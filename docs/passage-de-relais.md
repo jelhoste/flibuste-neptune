@@ -19,7 +19,7 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 |---|---|---|
 | 1. Couche Paramètre générique | **fait**, testé | `core/include/neptune/core/Parameter.h` : `ParamSpec`, `ParameterSet` (sans verrou, version par paramètre, texte affichage/saisie). |
 | 2. Undo/redo par commandes | **fait**, testé | `core/include/neptune/core/Undo.h` : gestes fusionnés, transactions, profondeur bornée. **Pas encore branché** à l'interface (qui n'a pas de contrôles). |
-| 3. Format JSON versionné | **fait côté cœur, testé** ; branchement plugin **non compilé en local** (CI à vérifier) | `core/.../State.h` (`save`/`load`, schéma v1, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, vide en v1). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
+| 3. Format JSON versionné | **fait**, testé, CI verte, sauvegarde/rechargement de projet validés sous Windows et Linux (macOS non testé) | `core/.../State.h` (`save`/`load`, schéma v1, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, vide en v1). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
 | 4. Vérification précoce CLAP/clap-juce-extensions | **partiellement fait** | Validé sous Windows et Linux : 676 paramètres exposés, valeurs affichées, automation, sauvegarde de projet, paramètre discret 1..32. **Reste à vérifier** : note-expression / modulation polyphonique, sorties multiples (jusqu'à 64 stéréo), latence modifiable à l'exécution, tempo/transport hôte, `clap-validator`. |
 | 5. Réglages globaux, autosave, récupération après crash | **à faire** | |
 | Autres éléments du palier 0 (roadmap) | **à faire** | squelettes i18n et thèmes, profils de performance Live/Studio, templates de sorties, composant générique potard/modale, test de performance du callback audio. |
@@ -64,7 +64,8 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 2. **Noms de tests Catch2 en ASCII uniquement** : `ctest` les passe en ligne de commande et Windows casse les accents.
 3. **Identifiants de paramètres** : le `clap_id` est le hachage du texte de l'ID de paramètre JUCE (wrapper). On utilise `std::to_string(ParamId)`. Les ids du cœur sont **stables** : ne jamais les renuméroter (automation des projets). Schéma de la sonde : maître 1–4 ; piste *t* à `1000 + 100·t` (+0 volume, +1 pan, +2 mute, +3 solo, +4 type, +10…17 bypass d'inserts, +20…27 niveaux d'envois).
 4. **Paramètres discrets** : seul `isBoolean()` est marqué « stepped » côté CLAP ; les sélecteurs à N valeurs sont vus comme un paramètre normalisé 0–1 avec texte. Cela fonctionne dans Reaper (validé).
-5. **Aperçu de la maquette** : le volet d'aperçu de l'application charge un fichier HTML en `data:` sans ses scripts voisins ; servir `design/` en HTTP (`python3 -m http.server --directory design`).
+5. **Cœur lié dans le `.clap`** : `neptune_core` doit rester en `POSITION_INDEPENDENT_CODE ON`, sinon l'édition de liens Linux échoue (révélé par nlohmann/json).
+6. **Aperçu de la maquette** : le volet d'aperçu de l'application charge un fichier HTML en `data:` sans ses scripts voisins ; servir `design/` en HTTP (`python3 -m http.server --directory design`).
 
 ## Décisions actées (en plus du brief)
 
