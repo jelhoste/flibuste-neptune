@@ -1,23 +1,43 @@
 #include "PluginEditor.h"
 #include "neptune/core/ProbePool.h"
 
-NeptuneEditor::NeptuneEditor (NeptuneProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p)
+using neptune::core::theme::Token;
+
+namespace
+{
+neptune::core::theme::Palette makePalette (const neptune::core::settings::GlobalSettings& st)
+{
+    const auto id = neptune::core::theme::themeFromString (st.theme).value_or (neptune::core::theme::ThemeId::Dark);
+    return neptune::core::theme::withContrast (neptune::core::theme::definition (id), st.contrast);
+}
+} // namespace
+
+juce::Colour NeptuneEditor::colour (Token t) const
+{
+    const auto& c = palette_.color (t);
+    return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
+}
+
+NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
+    : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
 {
     setSize (1160, 820);
     setResizable (true, true);
 
-    recoveryLabel_.setColour (juce::Label::textColourId, juce::Colour (0xffe8823f));
+    restoreButton_.setButtonText (text ("recovery.restore"));
+    discardButton_.setButtonText (text ("recovery.discard"));
+    recoveryLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
     addChildComponent (recoveryLabel_);
     restoreButton_.onClick = [this] { processor_.restoreRecovered(); updateRecoveryBanner(); };
     discardButton_.onClick = [this] { processor_.discardRecovered(); updateRecoveryBanner(); };
     addChildComponent (restoreButton_);
     addChildComponent (discardButton_);
 
-    latencyLabel_.setColour (juce::Label::textColourId, juce::Colour (0xff9a9088));
+    latencyLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (latencyLabel_);
     for (const int samples : { 0, 64, 512, 2048 })
     {
-        auto* b = latencyButtons_.add (new juce::TextButton ("Latency " + juce::String (samples)));
+        auto* b = latencyButtons_.add (new juce::TextButton (juce::String::fromUTF8 (tr_.format ("latency.set", { std::to_string (samples) }).c_str())));
         b->onClick = [this, samples] { processor_.setLatencySamples (samples); }; // thread message
         addAndMakeVisible (b);
     }
@@ -34,8 +54,7 @@ void NeptuneEditor::updateRecoveryBanner()
 {
     const bool show = processor_.hasRecoverableState();
     if (show)
-        recoveryLabel_.setText ("Unsaved state from a previous session was found (autosave of "
-                                    + processor_.recoverableDescription() + ").",
+        recoveryLabel_.setText (juce::String::fromUTF8 (tr_.format ("recovery.found", { processor_.recoverableDescription().toStdString() }).c_str()),
                                 juce::dontSendNotification);
     if (show != recoveryShown_)
     {
@@ -64,15 +83,15 @@ void NeptuneEditor::resized()
 void NeptuneEditor::paint (juce::Graphics& g)
 {
     using namespace neptune::core;
-    g.fillAll (juce::Colour (0xff12100e));
+    g.fillAll (colour (Token::BgApp));
 
     auto area = getLocalBounds().reduced (32);
-    g.setColour (juce::Colours::white);
+    g.setColour (colour (Token::Text));
     g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
     g.drawText ("Neptune", area.removeFromTop (40), juce::Justification::centredLeft);
 
     auto& ps = processor_.parameters();
-    g.setColour (juce::Colour (0xff9a9088));
+    g.setColour (colour (Token::TextDim));
     g.setFont (juce::FontOptions (14.0f));
     g.drawText (juce::String (static_cast<int> (ps.size())) + " parameters exposed to the host ("
                     + juce::String (processor_.probeTracks()) + " probe tracks)",
@@ -98,18 +117,18 @@ void NeptuneEditor::paint (juce::Graphics& g)
     for (const auto& r : rows)
     {
         auto line = area.removeFromTop (28);
-        g.setColour (juce::Colour (0xff9a9088));
+        g.setColour (colour (Token::TextDim));
         g.drawText (r.label, line.removeFromLeft (260), juce::Justification::centredLeft);
-        g.setColour (juce::Colour (0xffe8823f));
+        g.setColour (colour (Token::Accent));
         g.drawText (juce::String::fromUTF8 (ps.toText (r.id).c_str()), line.removeFromLeft (160), juce::Justification::centredLeft);
-        g.setColour (juce::Colour (0xff6f665f));
+        g.setColour (colour (Token::TextDim2));
         g.drawText ("changes: " + juce::String (static_cast<int> (ps.version (r.id))), line, juce::Justification::centredLeft);
     }
 
     // --- Ce que l'hôte nous envoie ---
     const auto& hp = processor_.hostProbe();
     area.removeFromTop (14);
-    g.setColour (juce::Colours::white);
+    g.setColour (colour (Token::Text));
     g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     g.drawText ("Host probe", area.removeFromTop (26), juce::Justification::centredLeft);
 
@@ -138,13 +157,13 @@ void NeptuneEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (14.0f));
     for (const auto& l : lines)
     {
-        g.setColour (juce::Colour (0xffe8823f));
+        g.setColour (colour (Token::Accent));
         g.drawText (l, area.removeFromTop (24), juce::Justification::centredLeft);
     }
 
     {
         const auto& st = processor_.settings();
-        g.setColour (juce::Colour (0xff6f665f));
+        g.setColour (colour (Token::TextDim2));
         g.drawText ("Settings (" + processor_.settingsFilePath() + "): language " + st.language + ", theme " + st.theme
                         + ", contrast " + juce::String (st.contrast) + ", profile "
                         + (st.profile == neptune::core::settings::PerformanceProfile::Live ? "live" : "studio")
@@ -152,5 +171,6 @@ void NeptuneEditor::paint (juce::Graphics& g)
                     area.removeFromTop (24), juce::Justification::centredLeft);
     }
 
-    latencyLabel_.setText ("Reported latency: " + juce::String (processor_.getLatencySamples()) + " samples", juce::dontSendNotification);
+    latencyLabel_.setText (juce::String::fromUTF8 (tr_.format ("latency.reported", { std::to_string (processor_.getLatencySamples()) }).c_str()),
+                           juce::dontSendNotification);
 }
