@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "neptune/core/Engine.h"
+#include "neptune/core/Parameter.h"
 
 // Fine couche d'adaptation : traduit JUCE/CLAP <-> cœur. Aucune logique métier ici.
 class NeptuneProcessor : public juce::AudioProcessor
@@ -26,10 +27,16 @@ public:
     const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override {}
 
-    void getStateInformation (juce::MemoryBlock&) override {}
-    void setStateInformation (const void*, int) override {}
+    // État provisoire (binaire minimal, versionné) en attendant le format JSON du palier 0 point 3.
+    void getStateInformation (juce::MemoryBlock&) override;
+    void setStateInformation (const void*, int) override;
+
+    neptune::core::ParameterSet& parameters() { return params_; }
+    int probeTracks() const { return probeTracks_; }
 
 private:
+    neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
+    int probeTracks_ = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeptuneProcessor)
 };

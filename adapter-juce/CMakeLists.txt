@@ -1,3 +1,6 @@
+# Nombre de pistes du pool de paramètres « sonde » (palier 0, point 4). 32 pistes = 676 paramètres.
+set(NEPTUNE_PROBE_TRACKS 32 CACHE STRING "Pistes du pool sonde")
+
 # Identité provisoire : domaine inversé du CLAP_ID à confirmer.
 set(NEPTUNE_CLAP_ID "com.tournedosrossini.neptune" CACHE STRING "Identifiant CLAP")
 
@@ -22,7 +25,8 @@ target_sources(Neptune PRIVATE
 target_compile_definitions(Neptune PUBLIC
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
-  JUCE_VST3_CAN_REPLACE_VST2=0)
+  JUCE_VST3_CAN_REPLACE_VST2=0
+  NEPTUNE_PROBE_TRACKS=${NEPTUNE_PROBE_TRACKS})
 
 target_link_libraries(Neptune
   PRIVATE
