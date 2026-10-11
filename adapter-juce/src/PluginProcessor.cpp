@@ -95,7 +95,12 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     {
         // refusé en bloc : aucun paramètre modifié
         DBG ("Neptune: state not loaded: " << result.message);
+        return;
     }
+
+    // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`
+    // vers l'hôte (exigé par le CLAP et vérifié par clap-validator, test state-reproducibility).
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
 bool NeptuneProcessor::supportsDirectEvent (uint16_t spaceId, uint16_t type)
