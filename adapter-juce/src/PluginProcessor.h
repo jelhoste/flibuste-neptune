@@ -13,6 +13,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Parameter.h"
+#include "neptune/core/Profile.h"
 #include "neptune/core/Settings.h"
 
 // Fine couche d'adaptation : traduit JUCE/CLAP <-> cœur. Aucune logique métier ici.
@@ -58,6 +59,10 @@ public:
     void discardRecovered();
     int probeOutputs() const { return probeOutputs_; }
 
+    // Profil Live/Studio : réglage partagé du processus + verrou propre à l'instance (sauvegardé dans le projet).
+    neptune::core::InstanceProfile& profile() { return profile_; }
+    void notifyStateChanged(); // thread message : le verrou fait partie de l'état du projet
+
     // Extensions CLAP (clap-juce-extensions) : notes au dialecte CLAP avec note_id, expressions de note, fin de note.
     bool supportsNoteDialectClap (bool isInput) override { return isInput; }
     bool supportsDirectEvent (uint16_t spaceId, uint16_t type) override;
@@ -70,11 +75,13 @@ private:
 
     neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
+    neptune::core::InstanceProfile profile_;
     int probeTracks_ = 0;
     int probeOutputs_ = 0;
     HostProbe hostProbe_;
 
     void autosaveNow();
+    std::string currentStateText() const; // état complet tel qu'écrit dans le projet et dans l'autosave
     void adoptStateIdentity (const std::string& idFromState);
 
     neptune::core::settings::GlobalSettings settings_;

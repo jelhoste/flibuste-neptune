@@ -1,4 +1,4 @@
-add_library(neptune_core STATIC src/Autosave.cpp src/Engine.cpp src/FileUtil.cpp src/Parameter.cpp src/ProbePool.cpp src/Settings.cpp src/State.cpp src/Theme.cpp src/I18n.cpp src/Undo.cpp)
+add_library(neptune_core STATIC src/Autosave.cpp src/Engine.cpp src/FileUtil.cpp src/Parameter.cpp src/Profile.cpp src/ProbePool.cpp src/Settings.cpp src/State.cpp src/Theme.cpp src/I18n.cpp src/Undo.cpp)
 target_include_directories(neptune_core PUBLIC include)
 target_compile_features(neptune_core PUBLIC cxx_std_17)
 # Règle : aucune dépendance JUCE ici. Le cœur reste portable (tests, web app/WASM plus tard).

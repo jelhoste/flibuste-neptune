@@ -43,7 +43,7 @@ TEST_CASE ("saved state declares format and schema version")
     REQUIRE (probe::buildPool (a, 1));
     const std::string text = state::save (a);
     CHECK (text.find ("\"format\": \"neptune-state\"") != std::string::npos);
-    CHECK (text.find ("\"schema_version\": 1") != std::string::npos);
+    CHECK (text.find ("\"schema_version\": " + std::to_string (state::currentSchemaVersion)) != std::string::npos);
 }
 
 TEST_CASE ("state with a newer schema is refused and changes nothing")

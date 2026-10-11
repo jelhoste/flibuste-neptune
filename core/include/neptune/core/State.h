@@ -3,16 +3,18 @@
 // Texte UTF-8 : {"format":"neptune-state","schema_version":N,"parameters":{"<id>":<valeur réelle>,...}}.
 // Aucune dépendance à JUCE ni à CLAP : l'adaptateur ne fait que transporter le texte.
 // Ne pas appeler depuis le thread audio (allocations).
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "neptune/core/Parameter.h"
+#include "neptune/core/Profile.h"
 
 namespace neptune::core::state
 {
 // Version de schéma écrite par cette version du plugin. À incrémenter à chaque changement de structure,
 // avec une migration (voir StateMigration.h) de la version précédente vers la nouvelle.
-constexpr int currentSchemaVersion = 1;
+constexpr int currentSchemaVersion = 2; // v2 : champ optionnel "profile_lock" (verrou de profil de l'instance)
 
 enum class Status
 {
@@ -31,6 +33,7 @@ struct LoadResult
     int applied = 0;     // paramètres appliqués
     int ignored = 0;     // entrées ignorées : id inconnu du pool, ou valeur non numérique
     std::string instanceId; // identifiant d'instance enregistré dans l'état (vide si absent) ; non validé, voir AutosaveStore::isValidId
+    std::optional<PerformanceProfile> profileLock; // verrou de profil de l'instance ; absent ou illisible = non verrouillé
 
     bool ok() const noexcept { return status == Status::Ok; }
 };
@@ -38,7 +41,8 @@ struct LoadResult
 // Écrit l'état complet : toutes les valeurs courantes (pas seulement celles qui diffèrent du défaut),
 // afin qu'un changement futur de valeur par défaut ne modifie pas un preset existant.
 // `instanceId` (optionnel) est inscrit dans le document : il relie l'état du projet à l'autosave de l'instance (Autosave.h).
-std::string save (const ParameterSet& set, std::string_view instanceId = {});
+// `profileLock` : profil sur lequel l'instance est verrouillée (absent du document si non verrouillée).
+std::string save (const ParameterSet& set, std::string_view instanceId = {}, std::optional<PerformanceProfile> profileLock = std::nullopt);
 
 // Charge un état complet. Tout ou rien : si le statut n'est pas Ok, `set` n'est pas modifié.
 // Les paramètres absents du fichier reviennent à leur valeur par défaut.

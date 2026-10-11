@@ -7,11 +7,13 @@
 #include <string_view>
 #include <vector>
 
+#include "neptune/core/Profile.h"
+
 namespace neptune::core::settings
 {
 constexpr int currentSchemaVersion = 1;
 
-enum class PerformanceProfile { Live, Studio };
+using ::neptune::core::PerformanceProfile; // défini dans Profile.h (partagé avec l'état du projet)
 
 struct GlobalSettings
 {

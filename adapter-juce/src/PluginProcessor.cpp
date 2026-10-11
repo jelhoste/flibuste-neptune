@@ -54,6 +54,8 @@ NeptuneProcessor::NeptuneProcessor()
     settings_ = neptune::core::settings::loadFile (settingsFile_, &warnings);
     for (const auto& w : warnings)
         DBG ("Neptune settings: " << juce::String (w));
+    // Première instance du processus : le profil global vient de settings.json ; les suivantes le partagent.
+    neptune::core::SharedProfile::process().initialiseOnce (settings_.profile);
     std::error_code ec;
     if (! std::filesystem::exists (settingsFile_, ec))
         neptune::core::settings::saveFile (settingsFile_, settings_);
@@ -62,7 +64,7 @@ NeptuneProcessor::NeptuneProcessor()
     const auto autosaveDir = configDir / "autosave";
     neptune::core::AutosaveStore::purgeStale (autosaveDir, settings_.autosaveKeepDays);
     autosave_ = std::make_unique<neptune::core::AutosaveStore> (autosaveDir);
-    autosave_->setBaseline (neptune::core::state::save (params_, autosave_->id()));
+    autosave_->setBaseline (currentStateText());
 
     if (settings_.autosaveIntervalSeconds > 0)
     {
@@ -77,10 +79,20 @@ NeptuneProcessor::~NeptuneProcessor()
     autosave_->discard(); // fermeture propre : il n'y a rien à récupérer
 }
 
+std::string NeptuneProcessor::currentStateText() const
+{
+    return neptune::core::state::save (params_, autosave_->id(), profile_.locked());
+}
+
+void NeptuneProcessor::notifyStateChanged()
+{
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+}
+
 void NeptuneProcessor::autosaveNow()
 {
     std::string error;
-    if (! autosave_->write (neptune::core::state::save (params_, autosave_->id()), &error))
+    if (! autosave_->write (currentStateText(), &error))
         DBG ("Neptune autosave failed: " << juce::String (error));
 }
 
@@ -91,7 +103,7 @@ void NeptuneProcessor::adoptStateIdentity (const std::string& idFromState)
     if (! idFromState.empty())
         autosave_->adoptId (idFromState); // refusé si invalide ou déjà pris : on garde l'identifiant courant
 
-    const std::string loaded = neptune::core::state::save (params_, autosave_->id());
+    const std::string loaded = currentStateText();
     autosave_->setBaseline (loaded);
 
     auto rec = autosave_->takeRecoverable();
@@ -133,6 +145,8 @@ void NeptuneProcessor::restoreRecovered()
     {
         DBG ("Neptune: recovered state not loaded: " << juce::String (result.message));
     }
+    else
+        profile_.setLocked (result.profileLock);
     autosave_->resolveRecovered();
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
     autosaveNow();
@@ -156,6 +170,7 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 {
     juce::ScopedNoDenormals noDenormals;
 
+    engine_.setProfile (profile_.effective()); // lecture atomique, sans verrou
     ++hostProbe_.blocks;
     hostProbe_.lastBlockSize = buffer.getNumSamples();
     hostProbe_.outputChannels = buffer.getNumChannels();
@@ -193,7 +208,7 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
 void NeptuneProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    const std::string text = neptune::core::state::save (params_, autosave_->id());
+    const std::string text = currentStateText();
     dest.append (text.data(), text.size());
 }
 
@@ -210,6 +225,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
         return;
     }
 
+    profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
     adoptStateIdentity (result.instanceId);
 
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`

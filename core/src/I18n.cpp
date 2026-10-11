@@ -22,6 +22,13 @@ const Entry kEntries[] = {
     { "recovery.discard", { "Discard", "Ignorer" } },
     { "latency.reported", { "Reported latency: {0} samples", "Latence déclarée : {0} échantillons" } },
     { "latency.set", { "Latency {0}", "Latence {0}" } },
+    { "profile.live", { "Live", "Live" } },
+    { "profile.studio", { "Studio", "Studio" } },
+    { "profile.status", { "Global profile: {0} - this instance: {1}{2}", "Profil global : {0} - cette instance : {1}{2}" } },
+    { "profile.locked_suffix", { " (locked)", " (verrouillée)" } },
+    { "profile.switch", { "Switch global profile", "Basculer le profil global" } },
+    { "profile.lock", { "Lock this instance", "Verrouiller cette instance" } },
+    { "profile.unlock", { "Unlock this instance", "Déverrouiller cette instance" } },
 };
 
 const std::vector<Language> kLanguages = { { "en", "English" }, { "fr", "Français" } };

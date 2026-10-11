@@ -33,6 +33,24 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addChildComponent (restoreButton_);
     addChildComponent (discardButton_);
 
+    profileLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
+    addAndMakeVisible (profileLabel_);
+    profileSwitchButton_.setButtonText (text ("profile.switch"));
+    profileSwitchButton_.onClick = [this]
+    {
+        auto& shared = processor_.profile().shared();
+        shared.set (shared.get() == neptune::core::PerformanceProfile::Live ? neptune::core::PerformanceProfile::Studio
+                                                                             : neptune::core::PerformanceProfile::Live);
+    };
+    addAndMakeVisible (profileSwitchButton_);
+    profileLockButton_.onClick = [this]
+    {
+        auto& p = processor_.profile();
+        if (p.locked()) p.unlock(); else p.lockToCurrent();
+        processor_.notifyStateChanged();
+    };
+    addAndMakeVisible (profileLockButton_);
+
     latencyLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (latencyLabel_);
     for (const int samples : { 0, 64, 512, 2048 })
@@ -44,9 +62,22 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     startTimerHz (30);
 }
 
+void NeptuneEditor::updateProfileControls()
+{
+    using neptune::core::PerformanceProfile;
+    auto& p = processor_.profile();
+    auto name = [this] (PerformanceProfile v) { return std::string (tr_.tr (v == PerformanceProfile::Live ? "profile.live" : "profile.studio")); };
+    const auto locked = p.locked();
+    profileLabel_.setText (juce::String::fromUTF8 (tr_.format ("profile.status",
+                               { name (p.shared().get()), name (p.effective()), locked ? tr_.tr ("profile.locked_suffix") : std::string_view() }).c_str()),
+                           juce::dontSendNotification);
+    profileLockButton_.setButtonText (text (locked ? "profile.unlock" : "profile.lock"));
+}
+
 void NeptuneEditor::timerCallback()
 {
     updateRecoveryBanner();
+    updateProfileControls();
     repaint();
 }
 
@@ -72,6 +103,10 @@ void NeptuneEditor::resized()
     discardButton_.setBounds (banner.removeFromRight (90).reduced (2));
     restoreButton_.setBounds (banner.removeFromRight (90).reduced (2));
     recoveryLabel_.setBounds (banner);
+    auto profileStrip = getLocalBounds().reduced (32).removeFromBottom (120).removeFromTop (32);
+    profileSwitchButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
+    profileLockButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
+    profileLabel_.setBounds (profileStrip);
     auto strip = getLocalBounds().reduced (32).removeFromBottom (32);
     latencyLabel_.setBounds (strip.removeFromLeft (260));
     for (auto* b : latencyButtons_)

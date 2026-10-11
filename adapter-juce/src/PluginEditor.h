@@ -23,6 +23,9 @@ private:
     juce::String text (std::string_view key) const { return juce::String::fromUTF8 (tr_.tr (key).data(), static_cast<int> (tr_.tr (key).size())); }
     juce::Label latencyLabel_;
     juce::Label recoveryLabel_;
+    juce::Label profileLabel_;
+    juce::TextButton profileSwitchButton_, profileLockButton_;
+    void updateProfileControls();
     juce::TextButton restoreButton_, discardButton_;
     bool recoveryShown_ = false;
     void updateRecoveryBanner();

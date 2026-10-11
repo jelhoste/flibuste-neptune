@@ -24,7 +24,8 @@ LoadResult fail (Status status, std::string message, int version = 0)
 
 const MigrationTable& registeredMigrations()
 {
-    static const MigrationTable table; // version 1 : rien à migrer
+    // v1 -> v2 : « profile_lock » est facultatif (absent = non verrouillé), le document v1 est déjà un v2 valide.
+    static const MigrationTable table = { { 1, [] (nlohmann::json&) { return true; } } };
     return table;
 }
 
@@ -48,7 +49,7 @@ bool migrate (nlohmann::json& doc, int from, int to, const MigrationTable& table
     return true;
 }
 
-std::string save (const ParameterSet& set, std::string_view instanceId)
+std::string save (const ParameterSet& set, std::string_view instanceId, std::optional<PerformanceProfile> profileLock)
 {
     nlohmann::json params = nlohmann::json::object();
     for (std::size_t i = 0; i < set.size(); ++i)
@@ -59,6 +60,8 @@ std::string save (const ParameterSet& set, std::string_view instanceId)
     doc["schema_version"] = currentSchemaVersion;
     if (! instanceId.empty())
         doc["instance_id"] = std::string (instanceId);
+    if (profileLock)
+        doc["profile_lock"] = toString (*profileLock);
     doc["parameters"] = std::move (params);
     return doc.dump (2);
 }
@@ -104,6 +107,8 @@ LoadResult load (ParameterSet& set, std::string_view text)
     result.fileVersion = version;
     if (const auto id = doc.find ("instance_id"); id != doc.end() && id->is_string())
         result.instanceId = id->get<std::string>();
+    if (const auto lk = doc.find ("profile_lock"); lk != doc.end() && lk->is_string())
+        result.profileLock = profileFromString (lk->get<std::string>()); // valeur inconnue : non verrouillé
 
     for (const auto& [key, value] : params->items())
     {
