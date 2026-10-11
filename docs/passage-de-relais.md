@@ -88,6 +88,13 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **État** : après un chargement, le plugin doit demander `params.rescan(VALUES)` à l'hôte (fait via `updateHostDisplay`). `setStateInformation` étant `void`, le wrapper répond « succès » même pour un état refusé (avertissement du validateur, sans conséquence).
 - **Validateur** : `clap-validator` s'exécute en CI Linux (binaire épinglé 0.4.1) ; le zip contient une `.tar.gz` imbriquée.
 
+### Constats de la sonde dans Reaper (Linux, 2026-10-11)
+
+- Validé : 64 sorties stéréo (le routage affiche « 2/128 out »), latence modifiable à l'exécution (compteur et compensation), transport/tempo/signature.
+- Notes jouées : arrivent en **événements CLAP** (compteurs « CLAP note-ons » et « NOTE_END » identiques ; « MIDI note-ons » reste à 0, normal : les notes ne passent pas par la voie MIDI de JUCE).
+- **Reaper ne fournit pas de `note_id`** (valeur -1) pour les notes jouées ; l'adressage d'une note se fait donc par canal + touche, pas par identifiant.
+- **Non déclenchés** : expressions de note et modulation de paramètres (mono/poly). Non testé : MPE, aftertouch polyphonique, modulation LFO/ACS de Reaper. Ne pas supposer que Reaper les émet ; à reconstater si le besoin apparaît (hôte susceptible de les émettre : Bitwig).
+
 ## Format d'état JSON (point 3) : décisions et suite
 
 - Chargement **tout ou rien** : document invalide ou plus récent → refus, aucun paramètre modifié. Plus ancien → migration silencieuse (`registeredMigrations()` : un saut n → n+1 par version ; un test garde-fou échoue si on monte `currentSchemaVersion` sans l'enregistrer).
