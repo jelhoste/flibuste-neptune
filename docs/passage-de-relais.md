@@ -1,6 +1,6 @@
 # Passage de relais — état du projet Neptune
 
-Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11.
+Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (fin de session : points 1 à 5 du palier 0 faits).
 
 ## Règles de travail de l'utilisateur
 
@@ -22,7 +22,7 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 | 3. Format JSON versionné | **fait**, testé, CI verte, sauvegarde/rechargement de projet validés sous Windows et Linux (macOS non testé) | `core/.../State.h` (`save`/`load`, schéma v1, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, vide en v1). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
 | 4. Vérification précoce CLAP/clap-juce-extensions | **clos, sauf expressions/modulation** | Validé dans Reaper : 64 sorties stéréo, latence à l'exécution, transport. `clap-validator` en CI (bloquant). Expressions de note et modulation de paramètres : non déclenchées par Reaper ; l'utilisateur écrira un petit plugin émetteur de test plus tard, la sonde (`HostProbe.h`) est prête à les recevoir. Voir « Constats du point 4 ». |
 | 5. Réglages globaux, autosave, récupération après crash | **fait**, 58 tests, CI verte, récupération après crash validée dans Reaper (kill -9 puis restauration) | `core/.../Settings.h`, `Autosave.h`, `FileUtil.h`. Voir « Réglages et autosave (point 5) ». |
-| Autres éléments du palier 0 (roadmap) | **à faire** | squelettes i18n et thèmes, profils de performance Live/Studio, templates de sorties, composant générique potard/modale, test de performance du callback audio. |
+| Autres éléments du palier 0 (roadmap) | **à faire** | Ordre convenu : (1) **test de performance du callback audio** (prochain, sert de mesure de référence avant que le moteur ne grossisse) ; (2) squelettes i18n et thèmes (langue/thème déjà dans `settings.json`) ; (3) mécanisme des profils Live/Studio ; (4) composant générique potard/modale. Les templates de sorties sont réglés : 64 stéréo fixes. |
 
 Le moteur ne produit que du silence. Le plugin charge, expose 676 paramètres « sonde » (`core/.../ProbePool.h`, 32 pistes × 21 + 4) et affiche leurs valeurs en direct.
 
