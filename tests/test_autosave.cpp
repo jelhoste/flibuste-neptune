@@ -91,10 +91,10 @@ TEST_CASE ("write creates the file once, skips identical state, discard removes 
     fs::last_write_time (file, t0 - std::chrono::hours (1)); // vieillit le fichier pour détecter une réécriture
     const auto aged = fs::last_write_time (file);
     REQUIRE (store.write ("state A"));
-    CHECK (fs::last_write_time (file) == aged); // rien réécrit
+    CHECK ((fs::last_write_time (file) == aged)); // rien réécrit ; double parenthèses : Catch ne sait pas afficher le time_point de libc++
 
     REQUIRE (store.write ("state B"));
-    CHECK (fs::last_write_time (file) != aged);
+    CHECK ((fs::last_write_time (file) != aged));
 
     store.discard();
     CHECK_FALSE (fs::exists (file));
