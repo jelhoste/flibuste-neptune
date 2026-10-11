@@ -14,8 +14,9 @@ if(NEPTUNE_BUILD_TESTS)
 endif()
 
 # --- Plugin : JUCE + clap-juce-extensions ---------------------------------
-# JUCE 8.0.11 et clap-juce-extensions 0.26.0 : combinaison testée par la CI de clap-juce-extensions
-# (matrice Linux / Windows / macOS). À monter de version volontairement, pas par accident.
+# JUCE 8.0.11 + clap-juce-extensions au commit 7adee3a (branche main, 2026-10-06) : combinaison dont la CI amont est verte
+# sur Linux, Windows et macOS. clap-juce-extensions n'a pas de vraies versions : ses tags sont anciens (le tag 0.26.0 date de 2022),
+# on fige donc un commit. À monter de version volontairement, pas par accident.
 if(NEPTUNE_BUILD_PLUGIN)
   FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
@@ -23,8 +24,7 @@ if(NEPTUNE_BUILD_PLUGIN)
     GIT_SHALLOW    TRUE)
   FetchContent_Declare(clap_juce_extensions
     GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
-    GIT_TAG        0.26.0
-    GIT_SHALLOW    TRUE
+    GIT_TAG        7adee3a1bd4684d4caa5601100e364abccff4b4d
     GIT_SUBMODULES "clap-libs/clap" "clap-libs/clap-helpers")
   FetchContent_MakeAvailable(JUCE clap_juce_extensions)
 endif()
