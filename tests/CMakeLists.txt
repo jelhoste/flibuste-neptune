@@ -1,0 +1,5 @@
+add_executable(neptune_core_tests test_engine.cpp)
+target_link_libraries(neptune_core_tests PRIVATE neptune_core Catch2::Catch2WithMain)
+include(CTest)
+include(Catch)
+catch_discover_tests(neptune_core_tests)

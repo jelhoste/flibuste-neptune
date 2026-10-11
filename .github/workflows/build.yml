@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux,   os: ubuntu-24.04 }
+          - { name: Windows, os: windows-latest }
+          - { name: macOS,   os: macos-latest }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dépendances système (Linux, liste de la doc JUCE)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev \
+            libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxrender-dev libxi-dev \
+            libglu1-mesa-dev mesa-common-dev libegl-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (cœur + tests)
+        run: cmake --build build --config Release --parallel --target neptune_core_tests
+
+      - name: Tests du cœur
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Build (plugin CLAP)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP
+
+      - name: Archive le .clap
+        uses: actions/upload-artifact@v4
+        with:
+          name: Neptune-${{ matrix.name }}
+          path: build/adapter-juce/Neptune_artefacts
+          if-no-files-found: error

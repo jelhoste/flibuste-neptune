@@ -1,0 +1,113 @@
+/*
+  NOVA — Styles de contrôles partagés (boutons toggle, curseurs linéaires, pills)
+  =============================================================
+  Même principe que les styles de potards (THEME_KNOB_STYLE) : chaque thème
+  choisit une "identité" de contrôles, et ce fichier fournit les jetons de
+  chaque identité. Trois identités :
+
+    glass  : arrondis, fond translucide, accent en dégradé (thèmes sombre et clair)
+    bezel  : façon orgue : fente creuse, manette rectangulaire, bakélite (thème Hammond)
+    hc     : haut contraste : contours blancs épais, aucun dégradé
+
+  -------------------------------------------------------------
+  UTILISATION DANS UNE UI
+  -------------------------------------------------------------
+  1. Charger ce fichier avant le <style> de l'UI :
+       <link rel="stylesheet" href="nova-controls.css">
+
+  2. Choisir l'identité selon le thème, au même endroit que le style de potard :
+       const THEME_CTL = { dark:'glass', modern:'glass', light:'glass', hammond:'bezel', hc:'hc' };
+       document.documentElement.setAttribute('data-ctl', THEME_CTL[theme]);
+
+  3. Écrire les composants de l'UI avec les jetons ci-dessous (voir la
+     section COMPOSANTS DE RÉFÉRENCE) : jamais de couleur ni de taille en dur
+     sur un toggle, un curseur ou une pill. NanoVG lit les mêmes valeurs.
+
+  Géométrie du toggle : left du pouce = --sw-th-x0 (éteint) / --sw-th-x1 (allumé),
+  mesuré depuis l'intérieur de la bordure ; x1 = largeur - 2*bordure - largeur du pouce - marge.
+
+  -------------------------------------------------------------
+  COMPOSANTS DE RÉFÉRENCE (à copier dans l'UI, en adaptant les noms de classes)
+  -------------------------------------------------------------
+  .sw{ width:var(--sw-w); height:var(--sw-h); box-sizing:border-box; position:relative; cursor:pointer;
+       border:var(--sw-bw) solid var(--sw-bd); border-radius:var(--sw-r); background:var(--sw-off); box-shadow:var(--sw-sh); }
+  .sw.on{ background:var(--sw-on); }
+  .sw i{ position:absolute; top:var(--sw-th-y); left:var(--sw-th-x0); width:var(--sw-th-w); height:var(--sw-th-h);
+         border-radius:var(--sw-th-r); background:var(--sw-th-off); box-shadow:var(--sw-th-sh); transition:left .15s; }
+  .sw.on i{ left:var(--sw-th-x1); background:var(--sw-th-on); }
+
+  .tr{ height:var(--sl-h); margin:var(--sl-m) 0; position:relative; border-radius:var(--sl-r); background:var(--sl-track); box-shadow:var(--sl-sh); }
+  .fl{ position:absolute; top:0; height:100%; border-radius:var(--sl-r); background:var(--sl-fill); }
+  .hd{ position:absolute; top:50%; transform:translate(-50%,-50%); box-sizing:border-box; width:var(--sl-hd-w); height:var(--sl-hd-h);
+       border-radius:var(--sl-hd-r); background:var(--sl-hd-bg); border:1px solid var(--sl-hd-bd); box-shadow:var(--sl-hd-sh); }
+
+  .pill{ background:var(--pl-bg); border:1px solid var(--pl-bd); box-shadow:var(--pl-sh); letter-spacing:var(--pl-ls); }
+  .pill:hover{ border-color:var(--pl-hov-bd); }
+  Boutons, champs et pastilles : border:1px solid var(--ctl-bd); box-shadow:var(--ctl-sh).
+
+  Les jetons de couleur utilisés ici (--grid, --accent, --pink, --handle, --bg-card, --border)
+  viennent du thème : le réglage de contraste (nova-contrast.js) continue donc de s'appliquer.
+  =============================================================
+*/
+
+/* ---------- glass (défaut) ---------- */
+:root, [data-ctl="glass"]{
+  --ctl-bd: var(--border);
+  --ctl-sh: none; --sbr:5px;
+
+  --sw-w:34px; --sw-h:19px; --sw-r:12px; --sw-bw:0px; --sw-bd:transparent;
+  --sw-off: var(--grid);
+  --sw-on: linear-gradient(90deg, var(--accent), var(--pink));
+  --sw-sh: none;
+  --sw-th-w:15px; --sw-th-h:15px; --sw-th-r:50%; --sw-th-y:2px; --sw-th-x0:2px; --sw-th-x1:17px;
+  --sw-th-off: var(--handle); --sw-th-on: var(--handle); --sw-th-sh: none;
+
+  --sl-h:4px; --sl-r:3px; --sl-m:6px;
+  --sl-track: var(--grid); --sl-sh: none; --sl-fill: var(--accent); --sl-fill-alt: linear-gradient(90deg, var(--pink), var(--pink-2));
+  --sl-hd-w:12px; --sl-hd-h:12px; --sl-hd-r:50%;
+  --sl-hd-bg: var(--handle); --sl-hd-bd: transparent; --sl-hd-sh: 0 0 0 2px var(--hring);
+
+  --pl-bg: var(--bg-card); --pl-bd: var(--ctl-bd); --pl-sh: none; --pl-ls:.3px; --pl-hov-bd: var(--ctl-bd);
+}
+
+/* ---------- bezel (orgue Hammond) ---------- */
+[data-ctl="bezel"]{
+  --ctl-bd: #1a140e;
+  --ctl-sh: inset 0 1px 2px rgba(0,0,0,.4); --sbr:1px;
+
+  --sw-w:34px; --sw-h:18px; --sw-r:2px; --sw-bw:1px; --sw-bd: var(--ctl-bd);
+  --sw-off: #0e0b08;
+  --sw-on: #0e0b08;
+  --sw-sh: inset 0 1px 3px rgba(0,0,0,.55);
+  --sw-th-w:14px; --sw-th-h:12px; --sw-th-r:1px; --sw-th-y:2px; --sw-th-x0:2px; --sw-th-x1:16px;
+  --sw-th-off: linear-gradient(180deg,#5a4a3a,#3a3028);
+  --sw-th-on: linear-gradient(180deg, var(--accent), #8a3c18);
+  --sw-th-sh: none;
+
+  --sl-h:6px; --sl-r:1px; --sl-m:5px;
+  --sl-track: #0c0a07;
+  --sl-sh: inset 0 1px 3px rgba(0,0,0,.65), inset 0 0 0 1px var(--ctl-bd);
+  --sl-fill: linear-gradient(90deg,#8a3c18, var(--accent)); --sl-fill-alt: linear-gradient(90deg,#6b5a2e, var(--pink));
+  --sl-hd-w:9px; --sl-hd-h:14px; --sl-hd-r:1px;
+  --sl-hd-bg: linear-gradient(180deg,#e8e0d0,#c0b8a8); --sl-hd-bd: var(--ctl-bd); --sl-hd-sh: 0 1px 2px rgba(0,0,0,.45);
+
+  --pl-bg: var(--bg-card); --pl-bd: var(--ctl-bd); --pl-sh: var(--ctl-sh); --pl-ls:.5px; --pl-hov-bd: var(--accent);
+}
+
+/* ---------- hc (haut contraste) ---------- */
+[data-ctl="hc"]{
+  --ctl-bd:#fff;
+  --ctl-sh: none; --sbr:5px;
+
+  --sw-w:36px; --sw-h:20px; --sw-r:10px; --sw-bw:2px; --sw-bd:#fff;
+  --sw-off:#000; --sw-on: var(--accent); --sw-sh: none;
+  --sw-th-w:12px; --sw-th-h:12px; --sw-th-r:50%; --sw-th-y:2px; --sw-th-x0:2px; --sw-th-x1:18px;
+  --sw-th-off:#fff; --sw-th-on:#000; --sw-th-sh: none;
+
+  --sl-h:6px; --sl-r:3px; --sl-m:5px;
+  --sl-track:#000; --sl-sh: inset 0 0 0 2px #fff; --sl-fill: var(--accent); --sl-fill-alt: var(--pink);
+  --sl-hd-w:14px; --sl-hd-h:14px; --sl-hd-r:50%;
+  --sl-hd-bg:#fff; --sl-hd-bd:#000; --sl-hd-sh: 0 0 0 2px #000;
+
+  --pl-bg:#000; --pl-bd:#fff; --pl-sh: none; --pl-ls:.3px; --pl-hov-bd: var(--accent);
+}
