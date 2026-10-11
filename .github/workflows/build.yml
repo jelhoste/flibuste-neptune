@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -18,7 +20,7 @@ jobs:
           - { name: macOS,   os: macos-latest }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Dépendances système (Linux, liste de la doc JUCE)
         if: runner.os == 'Linux'
@@ -43,9 +45,49 @@ jobs:
       - name: Build (plugin CLAP)
         run: cmake --build build --config Release --parallel --target Neptune_CLAP
 
+      # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
-        uses: actions/upload-artifact@v4
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Neptune_artefacts -name 'Neptune.clap' -print -quit)
+          test -n "$CLAP" || { echo "Neptune.clap introuvable"; exit 1; }
+          mkdir -p dist/stage
+          cp -R "$CLAP" dist/stage/
+          cd dist/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Neptune-${{ matrix.name }}.zip" Neptune.clap
+          else
+            tar -czf "../Neptune-${{ matrix.name }}.tar.gz" Neptune.clap
+          fi
+          cd ../..
+          rm -rf dist/stage
+          ls -la dist
+
+      - uses: actions/upload-artifact@v7
         with:
           name: Neptune-${{ matrix.name }}
-          path: build/adapter-juce/Neptune_artefacts
+          path: dist/*
           if-no-files-found: error
+
+  release:
+    # Publie une Release GitHub quand on pousse un tag « v* » (ex. : git tag v0.0.2 && git push --tags).
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Créer la Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "Neptune ${{ github.ref_name }}" \
+            --generate-notes \
+            --prerelease
