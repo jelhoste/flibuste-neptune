@@ -50,6 +50,8 @@ public:
     void addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer& midi, int sampleOffset) override;
 
 private:
+    static BusesProperties makeBuses (int numOutputs);
+
     neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
     int probeTracks_ = 0;

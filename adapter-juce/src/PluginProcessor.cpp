@@ -13,15 +13,12 @@
  #define NEPTUNE_PROBE_OUTPUTS 64
 #endif
 
-namespace
+NeptuneProcessor::BusesProperties NeptuneProcessor::makeBuses (int numOutputs)
 {
-juce::AudioProcessor::BusesProperties makeBuses (int numOutputs)
-{
-    juce::AudioProcessor::BusesProperties props;
+    BusesProperties props;
     for (int i = 0; i < numOutputs; ++i)
         props = props.withOutput ("Out " + juce::String (i + 1), juce::AudioChannelSet::stereo(), true);
     return props;
-}
 }
 
 NeptuneProcessor::NeptuneProcessor()
