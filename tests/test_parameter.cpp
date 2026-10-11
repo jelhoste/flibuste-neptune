@@ -8,10 +8,11 @@
 
 #include "neptune/core/Parameter.h"
 
+// Noms de tests en ASCII : ctest les passe en ligne de commande et Windows mélange les encodages.
 using namespace neptune::core;
 using Catch::Approx;
 
-TEST_CASE ("validation des définitions")
+TEST_CASE ("spec validation")
 {
     CHECK (ParamSpec::continuous (1, "x", Unit::None, 0, 1, 0.5).validate().empty());
     CHECK_FALSE (ParamSpec::continuous (1, "", Unit::None, 0, 1, 0.5).validate().empty());               // nom vide
@@ -23,7 +24,7 @@ TEST_CASE ("validation des définitions")
     CHECK_FALSE (ParamSpec::stepped (1, "s", Unit::None, 0, 10, 20).validate().empty());
 }
 
-TEST_CASE ("correspondance valeur <-> normalisé : aller-retour")
+TEST_CASE ("value to normalized round trip")
 {
     const std::vector<ParamSpec> specs = {
         ParamSpec::continuous (1, "lin", Unit::Decibel, -60, 12, 0),
@@ -44,7 +45,7 @@ TEST_CASE ("correspondance valeur <-> normalisé : aller-retour")
     }
 }
 
-TEST_CASE ("courbes : valeurs connues")
+TEST_CASE ("curves known values")
 {
     const auto freq = ParamSpec::continuous (1, "f", Unit::Hertz, 20, 20000, 1000, Curve::Exponential);
     CHECK (freq.fromNormalized (0.5) == Approx (632.456).epsilon (1e-4)); // moyenne géométrique de 20 et 20000
@@ -53,7 +54,7 @@ TEST_CASE ("courbes : valeurs connues")
     CHECK (pre.fromNormalized (0.5) == Approx (2000.0 * std::pow (0.5, 2.5)));
 }
 
-TEST_CASE ("paramètres discrets : arrondi et bornes")
+TEST_CASE ("discrete parameters rounding and bounds")
 {
     const auto st = ParamSpec::stepped (1, "alg", Unit::None, 1, 32, 1);
     CHECK (st.clamp (4.4) == 4.0);
@@ -68,7 +69,7 @@ TEST_CASE ("paramètres discrets : arrondi et bornes")
     CHECK (tg.fromNormalized (0.51) == 1.0);
 }
 
-TEST_CASE ("valeurs non finies : retour au défaut, jamais de NaN en sortie")
+TEST_CASE ("non finite values fall back to default")
 {
     const auto s = ParamSpec::continuous (1, "x", Unit::None, 0, 10, 3);
     CHECK (s.clamp (std::nan ("")) == 3.0);
@@ -76,7 +77,7 @@ TEST_CASE ("valeurs non finies : retour au défaut, jamais de NaN en sortie")
     CHECK (s.clamp (std::numeric_limits<double>::infinity()) == 3.0);
 }
 
-TEST_CASE ("ParameterSet : ajout, doublons, recherche")
+TEST_CASE ("ParameterSet add duplicates lookup")
 {
     ParameterSet ps;
     std::string err;
@@ -93,7 +94,7 @@ TEST_CASE ("ParameterSet : ajout, doublons, recherche")
     CHECK (ps.indexOf (99) == ParameterSet::npos);
 }
 
-TEST_CASE ("ParameterSet : valeurs, version, reset")
+TEST_CASE ("ParameterSet values version reset")
 {
     ParameterSet ps;
     ps.add (ParamSpec::continuous (1, "vol", Unit::Decibel, -60, 6, 0));
@@ -122,7 +123,7 @@ TEST_CASE ("ParameterSet : valeurs, version, reset")
     CHECK (ps.getNormalized (1) == Approx (0.0));
 }
 
-TEST_CASE ("texte : affichage")
+TEST_CASE ("text display")
 {
     ParameterSet ps;
     auto dry = ParamSpec::continuous (1, "dry", Unit::Decibel, -100, 30, -100);
@@ -144,7 +145,7 @@ TEST_CASE ("texte : affichage")
     CHECK (ps.toText (5) == "5");
 }
 
-TEST_CASE ("texte : saisie")
+TEST_CASE ("text parsing")
 {
     ParameterSet ps;
     ps.add (ParamSpec::continuous (1, "vol", Unit::Decibel, -100, 30, 0));
@@ -175,7 +176,7 @@ TEST_CASE ("texte : saisie")
     CHECK_FALSE (ps.fromText (99, "1", v));
 }
 
-TEST_CASE ("accès concurrent : écritures et lectures simultanées restent cohérentes")
+TEST_CASE ("concurrent access stays consistent")
 {
     ParameterSet ps;
     ps.add (ParamSpec::continuous (1, "x", Unit::None, 0, 100, 0));

@@ -4,7 +4,7 @@
 
 using neptune::core::Engine;
 
-TEST_CASE ("Engine produit du silence au palier 0")
+TEST_CASE ("Engine outputs silence at palier 0")
 {
     Engine e;
     e.prepare (48000.0, 256);
@@ -15,7 +15,7 @@ TEST_CASE ("Engine produit du silence au palier 0")
     for (float s : r) REQUIRE (s == 0.0f);
 }
 
-TEST_CASE ("noteOn / noteOff comptent les notes actives")
+TEST_CASE ("noteOn and noteOff count active notes")
 {
     Engine e;
     e.prepare (44100.0, 128);
