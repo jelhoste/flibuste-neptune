@@ -27,7 +27,7 @@ public:
     const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override {}
 
-    // État provisoire (binaire minimal, versionné) en attendant le format JSON du palier 0 point 3.
+    // État = JSON versionné produit/lu par le cœur (neptune/core/State.h).
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 

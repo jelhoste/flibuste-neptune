@@ -4,6 +4,16 @@
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
+# --- Format d'état JSON (cœur, palier 0 point 3) --------------------------
+# nlohmann/json v3.12.0 (MIT, header-only) : dernière version publiée vérifiée le 2026-10-11.
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install    OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG        v3.12.0
+  GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # --- Tests du cœur --------------------------------------------------------
 if(NEPTUNE_BUILD_TESTS)
   FetchContent_Declare(Catch2

@@ -19,7 +19,7 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 |---|---|---|
 | 1. Couche Paramètre générique | **fait**, testé | `core/include/neptune/core/Parameter.h` : `ParamSpec`, `ParameterSet` (sans verrou, version par paramètre, texte affichage/saisie). |
 | 2. Undo/redo par commandes | **fait**, testé | `core/include/neptune/core/Undo.h` : gestes fusionnés, transactions, profondeur bornée. **Pas encore branché** à l'interface (qui n'a pas de contrôles). |
-| 3. Format JSON versionné | **à faire** (prochain) | Remplacera l'état binaire provisoire de `PluginProcessor.cpp` (`getStateInformation`). Voir la spec §20 et §22. |
+| 3. Format JSON versionné | **fait côté cœur, testé** ; branchement plugin **non compilé en local** (CI à vérifier) | `core/.../State.h` (`save`/`load`, schéma v1, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, vide en v1). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
 | 4. Vérification précoce CLAP/clap-juce-extensions | **partiellement fait** | Validé sous Windows et Linux : 676 paramètres exposés, valeurs affichées, automation, sauvegarde de projet, paramètre discret 1..32. **Reste à vérifier** : note-expression / modulation polyphonique, sorties multiples (jusqu'à 64 stéréo), latence modifiable à l'exécution, tempo/transport hôte, `clap-validator`. |
 | 5. Réglages globaux, autosave, récupération après crash | **à faire** | |
 | Autres éléments du palier 0 (roadmap) | **à faire** | squelettes i18n et thèmes, profils de performance Live/Studio, templates de sorties, composant générique potard/modale, test de performance du callback audio. |
@@ -29,9 +29,9 @@ Le moteur ne produit que du silence. Le plugin charge, expose 676 paramètres «
 ## Architecture du dépôt
 
 ```
-core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, Undo)
+core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Undo)
 adapter-juce/    fine couche JUCE/CLAP : NeptuneParameter, PluginProcessor, PluginEditor
-tests/           Catch2 : tests du cœur (28 au 2026-10-11)
+tests/           Catch2 : tests du cœur (37 au 2026-10-11)
 cmake/           Dependencies.cmake : toutes les dépendances, versions figées
 design/          maquette HTML (neptune_ui.html) + briques de style NOVA copiées telles quelles
 docs/            brief, roadmap, spec, ce fichier
@@ -72,16 +72,13 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - Accessibilité (lecteurs d'écran) : **hors périmètre V1**. Le contraste NOVA 0–4 est du confort visuel.
 - 4 thèmes : sombre, clair, haut contraste, bois (Hammond). Identité visuelle alignée sur les plugins NOVA ; les maquettes NOVA (`~/Bureau/nova tst/nova-ui-series`) servent d'inspiration, pas de code.
 - Vues principales (onglets d'en-tête) : **Mixer**, **Mapping** (plein écran, liste de Zones rétractable, vue matrice), **Sample** (éditeur plein écran), **Façade** (plus tard). Vu-mètres dans la barre du bas.
-- État du plugin : binaire provisoire versionné (`'NPTS'`, v1, paires id/valeur). À remplacer par le JSON versionné.
+- État du plugin : JSON UTF-8 versionné (`"format":"neptune-state"`, `schema_version`, `parameters` id → valeur réelle). L'ancien binaire `'NPTS'` n'est plus lu (il n'a servi qu'aux jalons de test).
 
-## Pistes pour le point 3 (JSON versionné)
+## Format d'état JSON (point 3) : décisions et suite
 
-- Version de schéma numérotée dès la v1 ; preset plus ancien → migration automatique silencieuse ; plus récent → refus clair (spec §22).
-- Chemins de samples : relatif au dossier du preset, puis absolu, puis recherche par nom dans le dossier samples, puis relocalisation manuelle (spec §20).
-- Séparation projet (copie complète résolue) / bibliothèque de presets ; export portable ZIP (`preset.json` + `samples/`).
-- Extensions de fichiers retenues : `.neptunepreset`, cache `.neptunecache`.
-- Presse-papier de module = export/import partiel du sous-arbre JSON.
-- Le cœur doit rester sans JUCE : choisir une bibliothèque JSON portable (à vérifier et figer dans `cmake/Dependencies.cmake`) ou écrire un sérialiseur minimal ; **à décider avec l'utilisateur**.
+- Chargement **tout ou rien** : document invalide ou plus récent → refus, aucun paramètre modifié. Plus ancien → migration silencieuse (`registeredMigrations()` : un saut n → n+1 par version ; un test garde-fou échoue si on monte `currentSchemaVersion` sans l'enregistrer).
+- Toutes les valeurs sont sauvegardées (pas seulement celles ≠ défaut) : changer un défaut plus tard ne modifie pas un preset existant. Un paramètre absent du fichier revient à son défaut au chargement.
+- À faire quand les samples existeront (palier 1/6) : chemins de samples (relatif au preset, absolu, recherche par nom, relocalisation — spec §20), export ZIP portable, presse-papier = sous-arbre JSON, extensions `.neptunepreset` / `.neptunecache`.
 
 ## Questions encore ouvertes
 
