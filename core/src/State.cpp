@@ -48,7 +48,7 @@ bool migrate (nlohmann::json& doc, int from, int to, const MigrationTable& table
     return true;
 }
 
-std::string save (const ParameterSet& set)
+std::string save (const ParameterSet& set, std::string_view instanceId)
 {
     nlohmann::json params = nlohmann::json::object();
     for (std::size_t i = 0; i < set.size(); ++i)
@@ -57,6 +57,8 @@ std::string save (const ParameterSet& set)
     nlohmann::json doc;
     doc["format"] = kFormatTag;
     doc["schema_version"] = currentSchemaVersion;
+    if (! instanceId.empty())
+        doc["instance_id"] = std::string (instanceId);
     doc["parameters"] = std::move (params);
     return doc.dump (2);
 }
@@ -100,6 +102,8 @@ LoadResult load (ParameterSet& set, std::string_view text)
     entries.reserve (params->size());
     LoadResult result;
     result.fileVersion = version;
+    if (const auto id = doc.find ("instance_id"); id != doc.end() && id->is_string())
+        result.instanceId = id->get<std::string>();
 
     for (const auto& [key, value] : params->items())
     {

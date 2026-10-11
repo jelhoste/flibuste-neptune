@@ -1,4 +1,4 @@
-add_executable(neptune_core_tests test_engine.cpp test_parameter.cpp test_probe_pool.cpp test_state.cpp test_undo.cpp)
+add_executable(neptune_core_tests test_engine.cpp test_parameter.cpp test_autosave.cpp test_probe_pool.cpp test_settings.cpp test_state.cpp test_undo.cpp)
 target_link_libraries(neptune_core_tests PRIVATE neptune_core Catch2::Catch2WithMain)
 include(CTest)
 include(Catch)

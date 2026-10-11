@@ -6,6 +6,13 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p) : juce::AudioProcessorEditor 
     setSize (1160, 820);
     setResizable (true, true);
 
+    recoveryLabel_.setColour (juce::Label::textColourId, juce::Colour (0xffe8823f));
+    addChildComponent (recoveryLabel_);
+    restoreButton_.onClick = [this] { processor_.restoreRecovered(); updateRecoveryBanner(); };
+    discardButton_.onClick = [this] { processor_.discardRecovered(); updateRecoveryBanner(); };
+    addChildComponent (restoreButton_);
+    addChildComponent (discardButton_);
+
     latencyLabel_.setColour (juce::Label::textColourId, juce::Colour (0xff9a9088));
     addAndMakeVisible (latencyLabel_);
     for (const int samples : { 0, 64, 512, 2048 })
@@ -17,8 +24,35 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p) : juce::AudioProcessorEditor 
     startTimerHz (30);
 }
 
+void NeptuneEditor::timerCallback()
+{
+    updateRecoveryBanner();
+    repaint();
+}
+
+void NeptuneEditor::updateRecoveryBanner()
+{
+    const bool show = processor_.hasRecoverableState();
+    if (show)
+        recoveryLabel_.setText ("Unsaved state from a previous session was found (autosave of "
+                                    + processor_.recoverableDescription() + ").",
+                                juce::dontSendNotification);
+    if (show != recoveryShown_)
+    {
+        recoveryShown_ = show;
+        recoveryLabel_.setVisible (show);
+        restoreButton_.setVisible (show);
+        discardButton_.setVisible (show);
+    }
+}
+
 void NeptuneEditor::resized()
 {
+    auto bottom = getLocalBounds().reduced (32).removeFromBottom (80);
+    auto banner = bottom.removeFromTop (36);
+    discardButton_.setBounds (banner.removeFromRight (90).reduced (2));
+    restoreButton_.setBounds (banner.removeFromRight (90).reduced (2));
+    recoveryLabel_.setBounds (banner);
     auto strip = getLocalBounds().reduced (32).removeFromBottom (32);
     latencyLabel_.setBounds (strip.removeFromLeft (260));
     for (auto* b : latencyButtons_)
@@ -106,6 +140,16 @@ void NeptuneEditor::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colour (0xffe8823f));
         g.drawText (l, area.removeFromTop (24), juce::Justification::centredLeft);
+    }
+
+    {
+        const auto& st = processor_.settings();
+        g.setColour (juce::Colour (0xff6f665f));
+        g.drawText ("Settings (" + processor_.settingsFilePath() + "): language " + st.language + ", theme " + st.theme
+                        + ", contrast " + juce::String (st.contrast) + ", profile "
+                        + (st.profile == neptune::core::settings::PerformanceProfile::Live ? "live" : "studio")
+                        + ", autosave " + (st.autosaveIntervalSeconds > 0 ? juce::String (st.autosaveIntervalSeconds) + " s" : juce::String ("off")),
+                    area.removeFromTop (24), juce::Justification::centredLeft);
     }
 
     latencyLabel_.setText ("Reported latency: " + juce::String (processor_.getLatencySamples()) + " samples", juce::dontSendNotification);

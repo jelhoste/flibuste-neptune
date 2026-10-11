@@ -13,6 +13,19 @@
  #define NEPTUNE_PROBE_OUTPUTS 64
 #endif
 
+namespace
+{
+// Dossier de configuration utilisateur de Neptune : ~/.config/Neptune, %APPDATA%\\Neptune, ~/Library/Application Support/Neptune.
+std::filesystem::path configDirectory()
+{
+    auto base = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
+   #if JUCE_MAC
+    base = base.getChildFile ("Application Support");
+   #endif
+    return std::filesystem::u8path (base.getChildFile ("Neptune").getFullPathName().toStdString());
+}
+}
+
 NeptuneProcessor::BusesProperties NeptuneProcessor::makeBuses (int numOutputs)
 {
     BusesProperties props;
@@ -33,6 +46,105 @@ NeptuneProcessor::NeptuneProcessor()
 
     for (std::size_t i = 0; i < params_.size(); ++i)
         addParameter (new NeptuneParameter (params_, i, hostProbe_)); // l'AudioProcessor en prend la propriété
+
+    // Réglages globaux : lus une fois au démarrage ; le fichier est créé avec les valeurs par défaut s'il manque.
+    const auto configDir = configDirectory();
+    settingsFile_ = configDir / "settings.json";
+    std::vector<std::string> warnings;
+    settings_ = neptune::core::settings::loadFile (settingsFile_, &warnings);
+    for (const auto& w : warnings)
+        DBG ("Neptune settings: " << juce::String (w));
+    std::error_code ec;
+    if (! std::filesystem::exists (settingsFile_, ec))
+        neptune::core::settings::saveFile (settingsFile_, settings_);
+
+    // Autosave : fichiers orphelins trop anciens supprimés, puis écriture périodique de l'état s'il a changé.
+    const auto autosaveDir = configDir / "autosave";
+    neptune::core::AutosaveStore::purgeStale (autosaveDir, settings_.autosaveKeepDays);
+    autosave_ = std::make_unique<neptune::core::AutosaveStore> (autosaveDir);
+    autosave_->setBaseline (neptune::core::state::save (params_, autosave_->id()));
+
+    if (settings_.autosaveIntervalSeconds > 0)
+    {
+        autosaveTimer_.onTick = [this] { autosaveNow(); };
+        autosaveTimer_.startTimer (settings_.autosaveIntervalSeconds * 1000);
+    }
+}
+
+NeptuneProcessor::~NeptuneProcessor()
+{
+    autosaveTimer_.stopTimer();
+    autosave_->discard(); // fermeture propre : il n'y a rien à récupérer
+}
+
+void NeptuneProcessor::autosaveNow()
+{
+    std::string error;
+    if (! autosave_->write (neptune::core::state::save (params_, autosave_->id()), &error))
+        DBG ("Neptune autosave failed: " << juce::String (error));
+}
+
+// L'état du projet porte l'identifiant de l'instance de la session précédente : on le reprend pour retrouver
+// son autosave. Le fichier laissé par un crash est mis de côté et proposé à l'utilisateur.
+void NeptuneProcessor::adoptStateIdentity (const std::string& idFromState)
+{
+    if (! idFromState.empty())
+        autosave_->adoptId (idFromState); // refusé si invalide ou déjà pris : on garde l'identifiant courant
+
+    const std::string loaded = neptune::core::state::save (params_, autosave_->id());
+    autosave_->setBaseline (loaded);
+
+    auto rec = autosave_->takeRecoverable();
+    if (! rec) return;
+    if (rec->state == loaded) // identique à ce que le projet vient de charger : rien à proposer
+    {
+        autosave_->resolveRecovered();
+        return;
+    }
+    const juce::ScopedLock lock (recoveryLock_);
+    recovered_ = std::move (rec);
+}
+
+bool NeptuneProcessor::hasRecoverableState() const
+{
+    const juce::ScopedLock lock (recoveryLock_);
+    return recovered_.has_value();
+}
+
+juce::String NeptuneProcessor::recoverableDescription() const
+{
+    const juce::ScopedLock lock (recoveryLock_);
+    if (! recovered_) return {};
+    return juce::Time (static_cast<juce::int64> (recovered_->savedAt) * 1000).toString (true, true);
+}
+
+void NeptuneProcessor::restoreRecovered()
+{
+    std::optional<neptune::core::RecoveredState> rec;
+    {
+        const juce::ScopedLock lock (recoveryLock_);
+        rec = std::move (recovered_);
+        recovered_.reset();
+    }
+    if (! rec) return;
+
+    const auto result = neptune::core::state::load (params_, rec->state);
+    if (! result.ok())
+    {
+        DBG ("Neptune: recovered state not loaded: " << juce::String (result.message));
+    }
+    autosave_->resolveRecovered();
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+    autosaveNow();
+}
+
+void NeptuneProcessor::discardRecovered()
+{
+    {
+        const juce::ScopedLock lock (recoveryLock_);
+        recovered_.reset();
+    }
+    autosave_->resolveRecovered();
 }
 
 void NeptuneProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -81,7 +193,7 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
 void NeptuneProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    const std::string text = neptune::core::state::save (params_);
+    const std::string text = neptune::core::state::save (params_, autosave_->id());
     dest.append (text.data(), text.size());
 }
 
@@ -94,9 +206,11 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (! result.ok())
     {
         // refusé en bloc : aucun paramètre modifié
-        DBG ("Neptune: state not loaded: " << result.message);
+        DBG ("Neptune: state not loaded: " << juce::String (result.message));
         return;
     }
+
+    adoptStateIdentity (result.instanceId);
 
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`
     // vers l'hôte (exigé par le CLAP et vérifié par clap-validator, test state-reproducibility).

@@ -30,13 +30,15 @@ struct LoadResult
     int fileVersion = 0; // version de schéma lue dans le fichier (0 si illisible)
     int applied = 0;     // paramètres appliqués
     int ignored = 0;     // entrées ignorées : id inconnu du pool, ou valeur non numérique
+    std::string instanceId; // identifiant d'instance enregistré dans l'état (vide si absent) ; non validé, voir AutosaveStore::isValidId
 
     bool ok() const noexcept { return status == Status::Ok; }
 };
 
 // Écrit l'état complet : toutes les valeurs courantes (pas seulement celles qui diffèrent du défaut),
 // afin qu'un changement futur de valeur par défaut ne modifie pas un preset existant.
-std::string save (const ParameterSet& set);
+// `instanceId` (optionnel) est inscrit dans le document : il relie l'état du projet à l'autosave de l'instance (Autosave.h).
+std::string save (const ParameterSet& set, std::string_view instanceId = {});
 
 // Charge un état complet. Tout ou rien : si le statut n'est pas Ok, `set` n'est pas modifié.
 // Les paramètres absents du fichier reviennent à leur valeur par défaut.
