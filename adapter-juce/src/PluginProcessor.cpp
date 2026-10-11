@@ -55,7 +55,10 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     const auto result = neptune::core::state::load (
         params_, std::string_view (static_cast<const char*> (data), static_cast<size_t> (sizeInBytes)));
     if (! result.ok())
-        DBG ("Neptune: state not loaded: " << result.message); // refusé en bloc : aucun paramètre modifié
+    {
+        // refusé en bloc : aucun paramètre modifié
+        DBG ("Neptune: state not loaded: " << result.message);
+    }
 }
 
 juce::AudioProcessorEditor* NeptuneProcessor::createEditor() { return new NeptuneEditor (*this); }
