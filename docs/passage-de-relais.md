@@ -20,7 +20,7 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 | 1. Couche Paramètre générique | **fait**, testé | `core/include/neptune/core/Parameter.h` : `ParamSpec`, `ParameterSet` (sans verrou, version par paramètre, texte affichage/saisie). |
 | 2. Undo/redo par commandes | **fait**, testé | `core/include/neptune/core/Undo.h` : gestes fusionnés, transactions, profondeur bornée. **Pas encore branché** à l'interface (qui n'a pas de contrôles). |
 | 3. Format JSON versionné | **fait**, testé, CI verte, sauvegarde/rechargement de projet validés sous Windows et Linux (macOS non testé) | `core/.../State.h` (`save`/`load`, schéma v1, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, vide en v1). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
-| 4. Vérification précoce CLAP/clap-juce-extensions | **partiellement fait** | Validé sous Windows et Linux : 676 paramètres exposés, valeurs affichées, automation, sauvegarde de projet, paramètre discret 1..32. **Reste à vérifier** : note-expression / modulation polyphonique, sorties multiples (jusqu'à 64 stéréo), latence modifiable à l'exécution, tempo/transport hôte, `clap-validator`. |
+| 4. Vérification précoce CLAP/clap-juce-extensions | **sonde en place, à tester dans Reaper** | `clap-validator` 0.4.1 passe en CI Linux (34 réussis, 0 échec, 1 avertissement, 9 ignorés). Sonde hôte (`HostProbe.h`) : 64 sorties stéréo, notes CLAP avec `note_id`, expressions de note, modulation mono/polyphonique, `NOTE_END`, latence modifiable (boutons), transport/tempo. Voir « Constats du point 4 ». |
 | 5. Réglages globaux, autosave, récupération après crash | **à faire** | |
 | Autres éléments du palier 0 (roadmap) | **à faire** | squelettes i18n et thèmes, profils de performance Live/Studio, templates de sorties, composant générique potard/modale, test de performance du callback audio. |
 
@@ -75,6 +75,19 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - Vues principales (onglets d'en-tête) : **Mixer**, **Mapping** (plein écran, liste de Zones rétractable, vue matrice), **Sample** (éditeur plein écran), **Façade** (plus tard). Vu-mètres dans la barre du bas.
 - État du plugin : JSON UTF-8 versionné (`"format":"neptune-state"`, `schema_version`, `parameters` id → valeur réelle). L'ancien binaire `'NPTS'` n'est plus lu (il n'a servi qu'aux jalons de test).
 
+## Constats du point 4 (lecture du code de clap-juce-extensions + validateur)
+
+Établis par lecture du wrapper au commit figé et par `clap-validator` ; **le comportement réel de Reaper reste à constater avec la fenêtre de sonde**.
+
+- **Sorties** : un port CLAP par bus JUCE, stéréo ou mono seulement. Le wrapper plafonne à **128 canaux de sortie** : 64 stéréo = exactement la limite. Les *templates de sorties choisis à l'insertion* ne sont **pas** supportés par le wrapper (`audio-ports-config` : 0 configuration ; le validateur le signale « non implémenté »). Les ports sont fixes ; décision à prendre (voir questions ouvertes).
+- **Latence** : `setLatencySamples()` → le wrapper demande un **redémarrage** à l'hôte (`request_restart`, puis `latency_changed` à la réactivation). Utilisable pour les modes de l'IR loader, pas pour de l'automation.
+- **Transport/tempo** : transmis via `AudioPlayHead` (tempo, mesure, position en temps, lecture/boucle) ; le wrapper coupe le bloc aux événements de transport.
+- **Notes CLAP** : avec `supportsNoteDialectClap`, l'hôte peut envoyer des notes avec `note_id`. Le chemin standard du wrapper les convertit en MIDI JUCE et **perd le `note_id`** ; la sonde les prend donc en `handleDirectEvent`. `supportsNoteExpressions()` du wrapper n'est **pas utilisé** : les expressions passent obligatoirement par `supportsDirectEvent` + `handleDirectEvent`.
+- **Modulation** : `clap_juce_parameter_capabilities` sur le paramètre (mono + polyphonique) ; la modulation polyphonique exige que le plugin émette `NOTE_END` (fait par la sonde).
+- **Résolution des événements** : `CLAP_PROCESS_EVENTS_RESOLUTION_SAMPLES` vaut 0 par défaut : l'automation n'est **pas à l'échantillon près** (appliquée au début du bloc). À revoir avant le palier 1 si la précision compte.
+- **État** : après un chargement, le plugin doit demander `params.rescan(VALUES)` à l'hôte (fait via `updateHostDisplay`). `setStateInformation` étant `void`, le wrapper répond « succès » même pour un état refusé (avertissement du validateur, sans conséquence).
+- **Validateur** : `clap-validator` s'exécute en CI Linux (binaire épinglé 0.4.1) ; le zip contient une `.tar.gz` imbriquée.
+
 ## Format d'état JSON (point 3) : décisions et suite
 
 - Chargement **tout ou rien** : document invalide ou plus récent → refus, aucun paramètre modifié. Plus ancien → migration silencieuse (`registeredMigrations()` : un saut n → n+1 par version ; un test garde-fou échoue si on monte `currentSchemaVersion` sans l'enregistrer).
@@ -83,6 +96,7 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 
 ## Questions encore ouvertes
 
+- **Templates de sorties à l'insertion** : non supportés par clap-juce-extensions (ports fixes). Options : un seul jeu de ports fixe (64 stéréo) avec ports inutilisés ignorés par l'hôte ; plusieurs plugins distincts dans le même `.clap` (ex. Neptune Stereo / Neptune Multi) ; contourner le wrapper. À trancher avec l'utilisateur.
 - Identifiant CLAP définitif (`com.tournedosrossini.neptune` est provisoire : quel domaine ?).
 - Logo (trident provisoire dans la maquette).
 - Signature/notarisation macOS pour une distribution propre.
