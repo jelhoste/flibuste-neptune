@@ -42,6 +42,23 @@ jobs:
       - name: Tests du cœur
         run: ctest --test-dir build -C Release --output-on-failure
 
+      # Informatif : les runners sont partagés, les temps sont bruités. Jamais bloquant ; le JSON est archivé (voir docs/performance.md).
+      - name: Mesure de performance du callback (informatif)
+        continue-on-error: true
+        shell: bash
+        run: |
+          cmake --build build --config Release --target neptune_perf_callback
+          PERF=$(find build -type f \( -name 'neptune_perf_callback' -o -name 'neptune_perf_callback.exe' \) -print -quit)
+          mkdir -p perf
+          "$PERF" --save "perf/perf-${{ matrix.name }}.json"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: Perf-${{ matrix.name }}
+          path: perf/*.json
+          if-no-files-found: ignore
+
       - name: Build (plugin CLAP)
         run: cmake --build build --config Release --parallel --target Neptune_CLAP
 
