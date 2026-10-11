@@ -3,9 +3,28 @@
 
 NeptuneEditor::NeptuneEditor (NeptuneProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p)
 {
-    setSize (1160, 780);
+    setSize (1160, 820);
     setResizable (true, true);
+
+    latencyLabel_.setColour (juce::Label::textColourId, juce::Colour (0xff9a9088));
+    addAndMakeVisible (latencyLabel_);
+    for (const int samples : { 0, 64, 512, 2048 })
+    {
+        auto* b = latencyButtons_.add (new juce::TextButton ("Latency " + juce::String (samples)));
+        b->onClick = [this, samples] { processor_.setLatencySamples (samples); }; // thread message
+        addAndMakeVisible (b);
+    }
     startTimerHz (30);
+}
+
+void NeptuneEditor::resized()
+{
+    auto strip = getLocalBounds().reduced (32).removeFromBottom (32);
+    latencyLabel_.setBounds (strip.removeFromLeft (260));
+    for (auto* b : latencyButtons_)
+    {
+        b->setBounds (strip.removeFromLeft (110).reduced (2));
+    }
 }
 
 void NeptuneEditor::paint (juce::Graphics& g)
@@ -52,4 +71,42 @@ void NeptuneEditor::paint (juce::Graphics& g)
         g.setColour (juce::Colour (0xff6f665f));
         g.drawText ("changes: " + juce::String (static_cast<int> (ps.version (r.id))), line, juce::Justification::centredLeft);
     }
+
+    // --- Ce que l'hôte nous envoie ---
+    const auto& hp = processor_.hostProbe();
+    area.removeFromTop (14);
+    g.setColour (juce::Colours::white);
+    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    g.drawText ("Host probe", area.removeFromTop (26), juce::Justification::centredLeft);
+
+    static const char* const exprNames[] = { "volume", "pan", "tuning", "vibrato", "expression", "brightness", "pressure" };
+    juce::String expr;
+    for (int i = 0; i < HostProbe::numExpressions; ++i)
+        expr << exprNames[i] << " " << hp.expressionCount[static_cast<size_t> (i)].load() << " ("
+             << juce::String (hp.expressionLast[static_cast<size_t> (i)].load(), 3) << ")   ";
+
+    const juce::String lines[] = {
+        "Outputs: " + juce::String (processor_.probeOutputs()) + " stereo buses declared; host buffer channels: "
+            + juce::String (hp.outputChannels.load()) + "; blocks: " + juce::String (hp.blocks.load())
+            + "; block size: " + juce::String (hp.lastBlockSize.load()),
+        "Transport: " + juce::String (hp.hasTransport.load() ? "available" : "none")
+            + "; playing: " + juce::String (hp.playing.load() ? "yes" : "no")
+            + "; tempo: " + juce::String (hp.bpm.load(), 2) + " bpm; position: " + juce::String (hp.ppq.load(), 3)
+            + " beats; signature: " + juce::String (hp.timeSigNum.load()) + "/" + juce::String (hp.timeSigDen.load()),
+        "Notes: MIDI note-ons " + juce::String (hp.midiNoteOns.load()) + "; CLAP note-ons " + juce::String (hp.clapNoteOns.load())
+            + "; CLAP note-offs " + juce::String (hp.clapNoteOffs.load()) + "; NOTE_END sent " + juce::String (hp.noteEndsSent.load())
+            + "; last note_id " + juce::String (hp.lastNoteId.load()) + " key " + juce::String (hp.lastKey.load())
+            + "  (note_id -2: none yet, -1: host gave none)",
+        "Note expressions: " + expr,
+        "Parameter modulation: mono " + juce::String (hp.monoModCount.load()) + "; poly " + juce::String (hp.polyModCount.load())
+            + "; last amount " + juce::String (hp.lastModAmount.load(), 3) + "; last poly note_id " + juce::String (hp.lastPolyNoteId.load()),
+    };
+    g.setFont (juce::FontOptions (14.0f));
+    for (const auto& l : lines)
+    {
+        g.setColour (juce::Colour (0xffe8823f));
+        g.drawText (l, area.removeFromTop (24), juce::Justification::centredLeft);
+    }
+
+    latencyLabel_.setText ("Reported latency: " + juce::String (processor_.getLatencySamples()) + " samples", juce::dontSendNotification);
 }

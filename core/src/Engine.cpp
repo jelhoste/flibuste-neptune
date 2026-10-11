@@ -17,6 +17,6 @@ void Engine::setParameter (std::uint32_t, double) noexcept {}
 void Engine::process (float* const* out, int numChannels, int numFrames) noexcept
 {
     for (int c = 0; c < numChannels; ++c)
-        std::fill (out[c], out[c] + numFrames, 0.0f);
+        if (out[c] != nullptr) std::fill (out[c], out[c] + numFrames, 0.0f);
 }
 } // namespace neptune::core

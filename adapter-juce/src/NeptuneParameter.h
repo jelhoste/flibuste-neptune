@@ -1,14 +1,35 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wnon-virtual-dtor")
+#include <clap-juce-extensions/clap-juce-extensions.h>
+JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+#include "HostProbe.h"
 #include "neptune/core/Parameter.h"
 
 // Vue d'un paramètre du cœur pour l'hôte. La source de vérité reste neptune::core::ParameterSet :
 // cette classe ne fait que traduire (valeur normalisée, texte, métadonnées).
-class NeptuneParameter : public juce::HostedAudioProcessorParameter
+// Les paramètres « modulables » du cœur acceptent la modulation CLAP, monophonique et par note (note_id).
+// Pour l'instant (sonde) la modulation est seulement comptée : le moteur ne produit pas encore de son.
+class NeptuneParameter : public juce::HostedAudioProcessorParameter,
+                         public clap_juce_extensions::clap_juce_parameter_capabilities
 {
 public:
-    NeptuneParameter (neptune::core::ParameterSet& set, std::size_t index)
-        : set_ (set), index_ (index), spec_ (set.spec (index)) {}
+    NeptuneParameter (neptune::core::ParameterSet& set, std::size_t index, HostProbe& probe)
+        : set_ (set), index_ (index), spec_ (set.spec (index)), probe_ (probe) {}
+
+    bool supportsMonophonicModulation() override { return spec_.modulatable; }
+    void applyMonophonicModulation (double amount) override
+    {
+        probe_.lastModAmount = amount;
+        ++probe_.monoModCount;
+    }
+    bool supportsPolyphonicModulation() override { return spec_.modulatable; }
+    void applyPolyphonicModulation (int32_t noteId, int16_t, int16_t, int16_t, double amount) override
+    {
+        probe_.lastModAmount = amount;
+        probe_.lastPolyNoteId = noteId;
+        ++probe_.polyModCount;
+    }
 
     // Identifiant stable pour l'automation : l'id du cœur, en texte (clap-juce-extensions en tire le clap_id par hachage).
     juce::String getParameterID() const override { return juce::String (static_cast<juce::int64> (spec_.id)); }
@@ -51,4 +72,5 @@ private:
     neptune::core::ParameterSet& set_;
     std::size_t index_;
     const neptune::core::ParamSpec& spec_;
+    HostProbe& probe_;
 };

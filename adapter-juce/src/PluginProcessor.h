@@ -1,10 +1,16 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wnon-virtual-dtor")
+#include <clap-juce-extensions/clap-juce-extensions.h>
+JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+#include <array>
+#include "HostProbe.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Parameter.h"
 
 // Fine couche d'adaptation : traduit JUCE/CLAP <-> cœur. Aucune logique métier ici.
-class NeptuneProcessor : public juce::AudioProcessor
+class NeptuneProcessor : public juce::AudioProcessor,
+                         public clap_juce_extensions::clap_juce_audio_processor_capabilities
 {
 public:
     NeptuneProcessor();
@@ -33,10 +39,26 @@ public:
 
     neptune::core::ParameterSet& parameters() { return params_; }
     int probeTracks() const { return probeTracks_; }
+    HostProbe& hostProbe() { return hostProbe_; }
+    int probeOutputs() const { return probeOutputs_; }
+
+    // Extensions CLAP (clap-juce-extensions) : notes au dialecte CLAP avec note_id, expressions de note, fin de note.
+    bool supportsNoteDialectClap (bool isInput) override { return isInput; }
+    bool supportsDirectEvent (uint16_t spaceId, uint16_t type) override;
+    void handleDirectEvent (const clap_event_header_t* event, int sampleOffset) override;
+    bool supportsOutboundEvents() override { return true; }
+    void addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer& midi, int sampleOffset) override;
 
 private:
     neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
     int probeTracks_ = 0;
+    int probeOutputs_ = 0;
+    HostProbe hostProbe_;
+
+    // Notes terminées à signaler à l'hôte (NOTE_END). Écrit et lu sur le thread audio uniquement.
+    struct PendingNoteEnd { std::int32_t noteId; std::int16_t port, channel, key; };
+    std::array<PendingNoteEnd, 256> pendingEnds_ {};
+    int numPendingEnds_ = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeptuneProcessor)
 };
