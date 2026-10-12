@@ -37,6 +37,18 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     statusLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
     addAndMakeVisible (statusLabel_);
 
+    importButton_.setButtonText (text ("sampler.import"));
+    importButton_.onClick = [this] { startImport(); };
+    addAndMakeVisible (importButton_);
+    removeButton_.setButtonText (text ("sampler.remove"));
+    removeButton_.onClick = [this] { removeSelectedZones(); };
+    addAndMakeVisible (removeButton_);
+    selectionLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    addAndMakeVisible (selectionLabel_);
+    zoneTable_ = std::make_unique<ZoneTable> (palette_, tr_);
+    zoneTable_->onSelectionChanged = [this] { lastRevision_ = 0xFFFFFFFFu; updateSamplerControls(); };
+    addAndMakeVisible (*zoneTable_);
+
     modeButton_.onClick = [this]
     {
         editZone ([] (neptune::core::ZoneDescription& z)
@@ -149,19 +161,116 @@ void NeptuneEditor::chooseSample()
                                const auto file = fc.getResult();
                                if (file == juce::File()) return; // annulé
                                const auto path = file.getFullPathName().toStdString();
-                               safe->editZone ([&path] (neptune::core::ZoneDescription& z) { z.samplePath = path; });
+                               // Un seul sample : on garde les réglages de la première zone et on remplace le reste.
+                               auto d = safe->processor_.instrumentDescription();
+                               neptune::core::ZoneDescription z = d.zones.empty() ? neptune::core::ZoneDescription {} : d.zones.front();
+                               z.samplePath = path;
+                               z.keyLow = 0; z.keyHigh = 127; z.velLow = 1; z.velHigh = 127; z.roundRobin = 0; z.group.clear(); z.onRelease = false;
+                               d.zones.assign (1, z);
+                               safe->processor_.setInstrumentDescription (std::move (d), false);
+                               safe->lastRevision_ = 0xFFFFFFFFu;
+                               safe->updateSamplerControls();
                            });
 }
 
-// Modifie la zone 0 (la crée avec les réglages par défaut si l'instrument est vide) et la republie.
+// Applique un changement aux zones sélectionnées (toutes si rien n'est sélectionné) et republie l'instrument.
 void NeptuneEditor::editZone (const std::function<void (neptune::core::ZoneDescription&)>& change)
 {
     auto d = processor_.instrumentDescription();
-    const bool created = d.zones.empty();
-    if (created) d.zones.emplace_back();
-    change (d.zones.front());
-    if (created && d.zones.front().samplePath.empty()) return; // pas de sample : rien à jouer
+    if (d.zones.empty()) return; // pas de sample : rien à régler
+    const auto selection = zoneTable_->selectedRows();
+    if (selection.empty())
+        for (auto& z : d.zones) change (z);
+    else
+        for (const int row : selection)
+            if (row >= 0 && row < static_cast<int> (d.zones.size())) change (d.zones[static_cast<std::size_t> (row)]);
     processor_.setInstrumentDescription (std::move (d), /*forceReload*/ false);
+    updateSamplerControls();
+}
+
+void NeptuneEditor::startImport()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("sampler.import_files"));
+    menu.addItem (2, text ("sampler.import_folder"));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&importButton_),
+                        [safe = juce::Component::SafePointer<NeptuneEditor> (this)] (int choice)
+                        {
+                            if (safe == nullptr || choice == 0) return;
+                            auto* self = safe.getComponent();
+                            const bool folder = choice == 2;
+                            self->importChooser_ = std::make_unique<juce::FileChooser> (self->text ("sampler.choose"), juce::File(),
+                                                                                       "*.wav;*.aif;*.aiff;*.flac");
+                            const int flags = folder ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories
+                                                     : juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                                           | juce::FileBrowserComponent::canSelectMultipleItems;
+                            self->importChooser_->launchAsync (flags, [safe, folder] (const juce::FileChooser& fc)
+                            {
+                                if (safe == nullptr) return;
+                                std::vector<std::string> paths;
+                                if (folder)
+                                {
+                                    const auto dir = fc.getResult();
+                                    if (! dir.isDirectory()) return;
+                                    for (const auto& f : dir.findChildFiles (juce::File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac"))
+                                        paths.push_back (f.getFullPathName().toStdString());
+                                }
+                                else
+                                    for (const auto& f : fc.getResults()) paths.push_back (f.getFullPathName().toStdString());
+                                if (! paths.empty()) safe->openWizard (std::move (paths));
+                            });
+                        });
+}
+
+void NeptuneEditor::openWizard (std::vector<std::string> paths)
+{
+    if (wizard_ || modal_) return;
+    const auto saved = processor_.lastImportTemplate();
+    auto templ = saved.empty() ? neptune::core::import::Template {} : neptune::core::import::Template::fromJson (saved);
+    wizard_ = std::make_unique<ImportWizard> (std::move (paths), palette_, tr_, std::move (templ),
+        [safe = juce::Component::SafePointer<NeptuneEditor> (this)] (const ImportWizard::Result& r)
+        {
+            if (safe == nullptr) return;
+            safe->applyImport (r);
+            juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeWizard(); });
+        },
+        [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+        {
+            juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeWizard(); });
+        });
+    addAndMakeVisible (*wizard_);
+    wizard_->setBounds (getLocalBounds());
+    wizard_->toFront (true);
+}
+
+void NeptuneEditor::closeWizard()
+{
+    wizard_.reset();
+    grabKeyboardFocus();
+}
+
+void NeptuneEditor::applyImport (const ImportWizard::Result& r)
+{
+    processor_.setLastImportTemplate (r.templ.toJson());
+    auto d = processor_.instrumentDescription();
+    if (r.replace) d.zones.clear();
+    for (const auto& z : r.zones) d.zones.push_back (z);
+    d.roundRobinMode = r.roundRobinMode;
+    processor_.setInstrumentDescription (std::move (d), /*forceReload*/ false);
+    lastRevision_ = 0xFFFFFFFFu;
+    updateSamplerControls();
+}
+
+void NeptuneEditor::removeSelectedZones()
+{
+    auto selection = zoneTable_->selectedRows();
+    if (selection.empty()) return;
+    std::sort (selection.begin(), selection.end(), std::greater<int>());
+    auto d = processor_.instrumentDescription();
+    for (const int row : selection)
+        if (row >= 0 && row < static_cast<int> (d.zones.size())) d.zones.erase (d.zones.begin() + row);
+    processor_.setInstrumentDescription (std::move (d), false);
+    lastRevision_ = 0xFFFFFFFFu;
     updateSamplerControls();
 }
 
@@ -172,10 +281,16 @@ juce::String NeptuneEditor::statusText() const
     switch (st.kind)
     {
         case Kind::None: return text ("sampler.none");
-        case Kind::Loading: return text ("sampler.loading");
+        case Kind::Loading:
+            if (st.total > 0)
+                return juce::String::fromUTF8 (tr_.format ("sampler.loading_progress", { std::to_string (st.done), std::to_string (st.total) }).c_str());
+            return text ("sampler.loading");
         case Kind::Error: return juce::String::fromUTF8 (tr_.format ("sampler.error", { st.error }).c_str());
         case Kind::Loaded:
         {
+            if (st.zones > 1)
+                return juce::String::fromUTF8 (tr_.format ("sampler.loaded_many", { std::to_string (st.zones), std::to_string (st.files),
+                                                                                       juce::String (st.megabytes, 1).toStdString() }).c_str());
             const std::string name = st.name;
             const std::string ch (tr_.tr (st.channels == 1 ? "sampler.mono" : "sampler.stereo"));
             const auto rate = juce::String (st.sampleRate, 0).toStdString();
@@ -190,8 +305,18 @@ juce::String NeptuneEditor::statusText() const
 
 void NeptuneEditor::updateSamplerControls()
 {
-    const auto d = processor_.instrumentDescription();
-    const neptune::core::ZoneDescription z = d.zones.empty() ? neptune::core::ZoneDescription {} : d.zones.front();
+    const auto rev = processor_.instrumentRevision();
+    if (rev != lastRevision_)
+    {
+        lastRevision_ = rev;
+        cachedDescription_ = processor_.instrumentDescription();
+        zoneTable_->setZones (cachedDescription_.zones);
+    }
+    const auto& d = cachedDescription_;
+    const auto selection = zoneTable_->selectedRows();
+    const std::size_t shown = (! selection.empty() && selection.front() >= 0 && selection.front() < static_cast<int> (d.zones.size()))
+                                  ? static_cast<std::size_t> (selection.front()) : 0;
+    const neptune::core::ZoneDescription z = d.zones.empty() ? neptune::core::ZoneDescription {} : d.zones[shown];
     const auto modeName = tr_.tr (z.mode == neptune::core::PlayMode::Loop ? "sampler.mode_loop" : "sampler.mode_one_shot");
     modeButton_.setButtonText (juce::String::fromUTF8 (tr_.format ("sampler.mode", { std::string (modeName) }).c_str()));
 
@@ -203,8 +328,12 @@ void NeptuneEditor::updateSamplerControls()
     const bool has = ! d.zones.empty();
     modeButton_.setEnabled (has);
     rootSlider_.setEnabled (has);
+    removeButton_.setEnabled (! selection.empty());
     envelopeEditor_->setEnabled (has);
     envelopeEditor_->setEnvelope (z.envelope);
+    selectionLabel_.setText (selection.empty() ? text ("sampler.selection_all")
+                                               : juce::String::fromUTF8 (tr_.format ("sampler.selection_n", { std::to_string (selection.size()) }).c_str()),
+                             juce::dontSendNotification);
 }
 
 void NeptuneEditor::updateViewVisibility()
@@ -216,6 +345,10 @@ void NeptuneEditor::updateViewVisibility()
     rootLabel_.setVisible (sampler);
     rootSlider_.setVisible (sampler);
     envelopeEditor_->setVisible (sampler);
+    importButton_.setVisible (sampler);
+    removeButton_.setVisible (sampler);
+    selectionLabel_.setVisible (sampler);
+    zoneTable_->setVisible (sampler);
     for (auto* k : knobs_) k->setVisible (sampler);
     viewButton_.setButtonText (showProbe_ ? "Sampler" : "Probe");
 }
@@ -289,20 +422,27 @@ void NeptuneEditor::resized()
     recoveryLabel_.setBounds (banner);
     if (modal_) modal_->setBounds (getLocalBounds());
 
-    // Vue Sampler : chargement, état, mode, note racine, enveloppe graphique.
+    // Vue Sampler : chargement, import, état, mode, note racine ; liste des zones à gauche, enveloppe à droite.
     viewButton_.setBounds (getWidth() - 32 - 110, 32, 110, 36);
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
+        importButton_.setBounds (r.removeFromLeft (130).reduced (2));
         modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
         statusLabel_.setBounds (r);
         auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));
-        rootSlider_.setBounds (r2.removeFromLeft (170).reduced (2));
-        const int envTop = 168;
-        const int envBottom = getHeight() - 270 - 12;
-        envelopeEditor_->setBounds (32, envTop, getWidth() - 64, juce::jmax (120, envBottom - envTop));
+        rootSlider_.setBounds (r2.removeFromLeft (150).reduced (2));
+        removeButton_.setBounds (r2.removeFromLeft (190).reduced (2));
+        selectionLabel_.setBounds (r2);
+        const int top = 168;
+        const int bottom = getHeight() - 270 - 12;
+        const int h = juce::jmax (120, bottom - top);
+        const int tableW = juce::jmin (450, (getWidth() - 64) / 2);
+        zoneTable_->setBounds (32, top, tableW, h);
+        envelopeEditor_->setBounds (32 + tableW + 12, top, getWidth() - 64 - tableW - 12, h);
     }
+    if (wizard_) wizard_->setBounds (getLocalBounds());
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {

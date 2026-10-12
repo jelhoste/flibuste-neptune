@@ -40,6 +40,7 @@ std::string toJson (const UiState& s)
     o["schema_version"] = currentSchemaVersion;
     o["modal_pointer"] = { { "width", s.modalPointer.width }, { "height", s.modalPointer.height } };
     o["modal_touch"] = { { "width", s.modalTouch.width }, { "height", s.modalTouch.height } };
+    if (! s.lastImportTemplate.empty()) o["import_template"] = s.lastImportTemplate;
     return o.dump (2) + "\n";
 }
 
@@ -50,6 +51,8 @@ UiState fromJson (std::string_view text)
     if (doc.is_discarded() || ! doc.is_object()) return s;
     s.modalPointer = readSize (doc, "modal_pointer", s.modalPointer);
     s.modalTouch = readSize (doc, "modal_touch", s.modalTouch);
+    if (const auto it = doc.find ("import_template"); it != doc.end() && it->is_string() && it->get<std::string>().size() < 8192)
+        s.lastImportTemplate = it->get<std::string>();
     return s;
 }
 

@@ -4,6 +4,7 @@ JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wno
 #include <clap-juce-extensions/clap-juce-extensions.h>
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -81,6 +82,8 @@ public:
     {
         enum class Kind { None, Loading, Loaded, Error } kind = Kind::None;
         std::string name, error;
+        int zones = 0, files = 0;       // Loaded : nombre de zones et de fichiers distincts
+        int done = 0, total = 0;        // Loading : avancement
         int channels = 0, bitDepth = 0;
         double sampleRate = 0.0, seconds = 0.0, megabytes = 0.0;
     };
@@ -88,10 +91,15 @@ public:
     // Thread de message. `forceReload` : relire les fichiers même si le chemin n'a pas changé. Marque le projet modifié.
     void setInstrumentDescription (neptune::core::InstrumentDescription, bool forceReload = false);
     InstrumentStatus instrumentStatus() const;
+    // Change à chaque modification de la description : l'interface compare ce nombre au lieu de comparer tout l'instrument.
+    std::uint32_t instrumentRevision() const noexcept { return revision_.load(); }
 
     // Taille mémorisée de la modale des potards (par type de terminal), enregistrée dans ui_state.json.
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const { return uiState_.modalSize (t); }
     void setModalSize (neptune::core::uistate::Terminal, neptune::core::uistate::Size);
+    // Dernier gabarit de nom utilisé à l'import (JSON), mémorisé dans ui_state.json.
+    std::string lastImportTemplate() const { return uiState_.lastImportTemplate; }
+    void setLastImportTemplate (const std::string&);
 
     // Extensions CLAP (clap-juce-extensions) : notes au dialecte CLAP avec note_id, expressions de note, fin de note.
     bool supportsNoteDialectClap (bool isInput) override { return isInput; }
@@ -110,6 +118,7 @@ private:
     mutable juce::CriticalSection instrumentLock_;
     neptune::core::InstrumentDescription instrument_; // protégé par instrumentLock_
     InstrumentStatus status_;                          // protégé par instrumentLock_
+    std::atomic<std::uint32_t> revision_ { 0 };
     neptune::core::uistate::UiState uiState_;
     std::filesystem::path uiStateFile_;
     int probeTracks_ = 0;

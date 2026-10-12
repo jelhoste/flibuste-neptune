@@ -1,8 +1,10 @@
 #pragma once
 #include "PluginProcessor.h"
 #include "EnvelopeEditor.h"
+#include "ImportWizard.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
+#include "ZoneTable.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
 
@@ -44,7 +46,20 @@ private:
     juce::TextButton viewButton_; // bascule entre la vue Sampler et la vue Sonde (texte de diagnostic de l'hôte)
     bool showProbe_ = false;
     void updateViewVisibility();
-    std::unique_ptr<juce::FileChooser> chooser_;
+    std::unique_ptr<juce::FileChooser> chooser_, importChooser_;
+
+    // Zones multiples (jalon 3) : liste, import par gabarit de nom, suppression ; les réglages agissent sur la sélection.
+    std::unique_ptr<ZoneTable> zoneTable_;
+    std::unique_ptr<ImportWizard> wizard_;
+    juce::TextButton importButton_, removeButton_;
+    juce::Label selectionLabel_;
+    std::uint32_t lastRevision_ = 0xFFFFFFFFu;
+    neptune::core::InstrumentDescription cachedDescription_;
+    void startImport();
+    void openWizard (std::vector<std::string> paths);
+    void closeWizard();
+    void applyImport (const ImportWizard::Result&);
+    void removeSelectedZones();
     bool updatingControls_ = false;
     void chooseSample();
     void editZone (const std::function<void (neptune::core::ZoneDescription&)>&);

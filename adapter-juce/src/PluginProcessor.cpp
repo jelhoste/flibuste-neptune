@@ -4,6 +4,7 @@
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/State.h"
+#include <set>
 
 #ifndef NEPTUNE_PROBE_TRACKS
  #define NEPTUNE_PROBE_TRACKS 32
@@ -74,10 +75,25 @@ public:
             }
 
             st.kind = InstrumentStatus::Kind::Loading;
+            st.total = static_cast<int> (d.zones.size());
             owner_.setStatus (st);
             std::vector<std::string> warnings;
-            auto inst = neptune::core::buildInstrument (d, &warnings, &cache_);
+            // Abandonne dès qu'une nouvelle demande arrive (le cache garde ce qui est déjà lu) ou à l'arrêt du plugin.
+            auto inst = neptune::core::buildInstrument (d, &warnings, &cache_, [&] (int done, int total)
+            {
+                if (threadShouldExit() || hasPendingRequest()) return false;
+                if (done % 16 == 0)
+                {
+                    InstrumentStatus p;
+                    p.kind = InstrumentStatus::Kind::Loading;
+                    p.done = done;
+                    p.total = total;
+                    owner_.setStatus (std::move (p));
+                }
+                return true;
+            });
             if (threadShouldExit()) break;
+            if (inst == nullptr) continue; // annulé : la demande suivante est traitée au tour d'après
 
             owner_.engine_.publishInstrument (inst);
             st = {};
@@ -90,8 +106,12 @@ public:
                 st.bitDepth = sd.sourceBitDepth;
                 st.sampleRate = sd.sampleRate;
                 st.seconds = sd.durationSeconds();
+                st.zones = static_cast<int> (inst->zones.size());
+                std::set<const neptune::core::SampleData*> distinct;
                 double bytes = 0.0;
-                for (const auto& z : inst->zones) bytes += static_cast<double> (z.sample->bytes());
+                for (const auto& z : inst->zones)
+                    if (distinct.insert (z.sample.get()).second) bytes += static_cast<double> (z.sample->bytes());
+                st.files = static_cast<int> (distinct.size());
                 st.megabytes = bytes / (1024.0 * 1024.0);
             }
             else
@@ -101,6 +121,12 @@ public:
             }
             owner_.setStatus (st);
         }
+    }
+
+    bool hasPendingRequest()
+    {
+        const juce::ScopedLock lock (lock_);
+        return hasPending_;
     }
 
 private:
@@ -137,6 +163,7 @@ void NeptuneProcessor::setInstrumentDescription (neptune::core::InstrumentDescri
         if (d == instrument_ && ! forceReload) return;
         instrument_ = d;
     }
+    ++revision_;
     loader_->request (std::move (d), forceReload);
     notifyStateChanged(); // la description fait partie de l'état du projet
 }
@@ -150,6 +177,7 @@ void NeptuneProcessor::adoptInstrumentFromState (const std::optional<neptune::co
         if (*d == instrument_) return;
         instrument_ = *d;
     }
+    ++revision_;
     loader_->request (*d, false);
 }
 
@@ -275,6 +303,15 @@ bool NeptuneProcessor::uiRedo()
     if (done)
         updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true).withNonParameterStateChanged (true));
     return done;
+}
+
+void NeptuneProcessor::setLastImportTemplate (const std::string& json)
+{
+    if (json == uiState_.lastImportTemplate) return;
+    uiState_.lastImportTemplate = json;
+    std::string error;
+    if (! neptune::core::uistate::saveFile (uiStateFile_, uiState_, &error))
+        DBG ("Neptune ui state not saved: " << juce::String (error));
 }
 
 void NeptuneProcessor::setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s)

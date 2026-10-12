@@ -50,6 +50,7 @@ private:
     };
 
     void steal (Voice& v) noexcept;
+    void startVoice (int channel, int key, float velocity, const Zone& zone) noexcept;
     void bindZone (Voice& v, const Zone& zone) noexcept;
     Voice* allocate() noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
@@ -58,5 +59,6 @@ private:
     const Instrument* instrument_ = nullptr;
     double sampleRate_ = 48000.0;
     std::uint64_t counter_ = 0;
+    std::array<float, 128> heldVelocity_ {}; // vélocité du dernier Note On par touche (zones déclenchées au relâchement)
 };
 } // namespace neptune::core

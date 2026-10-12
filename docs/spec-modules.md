@@ -108,6 +108,7 @@ Structure **fixe, non modulaire** (choix assumé pour la robustesse de l'automat
 - Délimiteur configurable (par défaut `_`). Chaque segment du nom de fichier devient une **carte** affichée et réordonnable par glisser-déposer.
 - Rôle assignable par menu déroulant sur chaque carte : Note racine / Note basse de plage / Note haute de plage / Vélocité basse / Vélocité haute / Round robin (index) / Groupe / Ignorer.
 - Le gabarit (nombre de cartes + rôles assignés) est **sauvegardable comme template nommé et réutilisable**, car chaque bibliothèque de samples a sa propre convention de nommage.
+- **Extension décidée le 2026-10-12** : un champ peut aussi se définir **par position** dans le nom (à partir du n-ième caractère, longueur min/max, depuis le début ou la fin), pour les noms sans délimiteur, avec un nom d'exemple affiché en cases. Rôles supplémentaires : demi-tons sous/au-dessus de la racine, valeur de vélocité (bornes déduites), numéro et nombre de couches, nuance (pp à ff), marqueur de relâchement. Noms de note acceptés avec correspondance d'octave réglable (do central = C3/C4/C5). Étendues déduites : aucune (par défaut), à mi-chemin, ou fixes. Contrôles de cohérence et aperçu avant validation. Voir `docs/passage-de-relais.md`, jalon 3.
 
 ### Zone d'édition de sample (sample sélectionné)
 Liste des réglages disponibles :

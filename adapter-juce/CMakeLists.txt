@@ -25,6 +25,8 @@ target_sources(Neptune PRIVATE
   src/PluginProcessor.cpp
   src/PluginEditor.cpp
   src/EnvelopeEditor.cpp
+  src/ImportWizard.cpp
+  src/ZoneTable.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

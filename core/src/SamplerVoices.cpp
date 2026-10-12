@@ -93,8 +93,14 @@ SamplerVoices::Voice* SamplerVoices::allocate() noexcept
 void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
 {
     if (instrument_ == nullptr) return;
-    const Zone* zone = instrument_->find (key, velocity);
-    if (zone == nullptr || zone->sample == nullptr || zone->loopEnd <= zone->loopStart) return;
+    if (key >= 0 && key < 128) heldVelocity_[static_cast<std::size_t> (key)] = velocity;
+    const Zone* zone = instrument_->select (key, velocity, /*release*/ false);
+    if (zone != nullptr) startVoice (channel, key, velocity, *zone);
+}
+
+void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone& zone) noexcept
+{
+    if (zone.sample == nullptr || zone.loopEnd <= zone.loopStart) return;
 
     // Limite de voix : on fait s'éteindre la plus ancienne voix tenue (fondu court, pas de clic).
     if (heldVoices() >= kMaxVoices)
@@ -102,10 +108,7 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
         Voice* oldest = nullptr;
         for (auto& v : voices_)
             if (v.active && ! v.releasing && ! v.stolen && (oldest == nullptr || v.order < oldest->order)) oldest = &v;
-        if (oldest != nullptr)
-        {
-            steal (*oldest);
-        }
+        if (oldest != nullptr) steal (*oldest);
     }
 
     Voice* v = allocate();
@@ -114,12 +117,12 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
     v->active = true;
     v->channel = channel;
     v->key = key;
-    v->zoneIndex = static_cast<int> (zone - instrument_->zones.data());
+    v->zoneIndex = static_cast<int> (&zone - instrument_->zones.data());
     v->order = ++counter_;
     v->pos = 0.0;
-    bindZone (*v, *zone);
+    bindZone (*v, zone);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
-    v->env.begin (zone->env, sampleRate_);
+    v->env.begin (zone.env, sampleRate_);
 }
 
 void SamplerVoices::noteOff (int channel, int key) noexcept
@@ -133,6 +136,14 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
             v.env.noteOff (v.zone->env, sampleRate_);
         }
         // one-shot : le Note Off est ignoré, le sample est joué en entier
+    }
+
+    // Zones déclenchées au relâchement (bruit de mécanique, fin de note) : jouées à la vélocité du Note On.
+    if (instrument_ != nullptr && key >= 0 && key < 128)
+    {
+        const float vel = heldVelocity_[static_cast<std::size_t> (key)];
+        if (const Zone* zone = instrument_->select (key, vel > 0.0f ? vel : 0.5f, /*release*/ true))
+            startVoice (channel, key, vel > 0.0f ? vel : 0.5f, *zone);
     }
 }
 

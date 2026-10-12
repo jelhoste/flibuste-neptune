@@ -433,3 +433,25 @@ TEST_CASE ("building an instrument reuses the cache and reports missing files")
     CHECK (warnings[0].find ("here.wav") != std::string::npos);
     CHECK (cache.empty());
 }
+
+TEST_CASE ("building reports progress and can be cancelled")
+{
+    InstrumentDescription d;
+    for (int i = 0; i < 5; ++i)
+    {
+        ZoneDescription z;
+        z.samplePath = "/missing/" + std::to_string (i) + ".wav";
+        d.zones.push_back (z);
+    }
+    int calls = 0;
+    std::vector<std::string> warnings;
+    auto inst = buildInstrument (d, &warnings, nullptr, [&] (int done, int total) { ++calls; return done < 2 && total == 5; });
+    CHECK (inst == nullptr); // annulé à la troisième zone
+    CHECK (calls == 3);
+    CHECK (warnings.size() == 2);
+
+    calls = 0;
+    inst = buildInstrument (d, &warnings, nullptr, [&] (int, int) { ++calls; return true; });
+    CHECK (inst != nullptr);
+    CHECK (calls == 5);
+}

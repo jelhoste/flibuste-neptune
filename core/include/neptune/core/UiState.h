@@ -28,10 +28,16 @@ struct UiState
     Size modalPointer { 380, 230 };
     Size modalTouch { 500, 320 };
 
+    // Dernier gabarit de nom utilisé à l'import (JSON de neptune::core::import::Template) ; vide = aucun.
+    std::string lastImportTemplate;
+
     const Size& modalSize (Terminal t) const noexcept { return t == Terminal::Touch ? modalTouch : modalPointer; }
     // Borné à [minModalSide, maxModalSide].
     void setModalSize (Terminal t, Size s) noexcept;
-    bool operator== (const UiState& o) const noexcept { return modalPointer == o.modalPointer && modalTouch == o.modalTouch; }
+    bool operator== (const UiState& o) const noexcept
+    {
+        return modalPointer == o.modalPointer && modalTouch == o.modalTouch && lastImportTemplate == o.lastImportTemplate;
+    }
 };
 
 std::string toJson (const UiState& s);

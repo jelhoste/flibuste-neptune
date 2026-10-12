@@ -6,6 +6,7 @@
 // Les réglages de zone (note racine, mode, relâchement...) vivent dans la zone, pas dans la couche Paramètre : un
 // instrument aura plusieurs zones. Les réglages globaux (gain, accordage) sont des paramètres (SamplerParams.h).
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -26,6 +27,12 @@ enum class PlayMode
 const char* toString (PlayMode m) noexcept;                  // "one_shot" / "loop"
 bool playModeFromString (std::string_view s, PlayMode& out);
 
+// Alternance des échantillons d'une même place (spec-modules §3, round-robin). Le compteur est propre à chaque jeu
+// (même étendue de notes et de vélocité, donc indépendant par couche de vélocité).
+enum class RoundRobinMode { Sequential, Random, RandomNoRepeat };
+const char* toString (RoundRobinMode m) noexcept; // "sequential" / "random" / "random_no_repeat"
+bool roundRobinModeFromString (std::string_view s, RoundRobinMode& out);
+
 struct ZoneDescription
 {
     std::string samplePath;        // chemin absolu (la résolution relative/recherche par nom viendra avec les presets, spec §20)
@@ -36,6 +43,9 @@ struct ZoneDescription
     EnvelopeDescription envelope;  // enveloppe d'amplitude de la zone (voir Envelope.h)
     double tuneCents = 0.0;        // accordage fin de la zone
     double gainDb = 0.0;
+    int roundRobin = 0;            // indice dans le jeu round-robin (0 = non précisé)
+    std::string group;             // nom de Groupe (micro, articulation...) ; vide = aucun
+    bool onRelease = false;        // déclenchée au Note Off (bruits de mécanique, fins de note), pas au Note On
     // Points de boucle en échantillons ; loopEnd < 0 = jusqu'à la fin du fichier.
     std::int64_t loopStart = 0, loopEnd = -1;
 
@@ -43,14 +53,15 @@ struct ZoneDescription
     {
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
             && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && tuneCents == o.tuneCents && gainDb == o.gainDb
-            && loopStart == o.loopStart && loopEnd == o.loopEnd;
+            && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease;
     }
 };
 
 struct InstrumentDescription
 {
     std::vector<ZoneDescription> zones;
-    bool operator== (const InstrumentDescription& o) const noexcept { return zones == o.zones; }
+    RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    bool operator== (const InstrumentDescription& o) const noexcept { return zones == o.zones && roundRobinMode == o.roundRobinMode; }
     bool empty() const noexcept { return zones.empty(); }
 };
 
@@ -74,14 +85,33 @@ struct Zone
     double tuneCents = 0.0;
     float gain = 1.0f; // linéaire
     std::int64_t loopStart = 0, loopEnd = 0; // loopEnd exclusif, > loopStart, <= frames
+    int roundRobin = 0;
+    int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
+    bool onRelease = false;
 };
 
 struct Instrument
 {
     std::vector<Zone> zones;
+    RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
 
-    // Première zone qui couvre la note et la vélocité (0..1 -> 1..127) ; nul si aucune.
+    // Première zone qui couvre la note et la vélocité (0..1 -> 1..127) ; nul si aucune. Ignore le round-robin et
+    // les zones déclenchées au relâchement.
     const Zone* find (int key, float velocity) const noexcept;
+
+    // Zone à jouer : comme find(), puis choix dans le jeu round-robin de cette place selon `roundRobinMode`.
+    // `release` : cherche parmi les zones déclenchées au Note Off. Thread audio uniquement (les compteurs sont modifiés).
+    const Zone* select (int key, float velocity, bool release) const noexcept;
+
+    // À appeler une fois les zones remplies (construit les jeux round-robin).
+    void finalize();
+
+private:
+    struct RrSet { std::vector<int> members; }; // indices de zones, dans l'ordre des indices round-robin
+    std::vector<RrSet> rrSets_;
+    std::vector<int> zoneSet_;
+    mutable std::vector<std::uint32_t> rrCounter_, rrLast_;
+    mutable std::uint32_t rng_ = 0x9E3779B9u;
 };
 
 // Construit l'instrument depuis la description : charge les fichiers (hors temps réel). Une zone dont le fichier ne
@@ -89,8 +119,10 @@ struct Instrument
 // `cache` (facultatif) : fichiers déjà chargés, par chemin, pour ne pas relire le disque quand seul un réglage change.
 // À la fin, il ne contient plus que les fichiers de la description.
 using SampleCache = std::map<std::string, std::shared_ptr<const SampleData>>;
+// `progress(done, total)` est appelée après chaque zone ; si elle rend false, la construction s'arrête et rend nul.
 std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& description, std::vector<std::string>* warnings = nullptr,
-                                                   SampleCache* cache = nullptr);
+                                                   SampleCache* cache = nullptr,
+                                                   const std::function<bool (int done, int total)>& progress = {});
 
 // Zone qui couvre tout le clavier à partir d'un sample déjà chargé (tests, outils).
 Zone makeFullKeyboardZone (std::shared_ptr<const SampleData> sample, int rootNote, PlayMode mode);
