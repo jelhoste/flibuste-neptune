@@ -129,16 +129,13 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     matrix_->onGestureEnd = [this] { processor_.uiEndGesture(); };
     matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
     addChildComponent (*matrix_);
-    mappingButton_.setButtonText (text ("map.tab"));
-    mappingButton_.onClick = [this] { showMapping_ = ! showMapping_; showProbe_ = false; updateViewVisibility(); resized(); repaint(); };
-    addAndMakeVisible (mappingButton_);
     listToggleButton_.setButtonText (text ("map.list"));
     listToggleButton_.setClickingTogglesState (true);
     listToggleButton_.setToggleState (true, juce::dontSendNotification);
     listToggleButton_.onClick = [this] { listVisible_ = listToggleButton_.getToggleState(); updateViewVisibility(); resized(); };
-    addChildComponent (listToggleButton_);
+    addAndMakeVisible (listToggleButton_);
 
-    viewButton_.onClick = [this] { showProbe_ = ! showProbe_; if (showProbe_) showMapping_ = false; updateViewVisibility(); resized(); repaint(); };
+    viewButton_.onClick = [this] { showProbe_ = ! showProbe_; updateViewVisibility(); resized(); repaint(); };
     addAndMakeVisible (viewButton_);
 
     undoButton_.setButtonText (text ("undo.undo"));
@@ -506,35 +503,29 @@ void NeptuneEditor::rebuildLoadPanel()
 
 void NeptuneEditor::updateViewVisibility()
 {
-    const bool sampler = ! showProbe_;
-    const bool mapping = sampler && showMapping_;
-    const bool classic = sampler && ! showMapping_;
-    // communs aux vues Sampler et Mapping
-    statusLabel_.setVisible (sampler);
-    rootLabel_.setVisible (sampler);
-    rootSlider_.setVisible (sampler);
-    envelopeEditor_->setVisible (sampler);
-    importButton_.setVisible (sampler);
-    removeButton_.setVisible (sampler);
-    selectionLabel_.setVisible (sampler);
-    zoneTable_->setVisible (sampler && (classic || listVisible_));
-    // propres à la vue Sampler
-    loadButton_.setVisible (classic);
-    modeButton_.setVisible (classic);
-    loadTitle_.setVisible (classic);
-    rrToggle_.setVisible (classic);
-    releaseToggle_.setVisible (classic);
-    streamToggle_.setVisible (classic);
-    preloadLabel_.setVisible (classic);
-    preloadBox_.setVisible (classic);
-    groupsViewport_.setVisible (classic);
-    for (auto* k : knobs_) k->setVisible (classic);
-    // propres à la vue Mapping
-    matrix_->setVisible (mapping);
+    // Deux vues : Mapping (tout l'instrument : matrice, liste, enveloppe, chargement, potards) et Sonde (diagnostic de l'hôte).
+    const bool mapping = ! showProbe_;
+    loadButton_.setVisible (mapping);
+    modeButton_.setVisible (mapping);
+    statusLabel_.setVisible (mapping);
+    rootLabel_.setVisible (mapping);
+    rootSlider_.setVisible (mapping);
+    envelopeEditor_->setVisible (mapping);
+    importButton_.setVisible (mapping);
+    removeButton_.setVisible (mapping);
+    selectionLabel_.setVisible (mapping);
+    zoneTable_->setVisible (mapping && listVisible_);
     listToggleButton_.setVisible (mapping);
-    mappingButton_.setVisible (sampler);
-    mappingButton_.setButtonText (showMapping_ ? "Sampler" : text ("map.tab"));
-    viewButton_.setButtonText (showProbe_ ? "Sampler" : "Probe");
+    matrix_->setVisible (mapping);
+    loadTitle_.setVisible (mapping);
+    rrToggle_.setVisible (mapping);
+    releaseToggle_.setVisible (mapping);
+    streamToggle_.setVisible (mapping);
+    preloadLabel_.setVisible (mapping);
+    preloadBox_.setVisible (mapping);
+    groupsViewport_.setVisible (mapping);
+    for (auto* k : knobs_) k->setVisible (mapping);
+    viewButton_.setButtonText (showProbe_ ? text ("map.tab") : juce::String ("Probe"));
 }
 
 void NeptuneEditor::updateUndoButtons()
@@ -606,43 +597,30 @@ void NeptuneEditor::resized()
     recoveryLabel_.setBounds (banner);
     if (modal_) modal_->setBounds (getLocalBounds());
 
-    // Vue Sampler : chargement, import, état, mode, note racine ; liste des zones à gauche, enveloppe à droite.
+    // Vue Mapping : chargement, import, état, mode, note racine en haut ; à gauche la liste des zones (rétractable) et le
+    // panneau « Chargé en mémoire » ; au centre la matrice puis l'enveloppe ; les potards en bas.
     viewButton_.setBounds (getWidth() - 32 - 110, 32, 110, 36);
-    mappingButton_.setBounds (getWidth() - 32 - 110 - 8 - 130, 32, 130, 36);
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
         importButton_.setBounds (r.removeFromLeft (130).reduced (2));
         modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
+        listToggleButton_.setBounds (r.removeFromLeft (150).reduced (2));
         statusLabel_.setBounds (r);
         auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));
         rootSlider_.setBounds (r2.removeFromLeft (150).reduced (2));
         removeButton_.setBounds (r2.removeFromLeft (190).reduced (2));
         selectionLabel_.setBounds (r2);
+
         const int top = 168;
-        if (showMapping_)
-        {
-            // Vue Mapping : plein écran (pas de rangée de potards) ; liste rétractable à gauche, matrice au centre, enveloppe dessous.
-            const int mapBottom = getHeight() - 150;
-            const int mh = juce::jmax (160, mapBottom - top);
-            const int listW = listVisible_ ? juce::jmin (380, (getWidth() - 64) / 3) : 0;
-            listToggleButton_.setBounds (loadButton_.getBounds());
-            if (listVisible_) zoneTable_->setBounds (32, top, listW, mh);
-            const int x = 32 + (listVisible_ ? listW + 12 : 0);
-            const int w = getWidth() - 32 - x;
-            const int matrixH = juce::jmax (120, static_cast<int> (mh * 0.62));
-            matrix_->setBounds (x, top, w, matrixH);
-            envelopeEditor_->setBounds (x, top + matrixH + 8, w, juce::jmax (80, mh - matrixH - 8));
-        }
-        else
-        {
         const int bottom = getHeight() - 270 - 12;
-        const int h = juce::jmax (120, bottom - top);
-        const int tableW = juce::jmin (450, (getWidth() - 64) / 2);
+        const int h = juce::jmax (160, bottom - top);
+        const int leftW = juce::jmin (400, (getWidth() - 64) / 3);
         const int panelH = 192;
-        zoneTable_->setBounds (32, top, tableW, juce::jmax (80, h - panelH - 6));
-        auto lp = juce::Rectangle<int> (32, top + juce::jmax (80, h - panelH - 6) + 6, tableW, panelH);
+        const int tableH = juce::jmax (80, h - panelH - 6);
+        if (listVisible_) zoneTable_->setBounds (32, top, leftW, tableH);
+        auto lp = juce::Rectangle<int> (32, listVisible_ ? top + tableH + 6 : top, leftW, panelH);
         loadTitle_.setBounds (lp.removeFromTop (24));
         rrToggle_.setBounds (lp.removeFromTop (28));
         releaseToggle_.setBounds (lp.removeFromTop (28));
@@ -654,8 +632,12 @@ void NeptuneEditor::resized()
         }
         groupsViewport_.setBounds (lp);
         groupsSignature_.clear(); // largeur changée : les cases sont reconstruites à la prochaine mise à jour
-        envelopeEditor_->setBounds (32 + tableW + 12, top, getWidth() - 64 - tableW - 12, h);
-        }
+
+        const int x = 32 + leftW + 12;
+        const int w = getWidth() - 32 - x;
+        const int matrixH = juce::jmax (120, static_cast<int> (h * 0.62));
+        matrix_->setBounds (x, top, w, matrixH);
+        envelopeEditor_->setBounds (x, top + matrixH + 8, w, juce::jmax (80, h - matrixH - 8));
     }
     if (wizard_) wizard_->setBounds (getLocalBounds());
 
@@ -775,7 +757,7 @@ void NeptuneEditor::paint (juce::Graphics& g)
 
     } // showProbe_
 
-    // Nom et valeur de chaque potard (vue Sampler)
+    // Nom et valeur de chaque potard (vue Mapping)
     if (! showProbe_)
     {
         const auto& ps2 = processor_.parameters();

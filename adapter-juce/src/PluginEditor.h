@@ -45,11 +45,10 @@ private:
     juce::Label statusLabel_, rootLabel_;
     juce::Slider rootSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     std::unique_ptr<EnvelopeEditor> envelopeEditor_;
-    juce::TextButton viewButton_; // bascule entre la vue Sampler et la vue Sonde (texte de diagnostic de l'hôte)
+    juce::TextButton viewButton_; // bascule entre la vue Mapping et la vue Sonde (texte de diagnostic de l'hôte)
     // Vue Mapping (jalon 5) : matrice notes × vélocité plein écran, liste des zones rétractable.
     std::unique_ptr<MappingMatrix> matrix_;
-    juce::TextButton mappingButton_, listToggleButton_;
-    bool showMapping_ = false;
+    juce::TextButton listToggleButton_;
     bool listVisible_ = true;
     void setZoneSelection (const std::vector<int>&);
     bool showProbe_ = false;

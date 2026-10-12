@@ -268,7 +268,7 @@ void MappingMatrix::paint (juce::Graphics& g)
                 juce::String label;
                 if (inner.getWidth() > 90.0f) label = u8 (std::filesystem::u8path (z.samplePath).stem().string());
                 if (p.zones.size() > 1) label = (label.isEmpty() ? juce::String() : label + "  ") + juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (static_cast<int> (p.zones.size()));
-                g.drawText (label, inner.reduced (3.0f, 1.0f), juce::Justification::topLeft, true);
+                g.drawText (label, inner.reduced (3.0f, 0.0f), juce::Justification::centred, true); // centré dans le rectangle, quelle que soit sa hauteur
             }
         }
 
