@@ -67,10 +67,20 @@ struct InstrumentDescription
     bool loadReleaseSamples = true;            // zones déclenchées au relâchement
     std::vector<std::string> unloadedGroups;   // noms de Groupe (articulations, pédales...) laissés sur le disque
 
+    // Streaming disque (réglage par instrument, sauvegardé avec lui) : en mémoire seulement le début de chaque sample
+    // (`preloadKB` Ko de PCM par fichier), le reste est lu sur le disque pendant le jeu. Les zones en boucle gardent en
+    // mémoire tout ce qui précède la fin de boucle. Faux = tout en RAM (comportement historique).
+    bool streamFromDisk = false;
+    int preloadKB = defaultPreloadKB;
+
+    static constexpr int defaultPreloadKB = 128;
+    static constexpr int minPreloadKB = 16, maxPreloadKB = 65536;
+
     bool operator== (const InstrumentDescription& o) const noexcept
     {
         return zones == o.zones && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
-            && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups;
+            && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups
+            && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB;
     }
     bool empty() const noexcept { return zones.empty(); }
 };
@@ -78,6 +88,10 @@ struct InstrumentDescription
 // Quelles zones de la description sont chargées en mémoire, selon les options ci-dessus. Le principal d'une place
 // (mêmes étendues, même Groupe, même déclenchement) est la zone sans numéro de round-robin, sinon le plus petit numéro.
 std::vector<bool> loadedZones (const InstrumentDescription& d);
+
+// Frames de ce fichier à garder en mémoire pour cette zone (toutes si le streaming est coupé). Règle unique, utilisée par
+// le chargement ET par l'estimation de mémoire : un fichier utilisé par plusieurs zones garde le maximum de leurs besoins.
+std::int64_t residentFramesNeeded (const InstrumentDescription&, const ZoneDescription&, int channels, bool keptAsInt16, std::int64_t totalFrames);
 
 // Valeurs bornées/rectifiées (note 0..127, vélocité 1..127, enveloppe : voir sanitised(EnvelopeDescription), cents ±1200,
 // gain ±60 dB, boucle ordonnée).

@@ -64,7 +64,9 @@ private:
 
     // Tables chargées en mémoire : alternatives round-robin, relâchements, un Groupe à la fois (vidage réversible).
     juce::Label loadTitle_;
-    juce::ToggleButton rrToggle_, releaseToggle_;
+    juce::ToggleButton rrToggle_, releaseToggle_, streamToggle_;
+    juce::Label preloadLabel_;
+    juce::ComboBox preloadBox_; // Ko de PCM gardés en mémoire par sample en mode streaming
     juce::OwnedArray<juce::ToggleButton> groupToggles_;
     juce::Component groupsHolder_;
     juce::Viewport groupsViewport_;
@@ -76,6 +78,7 @@ private:
     void editZone (const std::function<void (neptune::core::ZoneDescription&)>&);
     void updateSamplerControls();
     juce::String statusText() const;
+    juce::String baseStatusText() const;
     void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
     void closeModal();
     void updateUndoButtons();

@@ -96,6 +96,8 @@ public:
     void uiBeginGesture() { undo_.beginGesture(); }
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const;
+    // Voix éteintes faute de données du disque (streaming) depuis le chargement du plugin.
+    std::uint32_t streamUnderruns() const noexcept { return engine_.streamUnderruns(); }
     // Change à chaque modification de la description : l'interface compare ce nombre au lieu de comparer tout l'instrument.
     std::uint32_t instrumentRevision() const noexcept { return revision_.load(); }
 

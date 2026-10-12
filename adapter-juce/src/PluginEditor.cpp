@@ -48,7 +48,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     loadTitle_.setText (text ("load.title"), juce::dontSendNotification);
     loadTitle_.setColour (juce::Label::textColourId, colour (Token::Text));
     addAndMakeVisible (loadTitle_);
-    for (auto* t : { &rrToggle_, &releaseToggle_ })
+    for (auto* t : { &rrToggle_, &releaseToggle_, &streamToggle_ })
     {
         t->setColour (juce::ToggleButton::textColourId, colour (Token::Text));
         addAndMakeVisible (t);
@@ -65,6 +65,26 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         d.loadReleaseSamples = releaseToggle_.getToggleState();
         processor_.uiEditInstrument (std::move (d), "Load release samples");
     };
+    streamToggle_.onClick = [this]
+    {
+        auto d = processor_.instrumentDescription();
+        d.streamFromDisk = streamToggle_.getToggleState();
+        processor_.uiEditInstrument (std::move (d), "Stream from disk");
+    };
+    preloadLabel_.setText (text ("load.preload"), juce::dontSendNotification);
+    preloadLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    addAndMakeVisible (preloadLabel_);
+    for (const int kb : { 32, 64, 128, 256, 512, 1024, 2048, 4096 })
+        preloadBox_.addItem (juce::String (kb) + " KB", kb);
+    preloadBox_.onChange = [this]
+    {
+        if (updatingControls_) return;
+        auto d = processor_.instrumentDescription();
+        d.preloadKB = preloadBox_.getSelectedId();
+        processor_.uiEditInstrument (std::move (d), "Preload size");
+    };
+    addAndMakeVisible (preloadBox_);
+
     groupsViewport_.setViewedComponent (&groupsHolder_, false);
     addAndMakeVisible (groupsViewport_);
     zoneTable_ = std::make_unique<ZoneTable> (palette_, tr_);
@@ -223,8 +243,10 @@ void NeptuneEditor::startImport()
                             if (safe == nullptr || choice == 0) return;
                             auto* self = safe.getComponent();
                             const bool folder = choice == 2;
+                            // Choix d'un dossier : AUCUN filtre (la boîte système l'appliquerait aux dossiers eux-mêmes et les
+                            // rendrait non sélectionnables) ; les fichiers audio sont filtrés ensuite, dans le dossier.
                             self->importChooser_ = std::make_unique<juce::FileChooser> (self->text ("sampler.choose"), juce::File(),
-                                                                                       "*.wav;*.aif;*.aiff;*.flac");
+                                                                                       folder ? juce::String ("*") : juce::String ("*.wav;*.aif;*.aiff;*.flac"));
                             const int flags = folder ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories
                                                      : juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                                                            | juce::FileBrowserComponent::canSelectMultipleItems;
@@ -283,6 +305,7 @@ void NeptuneEditor::applyImport (const ImportWizard::Result& r)
     // Import léger : en remplaçant, le choix de l'assistant s'applique tel quel ; en ajoutant, on ne fait que restreindre.
     d.mainRoundRobinOnly = r.replace ? r.mainRoundRobinOnly : (d.mainRoundRobinOnly || r.mainRoundRobinOnly);
     d.loadReleaseSamples = r.replace ? r.loadReleaseSamples : (d.loadReleaseSamples && r.loadReleaseSamples);
+    d.streamFromDisk = r.replace ? r.streamFromDisk : (d.streamFromDisk || r.streamFromDisk);
     d.roundRobinMode = r.roundRobinMode;
     processor_.uiEditInstrument (std::move (d), "Import samples");
     lastRevision_ = 0xFFFFFFFFu;
@@ -303,6 +326,15 @@ void NeptuneEditor::removeSelectedZones()
 }
 
 juce::String NeptuneEditor::statusText() const
+{
+    auto s = baseStatusText();
+    if (cachedDescription_.streamFromDisk)
+        s += juce::String::fromUTF8 (tr_.format ("sampler.stream_status",
+                                                 { std::to_string (processor_.streamUnderruns()) }).c_str());
+    return s;
+}
+
+juce::String NeptuneEditor::baseStatusText() const
 {
     using Kind = NeptuneProcessor::InstrumentStatus::Kind;
     const auto st = processor_.instrumentStatus();
@@ -368,8 +400,14 @@ void NeptuneEditor::updateSamplerControls()
 void NeptuneEditor::rebuildLoadPanel()
 {
     const auto& d = cachedDescription_;
-    // Mémoire exacte lue dans l'en-tête des fichiers (la même règle que le chargement).
-    auto sizeOf = [this] (const std::string& path) -> std::uint64_t { return fileInfo_.ramBytes (path); };
+    // Mémoire exacte lue dans l'en-tête des fichiers, selon ce que le mode (tout RAM / streaming) garde en mémoire.
+    auto sizeOf = [this, &d] (const neptune::core::ZoneDescription& z) -> std::uint64_t
+    {
+        const auto& info = fileInfo_.info (z.samplePath);
+        if (! info.ok) return 0;
+        const auto n = neptune::core::residentFramesNeeded (d, neptune::core::sanitised (z), info.channels, info.keptAsInt16, info.frames);
+        return static_cast<std::uint64_t> (n) * static_cast<std::uint64_t> (info.channels) * (info.keptAsInt16 ? 2u : 4u);
+    };
     // Ce que chaque case commande, en Mo (mémoire réelle après décodage).
     std::uint64_t alternates = 0, release = 0;
     std::map<std::string, std::uint64_t> groups;
@@ -380,7 +418,7 @@ void NeptuneEditor::rebuildLoadPanel()
         for (std::size_t i = 0; i < d.zones.size(); ++i)
         {
             const auto& z = d.zones[i];
-            const auto bytes = sizeOf (z.samplePath);
+            const auto bytes = sizeOf (z);
             if (z.onRelease) release += bytes;
             else if (! z.group.empty()) groups[z.group] += bytes;
             if (! mask[i] && ! z.onRelease && z.group.empty()) alternates += bytes;
@@ -399,6 +437,16 @@ void NeptuneEditor::rebuildLoadPanel()
     releaseToggle_.setToggleState (d.loadReleaseSamples, juce::dontSendNotification);
     rrToggle_.setEnabled (has);
     releaseToggle_.setEnabled (has);
+    streamToggle_.setButtonText (text ("load.stream"));
+    updatingControls_ = true;
+    streamToggle_.setToggleState (d.streamFromDisk, juce::dontSendNotification);
+    preloadBox_.setSelectedId (d.preloadKB, juce::dontSendNotification);
+    if (preloadBox_.getSelectedId() != d.preloadKB) // valeur hors liste (fichier édité à la main) : affichée telle quelle
+        preloadBox_.setText (juce::String (d.preloadKB) + " KB", juce::dontSendNotification);
+    updatingControls_ = false;
+    streamToggle_.setEnabled (has);
+    preloadBox_.setEnabled (has && d.streamFromDisk);
+    preloadLabel_.setEnabled (has && d.streamFromDisk);
 
     // Une case par Groupe nommé (articulation, pédale, micro...) : reconstruites seulement si elles changent.
     if (signature != groupsSignature_)
@@ -444,6 +492,9 @@ void NeptuneEditor::updateViewVisibility()
     loadTitle_.setVisible (sampler);
     rrToggle_.setVisible (sampler);
     releaseToggle_.setVisible (sampler);
+    streamToggle_.setVisible (sampler);
+    preloadLabel_.setVisible (sampler);
+    preloadBox_.setVisible (sampler);
     groupsViewport_.setVisible (sampler);
     for (auto* k : knobs_) k->setVisible (sampler);
     viewButton_.setButtonText (showProbe_ ? "Sampler" : "Probe");
@@ -535,12 +586,18 @@ void NeptuneEditor::resized()
         const int bottom = getHeight() - 270 - 12;
         const int h = juce::jmax (120, bottom - top);
         const int tableW = juce::jmin (450, (getWidth() - 64) / 2);
-        const int panelH = 160;
+        const int panelH = 192;
         zoneTable_->setBounds (32, top, tableW, juce::jmax (80, h - panelH - 6));
         auto lp = juce::Rectangle<int> (32, top + juce::jmax (80, h - panelH - 6) + 6, tableW, panelH);
         loadTitle_.setBounds (lp.removeFromTop (24));
         rrToggle_.setBounds (lp.removeFromTop (28));
         releaseToggle_.setBounds (lp.removeFromTop (28));
+        {
+            auto row = lp.removeFromTop (32);
+            streamToggle_.setBounds (row.removeFromLeft (juce::jmin (420, row.getWidth() / 2)));
+            preloadLabel_.setBounds (row.removeFromLeft (90));
+            preloadBox_.setBounds (row.removeFromLeft (120).reduced (2));
+        }
         groupsViewport_.setBounds (lp);
         groupsSignature_.clear(); // largeur changée : les cases sont reconstruites à la prochaine mise à jour
         envelopeEditor_->setBounds (32 + tableW + 12, top, getWidth() - 64 - tableW - 12, h);

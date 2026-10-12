@@ -338,9 +338,11 @@ ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette
     // Import léger : décocher réduit la mémoire estimée (et ce qui sera chargé). On part de l'état de l'instrument actuel.
     alternatesToggle_.setButtonText (t ("import.light_alternates"));
     releaseToggle_.setButtonText (t ("import.light_release"));
+    streamToggle_.setButtonText (t ("import.light_stream"));
+    streamToggle_.setToggleState (existing_.streamFromDisk, juce::dontSendNotification);
     alternatesToggle_.setToggleState (! existing_.mainRoundRobinOnly, juce::dontSendNotification);
     releaseToggle_.setToggleState (existing_.loadReleaseSamples, juce::dontSendNotification);
-    for (auto* b : { &alternatesToggle_, &releaseToggle_ })
+    for (auto* b : { &alternatesToggle_, &releaseToggle_, &streamToggle_ })
     {
         b->setColour (juce::ToggleButton::textColourId, colour (Token::Text));
         b->onClick = [this] { updateMemory(); };
@@ -404,8 +406,10 @@ void ImportWizard::resized()
     auto bottom = r.removeFromBottom (44);
     {
         auto lightRow = r.removeFromBottom (28);
-        alternatesToggle_.setBounds (lightRow.removeFromLeft (320));
-        releaseToggle_.setBounds (lightRow.removeFromLeft (320));
+        const int w = juce::jmax (200, lightRow.getWidth() / 3);
+        alternatesToggle_.setBounds (lightRow.removeFromLeft (w));
+        releaseToggle_.setBounds (lightRow.removeFromLeft (w));
+        streamToggle_.setBounds (lightRow);
     }
     cancelButton_.setBounds (bottom.removeFromRight (120).reduced (2));
     addButton_.setBounds (bottom.removeFromRight (200).reduced (2));
@@ -560,17 +564,20 @@ void ImportWizard::updateMemory()
 {
     const bool wantAlternates = alternatesToggle_.getToggleState();
     const bool wantRelease = releaseToggle_.getToggleState();
+    const bool wantStream = streamToggle_.getToggleState();
     const auto fresh = import::includedZones (plan_);
 
     InstrumentDescription replaceDesc = existing_;
     replaceDesc.zones = fresh;
     replaceDesc.mainRoundRobinOnly = ! wantAlternates;
     replaceDesc.loadReleaseSamples = wantRelease;
+    replaceDesc.streamFromDisk = wantStream;
 
     InstrumentDescription addDesc = existing_;
     addDesc.zones.insert (addDesc.zones.end(), fresh.begin(), fresh.end());
     addDesc.mainRoundRobinOnly = existing_.mainRoundRobinOnly || ! wantAlternates;
     addDesc.loadReleaseSamples = existing_.loadReleaseSamples && wantRelease;
+    addDesc.streamFromDisk = existing_.streamFromDisk || wantStream;
 
     int unreadable = 0;
     const auto replaceBytes = memory::estimateInstrumentBytes (replaceDesc, fileInfo_, &unreadable);
@@ -612,6 +619,7 @@ void ImportWizard::finish (bool replace)
     r.replace = replace;
     r.mainRoundRobinOnly = ! alternatesToggle_.getToggleState();
     r.loadReleaseSamples = releaseToggle_.getToggleState();
+    r.streamFromDisk = streamToggle_.getToggleState();
     r.templ = template_;
     if (onImport_) onImport_ (r);
 }

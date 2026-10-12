@@ -33,5 +33,35 @@ struct AudioFileInfo
 
 AudioFileInfo probeAudioFile (const std::filesystem::path& path);
 
-SampleLoadResult loadSampleFile (const std::filesystem::path& path);
+// `maxResidentFrames` > 0 : ne garde en mémoire que les premières frames (streaming disque) ; `frames` reste la longueur
+// du fichier et `residentFrames` ce qui est lu. -1 (défaut) : tout le fichier. Un chemin trop long pour DiskStreamer
+// (maxStreamPathBytes) est toujours chargé en entier.
+SampleLoadResult loadSampleFile (const std::filesystem::path& path, std::int64_t maxResidentFrames = -1);
+
+// Lecture séquentielle d'un fichier en float32 normalisé (mêmes valeurs que le chargement : 16 bits / 32768). Hors temps
+// réel ; un lecteur par flux. Non copiable.
+class AudioStreamReader
+{
+public:
+    AudioStreamReader();
+    ~AudioStreamReader();
+    AudioStreamReader (const AudioStreamReader&) = delete;
+    AudioStreamReader& operator= (const AudioStreamReader&) = delete;
+
+    bool open (const std::filesystem::path& path, std::string* error = nullptr);
+    void close();
+    bool isOpen() const noexcept;
+    int channels() const noexcept { return channels_; }
+    std::int64_t totalFrames() const noexcept { return totalFrames_; }
+
+    bool seek (std::int64_t frame);
+    // Lit jusqu'à `frames` frames entrelacées dans `interleaved` (frames * canaux floats) ; rend le nombre lu (0 = fin/erreur).
+    std::int64_t read (float* interleaved, std::int64_t frames);
+
+private:
+    struct Impl;
+    Impl* impl_ = nullptr;
+    int channels_ = 0;
+    std::int64_t totalFrames_ = 0;
+};
 } // namespace neptune::core

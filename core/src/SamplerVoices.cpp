@@ -27,6 +27,12 @@ inline std::int64_t wrapIndex (const Zone& z, std::int64_t k) noexcept
 }
 } // namespace
 
+void SamplerVoices::discard (Voice& v) noexcept
+{
+    if (v.streaming && streamer_ != nullptr) streamer_->release (static_cast<int> (&v - voices_.data()));
+    v = Voice {};
+}
+
 void SamplerVoices::prepare (double sampleRate) noexcept
 {
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
@@ -49,14 +55,14 @@ void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
         const bool keep = instrument != nullptr && v.zoneIndex >= 0 && static_cast<std::size_t> (v.zoneIndex) < instrument->zones.size()
                        && current != nullptr && instrument->zones[static_cast<std::size_t> (v.zoneIndex)].sample.get() == current;
         if (keep) bindZone (v, instrument->zones[static_cast<std::size_t> (v.zoneIndex)]);
-        else v = Voice {};
+        else discard (v);
     }
     instrument_ = instrument;
 }
 
 void SamplerVoices::allSoundOff() noexcept
 {
-    for (auto& v : voices_) v = Voice {};
+    for (auto& v : voices_) discard (v);
 }
 
 int SamplerVoices::activeVoices() const noexcept
@@ -113,7 +119,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
 
     Voice* v = allocate();
     if (v == nullptr) return;
-    *v = Voice {};
+    discard (*v);
     v->active = true;
     v->channel = channel;
     v->key = key;
@@ -123,6 +129,17 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     bindZone (*v, zone);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     v->env.begin (zone.env, sampleRate_);
+    // Échantillon dont seul le début est en mémoire : le reste est lu sur le disque. Les zones en boucle gardent tout ce
+    // qui précède la fin de boucle en mémoire (voir residentFramesNeeded) et n'ont donc jamais besoin du flux.
+    if (zone.mode == PlayMode::OneShot && zone.sample->isStreamed() && streamer_ != nullptr)
+    {
+        const int slot = static_cast<int> (v - voices_.data());
+        if (streamer_->claim (slot, *zone.sample))
+        {
+            v->streaming = true;
+            v->streamGen = streamer_->generation (slot);
+        }
+    }
 }
 
 void SamplerVoices::noteOff (int channel, int key) noexcept
@@ -149,6 +166,13 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
 
 void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept
 {
+    if (v.zone->sample->isStreamed()) renderVoiceT<true> (v, left, right, numFrames, g0, g1, pitchFactor);
+    else renderVoiceT<false> (v, left, right, numFrames, g0, g1, pitchFactor);
+}
+
+template <bool Streamed>
+void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept
+{
     const Zone& z = *v.zone;
     const SampleData& s = *z.sample;
     const bool stereo = s.channels >= 2;
@@ -158,6 +182,50 @@ void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFra
     const float gStep = numFrames > 0 ? (g1 - g0) / static_cast<float> (numFrames) : 0.0f;
     float mg = g0;
 
+    // --- streaming : ce qui est disponible au-delà de la partie résidente ---
+    const std::int64_t resident = s.resident();
+    DiskStreamer::View ring;
+    if constexpr (Streamed)
+    {
+        const int slot = static_cast<int> (&v - voices_.data());
+        if (v.streaming && streamer_ != nullptr)
+        {
+            streamer_->setReadPos (slot, std::max<std::int64_t> (resident, static_cast<std::int64_t> (v.pos) - 1));
+            ring = streamer_->view (slot, v.streamGen);
+        }
+        // Sous-alimentation : les frames dont ce bloc aura besoin ne sont pas encore là. La voix s'éteint en fondu court sur
+        // ce qui est disponible (sans clic) ; l'incident est compté.
+        if (! v.stolen && ! loop)
+        {
+            const std::int64_t lastNeeded = std::min<std::int64_t> (s.frames - 1, static_cast<std::int64_t> (v.pos + inc * numFrames) + 3);
+            if (lastNeeded >= resident)
+            {
+                const std::int64_t have = ring.ready ? ring.writePos : resident; // frames < have sont lisibles
+                if (have <= lastNeeded && have < s.frames)
+                {
+                    const double outLeft = (static_cast<double> (have) - 4.0 - v.pos) / std::max (inc, 1e-9);
+                    if (streamer_ != nullptr) streamer_->countUnderrun();
+                    if (outLeft < 2.0) { v.active = false; return; }
+                    v.stolen = true;
+                    v.fadeStep = static_cast<float> (1.0 / std::max (1.0, std::min (kStealFadeSeconds * sampleRate_, outLeft)));
+                }
+            }
+        }
+    }
+
+    auto tap = [&] (int channel, std::int64_t k) noexcept -> float
+    {
+        if constexpr (Streamed)
+        {
+            if (k >= resident)
+            {
+                if (k >= ring.writePos || ! ring.ready) return 0.0f;
+                return (channel == 0 ? ring.left : ring.right)[k & (DiskStreamer::kRingFrames - 1)];
+            }
+        }
+        return s.at (channel, k);
+    };
+
     for (int i = 0; i < numFrames; ++i)
     {
         if (v.pos >= frames) { v.active = false; return; } // fin du sample (one-shot)
@@ -165,8 +233,8 @@ void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFra
         const std::int64_t i0 = static_cast<std::int64_t> (v.pos);
         const float t = static_cast<float> (v.pos - static_cast<double> (i0));
         const std::int64_t a = wrapIndex (z, i0 - 1), b = wrapIndex (z, i0), c = wrapIndex (z, i0 + 1), d = wrapIndex (z, i0 + 2);
-        const float l = hermite (s.at (0, a), s.at (0, b), s.at (0, c), s.at (0, d), t);
-        const float r = stereo ? hermite (s.at (1, a), s.at (1, b), s.at (1, c), s.at (1, d), t) : l;
+        const float l = hermite (tap (0, a), tap (0, b), tap (0, c), tap (0, d), t);
+        const float r = stereo ? hermite (tap (1, a), tap (1, b), tap (1, c), tap (1, d), t) : l;
 
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
@@ -201,5 +269,13 @@ void SamplerVoices::render (float* left, float* right, int numFrames, float gain
     const double pitchFactor = masterTuneCents == 0.0 ? 1.0 : std::exp2 (masterTuneCents / 1200.0);
     for (auto& v : voices_)
         if (v.active) renderVoice (v, left, right, numFrames, gainStart, gainEnd, pitchFactor);
+    // Les voix terminées rendent leur emplacement de streaming (le thread disque ferme le fichier).
+    if (streamer_ != nullptr)
+        for (auto& v : voices_)
+            if (v.streaming && ! v.active)
+            {
+                streamer_->release (static_cast<int> (&v - voices_.data()));
+                v.streaming = false;
+            }
 }
 } // namespace neptune::core

@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "neptune/core/DiskStreamer.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/SampleLoader.h"
 
@@ -28,6 +29,12 @@ private:
 // (un fichier utilisé par plusieurs zones n'est compté qu'une fois : le cache du chargeur le partage).
 // `unreadable` (facultatif) reçoit le nombre de fichiers chargés mais illisibles (comptés pour 0).
 std::uint64_t estimateInstrumentBytes (const InstrumentDescription&, FileInfoCache&, int* unreadable = nullptr);
+
+// Tampons circulaires du streaming disque (fixes, par instance du plugin dès qu'un instrument est streamé).
+constexpr std::uint64_t streamBufferBytes() noexcept
+{
+    return static_cast<std::uint64_t> (DiskStreamer::kSlots) * 2u * static_cast<std::uint64_t> (DiskStreamer::kRingFrames) * sizeof (float);
+}
 
 // RAM physique disponible maintenant, en octets ; 0 si la plateforme ne sait pas la donner.
 // Linux : MemAvailable de /proc/meminfo ; Windows : GlobalMemoryStatusEx (ullAvailPhys).

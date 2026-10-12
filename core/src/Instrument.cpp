@@ -146,6 +146,8 @@ std::string toJson (const InstrumentDescription& d)
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
+    if (d.streamFromDisk) doc["stream_from_disk"] = true;
+    if (d.preloadKB != InstrumentDescription::defaultPreloadKB) doc["preload_kb"] = d.preloadKB;
     doc["zones"] = std::move (zones);
     return doc.dump();
 }
@@ -199,12 +201,15 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
     if (const auto m = doc.find ("load_release_samples"); m != doc.end() && m->is_boolean()) d.loadReleaseSamples = m->get<bool>();
+    if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
+    d.preloadKB = std::clamp (readInt (doc, "preload_kb", InstrumentDescription::defaultPreloadKB),
+                              InstrumentDescription::minPreloadKB, InstrumentDescription::maxPreloadKB);
     if (const auto m = doc.find ("unloaded_groups"); m != doc.end() && m->is_array())
         for (const auto& g : *m)
             if (g.is_string() && g.get<std::string>().size() <= 128 && d.unloadedGroups.size() < 256) d.unloadedGroups.push_back (g.get<std::string>());
     const auto zones = doc.find ("zones");
     if (zones == doc.end() || ! zones->is_array()) return d;
-    constexpr std::size_t kMaxZones = 4096;
+    constexpr std::size_t kMaxZones = 32768; // un piano 88 notes x ~30 vélocités x round-robin dépasse 4096
     for (const auto& z : *zones)
     {
         if (d.zones.size() >= kMaxZones) break;
@@ -313,6 +318,24 @@ std::vector<bool> loadedZones (const InstrumentDescription& d)
     return mask;
 }
 
+std::int64_t residentFramesNeeded (const InstrumentDescription& d, const ZoneDescription& zone, int channels, bool keptAsInt16,
+                                   std::int64_t totalFrames)
+{
+    if (! d.streamFromDisk || totalFrames <= 0) return totalFrames;
+    if (zone.mode == PlayMode::Loop)
+    {
+        // Même règle de bornage que buildInstrument : la boucle lit jusqu'à loopEnd (+ 4 pour l'interpolation).
+        std::int64_t loopEnd = zone.loopEnd < 0 ? totalFrames : std::min<std::int64_t> (zone.loopEnd, totalFrames);
+        const std::int64_t loopStart = std::min<std::int64_t> (zone.loopStart, totalFrames - 1);
+        if (loopEnd <= loopStart) loopEnd = totalFrames;
+        return std::min<std::int64_t> (totalFrames, loopEnd + 4);
+    }
+    const std::int64_t bytes = static_cast<std::int64_t> (std::clamp (d.preloadKB, InstrumentDescription::minPreloadKB,
+                                                                      InstrumentDescription::maxPreloadKB)) * 1024;
+    const std::int64_t perFrame = static_cast<std::int64_t> (std::max (1, channels)) * (keptAsInt16 ? 2 : 4);
+    return std::min<std::int64_t> (totalFrames, std::max<std::int64_t> (1, bytes / perFrame));
+}
+
 std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& description, std::vector<std::string>* warnings,
                                                    SampleCache* externalCache, const std::function<bool (int, int)>& progress)
 {
@@ -324,16 +347,51 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     const std::vector<bool> mask = loadedZones (description);
     int done = 0;
     const int total = static_cast<int> (std::count (mask.begin(), mask.end(), true));
+    // Besoin en mémoire par fichier (streaming) : le maximum des zones qui l'utilisent. -1 = fichier entier.
+    std::map<std::string, std::int64_t> need;
+    if (description.streamFromDisk)
+        for (std::size_t zi = 0; zi < description.zones.size(); ++zi)
+        {
+            if (! mask[zi]) continue;
+            const ZoneDescription zd = sanitised (description.zones[zi]);
+            std::int64_t frames = 0;
+            int channels = 0;
+            bool int16 = false;
+            if (auto c = cache.find (zd.samplePath); c != cache.end() && c->second)
+            {
+                frames = c->second->frames; channels = c->second->channels; int16 = c->second->isInt16();
+            }
+            else
+            {
+                const auto info = probeAudioFile (std::filesystem::u8path (zd.samplePath));
+                if (! info.ok) continue; // l'échec sera signalé au chargement
+                frames = info.frames; channels = info.channels; int16 = info.keptAsInt16;
+            }
+            const auto n = residentFramesNeeded (description, zd, channels, int16, frames);
+            auto& cur = need[zd.samplePath];
+            cur = std::max (cur, n);
+        }
+
     for (std::size_t zi = 0; zi < description.zones.size(); ++zi)
     {
         if (! mask[zi]) continue; // laissée sur le disque (principal seulement, Groupe ou relâchement non chargés)
         if (progress && ! progress (done, total)) return nullptr;
         ++done;
         const ZoneDescription zd = sanitised (description.zones[zi]);
+        const auto needIt = need.find (zd.samplePath);
+        const std::int64_t wanted = needIt != need.end() ? needIt->second : -1; // -1 : tout
         auto it = cache.find (zd.samplePath);
+        // Un échantillon déjà lu n'est réutilisé que s'il a exactement la partie résidente voulue (changer le
+        // préchargement ou le mode relit le fichier et libère le surplus).
+        if (it != cache.end() && it->second)
+        {
+            const auto& cached = *it->second;
+            const std::int64_t expected = wanted < 0 ? cached.frames : std::min (cached.frames, wanted);
+            if (cached.resident() != expected) { cache.erase (it); it = cache.end(); }
+        }
         if (it == cache.end())
         {
-            auto r = loadSampleFile (std::filesystem::u8path (zd.samplePath));
+            auto r = loadSampleFile (std::filesystem::u8path (zd.samplePath), wanted);
             if (! r.ok())
             {
                 if (warnings) warnings->push_back (zd.samplePath + ": " + r.error);

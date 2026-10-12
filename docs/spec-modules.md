@@ -674,7 +674,7 @@ Permet aussi de connaître à l'avance (hors temps réel) le niveau de référen
 ### RAM vs streaming — confirmation et précision du préchargement
 Deux modes confirmés, sélectionnables par preset/instrument avec préséance utilisateur en session :
 - **Tout-RAM** : fichier entier chargé en mémoire.
-- **Hybride (type Kontakt)** : court préchargement en RAM du début du sample (réponse instantanée à l'attaque, sans attendre le disque) puis le reste streamé depuis le disque au fur et à mesure de la lecture. **Durée de préchargement par défaut : 200-500ms**, réglable dans le menu de réglages généraux (plus long = plus de marge si le disque est lent, plus court = économie de RAM sur les instruments à très nombreux samples chargés simultanément).
+- **Hybride (type Kontakt)** : court préchargement en RAM du début du sample (réponse instantanée à l'attaque, sans attendre le disque) puis le reste streamé depuis le disque au fur et à mesure de la lecture. **Préchargement par défaut : 128 Ko de PCM par sample** (décision de l'utilisateur, 2026-10-12 ; remplace « 200-500 ms »), réglable **par instrument** et accessible en cours d'usage (panneau « Chargé en mémoire ») (plus long = plus de marge si le disque est lent, plus court = économie de RAM sur les instruments à très nombreux samples chargés simultanément).
 
 ---
 

@@ -25,6 +25,7 @@ public:
         // Import léger : ce que l'utilisateur a choisi de charger en mémoire (avec les zones, c'est ce qui est estimé).
         bool mainRoundRobinOnly = false;
         bool loadReleaseSamples = true;
+        bool streamFromDisk = false;
         neptune::core::import::Template templ;
     };
 
@@ -94,7 +95,7 @@ private:
     juce::Viewport rulesViewport_;
     juce::Component rulesHolder_;
     juce::TableListBox table_ { "preview", this };
-    juce::ToggleButton alternatesToggle_, releaseToggle_;
+    juce::ToggleButton alternatesToggle_, releaseToggle_, streamToggle_;
     juce::TextButton replaceButton_, addButton_, cancelButton_;
     std::string exampleStem_;
 

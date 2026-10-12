@@ -13,6 +13,14 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     lastGain_ = 1.0f;
 }
 
+void Engine::publishInstrument (std::shared_ptr<const Instrument> instrument)
+{
+    if (instrument != nullptr)
+        for (const auto& z : instrument->zones)
+            if (z.sample != nullptr && z.sample->isStreamed()) { streamer_.start(); break; }
+    slot_.publish (std::move (instrument));
+}
+
 void Engine::attachParameters (const ParameterSet* parameters) noexcept
 {
     params_ = parameters;

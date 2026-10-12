@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 
+#include "neptune/core/DiskStreamer.h"
 #include "neptune/core/Envelope.h"
 #include "neptune/core/Instrument.h"
 
@@ -16,7 +17,11 @@ public:
     static constexpr int kFadeSlots = 16;  // emplacements supplémentaires pour les voix volées qui s'éteignent
     static constexpr double kStealFadeSeconds = 0.003;
 
+    static_assert (kMaxVoices + kFadeSlots == DiskStreamer::kSlots, "un emplacement de streaming par voix");
+
     void prepare (double sampleRate) noexcept;
+    // Streaming disque (facultatif) : les échantillons dont seul le début est en mémoire y sont lus. Nul = jamais de streaming.
+    void setStreamer (DiskStreamer* streamer) noexcept { streamer_ = streamer; }
     // Remplace l'instrument. Les voix dont la zone existe encore (même indice, même sample) continuent avec les nouveaux
     // réglages (édition en direct) ; les autres s'arrêtent net : les zones de l'ancien instrument vont disparaître.
     void setInstrument (const Instrument* instrument) noexcept;
@@ -47,9 +52,14 @@ private:
         float velocity = 1.0f;  // le gain de la zone est relu à chaque bloc (édition en direct)
         EnvelopeRunner env;
         float fade = 1.0f, fadeStep = 0.0f; // fondu rapide d'une voix volée
+        bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
+        std::uint32_t streamGen = 0;
     };
 
     void steal (Voice& v) noexcept;
+    void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
+    template <bool Streamed>
+    void renderVoiceT (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
     void startVoice (int channel, int key, float velocity, const Zone& zone) noexcept;
     void bindZone (Voice& v, const Zone& zone) noexcept;
     Voice* allocate() noexcept;
@@ -57,6 +67,7 @@ private:
 
     std::array<Voice, kMaxVoices + kFadeSlots> voices_ {};
     const Instrument* instrument_ = nullptr;
+    DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;
     std::uint64_t counter_ = 0;
     std::array<float, 128> heldVelocity_ {}; // vélocité du dernier Note On par touche (zones déclenchées au relâchement)

@@ -3,6 +3,7 @@
 
 #include <memory>
 
+#include "neptune/core/DiskStreamer.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/InstrumentSlot.h"
 #include "neptune/core/Parameter.h"
@@ -16,6 +17,8 @@ namespace neptune::core
 class Engine
 {
 public:
+    Engine() noexcept { voices_.setStreamer (&streamer_); }
+
     void prepare (double sampleRate, int maxBlockSize) noexcept;
     void noteOn (int channel, int key, float velocity) noexcept;
     void noteOff (int channel, int key) noexcept;
@@ -29,11 +32,14 @@ public:
     void attachParameters (const ParameterSet* parameters) noexcept;
 
     // Instrument : thread de message. L'audio l'adopte au début du bloc suivant ; les voix en cours s'arrêtent.
-    void publishInstrument (std::shared_ptr<const Instrument> instrument) { slot_.publish (std::move (instrument)); }
+    // Démarre le thread disque (et ses tampons) la première fois qu'un instrument en streaming est publié.
+    void publishInstrument (std::shared_ptr<const Instrument> instrument);
     void collectGarbage() { slot_.collect(); } // thread de message, régulièrement
 
     int activeVoices() const noexcept { return voices_.activeVoices(); }
     double sampleRate() const noexcept { return sampleRate_; }
+    // Sous-alimentations du streaming depuis le démarrage (une voix s'est éteinte faute de données du disque).
+    std::uint32_t streamUnderruns() const noexcept { return streamer_.underruns(); }
     int activeNotes() const noexcept { return activeNotes_; }
 
 private:
@@ -43,6 +49,7 @@ private:
     PerformanceProfile profile_ = PerformanceProfile::Live;
 
     InstrumentSlot slot_;
+    DiskStreamer streamer_;
     SamplerVoices voices_;
     const ParameterSet* params_ = nullptr;
     std::size_t gainIndex_ = ParameterSet::npos, tuneSemiIndex_ = ParameterSet::npos, tuneCentsIndex_ = ParameterSet::npos;
