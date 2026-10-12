@@ -119,6 +119,99 @@ private:
     juce::TextButton remove_;
 };
 
+// ---- Une expression : mot + portée + ce que les chiffres suivants signifient + déclenchement ----
+
+class ImportWizard::KeywordRow : public juce::Component
+{
+public:
+    KeywordRow (ImportWizard& o, int index) : owner_ (o), index_ (index)
+    {
+        const auto& k = owner_.template_.keywords[static_cast<std::size_t> (index)];
+        auto style = [this] (juce::TextEditor& e, const juce::String& text, int maxLen, const juce::String& allowed)
+        {
+            e.setText (text, false);
+            e.setInputRestrictions (maxLen, allowed);
+            e.setColour (juce::TextEditor::backgroundColourId, owner_.colour (Token::BgCard));
+            e.setColour (juce::TextEditor::textColourId, owner_.colour (Token::Text));
+            e.onTextChange = [this] { push(); };
+            addAndMakeVisible (e);
+        };
+        style (word_, u8 (k.keyword), 16, {});
+        style (position_, juce::String (k.scope == import::KeywordScope::InSegment ? k.segment : k.start), 4, "-0123456789");
+        style (digitsMin_, juce::String (k.digitsMin), 1, "123456789");
+        style (digitsMax_, juce::String (k.digitsMax), 1, "123456789");
+        style (group_, u8 (k.group), 32, {});
+        group_.setTextToShowWhenEmpty (owner_.t ("import.col_group"), owner_.colour (Token::TextDim2));
+
+        scope_.addItem (owner_.t ("import.scope_any"), 1);
+        scope_.addItem (owner_.t ("import.scope_pos"), 2);
+        scope_.addItem (owner_.t ("import.scope_seg"), 3);
+        scope_.setSelectedId (k.scope == import::KeywordScope::AtPosition ? 2 : (k.scope == import::KeywordScope::InSegment ? 3 : 1),
+                              juce::dontSendNotification);
+        scope_.onChange = [this] { push(); };
+        addAndMakeVisible (scope_);
+
+        value_.addItem (owner_.t ("import.value_none"), 1);
+        for (int i = 1; i < import::numRoles; ++i)
+            value_.addItem (owner_.t ((std::string ("role.") + import::roleKey (static_cast<import::Role> (i))).c_str()), i + 1);
+        value_.setSelectedId (static_cast<int> (k.valueRole) == 0 ? 1 : static_cast<int> (k.valueRole) + 1, juce::dontSendNotification);
+        value_.onChange = [this] { push(); };
+        addAndMakeVisible (value_);
+
+        trigger_.addItem (owner_.t ("import.trigger_unchanged"), 1);
+        trigger_.addItem (owner_.t ("import.trigger_attack"), 2);
+        trigger_.addItem (owner_.t ("import.trigger_release"), 3);
+        trigger_.setSelectedId (k.trigger == import::Trigger::Attack ? 2 : (k.trigger == import::Trigger::Release ? 3 : 1), juce::dontSendNotification);
+        trigger_.onChange = [this] { push(); };
+        addAndMakeVisible (trigger_);
+
+        remove_.setButtonText ("x");
+        remove_.onClick = [this] { owner_.template_.keywords.erase (owner_.template_.keywords.begin() + index_); owner_.rebuildKeywords(); owner_.recompute(); };
+        addAndMakeVisible (remove_);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        remove_.setBounds (r.removeFromRight (36).reduced (2));
+        group_.setBounds (r.removeFromRight (90).reduced (2));
+        trigger_.setBounds (r.removeFromRight (150).reduced (2));
+        value_.setBounds (r.removeFromRight (210).reduced (2));
+        digitsMax_.setBounds (r.removeFromRight (34).reduced (2));
+        digitsMin_.setBounds (r.removeFromRight (34).reduced (2));
+        position_.setBounds (r.removeFromRight (56).reduced (2));
+        scope_.setBounds (r.removeFromRight (150).reduced (2));
+        word_.setBounds (r.reduced (2));
+    }
+
+private:
+    void push()
+    {
+        if (index_ >= static_cast<int> (owner_.template_.keywords.size())) return;
+        auto& k = owner_.template_.keywords[static_cast<std::size_t> (index_)];
+        k.keyword = word_.getText().toStdString();
+        const int sc = scope_.getSelectedId();
+        k.scope = sc == 2 ? import::KeywordScope::AtPosition : (sc == 3 ? import::KeywordScope::InSegment : import::KeywordScope::Anywhere);
+        const int pos = position_.getText().getIntValue();
+        if (k.scope == import::KeywordScope::InSegment) { k.segment = pos == 0 ? 1 : pos; k.start = 0; }
+        else { k.start = pos == 0 ? 1 : pos; k.segment = 0; }
+        k.digitsMin = std::max (1, digitsMin_.getText().getIntValue());
+        k.digitsMax = std::max (k.digitsMin, digitsMax_.getText().getIntValue());
+        const int v = value_.getSelectedId();
+        k.valueRole = v <= 1 ? import::Role::Ignore : static_cast<import::Role> (v - 1);
+        const int tr = trigger_.getSelectedId();
+        k.trigger = tr == 2 ? import::Trigger::Attack : (tr == 3 ? import::Trigger::Release : import::Trigger::Unchanged);
+        k.group = group_.getText().toStdString();
+        owner_.recompute();
+    }
+
+    ImportWizard& owner_;
+    int index_;
+    juce::TextEditor word_, position_, digitsMin_, digitsMax_, group_;
+    juce::ComboBox scope_, value_, trigger_;
+    juce::TextButton remove_;
+};
+
 // ---- Assistant ----
 
 void ImportWizard::Panel::paint (juce::Graphics& g)
@@ -165,6 +258,12 @@ ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette
     label (velLabel_, "import.velocities");
     label (layersLabel_, "import.layers");
     label (rrLabel_, "import.rr_mode");
+    label (keywordsLabel_, "import.keywords");
+    addKeywordButton_.setButtonText (t ("import.add_keyword"));
+    addKeywordButton_.onClick = [this] { import::KeywordRule k; k.keyword = "REL"; k.trigger = import::Trigger::Release; addKeyword (k); };
+    panel_.addAndMakeVisible (addKeywordButton_);
+    keywordsViewport_.setViewedComponent (&keywordsHolder_, false);
+    panel_.addAndMakeVisible (keywordsViewport_);
 
     auto edit = [this] (juce::TextEditor& e, const juce::String& text, int maxLen, const juce::String& allowed)
     {
@@ -204,6 +303,10 @@ ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette
     rrMode_.setSelectedId (1, juce::dontSendNotification);
     rrMode_.onChange = [this] { recompute(); };
     panel_.addAndMakeVisible (rrMode_);
+    mainOnly_.setButtonText (t ("import.main_only"));
+    mainOnly_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+    mainOnly_.onClick = [this] { recompute(); };
+    panel_.addAndMakeVisible (mainOnly_);
 
     strip_ = std::make_unique<ExampleStrip> (*this);
     strip_->setStem (exampleStem_);
@@ -238,6 +341,7 @@ ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette
     for (auto* b : { &replaceButton_, &addButton_, &cancelButton_ }) panel_.addAndMakeVisible (*b);
 
     rebuildRules();
+    rebuildKeywords();
     recompute();
 }
 
@@ -265,6 +369,13 @@ void ImportWizard::resized()
     rulesHolder_.setSize (rulesViewport_.getMaximumVisibleWidth(), std::max (1, ruleRows_.size()) * 34);
     for (int i = 0; i < ruleRows_.size(); ++i) ruleRows_[i]->setBounds (0, i * 34, rulesHolder_.getWidth(), 34);
 
+    auto kwHeader = r.removeFromTop (26);
+    addKeywordButton_.setBounds (kwHeader.removeFromRight (140).reduced (2));
+    keywordsLabel_.setBounds (kwHeader);
+    keywordsViewport_.setBounds (r.removeFromTop (3 * 34));
+    keywordsHolder_.setSize (keywordsViewport_.getMaximumVisibleWidth(), std::max (1, keywordRows_.size()) * 34);
+    for (int i = 0; i < keywordRows_.size(); ++i) keywordRows_[i]->setBounds (0, i * 34, keywordsHolder_.getWidth(), 34);
+
     r.removeFromTop (6);
     auto opt = r.removeFromTop (34);
     keysLabel_.setBounds (opt.removeFromLeft (110));
@@ -282,6 +393,8 @@ void ImportWizard::resized()
     opt2.removeFromLeft (20);
     rrLabel_.setBounds (opt2.removeFromLeft (110));
     rrMode_.setBounds (opt2.removeFromLeft (200).reduced (2));
+    opt2.removeFromLeft (16);
+    mainOnly_.setBounds (opt2);
 
     auto bottom = r.removeFromBottom (44);
     cancelButton_.setBounds (bottom.removeFromRight (120).reduced (2));
@@ -298,11 +411,23 @@ void ImportWizard::addRuleFromSelection (int from, int to)
     juce::PopupMenu menu;
     for (int i = 1; i < import::numRoles; ++i) // 0 = Ignore : inutile à créer
         menu.addItem (i, t ((std::string ("role.") + import::roleKey (static_cast<import::Role> (i))).c_str()));
+    menu.addSeparator();
+    menu.addItem (1000, t ("import.expr_from_selection"));
     const int len = to - from + 1;
     juce::Component::SafePointer<ImportWizard> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (strip_.get()), [safe, from, len] (int chosen)
     {
         if (safe == nullptr || chosen <= 0) return;
+        if (chosen == 1000)
+        {
+            // Le texte sélectionné devient une expression cherchée à cette position (modifiable ensuite).
+            import::KeywordRule k;
+            k.keyword = safe->exampleStem_.substr (static_cast<std::size_t> (from), static_cast<std::size_t> (len));
+            k.scope = import::KeywordScope::AtPosition;
+            k.start = from + 1;
+            safe->addKeyword (k);
+            return;
+        }
         import::FieldRule f;
         f.role = static_cast<import::Role> (chosen);
         f.segment = 0;
@@ -338,6 +463,32 @@ void ImportWizard::addRuleFromSelection (int from, int to)
     });
 }
 
+void ImportWizard::addKeyword (import::KeywordRule k)
+{
+    if (template_.keywords.size() >= 12) return;
+    template_.keywords.push_back (std::move (k));
+    rebuildKeywords();
+    recompute();
+}
+
+void ImportWizard::rebuildKeywords()
+{
+    keywordRows_.clear();
+    for (int i = 0; i < static_cast<int> (template_.keywords.size()); ++i)
+    {
+        auto* row = keywordRows_.add (new KeywordRow (*this, i));
+        keywordsHolder_.addAndMakeVisible (row);
+    }
+    resized();
+}
+
+void ImportWizard::cellClicked (int row, int, const juce::MouseEvent&)
+{
+    if (row < 0 || row >= static_cast<int> (shown_.size())) return;
+    exampleStem_ = stemOf (plan_.zones[static_cast<std::size_t> (shown_[static_cast<std::size_t> (row)])].path);
+    strip_->setStem (exampleStem_);
+}
+
 void ImportWizard::rebuildRules()
 {
     ruleRows_.clear();
@@ -356,6 +507,7 @@ void ImportWizard::recompute()
     options_.keys = { strat (keyStrategy_.getSelectedId()), belowKeys_.getText().getIntValue(), aboveKeys_.getText().getIntValue() };
     options_.velocities = { strat (velStrategy_.getSelectedId()), belowVel_.getText().getIntValue(), aboveVel_.getText().getIntValue() };
     options_.layerCountOverride = layersEdit_.getText().getIntValue();
+    options_.mainRoundRobinOnly = mainOnly_.getToggleState();
     options_.roundRobinMode = rrMode_.getSelectedId() == 2 ? RoundRobinMode::Random
                             : (rrMode_.getSelectedId() == 3 ? RoundRobinMode::RandomNoRepeat : RoundRobinMode::Sequential);
 
@@ -422,8 +574,11 @@ void ImportWizard::finish (bool replace)
 
 void ImportWizard::paintRowBackground (juce::Graphics& g, int row, int, int, bool)
 {
-    if (row >= 0 && row < static_cast<int> (shown_.size()) && ! plan_.zones[static_cast<std::size_t> (shown_[static_cast<std::size_t> (row)])].included)
-        g.fillAll (colour (Token::KnobHot).withAlpha (0.18f));
+    if (row >= 0 && row < static_cast<int> (shown_.size()))
+    {
+        const auto& pz = plan_.zones[static_cast<std::size_t> (shown_[static_cast<std::size_t> (row)])];
+        if (! pz.included && ! pz.skipped) g.fillAll (colour (Token::KnobHot).withAlpha (0.18f));
+    }
 }
 
 void ImportWizard::paintCell (juce::Graphics& g, int row, int column, int width, int height, bool)
@@ -449,7 +604,7 @@ void ImportWizard::paintCell (juce::Graphics& g, int row, int column, int width,
         }
         default: break;
     }
-    g.setColour (pz.included ? colour (Token::Text) : colour (Token::KnobHot2));
+    g.setColour (pz.included ? colour (Token::Text) : (pz.skipped ? colour (Token::TextDim2) : colour (Token::KnobHot2)));
     g.setFont (juce::FontOptions (13.0f));
     g.drawText (text, 4, 0, width - 6, height, juce::Justification::centredLeft, true);
 }

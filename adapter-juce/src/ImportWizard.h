@@ -35,15 +35,19 @@ public:
 private:
     class ExampleStrip;
     class RuleRow;
+    class KeywordRow;
     struct Panel : juce::Component { void paint (juce::Graphics&) override; ImportWizard* owner = nullptr; };
 
     // TableListBoxModel (aperçu)
     int getNumRows() override { return static_cast<int> (shown_.size()); }
     void paintRowBackground (juce::Graphics&, int, int, int, bool) override;
     void paintCell (juce::Graphics&, int, int, int, int, bool) override;
+    void cellClicked (int row, int column, const juce::MouseEvent&) override; // montre ce nom dans l'exemple
 
     void recompute();
     void rebuildRules();
+    void rebuildKeywords();
+    void addKeyword (neptune::core::import::KeywordRule);
     void addRuleFromSelection (int from, int to); // caractères 0-based, inclus
     void finish (bool replace);
     juce::String t (const char* key) const;
@@ -64,6 +68,12 @@ private:
     std::function<void()> onCancel_;
 
     Panel panel_;
+    juce::Label keywordsLabel_;
+    juce::TextButton addKeywordButton_;
+    juce::ToggleButton mainOnly_;
+    juce::OwnedArray<KeywordRow> keywordRows_;
+    juce::Viewport keywordsViewport_;
+    juce::Component keywordsHolder_;
     juce::Label titleLabel_, exampleLabel_, rulesLabel_, summaryLabel_, ramLabel_, delimiterLabel_, octaveLabel_;
     juce::TextEditor delimiterEdit_, belowKeys_, aboveKeys_, belowVel_, aboveVel_, layersEdit_;
     juce::ComboBox octaveBox_, keyStrategy_, velStrategy_, rrMode_;

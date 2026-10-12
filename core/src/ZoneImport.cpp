@@ -109,11 +109,90 @@ std::optional<int> dynamicsRank (std::string_view text)
     return it->second;
 }
 
+namespace
+{
+// Donne un rôle à un texte lu dans le nom (champ positionnel ou chiffres après une expression).
+void applyValue (ParsedName& p, Role role, std::string_view text, int minLength, const Template& t)
+{
+    auto problem = [&] (const std::string& m) { p.problems.push_back (m); };
+    const std::string key = roleKey (role);
+    auto bounded = [&] (std::optional<int> v, int lo, int hi, std::optional<int>& dst)
+    {
+        if (! v) { problem (key + ": no number at the given position in \"" + std::string (text) + "\""); return; }
+        if (*v < lo || *v > hi) { problem (key + ": " + std::to_string (*v) + " is outside " + std::to_string (lo) + ".." + std::to_string (hi)); return; }
+        dst = v;
+    };
+    switch (role)
+    {
+        case Role::NoteNumber: bounded (readInt (text, minLength), 0, 127, p.note); break;
+        case Role::NoteName:
+        {
+            // longueur maximale non précisée : on lit le nom de note le plus long possible depuis le début
+            std::optional<int> v;
+            for (std::size_t len = std::min<std::size_t> (text.size(), 6); len >= 2 && ! v; --len) v = noteNameToMidi (text.substr (0, len), t.notes);
+            if (v) p.noteFromName = v;
+            else problem (key + ": \"" + std::string (text) + "\" is not a note name");
+            break;
+        }
+        case Role::KeyLow: bounded (readInt (text, minLength), 0, 127, p.keyLow); break;
+        case Role::KeyHigh: bounded (readInt (text, minLength), 0, 127, p.keyHigh); break;
+        case Role::KeyBelow: bounded (readInt (text, minLength), 0, 127, p.keyBelow); break;
+        case Role::KeyAbove: bounded (readInt (text, minLength), 0, 127, p.keyAbove); break;
+        case Role::VelocityValue: bounded (readInt (text, minLength), 1, 127, p.velValue); break;
+        case Role::VelocityLow: bounded (readInt (text, minLength), 1, 127, p.velLow); break;
+        case Role::VelocityHigh: bounded (readInt (text, minLength), 1, 127, p.velHigh); break;
+        case Role::VelocityLayer: bounded (readInt (text, minLength), 1, 1000, p.layer); break;
+        case Role::VelocityLayerCount: bounded (readInt (text, minLength), 1, 1000, p.layerCount); break;
+        case Role::Dynamics:
+        {
+            std::size_t n = 0;
+            while (n < text.size() && std::isalpha (static_cast<unsigned char> (text[n]))) ++n;
+            const auto r = dynamicsRank (text.substr (0, n));
+            if (r) p.dynamicsRank = r;
+            else problem (key + ": \"" + std::string (text.substr (0, n)) + "\" is not a dynamics marking (ppp..fff)");
+            break;
+        }
+        case Role::RoundRobin:
+        {
+            if (const auto v = readInt (text, minLength)) { bounded (v, 1, 10000, p.roundRobin); break; }
+            if (! text.empty() && std::isalpha (static_cast<unsigned char> (text[0])) && (text.size() == 1 || ! std::isalpha (static_cast<unsigned char> (text[1]))))
+                p.roundRobin = std::tolower (static_cast<unsigned char> (text[0])) - 'a' + 1; // a, b, c -> 1, 2, 3
+            else
+                problem (key + ": \"" + std::string (text) + "\" is neither a number nor a single letter");
+            break;
+        }
+        case Role::Group:
+            if (! text.empty()) p.group = std::string (text);
+            break;
+        case Role::Release:
+            p.release = ! text.empty();
+            break;
+        case Role::Ignore: break;
+    }
+}
+
+// Position (0-based) où commence le mot dans `scope`, selon la portée ; npos si absent.
+std::size_t findKeyword (std::string_view stem, const Template& t, const KeywordRule& k, std::string_view& scopeOut)
+{
+    std::string_view scope = stem;
+    if (k.scope == KeywordScope::InSegment && ! scopeOf (stem, t.delimiter, k.segment, scope)) return std::string_view::npos;
+    scopeOut = scope;
+    const std::string word = lower (k.keyword);
+    if (word.empty() || word.size() > scope.size()) return std::string_view::npos;
+    const std::string hay = lower (scope);
+    if (k.scope == KeywordScope::Anywhere || (k.scope == KeywordScope::InSegment && k.start <= 0))
+        return hay.find (word);
+    const int n = static_cast<int> (hay.size());
+    const int from = k.start > 0 ? k.start - 1 : n + k.start;
+    if (from < 0 || from + static_cast<int> (word.size()) > n) return std::string_view::npos;
+    return hay.compare (static_cast<std::size_t> (from), word.size(), word) == 0 ? static_cast<std::size_t> (from) : std::string_view::npos;
+}
+} // namespace
+
 ParsedName parseName (std::string_view stem, const Template& t)
 {
     ParsedName p;
     p.stem = std::string (stem);
-    auto problem = [&] (const std::string& m) { p.problems.push_back (m); };
 
     for (const auto& f : t.fields)
     {
@@ -124,64 +203,31 @@ ParsedName parseName (std::string_view stem, const Template& t)
             // Un segment absent n'est une erreur que pour la note (sans elle le fichier n'a pas de place). Pour les autres
             // rôles (groupe, relâchement, vélocité, round-robin...) c'est « pas de valeur » : l'aperçu montre le résultat.
             if (f.role == Role::NoteNumber || f.role == Role::NoteName)
-                problem (std::string ("segment ") + std::to_string (f.segment) + " not found for " + roleKey (f.role));
+                p.problems.push_back (std::string ("segment ") + std::to_string (f.segment) + " not found for " + roleKey (f.role));
             continue;
         }
-        const std::string_view text = slice (scope, f.start, f.maxLength);
-        const std::string key = roleKey (f.role);
-        auto bounded = [&] (std::optional<int> v, int lo, int hi, std::optional<int>& dst)
+        applyValue (p, f.role, slice (scope, f.start, f.maxLength), f.minLength, t);
+    }
+
+    // Règles par expression : appliquées après les champs, dans l'ordre ; la dernière qui parle l'emporte.
+    for (const auto& k : t.keywords)
+    {
+        std::string_view scope;
+        const std::size_t at = findKeyword (stem, t, k, scope);
+        if (at == std::string_view::npos) continue; // le mot n'est pas dans ce nom : la règle ne dit rien
+        if (k.trigger == Trigger::Release) p.release = true;
+        else if (k.trigger == Trigger::Attack) p.release = false;
+        if (! k.group.empty()) p.group = k.group;
+        if (k.valueRole != Role::Ignore)
         {
-            if (! v) { problem (key + ": no number at the given position in \"" + std::string (text) + "\""); return; }
-            if (*v < lo || *v > hi) { problem (key + ": " + std::to_string (*v) + " is outside " + std::to_string (lo) + ".." + std::to_string (hi)); return; }
-            dst = v;
-        };
-        switch (f.role)
-        {
-            case Role::NoteNumber: bounded (readInt (text, f.minLength), 0, 127, p.note); break;
-            case Role::NoteName:
-            {
-                std::string_view t2 = text;
-                // longueur maximale non précisée : on lit le nom de note le plus long possible depuis le début
-                std::optional<int> v;
-                for (std::size_t len = std::min<std::size_t> (t2.size(), 6); len >= 2 && ! v; --len) v = noteNameToMidi (t2.substr (0, len), t.notes);
-                if (v) p.noteFromName = v;
-                else problem (key + ": \"" + std::string (text) + "\" is not a note name");
-                break;
-            }
-            case Role::KeyLow: bounded (readInt (text, f.minLength), 0, 127, p.keyLow); break;
-            case Role::KeyHigh: bounded (readInt (text, f.minLength), 0, 127, p.keyHigh); break;
-            case Role::KeyBelow: bounded (readInt (text, f.minLength), 0, 127, p.keyBelow); break;
-            case Role::KeyAbove: bounded (readInt (text, f.minLength), 0, 127, p.keyAbove); break;
-            case Role::VelocityValue: bounded (readInt (text, f.minLength), 1, 127, p.velValue); break;
-            case Role::VelocityLow: bounded (readInt (text, f.minLength), 1, 127, p.velLow); break;
-            case Role::VelocityHigh: bounded (readInt (text, f.minLength), 1, 127, p.velHigh); break;
-            case Role::VelocityLayer: bounded (readInt (text, f.minLength), 1, 1000, p.layer); break;
-            case Role::VelocityLayerCount: bounded (readInt (text, f.minLength), 1, 1000, p.layerCount); break;
-            case Role::Dynamics:
-            {
-                std::size_t n = 0;
-                while (n < text.size() && std::isalpha (static_cast<unsigned char> (text[n]))) ++n;
-                const auto r = dynamicsRank (text.substr (0, n));
-                if (r) p.dynamicsRank = r;
-                else problem (key + ": \"" + std::string (text.substr (0, n)) + "\" is not a dynamics marking (ppp..fff)");
-                break;
-            }
-            case Role::RoundRobin:
-            {
-                if (const auto v = readInt (text, f.minLength)) { bounded (v, 1, 10000, p.roundRobin); break; }
-                if (! text.empty() && std::isalpha (static_cast<unsigned char> (text[0])) && (text.size() == 1 || ! std::isalpha (static_cast<unsigned char> (text[1]))))
-                    p.roundRobin = std::tolower (static_cast<unsigned char> (text[0])) - 'a' + 1; // a, b, c -> 1, 2, 3
-                else
-                    problem (key + ": \"" + std::string (text) + "\" is neither a number nor a single letter");
-                break;
-            }
-            case Role::Group:
-                if (! text.empty()) p.group = std::string (text);
-                break;
-            case Role::Release:
-                p.release = ! text.empty();
-                break;
-            case Role::Ignore: break;
+            std::size_t i = at + k.keyword.size();
+            std::size_t n = 0;
+            const std::size_t cap = static_cast<std::size_t> (std::max (1, k.digitsMax));
+            while (i + n < scope.size() && n < cap && isDigit (scope[i + n])) ++n;
+            if (static_cast<int> (n) < std::max (1, k.digitsMin))
+                p.problems.push_back ("\"" + k.keyword + "\" is not followed by " + std::to_string (std::max (1, k.digitsMin)) + " digit(s)");
+            else
+                applyValue (p, k.valueRole, scope.substr (i, n), 1, t);
         }
     }
     return p;
@@ -199,6 +245,16 @@ std::string Template::toJson() const
         arr.push_back ({ { "role", roleKey (f.role) }, { "segment", f.segment }, { "start", f.start },
                          { "min_length", f.minLength }, { "max_length", f.maxLength } });
     o["fields"] = std::move (arr);
+    nlohmann::json kws = nlohmann::json::array();
+    for (const auto& k : keywords)
+    {
+        const char* scope = k.scope == KeywordScope::AtPosition ? "position" : (k.scope == KeywordScope::InSegment ? "segment" : "anywhere");
+        const char* trig = k.trigger == Trigger::Release ? "release" : (k.trigger == Trigger::Attack ? "attack" : "unchanged");
+        kws.push_back ({ { "keyword", k.keyword }, { "scope", scope }, { "segment", k.segment }, { "start", k.start },
+                         { "value_role", roleKey (k.valueRole) }, { "digits_min", k.digitsMin }, { "digits_max", k.digitsMax },
+                         { "trigger", trig }, { "group", k.group } });
+    }
+    o["keywords"] = std::move (kws);
     return o.dump();
 }
 
@@ -227,6 +283,40 @@ Template Template::fromJson (std::string_view text)
             r.minLength = std::max (1, num ("min_length", 1));
             r.maxLength = std::max (0, num ("max_length", 0));
             t.fields.push_back (r);
+        }
+    if (const auto it = doc.find ("keywords"); it != doc.end() && it->is_array())
+        for (const auto& k : *it)
+        {
+            if (! k.is_object() || t.keywords.size() >= 32) continue;
+            KeywordRule r;
+            if (const auto v = k.find ("keyword"); v != k.end() && v->is_string() && ! v->get<std::string>().empty() && v->get<std::string>().size() <= 32)
+                r.keyword = v->get<std::string>();
+            else
+                continue;
+            if (const auto v = k.find ("scope"); v != k.end() && v->is_string())
+            {
+                const auto sc = v->get<std::string>();
+                r.scope = sc == "position" ? KeywordScope::AtPosition : (sc == "segment" ? KeywordScope::InSegment : KeywordScope::Anywhere);
+            }
+            if (const auto v = k.find ("trigger"); v != k.end() && v->is_string())
+            {
+                const auto tr = v->get<std::string>();
+                r.trigger = tr == "release" ? Trigger::Release : (tr == "attack" ? Trigger::Attack : Trigger::Unchanged);
+            }
+            if (const auto v = k.find ("value_role"); v != k.end() && v->is_string())
+                for (int i = 0; i < numRoles; ++i)
+                    if (v->get<std::string>() == kRoleKeys[i]) r.valueRole = static_cast<Role> (i);
+            auto num = [&] (const char* key, int def, int lo, int hi)
+            {
+                const auto v = k.find (key);
+                return v != k.end() && v->is_number_integer() ? static_cast<int> (std::clamp<long long> (v->get<long long>(), lo, hi)) : def;
+            };
+            r.segment = num ("segment", 0, -64, 64);
+            r.start = num ("start", 0, -64, 64);
+            r.digitsMin = num ("digits_min", 1, 1, 9);
+            r.digitsMax = std::max (r.digitsMin, num ("digits_max", 3, 1, 9));
+            if (const auto v = k.find ("group"); v != k.end() && v->is_string() && v->get<std::string>().size() <= 64) r.group = v->get<std::string>();
+            t.keywords.push_back (std::move (r));
         }
     return t;
 }
@@ -258,6 +348,7 @@ struct Item
     int note = -1;
     int keyLow = 0, keyHigh = 127, velLow = 1, velHigh = 127;
     int rr = 0;
+    bool skipped = false;
 };
 
 // Étendues « à mi-chemin » : valeurs triées distinctes -> (bas, haut) par valeur.
@@ -282,6 +373,7 @@ Plan planImport (const std::vector<std::string>& paths, const Template& t, const
 
     bool templateHasRoundRobin = false;
     for (const auto& f : t.fields) templateHasRoundRobin = templateHasRoundRobin || f.role == Role::RoundRobin;
+    for (const auto& k : t.keywords) templateHasRoundRobin = templateHasRoundRobin || k.valueRole == Role::RoundRobin;
 
     std::vector<Item> items;
     for (const auto& path : paths)
@@ -456,13 +548,40 @@ Plan planImport (const std::vector<std::string>& paths, const Template& t, const
         }
         else
         {
-            int next = std::max (1, counter[pl] + 1);
-            while (used.count (next)) ++next;
-            used.insert (next);
-            counter[pl] = next;
-            it.rr = used.size() > 1 || templateHasRoundRobin ? next : 0;
-            if (templateHasRoundRobin && used.size() > 1)
-                diag (Severity::Warning, it.parsed.stem, "no round-robin value in the name: given index " + std::to_string (next) + " in file name order");
+            // Pas de numéro dans le nom : c'est l'échantillon principal de cette place (numéro 0), qui joue en
+            // alternance avec les autres. Deux « principaux » à la même place : doublon.
+            if (used.count (0))
+            {
+                diag (Severity::Error, it.parsed.stem, "duplicate: another file already is the main sample at the same note and velocity");
+                it.included = false;
+                continue;
+            }
+            used.insert (0);
+            it.rr = 0;
+        }
+    }
+
+    // ---- instrument léger : un seul échantillon par place ----
+    if (options.mainRoundRobinOnly)
+    {
+        std::map<Place, int> bestRr;
+        for (const auto& it : items)
+        {
+            if (! it.included) continue;
+            const Place pl { it.parsed.group, it.parsed.release, it.note, it.keyLow, it.keyHigh, it.velLow, it.velHigh };
+            const auto f = bestRr.find (pl);
+            if (f == bestRr.end() || it.rr < f->second) bestRr[pl] = it.rr;
+        }
+        for (auto& it : items)
+        {
+            if (! it.included) continue;
+            const Place pl { it.parsed.group, it.parsed.release, it.note, it.keyLow, it.keyHigh, it.velLow, it.velHigh };
+            if (it.rr != bestRr[pl])
+            {
+                it.included = false;
+                it.skipped = true;
+                diag (Severity::Info, it.parsed.stem, "round-robin alternate not loaded (main sample only)");
+            }
         }
     }
 
@@ -508,6 +627,7 @@ Plan planImport (const std::vector<std::string>& paths, const Template& t, const
         PlannedZone pz;
         pz.path = it.path;
         pz.included = it.included;
+        pz.skipped = it.skipped;
         pz.zone.samplePath = it.path;
         pz.zone.rootNote = std::max (0, it.note);
         pz.zone.keyLow = it.keyLow;

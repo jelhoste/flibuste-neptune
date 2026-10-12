@@ -48,6 +48,35 @@ struct FieldRule
     }
 };
 
+// Règle par EXPRESSION : un mot (« REL », « SUS », « RR »...) cherché dans le nom. Sert quand les mêmes caractères
+// peuvent dire des choses différentes selon le fichier (RR3 = round-robin 3, SUS = au Note On, REL = au relâchement).
+enum class KeywordScope
+{
+    Anywhere,   // n'importe où dans le nom
+    AtPosition, // le mot doit commencer à la position `start` du nom (1-based, < 0 depuis la fin)
+    InSegment   // dans le segment `segment` ; si `start` > 0, le mot doit y commencer à cette position
+};
+
+enum class Trigger { Unchanged, Attack, Release }; // Attack = joué au Note On (« sustain »)
+
+struct KeywordRule
+{
+    std::string keyword;                          // sans tenir compte de la casse
+    KeywordScope scope = KeywordScope::Anywhere;
+    int segment = 0;
+    int start = 0;
+    Role valueRole = Role::Ignore;                // rôle donné aux chiffres qui SUIVENT le mot ; Ignore = aucun
+    int digitsMin = 1, digitsMax = 3;
+    Trigger trigger = Trigger::Unchanged;
+    std::string group;                            // non vide : nom de Groupe donné aux fichiers qui contiennent le mot
+
+    bool operator== (const KeywordRule& o) const noexcept
+    {
+        return keyword == o.keyword && scope == o.scope && segment == o.segment && start == o.start && valueRole == o.valueRole
+            && digitsMin == o.digitsMin && digitsMax == o.digitsMax && trigger == o.trigger && group == o.group;
+    }
+};
+
 // Do central (MIDI 60) = C3, C4 ou C5 selon les systèmes. Le fichier de test de l'utilisateur donne 048 = C3 : C4 = 60.
 struct NoteConvention
 {
@@ -59,8 +88,12 @@ struct Template
 {
     std::string delimiter = "_"; // vide : pas de segmentation
     NoteConvention notes;
-    std::vector<FieldRule> fields;
-    bool operator== (const Template& o) const noexcept { return delimiter == o.delimiter && notes == o.notes && fields == o.fields; }
+    std::vector<FieldRule> fields;       // lus à des positions fixes
+    std::vector<KeywordRule> keywords;   // appliqués ensuite, selon le mot présent dans le nom
+    bool operator== (const Template& o) const noexcept
+    {
+        return delimiter == o.delimiter && notes == o.notes && fields == o.fields && keywords == o.keywords;
+    }
 
     std::string toJson() const;
     static Template fromJson (std::string_view text); // tolérant : valeur invalide -> défaut
@@ -111,6 +144,9 @@ struct PlanOptions
     RangeOptions velocities;
     int layerCountOverride = 0;  // 0 : lu dans les noms, sinon déduit du plus grand numéro de couche rencontré
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    // Instrument plus léger : ne charge que l'échantillon principal de chaque place (celui sans numéro de round-robin,
+    // sinon le plus petit numéro) ; les alternatives ne sont pas importées.
+    bool mainRoundRobinOnly = false;
 };
 
 enum class Severity { Info, Warning, Error };
@@ -126,7 +162,8 @@ struct PlannedZone
 {
     std::string path;
     ZoneDescription zone;
-    bool included = true; // faux : exclu par une erreur (nom illisible, doublon)
+    bool included = true; // faux : exclu par une erreur (nom illisible, doublon) ou volontairement (skipped)
+    bool skipped = false; // exclu volontairement (alternative de round-robin avec mainRoundRobinOnly) : pas une erreur
 };
 
 struct Plan

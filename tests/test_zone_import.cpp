@@ -276,6 +276,151 @@ TEST_CASE ("template json round trip and tolerant reading")
     CHECK (Template::fromJson ("not json") == Template {});
 }
 
+TEST_CASE ("keywords: the same characters can mean RR3, SUS or REL")
+{
+    Template t = positionalTemplate();   // 048_C3v11 : note et couche par position
+    KeywordRule rr;
+    rr.keyword = "RR"; rr.valueRole = Role::RoundRobin; rr.digitsMin = 1; rr.digitsMax = 2;
+    KeywordRule sus;
+    sus.keyword = "SUS"; sus.trigger = Trigger::Attack;
+    KeywordRule rel;
+    rel.keyword = "REL"; rel.trigger = Trigger::Release;
+    t.keywords = { rr, sus, rel };
+
+    const auto a = parseName ("048_C3v11_RR3", t);
+    CHECK (a.problems.empty());
+    CHECK (a.roundRobin == 3);
+    CHECK_FALSE (a.release);
+
+    const auto b = parseName ("048_C3v11_SUS", t);
+    CHECK (b.problems.empty());
+    CHECK_FALSE (b.roundRobin.has_value());
+    CHECK_FALSE (b.release);
+
+    const auto c = parseName ("048_C3v11_rel", t); // insensible à la casse
+    CHECK (c.problems.empty());
+    CHECK (c.release);
+}
+
+TEST_CASE ("keywords at an exact position, or inside a segment")
+{
+    Template t;
+    t.delimiter = "";
+    t.fields = { rule (Role::NoteNumber, 0, 1, 3, 3) };
+    KeywordRule rr;
+    rr.keyword = "RR"; rr.scope = KeywordScope::AtPosition; rr.start = 11; rr.valueRole = Role::RoundRobin; rr.digitsMin = 1; rr.digitsMax = 1;
+    KeywordRule rel;
+    rel.keyword = "REL"; rel.scope = KeywordScope::AtPosition; rel.start = 11; rel.trigger = Trigger::Release;
+    t.keywords = { rr, rel };
+
+    // « 048_C3v11_RR2 » : le mot commence au 11e caractère (0,4,8,_,C,3,v,1,1,_ = 10 caractères avant)
+    CHECK (parseName ("048_C3v11_RR2", t).roundRobin == 2);
+    CHECK (parseName ("048_C3v11_REL", t).release);
+    CHECK_FALSE (parseName ("048_C3v11_REL", t).roundRobin.has_value());
+    // le mot à une autre position ne compte pas
+    CHECK_FALSE (parseName ("048_C3v11x_RR2", t).roundRobin.has_value());
+
+    Template seg;
+    seg.delimiter = "_";
+    seg.fields = { rule (Role::NoteNumber, 1, 1, 3, 3) };
+    KeywordRule inSeg;
+    inSeg.keyword = "REL"; inSeg.scope = KeywordScope::InSegment; inSeg.segment = -1; inSeg.trigger = Trigger::Release;
+    seg.keywords = { inSeg };
+    CHECK (parseName ("048_C3_REL", seg).release);
+    CHECK_FALSE (parseName ("048_REL_C3", seg).release); // « REL » n'est pas dans le dernier segment
+}
+
+TEST_CASE ("keywords: digits after the word give a value, missing digits are reported")
+{
+    Template t;
+    t.delimiter = "_";
+    t.fields = { rule (Role::NoteNumber, 1, 1, 1, 0) };
+    KeywordRule rel;
+    rel.keyword = "REL"; rel.trigger = Trigger::Release; rel.valueRole = Role::VelocityValue; rel.digitsMin = 3; rel.digitsMax = 3;
+    t.keywords = { rel };
+    const auto ok = parseName ("48_REL064", t);
+    CHECK (ok.release);
+    CHECK (ok.velValue == 64);
+    CHECK (ok.problems.empty());
+    const auto bad = parseName ("48_REL6", t); // il en faut trois
+    CHECK_FALSE (bad.problems.empty());
+    CHECK (bad.release); // le mot est bien reconnu
+}
+
+TEST_CASE ("plan: sustain and release files of the same note are different places")
+{
+    Template t = positionalTemplate();
+    KeywordRule rr;
+    rr.keyword = "RR"; rr.valueRole = Role::RoundRobin; rr.digitsMin = 1; rr.digitsMax = 1;
+    KeywordRule sus;
+    sus.keyword = "SUS"; sus.trigger = Trigger::Attack;
+    KeywordRule rel;
+    rel.keyword = "REL"; rel.trigger = Trigger::Release;
+    t.keywords = { rr, sus, rel };
+
+    const auto plan = planImport ({ wav ("048_C3v1_RR1"), wav ("048_C3v1_RR2"), wav ("048_C3v1_REL"), wav ("048_C3v1_SUS") }, t, {});
+    CHECK (plan.errors() == 0);
+    int release = 0, attack = 0;
+    for (const auto& z : plan.zones)
+    {
+        REQUIRE (z.included);
+        (z.zone.onRelease ? release : attack)++;
+    }
+    CHECK (release == 1);
+    CHECK (attack == 3); // RR1, RR2 et SUS : trois échantillons à la même place (SUS = principal, numéro 0)
+}
+
+TEST_CASE ("a file without round-robin number is the main sample, alternates can be left out")
+{
+    Template t = positionalTemplate();
+    KeywordRule rr;
+    rr.keyword = "RR"; rr.valueRole = Role::RoundRobin; rr.digitsMin = 1; rr.digitsMax = 1;
+    t.keywords = { rr };
+    const std::vector<std::string> files = { wav ("048_C3v1_RR1"), wav ("048_C3v1_RR2"), wav ("048_C3v1"), wav ("050_D3v1_RR2"), wav ("050_D3v1_RR3") };
+
+    const auto all = planImport (files, t, {});
+    CHECK (all.errors() == 0);
+    CHECK (all.warnings() == 0);
+    CHECK (includedZones (all).size() == 5);
+    bool mainIsZero = false;
+    for (const auto& z : all.zones)
+        if (z.zone.rootNote == 48 && z.zone.roundRobin == 0) mainIsZero = true;
+    CHECK (mainIsZero);
+
+    PlanOptions light;
+    light.mainRoundRobinOnly = true;
+    const auto lite = planImport (files, t, light);
+    CHECK (lite.errors() == 0);
+    const auto zones = includedZones (lite);
+    REQUIRE (zones.size() == 2);                 // une par place
+    CHECK (zones[0].roundRobin == 0);            // 048 : le principal, sans numéro
+    CHECK (zones[1].roundRobin == 2);            // 050 : pas de principal, le plus petit numéro
+    int skipped = 0;
+    for (const auto& z : lite.zones) skipped += z.skipped ? 1 : 0;
+    CHECK (skipped == 3);
+}
+
+TEST_CASE ("two main samples at the same place are a duplicate")
+{
+    Template t = positionalTemplate();
+    KeywordRule rr;
+    rr.keyword = "RR"; rr.valueRole = Role::RoundRobin; rr.digitsMin = 1; rr.digitsMax = 1;
+    t.keywords = { rr };
+    const auto plan = planImport ({ wav ("048_C3v1"), wav ("048_C3v1_x") }, t, {});
+    CHECK (plan.errors() == 1);
+}
+
+TEST_CASE ("template json keeps keyword rules")
+{
+    Template t = positionalTemplate();
+    KeywordRule k;
+    k.keyword = "REL"; k.scope = KeywordScope::AtPosition; k.start = 12; k.trigger = Trigger::Release;
+    k.valueRole = Role::NoteNumber; k.digitsMin = 3; k.digitsMax = 3; k.group = "release";
+    t.keywords.push_back (k);
+    CHECK (Template::fromJson (t.toJson()) == t);
+    CHECK (Template::fromJson (R"({"keywords":[{"keyword":""},{"keyword":"X","scope":"nope","trigger":"zzz"}]})").keywords.size() == 1);
+}
+
 // ---- round-robin et déclenchement au relâchement dans l'instrument ----
 
 namespace
