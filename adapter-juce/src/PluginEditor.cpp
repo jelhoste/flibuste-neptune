@@ -21,8 +21,6 @@ juce::Colour NeptuneEditor::colour (Token t) const
 NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
 {
-    setSize (1160, 920);
-    setResizable (true, true);
     setWantsKeyboardFocus (true);
 
     {
@@ -75,6 +73,11 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         addAndMakeVisible (b);
     }
     startTimerHz (30);
+
+    // La taille en dernier : resized() place les composants, qui doivent donc exister. (Fixée avant leur création,
+    // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
+    setResizable (true, true);
+    setSize (1160, 920);
 }
 
 void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate::Terminal terminal)
