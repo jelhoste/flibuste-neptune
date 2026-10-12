@@ -1,6 +1,6 @@
 # Passage de relais — état du projet Neptune
 
-Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale écrit).
+Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale validé sous Windows (tactile) et Linux).
 
 ## Règles de travail de l'utilisateur
 
@@ -22,7 +22,7 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 | 3. Format JSON versionné | **fait**, testé, CI verte, sauvegarde/rechargement de projet validés sous Windows et Linux (macOS non testé) | `core/.../State.h` (`save`/`load`, schéma v2, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, une migration v1→v2 sans transformation). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
 | 4. Vérification précoce CLAP/clap-juce-extensions | **clos, sauf expressions/modulation** | Validé dans Reaper : 64 sorties stéréo, latence à l'exécution, transport. `clap-validator` en CI (bloquant). Expressions de note et modulation de paramètres : non déclenchées par Reaper ; l'utilisateur écrira un petit plugin émetteur de test plus tard, la sonde (`HostProbe.h`) est prête à les recevoir. Voir « Constats du point 4 ». |
 | 5. Réglages globaux, autosave, récupération après crash | **fait**, 58 tests, CI verte, récupération après crash validée dans Reaper (kill -9 puis restauration) | `core/.../Settings.h`, `Autosave.h`, `FileUtil.h`. Voir « Réglages et autosave (point 5) ». |
-| Autres éléments du palier 0 (roadmap) | **à faire** | Ordre convenu : (1) **test de performance du callback audio** (outil fait, voir `docs/performance.md` ; étape CI informative, non vérifiée tant que le push n'a pas eu lieu) ; (2) ~~squelettes i18n et thèmes~~ **fait côté cœur** (voir « i18n et thèmes ») ; reste la sélection dans l'interface, qui n'a pas encore de menu ; (3) ~~mécanisme des profils Live/Studio~~ **fait** (voir « Profils Live/Studio ») ; (4) ~~composant générique potard/modale~~ **écrit** (voir « Potard générique et modale »), à valider dans Reaper. Les templates de sorties sont réglés : 64 stéréo fixes. |
+| Autres éléments du palier 0 (roadmap) | **à faire** | Ordre convenu : (1) **test de performance du callback audio** (outil fait, voir `docs/performance.md` ; étape CI informative, non vérifiée tant que le push n'a pas eu lieu) ; (2) ~~squelettes i18n et thèmes~~ **fait côté cœur** (voir « i18n et thèmes ») ; reste la sélection dans l'interface, qui n'a pas encore de menu ; (3) ~~mécanisme des profils Live/Studio~~ **fait** (voir « Profils Live/Studio ») ; (4) ~~composant générique potard/modale~~ **fait et validé** (voir « Potard générique et modale ») : **le palier 0 est complet**. Les templates de sorties sont réglés : 64 stéréo fixes. |
 
 Le moteur ne produit que du silence. Le plugin charge, expose 676 paramètres « sonde » (`core/.../ProbePool.h`, 32 pistes × 21 + 4) et affiche leurs valeurs en direct.
 
@@ -66,6 +66,9 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 4. **Paramètres discrets** : seul `isBoolean()` est marqué « stepped » côté CLAP ; les sélecteurs à N valeurs sont vus comme un paramètre normalisé 0–1 avec texte. Cela fonctionne dans Reaper (validé).
 5. **Cœur lié dans le `.clap`** : `neptune_core` doit rester en `POSITION_INDEPENDENT_CODE ON`, sinon l'édition de liens Linux échoue (révélé par nlohmann/json).
 6. **Aperçu de la maquette** : le volet d'aperçu de l'application charge un fichier HTML en `data:` sans ses scripts voisins ; servir `design/` en HTTP (`python3 -m http.server --directory design`).
+7. **Taille de l'éditeur JUCE en dernier dans le constructeur** : `resized()` place les composants, il doit les trouver. Fixer la taille avant de les créer ne place rien tant que l'hôte ne redimensionne pas la fenêtre (Reaper sous Linux ne le fait pas : potards absents à l'ouverture, apparus au premier redimensionnement ; Windows masquait le défaut). Constaté le 2026-10-12.
+8. **Contrôle de syntaxe de l'adaptateur sans compiler le plugin** : cloner JUCE 8.0.11 en partiel (`git clone --depth 1 --filter=blob:none --sparse`, `sparse-checkout set modules`) et clap-juce-extensions au commit figé avec ses sous-modules `clap-libs/clap` et `clap-libs/clap-helpers`, puis `g++ -std=c++17 -fsyntax-only -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_STANDALONE_APPLICATION=0 -I<juce>/modules -I<cje>/include -I<cje>/clap-libs/clap/include -I<cje>/clap-libs/clap-helpers/include -Icore/include -Iadapter-juce/src -I<json>/include` sur chaque `.cpp` de `adapter-juce/src`. Attrape les erreurs de compilation avant la CI (ne vérifie ni l'édition de liens ni l'affichage).
+9. **Installer un `.clap` sans passer par Chrome** : `gh run download <id> -n Neptune-Linux`, décompresser, copier dans `~/.clap/` (garder l'ancien hors de ce dossier : Reaper scanne tout ce qui s'y trouve), puis fermer les instances et faire Re-scan.
 
 ## Décisions actées (en plus du brief)
 
@@ -123,7 +126,7 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Undo branché** : chaque geste passe par `UndoManager` ET prévient l'hôte (début/fin de geste, `setValueNotifyingHost`). Annuler/rétablir ne sont **pas** des événements d'automation : l'hôte relit les valeurs (même mécanisme qu'au chargement d'un état) ; il n'enregistre donc pas l'annulation comme un geste d'automation.
 - **Interface** : 4 potards de test dans la fenêtre de sonde (Master Volume, Master Pan, FM Algorithm, Track 1 Volume) + boutons Annuler/Rétablir. Hauteur de la fenêtre passée de 820 à 920.
 - **Pas fait** : variante « fader vertical qui devient rotatif selon la hauteur » (c'est le mixeur, palier 1) ; potards bipolaires (le dessin les gère, rien ne les utilise) ; tailles de modale par instrument.
-- **Vérification** : adaptateur contrôlé à la syntaxe contre les vrais en-têtes JUCE 8.0.11 (4 fichiers, sans erreur) ; la CI le compile en entier. **Rien n'a encore été vu à l'écran.**
+- **Vérification** : adaptateur contrôlé à la syntaxe contre les vrais en-têtes JUCE 8.0.11 (4 fichiers, sans erreur) ; la CI le compile en entier. Validé par l'utilisateur dans Reaper : Windows en tactile, Linux (après correction de la disposition, piège 7).
 
 ## Profils Live/Studio (mécanisme, palier 0)
 
