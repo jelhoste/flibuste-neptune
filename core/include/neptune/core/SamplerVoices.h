@@ -50,6 +50,7 @@ private:
         double pos = 0.0;       // en échantillons du fichier
         double baseRatio = 1.0; // avance par échantillon de sortie, sans l'accordage global
         float velocity = 1.0f;  // le gain de la zone est relu à chaque bloc (édition en direct)
+        float layerGain = 1.0f; // fondu entre couches de vélocité (fixé au Note On)
         EnvelopeRunner env;
         float fade = 1.0f, fadeStep = 0.0f; // fondu rapide d'une voix volée
         bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
@@ -60,7 +61,7 @@ private:
     void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
     template <bool Streamed>
     void renderVoiceT (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
-    void startVoice (int channel, int key, float velocity, const Zone& zone) noexcept;
+    void startVoice (int channel, int key, float velocity, const Zone& zone, float layerGain = 1.0f) noexcept;
     void bindZone (Voice& v, const Zone& zone) noexcept;
     Voice* allocate() noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;

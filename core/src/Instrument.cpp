@@ -146,6 +146,17 @@ std::string toJson (const InstrumentDescription& d)
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
+    if (d.velocityFadeWidth != 0) doc["velocity_fade_width"] = d.velocityFadeWidth;
+    if (d.velocityFadeLinear) doc["velocity_fade_linear"] = true;
+    if (! d.velocityCurve.isLinear())
+    {
+        nlohmann::json c;
+        c["shape"] = d.velocityCurve.shape;
+        nlohmann::json pts = nlohmann::json::array();
+        for (const auto& p : d.velocityCurve.points) pts.push_back ({ p.first, p.second });
+        c["points"] = std::move (pts);
+        doc["velocity_curve"] = std::move (c);
+    }
     if (d.streamFromDisk) doc["stream_from_disk"] = true;
     if (d.preloadKB != InstrumentDescription::defaultPreloadKB) doc["preload_kb"] = d.preloadKB;
     doc["zones"] = std::move (zones);
@@ -201,6 +212,17 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
     if (const auto m = doc.find ("load_release_samples"); m != doc.end() && m->is_boolean()) d.loadReleaseSamples = m->get<bool>();
+    d.velocityFadeWidth = std::clamp (readInt (doc, "velocity_fade_width", 0), 0, InstrumentDescription::maxVelocityFadeWidth);
+    if (const auto m = doc.find ("velocity_fade_linear"); m != doc.end() && m->is_boolean()) d.velocityFadeLinear = m->get<bool>();
+    if (const auto m = doc.find ("velocity_curve"); m != doc.end() && m->is_object())
+    {
+        d.velocityCurve.shape = readNum (*m, "shape", 0.0);
+        if (const auto pts = m->find ("points"); pts != m->end() && pts->is_array())
+            for (const auto& p : *pts)
+                if (p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number() && d.velocityCurve.points.size() < 64)
+                    d.velocityCurve.points.push_back ({ p[0].get<double>(), p[1].get<double>() });
+        d.velocityCurve = sanitised (d.velocityCurve);
+    }
     if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
     d.preloadKB = std::clamp (readInt (doc, "preload_kb", InstrumentDescription::defaultPreloadKB),
                               InstrumentDescription::minPreloadKB, InstrumentDescription::maxPreloadKB);
@@ -230,30 +252,64 @@ void Instrument::finalize()
 {
     rrSets_.clear();
     zoneSet_.assign (zones.size(), -1);
+    zoneFamily_.assign (zones.size(), -1);
+    familySets_.clear();
+    for (auto& k : keyZones_) k.clear();
+
+    using PlaceKey = std::tuple<int, int, int, int, int, bool>;
+    using FamilyKey = std::tuple<int, int, int, bool>;
+    std::map<PlaceKey, int> setIndex;
+    std::map<FamilyKey, int> familyIndex;
+    std::vector<LayerKey> keys (zones.size());
     for (std::size_t i = 0; i < zones.size(); ++i)
     {
         const Zone& z = zones[i];
-        int found = -1;
-        for (std::size_t s = 0; s < rrSets_.size() && found < 0; ++s)
+        keys[i] = { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease };
+        auto it = setIndex.find ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease });
+        if (it == setIndex.end())
         {
-            const Zone& first = zones[static_cast<std::size_t> (rrSets_[s].members.front())];
-            if (first.keyLow == z.keyLow && first.keyHigh == z.keyHigh && first.velLow == z.velLow && first.velHigh == z.velHigh
-                && first.groupId == z.groupId && first.onRelease == z.onRelease)
-                found = static_cast<int> (s);
-        }
-        if (found < 0)
-        {
+            it = setIndex.emplace (PlaceKey { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease }, static_cast<int> (rrSets_.size())).first;
             rrSets_.push_back ({});
-            found = static_cast<int> (rrSets_.size()) - 1;
+            const FamilyKey fk { z.keyLow, z.keyHigh, z.groupId, z.onRelease };
+            auto fit = familyIndex.find (fk);
+            if (fit == familyIndex.end())
+            {
+                fit = familyIndex.emplace (fk, static_cast<int> (familySets_.size())).first;
+                familySets_.emplace_back();
+            }
+            familySets_[static_cast<std::size_t> (fit->second)].push_back (it->second);
         }
-        rrSets_[static_cast<std::size_t> (found)].members.push_back (static_cast<int> (i));
-        zoneSet_[i] = found;
+        rrSets_[static_cast<std::size_t> (it->second)].members.push_back (static_cast<int> (i));
+        zoneSet_[i] = it->second;
+        zoneFamily_[i] = familyIndex[FamilyKey { z.keyLow, z.keyHigh, z.groupId, z.onRelease }];
+        for (int k = std::max (0, z.keyLow); k <= std::min (127, z.keyHigh); ++k) keyZones_[static_cast<std::size_t> (k)].push_back (static_cast<int> (i));
     }
     for (auto& set : rrSets_) // ordre des indices round-robin, puis ordre de déclaration
         std::stable_sort (set.members.begin(), set.members.end(),
                           [this] (int a, int b) { return zones[static_cast<std::size_t> (a)].roundRobin < zones[static_cast<std::size_t> (b)].roundRobin; });
     rrCounter_.assign (rrSets_.size(), 0);
     rrLast_.assign (rrSets_.size(), 0xFFFFFFFFu);
+    fades_ = computeLayerFades (keys, fadeWidth);
+}
+
+const Zone* Instrument::pickFromSet (std::size_t set) const noexcept
+{
+    const auto& members = rrSets_[set].members;
+    if (members.size() <= 1) return &zones[static_cast<std::size_t> (members.front())];
+    const auto n = static_cast<std::uint32_t> (members.size());
+    std::uint32_t pick = 0;
+    auto next = [this] { rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5; return rng_; };
+    switch (roundRobinMode)
+    {
+        case RoundRobinMode::Sequential: pick = rrCounter_[set]++ % n; break;
+        case RoundRobinMode::Random: pick = next() % n; break;
+        case RoundRobinMode::RandomNoRepeat:
+            pick = next() % n;
+            if (pick == rrLast_[set]) pick = (pick + 1 + next() % (n - 1)) % n;
+            break;
+    }
+    rrLast_[set] = pick;
+    return &zones[static_cast<std::size_t> (members[pick])];
 }
 
 const Zone* Instrument::select (int key, float velocity, bool release) const noexcept
@@ -264,25 +320,46 @@ const Zone* Instrument::select (int key, float velocity, bool release) const noe
         const Zone& z = zones[i];
         if (! z.sample || z.onRelease != release || key < z.keyLow || key > z.keyHigh || v < z.velLow || v > z.velHigh) continue;
         if (zoneSet_.size() != zones.size()) return &z; // finalize() non appelé : première zone
-        const auto& members = rrSets_[static_cast<std::size_t> (zoneSet_[i])].members;
-        if (members.size() <= 1) return &z;
-        const auto set = static_cast<std::size_t> (zoneSet_[i]);
-        const auto n = static_cast<std::uint32_t> (members.size());
-        std::uint32_t pick = 0;
-        auto next = [this] { rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5; return rng_; };
-        switch (roundRobinMode)
-        {
-            case RoundRobinMode::Sequential: pick = rrCounter_[set]++ % n; break;
-            case RoundRobinMode::Random: pick = next() % n; break;
-            case RoundRobinMode::RandomNoRepeat:
-                pick = next() % n;
-                if (pick == rrLast_[set]) pick = (pick + 1 + next() % (n - 1)) % n;
-                break;
-        }
-        rrLast_[set] = pick;
-        return &zones[static_cast<std::size_t> (members[pick])];
+        return pickFromSet (static_cast<std::size_t> (zoneSet_[i]));
     }
     return nullptr;
+}
+
+int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, int maxOut) const noexcept
+{
+    if (out == nullptr || maxOut <= 0 || key < 0 || key > 127) return 0;
+    const float vCont = std::clamp (velocity * 127.0f, 1.0f, 127.0f);
+    const int vInt = std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 1, 127);
+
+    if (zoneSet_.size() != zones.size()) // finalize() non appelé : comme select()
+    {
+        const Zone* z = select (key, velocity, release);
+        if (z == nullptr) return 0;
+        out[0] = { z, 1.0f };
+        return 1;
+    }
+    int family = -1;
+    for (const int zi : keyZones_[static_cast<std::size_t> (key)])
+    {
+        const Zone& z = zones[static_cast<std::size_t> (zi)];
+        if (! z.sample || z.onRelease != release || vInt < z.velLow || vInt > z.velHigh) continue;
+        family = zoneFamily_[static_cast<std::size_t> (zi)];
+        break;
+    }
+    if (family < 0) return 0;
+
+    int n = 0;
+    for (const int set : familySets_[static_cast<std::size_t> (family)])
+    {
+        const int rep = rrSets_[static_cast<std::size_t> (set)].members.front();
+        const float g = layerGain (fades_[static_cast<std::size_t> (rep)], vCont, fadeLinear);
+        if (g <= 1e-4f) continue;
+        const Zone* z = pickFromSet (static_cast<std::size_t> (set));
+        if (z == nullptr || ! z->sample) continue;
+        out[n++] = { z, g };
+        if (n >= maxOut) break;
+    }
+    return n;
 }
 
 std::vector<bool> loadedZones (const InstrumentDescription& d)
@@ -341,6 +418,10 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
 {
     auto inst = std::make_shared<Instrument>();
     inst->roundRobinMode = description.roundRobinMode;
+    inst->velocityLut = buildLut (description.velocityCurve);
+    inst->velocityLinear = sanitised (description.velocityCurve).isLinear();
+    inst->fadeWidth = std::clamp (description.velocityFadeWidth, 0, InstrumentDescription::maxVelocityFadeWidth);
+    inst->fadeLinear = description.velocityFadeLinear;
     std::map<std::string, int> groupIds;
     SampleCache localCache;
     SampleCache& cache = externalCache != nullptr ? *externalCache : localCache;

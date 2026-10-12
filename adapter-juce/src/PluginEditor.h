@@ -51,6 +51,7 @@ private:
     juce::TextButton listToggleButton_;
     bool listVisible_ = true;
     void setZoneSelection (const std::vector<int>&);
+    void openVelocityPanel (juce::Component& anchor);
     bool showProbe_ = false;
     void updateViewVisibility();
     std::unique_ptr<juce::FileChooser> chooser_, importChooser_;

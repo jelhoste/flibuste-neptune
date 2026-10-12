@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "VelocityPanel.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 
@@ -128,6 +129,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     matrix_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
     matrix_->onGestureEnd = [this] { processor_.uiEndGesture(); };
     matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
+    matrix_->onOpenVelocity = [this] (juce::Component& anchor) { openVelocityPanel (anchor); };
     addChildComponent (*matrix_);
     listToggleButton_.setButtonText (text ("map.list"));
     listToggleButton_.setClickingTogglesState (true);
@@ -326,6 +328,26 @@ void NeptuneEditor::applyImport (const ImportWizard::Result& r)
     processor_.uiEditInstrument (std::move (d), "Import samples");
     lastRevision_ = 0xFFFFFFFFu;
     updateSamplerControls();
+}
+
+// Réponse de vélocité de l'instrument : fenêtre flottante ancrée sous le bouton de la matrice.
+void NeptuneEditor::openVelocityPanel (juce::Component& anchor)
+{
+    const auto d = processor_.instrumentDescription();
+    auto panel = std::make_unique<VelocityPanel> (palette_, tr_, d.velocityFadeWidth, d.velocityFadeLinear, d.velocityCurve);
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    panel->onGestureBegin = [safe] { if (safe != nullptr) safe->processor_.uiBeginGesture(); };
+    panel->onGestureEnd = [safe] { if (safe != nullptr) safe->processor_.uiEndGesture(); };
+    panel->onChange = [safe] (int width, bool linear, const neptune::core::VelocityCurve& curve)
+    {
+        if (safe == nullptr) return;
+        auto desc = safe->processor_.instrumentDescription();
+        desc.velocityFadeWidth = width;
+        desc.velocityFadeLinear = linear;
+        desc.velocityCurve = curve;
+        safe->processor_.uiEditInstrument (std::move (desc), "Velocity response", "velocity");
+    };
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
 }
 
 // Sélection demandée par la matrice : elle passe par la liste (source de vérité de la sélection de l'éditeur).

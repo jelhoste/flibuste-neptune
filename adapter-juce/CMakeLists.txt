@@ -28,6 +28,7 @@ target_sources(Neptune PRIVATE
   src/ImportWizard.cpp
   src/ZoneTable.cpp
   src/MappingMatrix.cpp
+  src/VelocityPanel.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

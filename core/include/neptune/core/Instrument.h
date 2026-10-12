@@ -5,6 +5,7 @@
 //  - Instrument            : l'instrument prêt à jouer (échantillons chargés), immuable, partagé avec le thread audio.
 // Les réglages de zone (note racine, mode, relâchement...) vivent dans la zone, pas dans la couche Paramètre : un
 // instrument aura plusieurs zones. Les réglages globaux (gain, accordage) sont des paramètres (SamplerParams.h).
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -15,6 +16,7 @@
 
 #include "neptune/core/Envelope.h"
 #include "neptune/core/SampleData.h"
+#include "neptune/core/VelocityResponse.h"
 
 namespace neptune::core
 {
@@ -76,11 +78,26 @@ struct InstrumentDescription
     static constexpr int defaultPreloadKB = 128;
     static constexpr int minPreloadKB = 16, maxPreloadKB = 65536;
 
+    // Réponse de vélocité (voir VelocityResponse.h) : courbe appliquée à la vélocité reçue, et fondu enchaîné entre couches.
+    VelocityCurve velocityCurve;
+    int velocityFadeWidth = 0;        // largeur (en vélocités) du fondu automatique aux frontières ; 0 = commutation franche
+    bool velocityFadeLinear = false;  // faux : puissance constante ; vrai : linéaire en amplitude
+    static constexpr int maxVelocityFadeWidth = 64;
+
+    // Copie tout sauf les zones (réglages de chargement, de streaming et de réponse de vélocité).
+    void copySettingsFrom (const InstrumentDescription& o)
+    {
+        roundRobinMode = o.roundRobinMode; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
+        unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
+        velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
+    }
+
     bool operator== (const InstrumentDescription& o) const noexcept
     {
         return zones == o.zones && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
             && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups
-            && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB;
+            && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
+            && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear;
     }
     bool empty() const noexcept { return zones.empty(); }
 };
@@ -131,13 +148,35 @@ struct Instrument
     // `release` : cherche parmi les zones déclenchées au Note Off. Thread audio uniquement (les compteurs sont modifiés).
     const Zone* select (int key, float velocity, bool release) const noexcept;
 
-    // À appeler une fois les zones remplies (construit les jeux round-robin).
+    // Réponse de vélocité et fondu entre couches : à régler AVANT finalize().
+    VelocityLut velocityLut = buildLut (VelocityCurve {});
+    bool velocityLinear = true; // courbe linéaire : la vélocité passe telle quelle (exacte, sans table)
+    int fadeWidth = 0;
+    bool fadeLinear = false;
+
+    // Vélocité (0..1) après la courbe de l'instrument.
+    float shapeVelocity (float velocity) const noexcept { return velocityLinear ? velocity : lookup (velocityLut, velocity); }
+
+    // Une zone choisie pour une note, avec son gain de couche (fondu) ; le round-robin est résolu.
+    struct Pick { const Zone* zone = nullptr; float gain = 1.0f; };
+    static constexpr int maxPicks = 16;
+    // Les couches de la FAMILLE de la première zone qui couvre la note et la vélocité jouent ensemble, avec leur fondu.
+    // `velocity` (0..1) est la vélocité déjà passée par shapeVelocity. Rend le nombre de zones écrites dans `out`.
+    // Thread audio uniquement (les compteurs round-robin sont modifiés).
+    int selectLayers (int key, float velocity, bool release, Pick* out, int maxOut) const noexcept;
+
+    // À appeler une fois les zones remplies (construit les jeux round-robin, les fondus, l'index par note).
     void finalize();
 
 private:
     struct RrSet { std::vector<int> members; }; // indices de zones, dans l'ordre des indices round-robin
     std::vector<RrSet> rrSets_;
     std::vector<int> zoneSet_;
+    std::vector<LayerFade> fades_;                  // par zone
+    std::vector<std::vector<int>> familySets_;      // par famille : indices de jeux round-robin (une couche chacun)
+    std::vector<int> zoneFamily_;                   // par zone
+    std::array<std::vector<int>, 128> keyZones_;    // par note : zones qui la couvrent, dans l'ordre de déclaration
+    const Zone* pickFromSet (std::size_t set) const noexcept;
     mutable std::vector<std::uint32_t> rrCounter_, rrLast_;
     mutable std::uint32_t rng_ = 0x9E3779B9u;
 };

@@ -99,12 +99,15 @@ SamplerVoices::Voice* SamplerVoices::allocate() noexcept
 void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
 {
     if (instrument_ == nullptr) return;
-    if (key >= 0 && key < 128) heldVelocity_[static_cast<std::size_t> (key)] = velocity;
-    const Zone* zone = instrument_->select (key, velocity, /*release*/ false);
-    if (zone != nullptr) startVoice (channel, key, velocity, *zone);
+    // Courbe de réponse de l'instrument : avant le choix des couches et le volume.
+    const float shaped = std::clamp (instrument_->shapeVelocity (velocity), 0.0f, 1.0f);
+    if (key >= 0 && key < 128) heldVelocity_[static_cast<std::size_t> (key)] = shaped;
+    Instrument::Pick picks[Instrument::maxPicks];
+    const int n = instrument_->selectLayers (key, shaped, /*release*/ false, picks, Instrument::maxPicks);
+    for (int i = 0; i < n; ++i) startVoice (channel, key, shaped, *picks[i].zone, picks[i].gain);
 }
 
-void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone& zone) noexcept
+void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone& zone, float layerGain) noexcept
 {
     if (zone.sample == nullptr || zone.loopEnd <= zone.loopStart) return;
 
@@ -128,6 +131,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->pos = 0.0;
     bindZone (*v, zone);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
+    v->layerGain = layerGain;
     v->env.begin (zone.env, sampleRate_);
     // Échantillon dont seul le début est en mémoire : le reste est lu sur le disque. Les zones en boucle gardent tout ce
     // qui précède la fin de boucle en mémoire (voir residentFramesNeeded) et n'ont donc jamais besoin du flux.
@@ -159,8 +163,11 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
     if (instrument_ != nullptr && key >= 0 && key < 128)
     {
         const float vel = heldVelocity_[static_cast<std::size_t> (key)];
-        if (const Zone* zone = instrument_->select (key, vel > 0.0f ? vel : 0.5f, /*release*/ true))
-            startVoice (channel, key, vel > 0.0f ? vel : 0.5f, *zone);
+        // vel est déjà passée par la courbe de l'instrument (voir noteOn)
+        const float v = vel > 0.0f ? vel : 0.5f;
+        Instrument::Pick picks[Instrument::maxPicks];
+        const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks);
+        for (int i = 0; i < n; ++i) startVoice (channel, key, v, *picks[i].zone, picks[i].gain);
     }
 }
 
@@ -238,7 +245,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
-        float e = v.velocity * z.gain * mg * envValue;
+        float e = v.velocity * z.gain * v.layerGain * mg * envValue;
         if (v.stolen)
         {
             v.fade -= v.fadeStep;

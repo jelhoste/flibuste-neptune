@@ -29,6 +29,7 @@ public:
     std::function<void (neptune::core::InstrumentDescription, const char* name)> onEdit;
     std::function<void()> onGestureBegin, onGestureEnd;
     std::function<void()> onDeleteRequested;
+    std::function<void (juce::Component& anchor)> onOpenVelocity; // réponse de vélocité / fondu entre couches
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -67,13 +68,14 @@ private:
     const neptune::core::i18n::Translator& tr_;
     neptune::core::InstrumentDescription description_;
     std::vector<neptune::core::mapping::Place> places_;
+    std::vector<neptune::core::LayerFade> fades_;   // par zone de la description (fondu entre couches)
     std::vector<int> selected_;                 // indices de zones
     neptune::core::mapping::View view_;
     std::vector<neptune::core::mapping::View> viewChoices_;
     std::string viewSignature_;
 
     juce::ComboBox viewBox_;
-    juce::TextButton zoomIn_, zoomOut_, zoomFit_, duplicate_;
+    juce::TextButton zoomIn_, zoomOut_, zoomFit_, duplicate_, velocity_;
     juce::Label hint_;
     juce::ScrollBar scroll_ { false };
     double keyStart_ = 0.0, keySpan_ = 128.0;

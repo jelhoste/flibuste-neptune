@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <set>
 #include "neptune/core/ZoneImport.h"
 
@@ -36,11 +37,13 @@ MappingMatrix::MappingMatrix (const theme::Palette& palette, const i18n::Transla
     zoomOut_.setButtonText ("-");
     zoomFit_.setButtonText (text ("map.fit"));
     duplicate_.setButtonText (text ("map.duplicate"));
+    velocity_.setButtonText (text ("map.velocity"));
+    velocity_.onClick = [this] { if (onOpenVelocity) onOpenVelocity (velocity_); };
     zoomIn_.onClick = [this] { zoom (0.6, keyStart_ + keySpan_ / 2.0); };
     zoomOut_.onClick = [this] { zoom (1.0 / 0.6, keyStart_ + keySpan_ / 2.0); };
     zoomFit_.onClick = [this] { keyStart_ = 0.0; keySpan_ = 128.0; clampView(); updateScrollBar(); repaint(); };
     duplicate_.onClick = [this] { duplicateSelection(); };
-    for (auto* b : { &zoomIn_, &zoomOut_, &zoomFit_, &duplicate_ }) addAndMakeVisible (*b);
+    for (auto* b : { &zoomIn_, &zoomOut_, &zoomFit_, &duplicate_, &velocity_ }) addAndMakeVisible (*b);
     hint_.setText (text ("map.hint"), juce::dontSendNotification);
     hint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     hint_.setJustificationType (juce::Justification::centredRight);
@@ -104,7 +107,21 @@ void MappingMatrix::rebuildViewChoices()
     view_ = viewChoices_[static_cast<std::size_t> (select - 1)];
 }
 
-void MappingMatrix::rebuildPlaces() { places_ = mapping::places (description_, view_); }
+void MappingMatrix::rebuildPlaces()
+{
+    places_ = mapping::places (description_, view_);
+    // fondus entre couches (mêmes règles que le moteur) pour les dessiner
+    std::map<std::string, int> groupIds;
+    std::vector<LayerKey> keys;
+    keys.reserve (description_.zones.size());
+    for (const auto& z : description_.zones)
+    {
+        int g = 0;
+        if (! z.group.empty()) g = groupIds.emplace (z.group, static_cast<int> (groupIds.size()) + 1).first->second;
+        keys.push_back ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, g, z.onRelease });
+    }
+    fades_ = computeLayerFades (keys, description_.velocityFadeWidth);
+}
 
 bool MappingMatrix::placeSelected (const mapping::Place& p) const
 {
@@ -196,11 +213,12 @@ void MappingMatrix::resized()
 {
     auto r = getLocalBounds();
     auto bar = r.removeFromTop (kToolbarH).reduced (2);
-    viewBox_.setBounds (bar.removeFromLeft (220));
-    zoomOut_.setBounds (bar.removeFromLeft (44));
-    zoomIn_.setBounds (bar.removeFromLeft (44));
-    zoomFit_.setBounds (bar.removeFromLeft (90));
-    duplicate_.setBounds (bar.removeFromLeft (130));
+    viewBox_.setBounds (bar.removeFromLeft (190));
+    zoomOut_.setBounds (bar.removeFromLeft (40));
+    zoomIn_.setBounds (bar.removeFromLeft (40));
+    zoomFit_.setBounds (bar.removeFromLeft (84));
+    duplicate_.setBounds (bar.removeFromLeft (104));
+    velocity_.setBounds (bar.removeFromLeft (110));
     hint_.setBounds (bar);
     scroll_.setBounds (kLeftMargin, getHeight() - kScrollH, getWidth() - kLeftMargin - 4, kScrollH);
     updateScrollBar();
@@ -247,6 +265,17 @@ void MappingMatrix::paint (juce::Graphics& g)
             const auto inner = r.reduced (0.5f);
             g.setColour (colour (sel ? Token::Accent : Token::Nav1).withAlpha (sel ? 0.55f : 0.45f));
             g.fillRect (inner);
+            // fondu automatique aux frontières : bandes plus claires au-delà de la plage (là où la couche joue encore, en fondu)
+            if (! p.zones.empty() && static_cast<std::size_t> (p.zones.front()) < fades_.size())
+            {
+                const auto& fd = fades_[static_cast<std::size_t> (p.zones.front())];
+                g.setColour (colour (Token::Accent2).withAlpha (0.35f));
+                const float uHi = fd.activeHi - 0.5f, uLo = fd.activeLo - 0.5f;
+                if (uHi > static_cast<float> (p.velHigh) + 0.01f)
+                    g.fillRect (juce::Rectangle<float> (inner.getX(), velY (uHi), inner.getWidth(), velY (p.velHigh) - velY (uHi)));
+                if (uLo < static_cast<float> (p.velLow - 1) - 0.01f)
+                    g.fillRect (juce::Rectangle<float> (inner.getX(), velY (p.velLow - 1), inner.getWidth(), velY (uLo) - velY (p.velLow - 1)));
+            }
             if (p.overlaps) // chevauchement signalé : hachures
             {
                 g.saveState();

@@ -35,12 +35,7 @@ void InstrumentEditCommand::apply (bool forward)
     }
     InstrumentDescription d = get_();
     const auto& head = forward ? newHead_ : oldHead_;
-    d.roundRobinMode = head.roundRobinMode;
-    d.mainRoundRobinOnly = head.mainRoundRobinOnly;
-    d.loadReleaseSamples = head.loadReleaseSamples;
-    d.unloadedGroups = head.unloadedGroups;
-    d.streamFromDisk = head.streamFromDisk;
-    d.preloadKB = head.preloadKB;
+    d.copySettingsFrom (head);
     for (const auto& [index, pair] : changed_)
         if (index < d.zones.size()) d.zones[index] = forward ? pair.second : pair.first;
     set_ (d);
@@ -59,12 +54,7 @@ bool InstrumentEditCommand::mergeWith (const Command& next)
         // « copies puis déplacement » dans un même geste : le déplacement s'applique à la copie complète d'arrivée.
         for (const auto& [index, pair] : o->changed_)
             if (index < newFull_.zones.size()) newFull_.zones[index] = pair.second;
-        newFull_.roundRobinMode = o->newHead_.roundRobinMode;
-        newFull_.mainRoundRobinOnly = o->newHead_.mainRoundRobinOnly;
-        newFull_.loadReleaseSamples = o->newHead_.loadReleaseSamples;
-        newFull_.unloadedGroups = o->newHead_.unloadedGroups;
-        newFull_.streamFromDisk = o->newHead_.streamFromDisk;
-        newFull_.preloadKB = o->newHead_.preloadKB;
+        newFull_.copySettingsFrom (o->newHead_);
         newHead_ = o->newHead_;
         return true;
     }
