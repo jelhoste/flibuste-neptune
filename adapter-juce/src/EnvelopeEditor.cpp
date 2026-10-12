@@ -125,44 +125,56 @@ EnvelopeEditor::Frame EnvelopeEditor::frame() const
     return f;
 }
 
+std::vector<EnvelopeEditor::Handle> EnvelopeEditor::handles (const Frame& f) const
+{
+    std::vector<Handle> out;
+    const auto& L = f.layout;
+    const EnvelopeSegment* segs[5] = { &env_.delay, &env_.attack, &env_.hold, &env_.decay, &env_.release };
+    const float sustainLevel = env_.decay.on ? static_cast<float> (env_.sustain) : 1.0f;
+    auto X = [&] (double x) { return f.graph.getX() + static_cast<float> (x); };
+    auto Y = [&] (float level) { return f.yBottom - level * (f.yBottom - f.yTop); };
+
+    // Niveau où se termine chaque segment : délai 0, attaque 1, hold 1, decay = sustain, relâchement 0.
+    const float endLevel[5] = { 0.0f, 1.0f, 1.0f, sustainLevel, 0.0f };
+    const float startLevel[5] = { 0.0f, 0.0f, 1.0f, 1.0f, sustainLevel };
+
+    for (int i = 0; i < 5; ++i)
+    {
+        if (! segs[i]->on) continue; // un segment désactivé se réactive par son bouton
+        const auto s = static_cast<Seg> (i);
+        if (L.active[i])
+            out.push_back ({ s, Part::Node, { X (L.x1[i]), Y (endLevel[i]) }, false });
+        else if (i == 0) // délai à 0 ms : collé à la marge gauche, sur la ligne de base
+            out.push_back ({ s, Part::Node, { f.graph.getX() - 2.0f, f.yBottom }, false });
+        else if (i == 2) // hold à 0 ms : poignée creuse, sur le prolongement du niveau haut
+            out.push_back ({ s, Part::Node, { X (L.x1[i]) + 16.0f, Y (1.0f) }, true });
+        else // attaque, decay, relâchement à 0 ms : au point de jonction
+            out.push_back ({ s, Part::Node, { X (L.x1[i]), Y (endLevel[i]) }, false });
+
+        if ((i == 1 || i == 3 || i == 4) && L.active[i] && L.x1[i] - L.x0[i] >= 24.0)
+        {
+            const double g = envelopeCurveFraction (segs[i]->curve, i == 1 ? 0 : (i == 3 ? 1 : 2), env_.sustain, 0.5);
+            out.push_back ({ s, Part::Shape,
+                             { X (0.5 * (L.x0[i] + L.x1[i])), Y (startLevel[i] + (endLevel[i] - startLevel[i]) * static_cast<float> (g)) }, false });
+        }
+    }
+    // poignée du plateau de sustain
+    out.push_back ({ Seg::Decay, Part::Sustain, { X (0.5 * (L.plateauX0 + L.plateauX1)), Y (sustainLevel) }, false });
+    return out;
+}
+
 EnvelopeEditor::Hit EnvelopeEditor::hitTest (juce::Point<float> p) const
 {
     const auto f = frame();
     for (const auto& c : f.chips)
         if (c.rect.expanded (0.0f, 4.0f).contains (p)) return { c.seg, Part::Chip };
 
-    const EnvelopeSegment* segs[5] = { &env_.delay, &env_.attack, &env_.hold, &env_.decay, &env_.release };
-    const float sustainLevel = env_.decay.on ? static_cast<float> (env_.sustain) : 1.0f;
-    auto Y = [&] (float level) { return f.yBottom - level * (f.yBottom - f.yTop); };
     Hit best;
     float bestD = kHitRadius;
-
-    // poignée du plateau de sustain
+    for (const auto& h : handles (f))
     {
-        const juce::Point<float> h (f.graph.getX() + static_cast<float> (0.5 * (f.layout.plateauX0 + f.layout.plateauX1)), Y (sustainLevel));
-        if (h.getDistanceFrom (p) < bestD) { bestD = h.getDistanceFrom (p); best = { Seg::Decay, Part::Sustain }; }
-    }
-    // délai à 0 ms : son nœud est collé à la marge gauche
-    if (env_.delay.on && ! f.layout.active[0])
-    {
-        const juce::Point<float> h (f.graph.getX() - 2.0f, f.yBottom);
-        if (h.getDistanceFrom (p) < bestD) { bestD = h.getDistanceFrom (p); best = { Seg::Delay, Part::Node }; }
-    }
-    for (int i = 0; i < 5; ++i)
-    {
-        if (! f.layout.active[i]) continue; // un segment sans largeur se règle par sa valeur, sous son bouton
-        const auto s = static_cast<Seg> (i);
-        const float y0 = i == 1 ? 0.0f : (i == 4 ? sustainLevel : (i == 3 ? 1.0f : (i == 2 ? 1.0f : 0.0f)));
-        const float y1 = i == 1 ? 1.0f : (i == 2 ? 1.0f : (i == 3 ? sustainLevel : 0.0f));
-        const juce::Point<float> node (f.graph.getX() + static_cast<float> (f.layout.x1[i]), Y (y1));
-        if (node.getDistanceFrom (p) < bestD) { bestD = node.getDistanceFrom (p); best = { s, Part::Node }; }
-        if ((i == 1 || i == 3 || i == 4) && f.layout.x1[i] - f.layout.x0[i] >= 24.0)
-        {
-            const double g = envelopeCurveFraction (segs[i]->curve, i == 1 ? 0 : (i == 3 ? 1 : 2), env_.sustain, 0.5);
-            const juce::Point<float> mid (f.graph.getX() + static_cast<float> (0.5 * (f.layout.x0[i] + f.layout.x1[i])),
-                                          Y (y0 + (y1 - y0) * static_cast<float> (g)));
-            if (mid.getDistanceFrom (p) < bestD) { bestD = mid.getDistanceFrom (p); best = { s, Part::Shape }; }
-        }
+        const float d = h.pos.getDistanceFrom (p);
+        if (d < bestD) { bestD = d; best = { h.seg, h.part }; }
     }
     return best;
 }
@@ -227,36 +239,6 @@ void EnvelopeEditor::paint (juce::Graphics& g)
     g.setColour (colour (Token::Accent));
     g.strokePath (path, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    // nœuds et poignées de forme
-    const float y0s[5] = { 0.0f, 0.0f, 1.0f, 1.0f, sustainLevel };
-    const float y1s[5] = { 0.0f, 1.0f, 1.0f, sustainLevel, 0.0f };
-    for (int i = 0; i < 5; ++i)
-    {
-        if (! L.active[i]) continue;
-        g.setColour (colour (Token::Handle));
-        g.fillEllipse (X (L.x1[i]) - 5.0f, Y (y1s[i]) - 5.0f, 10.0f, 10.0f);
-        if ((i == 1 || i == 3 || i == 4) && L.x1[i] - L.x0[i] >= 24.0)
-        {
-            const double fr = envelopeCurveFraction (segs[i]->curve, i == 1 ? 0 : (i == 3 ? 1 : 2), env_.sustain, 0.5);
-            const float mx = X (0.5 * (L.x0[i] + L.x1[i]));
-            const float my = Y (y0s[i] + (y1s[i] - y0s[i]) * static_cast<float> (fr));
-            g.setColour (colour (Token::Pink));
-            if (segs[i]->curve.db) g.drawEllipse (mx - 5.0f, my - 5.0f, 10.0f, 10.0f, 2.0f); // creux : courbe en dB
-            else g.fillEllipse (mx - 5.0f, my - 5.0f, 10.0f, 10.0f);
-        }
-    }
-    // nœud du délai à 0 ms, collé à la marge gauche
-    if (env_.delay.on && ! L.active[0])
-    {
-        g.setColour (colour (Token::Handle));
-        g.fillEllipse (x0 - 2.0f - 5.0f, f.yBottom - 5.0f, 10.0f, 10.0f);
-    }
-    // poignée du plateau (niveau de sustain)
-    {
-        const float hx = X (0.5 * (L.plateauX0 + L.plateauX1)), hy = Y (sustainLevel);
-        g.setColour (colour (Token::Pink));
-        g.fillRoundedRectangle (hx - 7.0f, hy - 4.0f, 14.0f, 8.0f, 2.0f);
-    }
     // segment illuminé : bande sur sa largeur, ou repère vertical à la jonction s'il n'a pas de largeur
     if (highlight_ != Seg::None)
     {
@@ -277,6 +259,34 @@ void EnvelopeEditor::paint (juce::Graphics& g)
                 juce::Justification::centred);
     g.restoreState();
 
+    // Poignées : dessinées HORS du rognage de la courbe, pour qu'aucune ne soit coupée par le bord du canevas.
+    for (const auto& h : handles (f))
+    {
+        if (h.part == Part::Sustain)
+        {
+            g.setColour (colour (Token::Pink));
+            g.fillRoundedRectangle (h.pos.x - 7.0f, h.pos.y - 4.0f, 14.0f, 8.0f, 2.0f);
+        }
+        else if (h.part == Part::Shape)
+        {
+            g.setColour (colour (Token::Pink));
+            if (segs[static_cast<int> (h.seg)]->curve.db) g.drawEllipse (h.pos.x - 5.0f, h.pos.y - 5.0f, 10.0f, 10.0f, 2.0f); // creux : dB
+            else g.fillEllipse (h.pos.x - 5.0f, h.pos.y - 5.0f, 10.0f, 10.0f);
+        }
+        else if (h.ghost) // hold à 0 ms : prolongement pointillé du niveau haut + poignée creuse
+        {
+            g.setColour (colour (Token::Handle).withAlpha (0.55f));
+            const float y = h.pos.y;
+            for (float x = h.pos.x - 16.0f; x < h.pos.x - 6.0f; x += 4.0f) g.fillRect (x, y - 0.5f, 2.0f, 1.0f);
+            g.drawEllipse (h.pos.x - 5.0f, h.pos.y - 5.0f, 10.0f, 10.0f, 1.5f);
+        }
+        else
+        {
+            g.setColour (colour (Token::Handle));
+            g.fillEllipse (h.pos.x - 5.0f, h.pos.y - 5.0f, 10.0f, 10.0f);
+        }
+    }
+
     // valeurs de durée, sous les boutons d'activation
     for (const auto& c : f.chips)
     {
@@ -289,6 +299,16 @@ void EnvelopeEditor::paint (juce::Graphics& g)
         g.setColour (on ? colour (Token::Text) : colour (Token::TextDim2));
         g.setFont (juce::FontOptions (13.0f));
         g.drawText (c.text, c.rect.toNearestInt(), juce::Justification::centred);
+        // Mode de la courbe, en petit : dB, lin (linéaire), cvx / ccv (convexe / concave). Seulement attaque, decay, relâchement.
+        const int si = static_cast<int> (c.seg);
+        if (on && (si == 1 || si == 3 || si == 4))
+        {
+            const auto& cv = segs[si]->curve;
+            const juce::String tag = cv.db ? "dB" : (std::abs (cv.shape) < 0.02 ? "lin" : (cv.shape > 0.0 ? "cvx" : "ccv"));
+            g.setColour (cv.db ? colour (Token::Pink) : colour (Token::TextDim2));
+            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+            g.drawText (tag, c.rect.toNearestInt().reduced (6, 2), juce::Justification::topRight);
+        }
     }
 }
 
@@ -366,7 +386,8 @@ void EnvelopeEditor::mouseDrag (const juce::MouseEvent& e)
     if (drag_.part == Part::Node)
     {
         // le nœud d'un délai à 0 ms est collé à la marge : sa largeur se mesure depuis le bord gauche de la courbe
-        const double width = static_cast<double> (e.position.x - f.graph.getX()) - (f.layout.active[i] ? f.layout.x0[i] : 0.0);
+        const double origin = (i == 0 && ! f.layout.active[0]) ? 0.0 : f.layout.x0[i];
+        const double width = static_cast<double> (e.position.x - f.graph.getX()) - origin - (i == 2 && ! f.layout.active[2] ? 16.0 : 0.0);
         seg.ms = envelopeTimeFromWidth (width, frozenScale_);
         if (drag_.seg == Seg::Decay)
             env_.sustain = juce::jlimit (0.0f, 1.0f, (f.yBottom - e.position.y) / (f.yBottom - f.yTop));

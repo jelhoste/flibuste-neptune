@@ -15,7 +15,9 @@
 //
 // Sur la courbe, on peut aussi tout régler directement :
 //  - nœud de fin de segment : glisser horizontalement = durée (le nœud du decay aussi verticalement = niveau de sustain) ;
-//  - nœud du délai à 0 ms : collé à la marge gauche, à tirer vers la droite ;
+//  - chaque segment activé a TOUJOURS sa poignée, même à 0 ms : délai collé à la marge gauche (ligne de base), attaque au
+//    sommet, decay sur la chute, relâchement au bout du plateau ; le hold à 0 ms a une poignée creuse sur le prolongement
+//    pointillé du niveau haut ;
 //  - poignée du plateau : glisser verticalement = niveau de sustain (active le decay au besoin) ;
 //  - poignée au milieu d'une courbe : glisser verticalement = forme ; double-clic = linéaire ; appui long / clic droit = dB ;
 //  - pendant un glissé l'échelle est figée : ce qui précède ne bouge pas ; au relâchement tout est recalculé.
@@ -43,10 +45,12 @@ private:
     enum class Part { Node, Shape, Chip, Sustain, None };
     struct Hit { Seg seg = Seg::None; Part part = Part::None; };
     struct Chip { Seg seg; juce::Rectangle<float> rect; juce::String text; };
+    struct Handle { Seg seg; Part part; juce::Point<float> pos; bool ghost; };
     struct Frame { juce::Rectangle<float> graph; float yTop, yBottom; neptune::core::EnvelopeLayout layout; std::vector<Chip> chips; };
 
     Frame frame() const;
     neptune::core::EnvelopeSegment& segment (neptune::core::EnvelopeDescription&, Seg) const;
+    std::vector<Handle> handles (const Frame&) const;
     Hit hitTest (juce::Point<float>) const;
     juce::Colour colour (neptune::core::theme::Token t) const;
     void changed();
