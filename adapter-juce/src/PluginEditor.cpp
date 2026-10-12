@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
 
 using neptune::core::theme::Token;
 
@@ -26,10 +27,48 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     {
         using namespace neptune::core;
         const auto& def = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
-        for (const ParamId id : { probe::masterVolume, probe::masterPan, probe::algorithm, probe::trackParam (0, probe::kVolume) })
+        for (const ParamId id : { sampler::gain, sampler::tuneSemitones, sampler::tuneCents })
             addAndMakeVisible (knobs_.add (new NeptuneKnob (processor_, id, palette_, def.knob,
                                                             [this] (ParamId pid, uistate::Terminal t) { openModal (pid, t); })));
     }
+    loadButton_.setButtonText (text ("sampler.load"));
+    loadButton_.onClick = [this] { chooseSample(); };
+    addAndMakeVisible (loadButton_);
+    statusLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
+    addAndMakeVisible (statusLabel_);
+
+    modeButton_.onClick = [this]
+    {
+        editZone ([] (neptune::core::ZoneDescription& z)
+                  { z.mode = z.mode == neptune::core::PlayMode::Loop ? neptune::core::PlayMode::OneShot : neptune::core::PlayMode::Loop; });
+    };
+    addAndMakeVisible (modeButton_);
+
+    rootSlider_.setRange (0.0, 127.0, 1.0);
+    rootSlider_.onValueChange = [this]
+    {
+        if (updatingControls_) return;
+        const int v = static_cast<int> (rootSlider_.getValue());
+        editZone ([v] (neptune::core::ZoneDescription& z) { z.rootNote = v; });
+    };
+    addAndMakeVisible (rootSlider_);
+    rootLabel_.setText (text ("sampler.root"), juce::dontSendNotification);
+    rootLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    addAndMakeVisible (rootLabel_);
+
+    releaseSlider_.setRange (1.0, 5000.0, 1.0);
+    releaseSlider_.setSkewFactorFromMidPoint (200.0);
+    releaseSlider_.onValueChange = [this]
+    {
+        if (updatingControls_) return;
+        const double v = releaseSlider_.getValue();
+        editZone ([v] (neptune::core::ZoneDescription& z) { z.releaseMs = v; });
+    };
+    addAndMakeVisible (releaseSlider_);
+    releaseLabel_.setText (text ("sampler.release"), juce::dontSendNotification);
+    releaseLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    addAndMakeVisible (releaseLabel_);
+
     undoButton_.setButtonText (text ("undo.undo"));
     redoButton_.setButtonText (text ("undo.redo"));
     undoButton_.onClick = [this] { processor_.uiUndo(); };
@@ -102,6 +141,74 @@ void NeptuneEditor::closeModal()
     grabKeyboardFocus();
 }
 
+void NeptuneEditor::chooseSample()
+{
+    chooser_ = std::make_unique<juce::FileChooser> (text ("sampler.choose"), juce::File(), "*.wav;*.aif;*.aiff;*.flac");
+    chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                           [safe = juce::Component::SafePointer<NeptuneEditor> (this)] (const juce::FileChooser& fc)
+                           {
+                               if (safe == nullptr) return;
+                               const auto file = fc.getResult();
+                               if (file == juce::File()) return; // annulé
+                               const auto path = file.getFullPathName().toStdString();
+                               safe->editZone ([&path] (neptune::core::ZoneDescription& z) { z.samplePath = path; });
+                           });
+}
+
+// Modifie la zone 0 (la crée avec les réglages par défaut si l'instrument est vide) et la republie.
+void NeptuneEditor::editZone (const std::function<void (neptune::core::ZoneDescription&)>& change)
+{
+    auto d = processor_.instrumentDescription();
+    const bool created = d.zones.empty();
+    if (created) d.zones.emplace_back();
+    change (d.zones.front());
+    if (created && d.zones.front().samplePath.empty()) return; // pas de sample : rien à jouer
+    processor_.setInstrumentDescription (std::move (d), /*forceReload*/ false);
+    updateSamplerControls();
+}
+
+juce::String NeptuneEditor::statusText() const
+{
+    using Kind = NeptuneProcessor::InstrumentStatus::Kind;
+    const auto st = processor_.instrumentStatus();
+    switch (st.kind)
+    {
+        case Kind::None: return text ("sampler.none");
+        case Kind::Loading: return text ("sampler.loading");
+        case Kind::Error: return juce::String::fromUTF8 (tr_.format ("sampler.error", { st.error }).c_str());
+        case Kind::Loaded:
+        {
+            const std::string name = st.name;
+            const std::string ch (tr_.tr (st.channels == 1 ? "sampler.mono" : "sampler.stereo"));
+            const auto rate = juce::String (st.sampleRate, 0).toStdString();
+            const auto secs = juce::String (st.seconds, 2).toStdString();
+            const auto bits = std::to_string (st.bitDepth);
+            const auto mb = juce::String (st.megabytes, 1).toStdString();
+            return juce::String::fromUTF8 (tr_.format ("sampler.loaded", { name, ch, rate, secs, bits, mb }).c_str());
+        }
+    }
+    return {};
+}
+
+void NeptuneEditor::updateSamplerControls()
+{
+    const auto d = processor_.instrumentDescription();
+    const neptune::core::ZoneDescription z = d.zones.empty() ? neptune::core::ZoneDescription {} : d.zones.front();
+    const auto modeName = tr_.tr (z.mode == neptune::core::PlayMode::Loop ? "sampler.mode_loop" : "sampler.mode_one_shot");
+    modeButton_.setButtonText (juce::String::fromUTF8 (tr_.format ("sampler.mode", { std::string (modeName) }).c_str()));
+
+    updatingControls_ = true;
+    if (! rootSlider_.isMouseButtonDown()) rootSlider_.setValue (z.rootNote, juce::dontSendNotification);
+    if (! releaseSlider_.isMouseButtonDown()) releaseSlider_.setValue (z.releaseMs, juce::dontSendNotification);
+    updatingControls_ = false;
+
+    statusLabel_.setText (statusText(), juce::dontSendNotification);
+    const bool has = ! d.zones.empty();
+    modeButton_.setEnabled (has);
+    rootSlider_.setEnabled (has);
+    releaseSlider_.setEnabled (has && z.mode == neptune::core::PlayMode::Loop);
+}
+
 void NeptuneEditor::updateUndoButtons()
 {
     undoButton_.setEnabled (processor_.undoManager().canUndo());
@@ -143,6 +250,7 @@ void NeptuneEditor::timerCallback()
     updateRecoveryBanner();
     updateProfileControls();
     updateUndoButtons();
+    updateSamplerControls();
     repaint();
 }
 
@@ -169,6 +277,21 @@ void NeptuneEditor::resized()
     restoreButton_.setBounds (banner.removeFromRight (90).reduced (2));
     recoveryLabel_.setBounds (banner);
     if (modal_) modal_->setBounds (getLocalBounds());
+
+    // Bande Sampler : chargement, état, mode, note racine, relâchement.
+    {
+        const int y = getHeight() - 270 - 120;
+        auto r = juce::Rectangle<int> (32, y, getWidth() - 64, 36);
+        loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
+        modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
+        statusLabel_.setBounds (r);
+        auto r2 = juce::Rectangle<int> (32, y + 42, getWidth() - 64, 36);
+        rootLabel_.setBounds (r2.removeFromLeft (190));
+        rootSlider_.setBounds (r2.removeFromLeft (170).reduced (2));
+        r2.removeFromLeft (24);
+        releaseLabel_.setBounds (r2.removeFromLeft (230));
+        releaseSlider_.setBounds (r2.removeFromLeft (200).reduced (2));
+    }
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {
@@ -222,12 +345,6 @@ void NeptuneEditor::paint (juce::Graphics& g)
         { "Master Mute",         probe::masterMute },
         { "FM Algorithm (1-32)", probe::algorithm },
         { "Track 1 Volume",      probe::trackParam (0, probe::kVolume) },
-        { "Track 1 Pan",         probe::trackParam (0, probe::kPan) },
-        { "Track 1 Mute",        probe::trackParam (0, probe::kMute) },
-        { "Track 1 Solo",        probe::trackParam (0, probe::kSolo) },
-        { "Track 1 Type",        probe::trackParam (0, probe::kType) },
-        { "Track 1 Insert 1 Bypass", probe::trackParam (0, probe::kInsertBypass) },
-        { "Track 1 Send 1 Level",    probe::trackParam (0, probe::kSendLevel) },
     };
 
     g.setFont (juce::FontOptions (16.0f));

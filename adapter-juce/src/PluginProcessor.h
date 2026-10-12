@@ -12,6 +12,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "HostProbe.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Engine.h"
+#include "neptune/core/Instrument.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 #include "neptune/core/Settings.h"
@@ -74,6 +75,20 @@ public:
     bool uiRedo();
     const neptune::core::UndoManager& undoManager() const { return undo_; }
 
+    // Instrument du Sampler (palier 1). La description (chemins + réglages de zone) est sauvegardée dans le projet ;
+    // le chargement des fichiers se fait sur un thread dédié, jamais sur le thread audio ni sur le thread de message.
+    struct InstrumentStatus
+    {
+        enum class Kind { None, Loading, Loaded, Error } kind = Kind::None;
+        std::string name, error;
+        int channels = 0, bitDepth = 0;
+        double sampleRate = 0.0, seconds = 0.0, megabytes = 0.0;
+    };
+    neptune::core::InstrumentDescription instrumentDescription() const; // copie
+    // Thread de message. `forceReload` : relire les fichiers même si le chemin n'a pas changé. Marque le projet modifié.
+    void setInstrumentDescription (neptune::core::InstrumentDescription, bool forceReload = false);
+    InstrumentStatus instrumentStatus() const;
+
     // Taille mémorisée de la modale des potards (par type de terminal), enregistrée dans ui_state.json.
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const { return uiState_.modalSize (t); }
     void setModalSize (neptune::core::uistate::Terminal, neptune::core::uistate::Size);
@@ -92,6 +107,9 @@ private:
     neptune::core::Engine engine_;
     neptune::core::InstanceProfile profile_;
     neptune::core::UndoManager undo_; // thread message uniquement
+    mutable juce::CriticalSection instrumentLock_;
+    neptune::core::InstrumentDescription instrument_; // protégé par instrumentLock_
+    InstrumentStatus status_;                          // protégé par instrumentLock_
     neptune::core::uistate::UiState uiState_;
     std::filesystem::path uiStateFile_;
     int probeTracks_ = 0;
@@ -99,12 +117,16 @@ private:
     HostProbe hostProbe_;
 
     void autosaveNow();
+    class InstrumentLoader;
+    void adoptInstrumentFromState (const std::optional<neptune::core::InstrumentDescription>&);
+    void setStatus (InstrumentStatus);
     std::string currentStateText() const; // état complet tel qu'écrit dans le projet et dans l'autosave
     void adoptStateIdentity (const std::string& idFromState);
 
     neptune::core::settings::GlobalSettings settings_;
     std::filesystem::path settingsFile_;
     std::unique_ptr<neptune::core::AutosaveStore> autosave_;
+    std::unique_ptr<InstrumentLoader> loader_; // après engine_ : détruit avant lui
     mutable juce::CriticalSection recoveryLock_;
     std::optional<neptune::core::RecoveredState> recovered_; // protégé par recoveryLock_
 

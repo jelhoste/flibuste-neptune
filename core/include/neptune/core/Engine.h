@@ -1,12 +1,18 @@
 #pragma once
 #include <cstdint>
 
+#include <memory>
+
+#include "neptune/core/Instrument.h"
+#include "neptune/core/InstrumentSlot.h"
+#include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
+#include "neptune/core/SamplerVoices.h"
 
 namespace neptune::core
 {
 // Frontière unique entre le cœur et les adaptateurs (JUCE/CLAP, tests, futur web).
-// Squelette du palier 0 : aucune synthèse, il produit du silence.
+// Palier 1 : lecture de samples (SamplerVoices) sur la sortie 1 (canaux 0 et 1) ; les autres sorties restent silencieuses.
 class Engine
 {
 public:
@@ -19,6 +25,14 @@ public:
     void setProfile (PerformanceProfile p) noexcept { profile_ = p; }
     PerformanceProfile profile() const noexcept { return profile_; }
 
+    // Paramètres lus à chaque bloc (gain et accordage globaux, SamplerParams.h). Appelé hors temps réel, avant l'audio.
+    void attachParameters (const ParameterSet* parameters) noexcept;
+
+    // Instrument : thread de message. L'audio l'adopte au début du bloc suivant ; les voix en cours s'arrêtent.
+    void publishInstrument (std::shared_ptr<const Instrument> instrument) { slot_.publish (std::move (instrument)); }
+    void collectGarbage() { slot_.collect(); } // thread de message, régulièrement
+
+    int activeVoices() const noexcept { return voices_.activeVoices(); }
     double sampleRate() const noexcept { return sampleRate_; }
     int activeNotes() const noexcept { return activeNotes_; }
 
@@ -27,5 +41,11 @@ private:
     int maxBlockSize_ = 0;
     int activeNotes_ = 0;
     PerformanceProfile profile_ = PerformanceProfile::Live;
+
+    InstrumentSlot slot_;
+    SamplerVoices voices_;
+    const ParameterSet* params_ = nullptr;
+    std::size_t gainIndex_ = ParameterSet::npos, tuneSemiIndex_ = ParameterSet::npos, tuneCentsIndex_ = ParameterSet::npos;
+    float lastGain_ = 1.0f;
 };
 } // namespace neptune::core

@@ -6,7 +6,7 @@ Outil : `tests/perf_callback.cpp` → exécutable `neptune_perf_callback` (cible
 
 `Engine::process()` du cœur seul (pas l'adaptateur JUCE : il ne se compile pas en local). 128 canaux (64 sorties stéréo), 48 kHz. Dix scénarios : blocs de 32, 64, 128, 256, 512 échantillons × `idle` (aucune note, aucun paramètre) et `loaded` (64 notes tenues, 64 `setParameter` avant chaque bloc, sur les identifiants réels du pool sonde). Par scénario : médiane, min et max sur 21 répétitions (temps par bloc) et part du budget temps réel (durée du bloc).
 
-Limite actuelle : le moteur ne produit que du silence, donc les chiffres mesurent surtout l'écriture de 128 tampons. Le tableau devient significatif au fur et à mesure que le moteur grossit ; les scénarios sont à enrichir en même temps (voix, pistes, inserts).
+Depuis le palier 1, `loaded` joue un instrument réel : un sample stéréo float de 2 s en boucle, 64 voix tenues, interpolation de Hermite (c'est la limite de voix). `idle` mesure le coût de base (128 tampons mis à zéro). Les scénarios sont à enrichir avec le moteur (enveloppes, filtres, pistes, inserts).
 
 ## Utilisation (avant/après une refactorisation, sur la même machine)
 

@@ -2,6 +2,7 @@
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
 #include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
 #include "neptune/core/State.h"
 
 #ifndef NEPTUNE_PROBE_TRACKS
@@ -26,6 +27,132 @@ std::filesystem::path configDirectory()
 }
 }
 
+// Thread de chargement des samples : construit l'instrument (lit le disque), le publie au moteur, et libère les
+// instruments rendus par le thread audio. Seul consommateur de la file de collecte (InstrumentSlot::collect).
+class NeptuneProcessor::InstrumentLoader : public juce::Thread
+{
+public:
+    explicit InstrumentLoader (NeptuneProcessor& owner) : juce::Thread ("Neptune sample loader"), owner_ (owner) { startThread(); }
+    ~InstrumentLoader() override { stopThread (15000); }
+
+    void request (neptune::core::InstrumentDescription d, bool force)
+    {
+        {
+            const juce::ScopedLock lock (lock_);
+            pending_ = std::move (d);
+            hasPending_ = true;
+            force_ = force_ || force;
+        }
+        notify();
+    }
+
+    void run() override
+    {
+        while (! threadShouldExit())
+        {
+            wait (500);
+            owner_.engine_.collectGarbage();
+
+            neptune::core::InstrumentDescription d;
+            bool force = false;
+            {
+                const juce::ScopedLock lock (lock_);
+                if (! hasPending_) continue;
+                d = std::move (pending_);
+                hasPending_ = false;
+                force = force_;
+                force_ = false;
+            }
+
+            if (force) cache_.clear();
+            InstrumentStatus st;
+            if (d.empty())
+            {
+                owner_.engine_.publishInstrument (std::make_shared<neptune::core::Instrument>());
+                owner_.setStatus (st); // None
+                continue;
+            }
+
+            st.kind = InstrumentStatus::Kind::Loading;
+            owner_.setStatus (st);
+            std::vector<std::string> warnings;
+            auto inst = neptune::core::buildInstrument (d, &warnings, &cache_);
+            if (threadShouldExit()) break;
+
+            owner_.engine_.publishInstrument (inst);
+            st = {};
+            if (! inst->zones.empty())
+            {
+                const auto& sd = *inst->zones.front().sample;
+                st.kind = InstrumentStatus::Kind::Loaded;
+                st.name = sd.name;
+                st.channels = sd.channels;
+                st.bitDepth = sd.sourceBitDepth;
+                st.sampleRate = sd.sampleRate;
+                st.seconds = sd.durationSeconds();
+                double bytes = 0.0;
+                for (const auto& z : inst->zones) bytes += static_cast<double> (z.sample->bytes());
+                st.megabytes = bytes / (1024.0 * 1024.0);
+            }
+            else
+            {
+                st.kind = InstrumentStatus::Kind::Error;
+                st.error = warnings.empty() ? "no usable zone" : warnings.front();
+            }
+            owner_.setStatus (st);
+        }
+    }
+
+private:
+    NeptuneProcessor& owner_;
+    juce::CriticalSection lock_;
+    neptune::core::InstrumentDescription pending_;
+    bool hasPending_ = false, force_ = false;
+    neptune::core::SampleCache cache_; // thread du chargeur uniquement
+};
+
+neptune::core::InstrumentDescription NeptuneProcessor::instrumentDescription() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return instrument_;
+}
+
+NeptuneProcessor::InstrumentStatus NeptuneProcessor::instrumentStatus() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return status_;
+}
+
+void NeptuneProcessor::setStatus (InstrumentStatus s)
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    status_ = std::move (s);
+}
+
+void NeptuneProcessor::setInstrumentDescription (neptune::core::InstrumentDescription d, bool forceReload)
+{
+    for (auto& z : d.zones) z = neptune::core::sanitised (z);
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        if (d == instrument_ && ! forceReload) return;
+        instrument_ = d;
+    }
+    loader_->request (std::move (d), forceReload);
+    notifyStateChanged(); // la description fait partie de l'état du projet
+}
+
+// Chargement d'un état (projet ou autosave) : ne marque pas le projet modifié.
+void NeptuneProcessor::adoptInstrumentFromState (const std::optional<neptune::core::InstrumentDescription>& d)
+{
+    if (! d) return;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        if (*d == instrument_) return;
+        instrument_ = *d;
+    }
+    loader_->request (*d, false);
+}
+
 NeptuneProcessor::BusesProperties NeptuneProcessor::makeBuses (int numOutputs)
 {
     BusesProperties props;
@@ -42,7 +169,10 @@ NeptuneProcessor::NeptuneProcessor()
     std::string error;
     const bool ok = neptune::core::probe::buildPool (params_, probeTracks_, &error);
     jassert (ok);
-    juce::ignoreUnused (ok);
+    const bool samplerOk = neptune::core::sampler::addParams (params_, &error);
+    jassert (samplerOk);
+    juce::ignoreUnused (ok, samplerOk);
+    engine_.attachParameters (&params_);
 
     for (std::size_t i = 0; i < params_.size(); ++i)
         addParameter (new NeptuneParameter (params_, i, hostProbe_)); // l'AudioProcessor en prend la propriété
@@ -54,6 +184,7 @@ NeptuneProcessor::NeptuneProcessor()
     settings_ = neptune::core::settings::loadFile (settingsFile_, &warnings);
     for (const auto& w : warnings)
         DBG ("Neptune settings: " << juce::String (w));
+    loader_ = std::make_unique<InstrumentLoader> (*this);
     uiStateFile_ = configDir / "ui_state.json";
     uiState_ = neptune::core::uistate::loadFile (uiStateFile_);
 
@@ -84,7 +215,8 @@ NeptuneProcessor::~NeptuneProcessor()
 
 std::string NeptuneProcessor::currentStateText() const
 {
-    return neptune::core::state::save (params_, autosave_->id(), profile_.locked());
+    const auto instrument = instrumentDescription();
+    return neptune::core::state::save (params_, autosave_->id(), profile_.locked(), &instrument);
 }
 
 // Changement d'état qui n'est pas un paramètre (le verrou de profil) : le wrapper CLAP le traduit en
@@ -213,7 +345,10 @@ void NeptuneProcessor::restoreRecovered()
         DBG ("Neptune: recovered state not loaded: " << juce::String (result.message));
     }
     else
+    {
         profile_.setLocked (result.profileLock);
+        adoptInstrumentFromState (result.instrument);
+    }
     autosave_->resolveRecovered();
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
     autosaveNow();
@@ -293,6 +428,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
 
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
+    adoptInstrumentFromState (result.instrument);
     adoptStateIdentity (result.instanceId);
 
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`

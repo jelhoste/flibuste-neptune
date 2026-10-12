@@ -1,6 +1,6 @@
 # Passage de relais — état du projet Neptune
 
-Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale validé sous Windows (tactile) et Linux).
+Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale validé sous Windows (tactile) et Linux ; palier 0 complet ; palier 1 jalon 1 écrit).
 
 ## Règles de travail de l'utilisateur
 
@@ -29,9 +29,9 @@ Le moteur ne produit que du silence. Le plugin charge, expose 676 paramètres «
 ## Architecture du dépôt
 
 ```
-core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile, KnobInteraction, UiState)
+core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile, KnobInteraction, UiState, SampleLoader, Instrument, SamplerVoices, SamplerParams)
 adapter-juce/    fine couche JUCE/CLAP : NeptuneParameter, PluginProcessor, PluginEditor
-tests/           Catch2 : tests du cœur (93 au 2026-10-12) + `neptune_perf_callback` (voir docs/performance.md)
+tests/           Catch2 : tests du cœur (115 au 2026-10-12) + `neptune_perf_callback` (voir docs/performance.md)
 cmake/           Dependencies.cmake : toutes les dépendances, versions figées
 design/          maquette HTML (neptune_ui.html) + briques de style NOVA copiées telles quelles
 docs/            brief, roadmap, spec, ce fichier
@@ -40,7 +40,7 @@ docs/            brief, roadmap, spec, ce fichier
 
 Règle d'architecture : le cœur n'inclut jamais JUCE. L'adaptateur ne contient aucune logique métier.
 
-Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUNE_PROBE_TRACKS` (32), `NEPTUNE_WITH_AUDIO_IO` (OFF : libsndfile 1.2.2 + libebur128 v1.2.6, prêts mais inutilisés).
+Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUNE_PROBE_TRACKS` (32), `NEPTUNE_WITH_LIBSNDFILE` (ON : libsndfile 1.2.2 + dr_flac, lecture des samples), `NEPTUNE_WITH_EBUR128` (OFF : libebur128 v1.2.6, pas encore utilisé).
 
 ## Build, tests, CI
 
@@ -116,6 +116,17 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Thèmes** (`Theme.h`) : les 4 thèmes avec leurs **jetons de couleur copiés de la maquette** (mêmes noms, `tokenCssName()`), style de potard (led/pot), style de contrôles (glass/bezel/hc), rayons, épaisseur de bordure. `withContrast(def, niveau)` est le **port exact de `design/nova-contrast.js`** ; vérifié en exécutant le JS réel dans le volet navigateur : 163 valeurs sur 163 identiques (3 thèmes × niveaux 1–4). Le thème haut contraste n'est jamais modifié.
 - **Pas repris** : les ombres (`--csh`, `--fsh`, `--ctl-sh`) et les dimensions des composants des contrôles (`nova-controls.css`) ; à décider quand les composants de l'interface seront écrits.
 - **Branché** : seulement la fenêtre de sonde (couleurs depuis le thème/contraste de `settings.json`, textes de la bannière de récupération et de la latence via les clés). Pas de menu : on édite `settings.json`, lu une fois au démarrage. Partie adaptateur compilée par la CI (verte) et **validée dans Reaper par l'utilisateur** (langue, thème, contraste).
+
+## Palier 1 — jalon 1 : un sample, tout le clavier, boucle (écrit, à valider dans Reaper)
+
+- **Décisions de l'utilisateur (2026-10-12)** : FLAC par **dr_flac** (libsndfile ne le lit pas sans libFLAC, absente de la chaîne de build ; WAV/AIFF par libsndfile) ; samples **16 bits gardés en int16, le reste en float32** ; premier jalon = **1 sample, clavier, one-shot/boucle** ; « repeat » de la roadmap = **même chose que boucle** (deux modes : one-shot et boucle).
+- **Cœur** : `SampleData` (immuable, planaire), `SampleLoader` (WAV/AIFF/FLAC, mono/stéréo), `Instrument` + `InstrumentDescription` (JSON), `SamplerVoices` (64 voix tenues + 16 emplacements de fondu de vol ; interpolation de Hermite ; one-shot ignore le Note Off ; boucle = fondu de relâchement ; vol de la plus ancienne voix en 3 ms), `InstrumentSlot` (remise lock-free au thread audio, l'audio ne libère jamais de mémoire), `SamplerParams` (ids 100–102 : gain dB, accordage demi-tons, accordage cents). `Engine` joue sur la sortie 1 (canaux 0 et 1).
+- **Réglages de zone** (note racine, mode, relâchement, étendues, boucle, accordage, gain) **ne sont pas des paramètres** : ils vivent dans la zone, sauvegardés dans le projet (schéma d'état **v3**, champ « instrument », migrations v1→v2→v3 sans transformation). Seuls le gain et l'accordage globaux sont des paramètres (automatisables, potards).
+- **Adaptateur** : thread de chargement dédié (jamais audio ni message) avec cache des fichiers déjà lus ; bouton « Load sample… », mode, note racine (numéro MIDI), relâchement, état du chargement ; 3 potards (gain, accordage demi-tons, fin). La fenêtre de sonde a perdu 6 de ses 11 lignes de paramètres (place) et ses 4 potards de test.
+- **Chemins** : absolus pour l'instant (la résolution relative / recherche par nom / relocalisation de la spec §20 viendra avec les presets). Un fichier introuvable à la réouverture du projet : « Cannot load » dans la fenêtre, pas de son.
+- **Coût mesuré** (`neptune_perf_callback`, machine de développement, 64 voix en boucle, Hermite, stéréo float) : environ **5 % du budget temps réel** quel que soit le bloc (32 à 512). Aucune optimisation faite (accès `at()` avec branche int16/float par échantillon).
+- **Limites connues du jalon** : une seule zone dans l'interface (le modèle en gère plusieurs) ; pas de pédale de sustain, pitch bend ni aftertouch ; vélocité = gain linéaire (pas de courbe) ; interpolation identique en Live et en Studio (le profil est disponible dans `Engine::profile()` mais pas encore utilisé) ; pas de points de boucle lus dans les fichiers (WAV `smpl`) ni de fondu enchaîné de boucle ; note-off d'un one-shot ignoré par construction.
+- **Suite du palier 1** (ordre proposé) : enveloppe AHDSHR, zones et couches de vélocité dans l'interface, polyphonie (modes de vol, retrigger/legato, choke, limite globale réglable), filtre par voie, mixeur multi-pistes, RAM/streaming, synthé soustractif.
 
 ## Potard générique et modale (palier 0)
 

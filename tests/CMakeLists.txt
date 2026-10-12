@@ -1,5 +1,5 @@
-add_executable(neptune_core_tests test_engine.cpp test_parameter.cpp test_autosave.cpp test_knob_interaction.cpp test_probe_pool.cpp test_profile.cpp test_settings.cpp test_state.cpp test_theme.cpp test_ui_state.cpp test_i18n.cpp test_undo.cpp)
-target_link_libraries(neptune_core_tests PRIVATE neptune_core Catch2::Catch2WithMain)
+add_executable(neptune_core_tests test_engine.cpp test_parameter.cpp test_autosave.cpp test_knob_interaction.cpp test_probe_pool.cpp test_profile.cpp test_sampler.cpp test_sample_loader.cpp test_settings.cpp test_state.cpp test_theme.cpp test_ui_state.cpp test_i18n.cpp test_undo.cpp)
+target_link_libraries(neptune_core_tests PRIVATE neptune_core SndFile::sndfile Catch2::Catch2WithMain) # SndFile : les tests écrivent des WAV
 include(CTest)
 include(Catch)
 catch_discover_tests(neptune_core_tests)

@@ -25,7 +25,8 @@ LoadResult fail (Status status, std::string message, int version = 0)
 const MigrationTable& registeredMigrations()
 {
     // v1 -> v2 : « profile_lock » est facultatif (absent = non verrouillé), le document v1 est déjà un v2 valide.
-    static const MigrationTable table = { { 1, [] (nlohmann::json&) { return true; } } };
+    // v2 -> v3 : « instrument » est facultatif (absent = pas d'instrument), rien à transformer non plus.
+    static const MigrationTable table = { { 1, [] (nlohmann::json&) { return true; } }, { 2, [] (nlohmann::json&) { return true; } } };
     return table;
 }
 
@@ -49,7 +50,8 @@ bool migrate (nlohmann::json& doc, int from, int to, const MigrationTable& table
     return true;
 }
 
-std::string save (const ParameterSet& set, std::string_view instanceId, std::optional<PerformanceProfile> profileLock)
+std::string save (const ParameterSet& set, std::string_view instanceId, std::optional<PerformanceProfile> profileLock,
+                 const InstrumentDescription* instrument)
 {
     nlohmann::json params = nlohmann::json::object();
     for (std::size_t i = 0; i < set.size(); ++i)
@@ -62,6 +64,8 @@ std::string save (const ParameterSet& set, std::string_view instanceId, std::opt
         doc["instance_id"] = std::string (instanceId);
     if (profileLock)
         doc["profile_lock"] = toString (*profileLock);
+    if (instrument != nullptr)
+        doc["instrument"] = nlohmann::json::parse (toJson (*instrument));
     doc["parameters"] = std::move (params);
     return doc.dump (2);
 }
@@ -109,6 +113,8 @@ LoadResult load (ParameterSet& set, std::string_view text)
         result.instanceId = id->get<std::string>();
     if (const auto lk = doc.find ("profile_lock"); lk != doc.end() && lk->is_string())
         result.profileLock = profileFromString (lk->get<std::string>()); // valeur inconnue : non verrouillé
+    if (const auto ins = doc.find ("instrument"); ins != doc.end() && ins->is_object())
+        result.instrument = instrumentFromJson (ins->dump());
 
     for (const auto& [key, value] : params->items())
     {

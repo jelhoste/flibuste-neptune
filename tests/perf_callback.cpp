@@ -7,6 +7,8 @@
 //   neptune_perf_callback --compare avant.json    compare ; code de sortie 1 si régression
 //                         [--tolerance 25]        seuil en % (défaut 25)
 #include "neptune/core/Engine.h"
+#include "neptune/core/Instrument.h"
+#include "neptune/core/SamplerParams.h"
 #include "neptune/core/ProbePool.h"
 #include <nlohmann/json.hpp>
 
@@ -51,6 +53,9 @@ double g_sink = 0.0;
 Result run (const Scenario& s)
 {
     Engine engine;
+    neptune::core::ParameterSet params;
+    neptune::core::sampler::addParams (params);
+    engine.attachParameters (&params);
     engine.prepare (kSampleRate, s.blockSize);
 
     std::vector<std::vector<float>> storage (kChannels, std::vector<float> (static_cast<size_t> (s.blockSize), 0.5f));
@@ -68,6 +73,25 @@ Result run (const Scenario& s)
             ids.push_back (probe::trackParam (t, off));
         }
 
+    // Charge représentative : un instrument stéréo float de 2 s joué en boucle, notes tenues réparties sur le clavier.
+    if (s.heldNotes > 0)
+    {
+        auto sample = std::make_shared<neptune::core::SampleData>();
+        sample->channels = 2;
+        sample->frames = static_cast<std::int64_t> (2.0 * kSampleRate);
+        sample->sampleRate = kSampleRate;
+        sample->pcm32.resize (static_cast<std::size_t> (sample->frames) * 2);
+        for (std::int64_t i = 0; i < sample->frames; ++i)
+        {
+            const float v = 0.3f * std::sin (6.2831853f * 220.0f * static_cast<float> (i) / static_cast<float> (kSampleRate));
+            sample->pcm32[static_cast<std::size_t> (i)] = v;
+            sample->pcm32[static_cast<std::size_t> (sample->frames + i)] = -v;
+        }
+        auto inst = std::make_shared<neptune::core::Instrument>();
+        inst->zones.push_back (neptune::core::makeFullKeyboardZone (std::move (sample), 60, neptune::core::PlayMode::Loop));
+        engine.publishInstrument (std::move (inst));
+        engine.process (chans.data(), kChannels, s.blockSize); // adopte l'instrument
+    }
     for (int n = 0; n < s.heldNotes; ++n) engine.noteOn (n % 16, 36 + n % 64, 0.8f);
 
     size_t idCursor = 0;

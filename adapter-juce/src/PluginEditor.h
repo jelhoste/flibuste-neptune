@@ -34,6 +34,18 @@ private:
     juce::OwnedArray<NeptuneKnob> knobs_;
     std::unique_ptr<KnobModal> modal_;
     juce::TextButton undoButton_, redoButton_;
+
+    // Sampler (palier 1) : chargement d'un sample et réglages de la zone (le premier jalon n'a qu'une zone).
+    juce::TextButton loadButton_, modeButton_;
+    juce::Label statusLabel_, rootLabel_, releaseLabel_;
+    juce::Slider rootSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    juce::Slider releaseSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    std::unique_ptr<juce::FileChooser> chooser_;
+    bool updatingControls_ = false;
+    void chooseSample();
+    void editZone (const std::function<void (neptune::core::ZoneDescription&)>&);
+    void updateSamplerControls();
+    juce::String statusText() const;
     void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
     void closeModal();
     void updateUndoButtons();

@@ -39,20 +39,50 @@ if(NEPTUNE_BUILD_PLUGIN)
   FetchContent_MakeAvailable(JUCE clap_juce_extensions)
 endif()
 
-# --- Lecture/analyse audio (palier 1) : désactivé tant qu'il n'est pas utilisé ---
-# libsndfile 1.2.2 (LGPL) et libebur128 v1.2.6 (MIT). Activer avec -DNEPTUNE_WITH_AUDIO_IO=ON.
-option(NEPTUNE_WITH_AUDIO_IO "Activer libsndfile + libebur128" OFF)
-if(NEPTUNE_WITH_AUDIO_IO)
+# --- Lecture de fichiers audio (palier 1) ----------------------------------
+# libsndfile 1.2.2 (LGPL, compatible AGPLv3) : WAV et AIFF, intégrés. Le FLAC n'y est PAS lu (il exige libFLAC, absente de
+# cette chaîne de build) : il passe par dr_flac (domaine public / MIT-0), un seul fichier d'en-tête.
+# On fige la configuration de libsndfile pour que le résultat ne dépende pas des bibliothèques installées sur la machine :
+# ni codecs externes (FLAC/Vorbis/Opus), ni MPEG.
+option(NEPTUNE_WITH_LIBSNDFILE "Lire les samples (libsndfile + dr_flac)" ON)
+if(NEPTUNE_WITH_LIBSNDFILE)
   set(BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(BUILD_TESTING  OFF CACHE BOOL "" FORCE)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(ENABLE_EXTERNAL_LIBS OFF CACHE BOOL "" FORCE)
+  set(ENABLE_MPEG OFF CACHE BOOL "" FORCE)
+  set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
+  set(ENABLE_PACKAGE_CONFIG OFF CACHE BOOL "" FORCE)
+  set(INSTALL_PKGCONFIG_MODULE OFF CACHE BOOL "" FORCE)
+  set(INSTALL_MANPAGES OFF CACHE BOOL "" FORCE)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON) # liée dans le .clap
+  # libsndfile 1.2.2 déclare une version minimale de CMake trop ancienne pour CMake 4 : on l'autorise explicitement.
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
   FetchContent_Declare(libsndfile
     GIT_REPOSITORY https://github.com/libsndfile/libsndfile.git
     GIT_TAG        1.2.2
     GIT_SHALLOW    TRUE)
+  FetchContent_MakeAvailable(libsndfile)
+
+  # dr_libs, étiquette flac-0.13.3 : on n'utilise que dr_flac.h (inclus par SampleLoader.cpp).
+  FetchContent_Declare(dr_libs
+    GIT_REPOSITORY https://github.com/mackron/dr_libs.git
+    GIT_TAG        flac-0.13.3
+    GIT_SHALLOW    TRUE)
+  FetchContent_GetProperties(dr_libs)
+  if(NOT dr_libs_POPULATED)
+    FetchContent_Populate(dr_libs)
+  endif()
+endif()
+
+# --- Analyse de niveau (plus tard : LUFS, spec-modules §3) : désactivé tant qu'il n'est pas utilisé ---
+# libebur128 v1.2.6 (MIT). Activer avec -DNEPTUNE_WITH_EBUR128=ON.
+option(NEPTUNE_WITH_EBUR128 "Activer libebur128" OFF)
+if(NEPTUNE_WITH_EBUR128)
   FetchContent_Declare(libebur128
     GIT_REPOSITORY https://github.com/jiixyj/libebur128.git
     GIT_TAG        v1.2.6
     GIT_SHALLOW    TRUE)
-  FetchContent_MakeAvailable(libsndfile libebur128)
+  FetchContent_MakeAvailable(libebur128)
 endif()
