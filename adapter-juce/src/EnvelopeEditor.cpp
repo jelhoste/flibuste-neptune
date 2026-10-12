@@ -336,6 +336,7 @@ void EnvelopeEditor::mouseDown (const juce::MouseEvent& e)
     moved_ = false;
     frozenScale_ = 0.0;
     if (drag_.part == Part::None) return;
+    if (onGestureBegin) onGestureBegin();
     downMs_ = segment (env_, drag_.seg).ms;
     highlight_ = drag_.part == Part::Chip ? drag_.seg : Seg::None;
     if (drag_.part != Part::Chip) frozenScale_ = frame().layout.scale; // échelle figée pendant le glissé
@@ -414,6 +415,7 @@ void EnvelopeEditor::mouseDrag (const juce::MouseEvent& e)
 void EnvelopeEditor::mouseUp (const juce::MouseEvent&)
 {
     const Hit hit = drag_;
+    if (hit.part != Part::None && onGestureEnd) onGestureEnd();
     const bool tapped = ! moved_ && ! longPressFired_;
     drag_ = {};
     frozenScale_ = 0.0; // au relâchement : tout est recalculé

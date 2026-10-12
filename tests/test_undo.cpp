@@ -188,3 +188,35 @@ TEST_CASE ("undo and redo on an empty history are harmless")
     CHECK_FALSE (f.um.redo());
     CHECK (f.um.undoName().empty());
 }
+
+TEST_CASE ("snapshot command: undo/redo restores whole values, a gesture merges into one entry")
+{
+    UndoManager um;
+    int value = 0;
+    auto apply = [&value] (const int& v) { value = v; };
+    auto edit = [&] (int to, const char* key)
+    {
+        um.perform (std::make_unique<SnapshotCommand<int>> (value, to, apply, "Edit", key));
+    };
+
+    um.beginGesture();
+    edit (1, "k"); edit (2, "k"); edit (3, "k");
+    um.endGesture();
+    CHECK (value == 3);
+    CHECK (um.undoSize() == 1);
+
+    edit (4, "k"); // hors geste : entrée distincte
+    edit (5, "k");
+    CHECK (um.undoSize() == 3);
+
+    um.beginGesture();
+    edit (6, ""); edit (7, ""); // clé vide : jamais fusionnées
+    um.endGesture();
+    CHECK (um.undoSize() == 5);
+
+    CHECK (um.undo()); CHECK (um.undo()); CHECK (value == 5);
+    CHECK (um.undo()); CHECK (value == 4);
+    CHECK (um.undo()); CHECK (value == 3);
+    CHECK (um.undo()); CHECK (value == 0);
+    CHECK (um.redo()); CHECK (value == 3);
+}

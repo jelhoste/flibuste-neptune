@@ -90,6 +90,11 @@ public:
     neptune::core::InstrumentDescription instrumentDescription() const; // copie
     // Thread de message. `forceReload` : relire les fichiers même si le chemin n'a pas changé. Marque le projet modifié.
     void setInstrumentDescription (neptune::core::InstrumentDescription, bool forceReload = false);
+    // Même chose, mais annulable : passe par l'historique (une seule entrée par geste si `mergeKey` est non vide et que
+    // uiBeginGesture/uiEndGesture entourent le geste). À utiliser pour toute modification venant de l'utilisateur.
+    void uiEditInstrument (neptune::core::InstrumentDescription, std::string name, std::string mergeKey = {});
+    void uiBeginGesture() { undo_.beginGesture(); }
+    void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const;
     // Change à chaque modification de la description : l'interface compare ce nombre au lieu de comparer tout l'instrument.
     std::uint32_t instrumentRevision() const noexcept { return revision_.load(); }

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -45,6 +46,34 @@ private:
     double oldValue_;
     double newValue_;
     std::string name_;
+};
+
+// Remplacement d'une valeur complète (ex. la description de l'instrument) : garde l'ancienne et la nouvelle valeur
+// et les réapplique par `apply`. Deux commandes consécutives de même `mergeKey` non vide (dans un même geste continu,
+// voir UndoManager::beginGesture) fusionnent en une seule entrée.
+template <typename T>
+class SnapshotCommand : public Command
+{
+public:
+    SnapshotCommand (T oldValue, T newValue, std::function<void (const T&)> apply, std::string name, std::string mergeKey = {})
+        : old_ (std::move (oldValue)), new_ (std::move (newValue)), apply_ (std::move (apply)),
+          name_ (std::move (name)), mergeKey_ (std::move (mergeKey)) {}
+
+    void redo() override { apply_ (new_); }
+    void undo() override { apply_ (old_); }
+    std::string name() const override { return name_; }
+    bool mergeWith (const Command& next) override
+    {
+        const auto* other = dynamic_cast<const SnapshotCommand<T>*> (&next);
+        if (other == nullptr || mergeKey_.empty() || other->mergeKey_ != mergeKey_) return false;
+        new_ = other->new_;
+        return true;
+    }
+
+private:
+    T old_, new_;
+    std::function<void (const T&)> apply_;
+    std::string name_, mergeKey_;
 };
 
 // Plusieurs commandes annulées/rétablies d'un bloc (action structurelle, « tout réinitialiser »...).

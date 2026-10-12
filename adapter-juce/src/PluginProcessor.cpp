@@ -168,6 +168,17 @@ void NeptuneProcessor::setInstrumentDescription (neptune::core::InstrumentDescri
     notifyStateChanged(); // la description fait partie de l'état du projet
 }
 
+void NeptuneProcessor::uiEditInstrument (neptune::core::InstrumentDescription d, std::string name, std::string mergeKey)
+{
+    for (auto& z : d.zones) z = neptune::core::sanitised (z);
+    auto previous = instrumentDescription();
+    if (previous == d) return;
+    undo_.perform (std::make_unique<neptune::core::SnapshotCommand<neptune::core::InstrumentDescription>> (
+        std::move (previous), std::move (d),
+        [this] (const neptune::core::InstrumentDescription& v) { setInstrumentDescription (v, false); },
+        std::move (name), std::move (mergeKey)));
+}
+
 // Chargement d'un état (projet ou autosave) : ne marque pas le projet modifié.
 void NeptuneProcessor::adoptInstrumentFromState (const std::optional<neptune::core::InstrumentDescription>& d)
 {
@@ -464,6 +475,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
         return;
     }
 
+    undo_.clear(); // l'historique d'un autre état ne s'applique plus (il restaurerait un ancien instrument)
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
     adoptInstrumentFromState (result.instrument);
     adoptStateIdentity (result.instanceId);

@@ -29,6 +29,7 @@ public:
     ~EnvelopeEditor() override { stopTimer(); }
 
     std::function<void (const neptune::core::EnvelopeDescription&)> onChange; // à chaque modification par l'utilisateur
+    std::function<void()> onGestureBegin, onGestureEnd;                       // entourent un glissé : une seule entrée d'annulation
     void setEnvelope (const neptune::core::EnvelopeDescription&);            // sans notification
 
     void paint (juce::Graphics&) override;

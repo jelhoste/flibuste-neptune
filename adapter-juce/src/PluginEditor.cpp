@@ -57,13 +57,13 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     {
         auto d = processor_.instrumentDescription();
         d.mainRoundRobinOnly = ! rrToggle_.getToggleState(); // coché = les alternatives sont chargées
-        processor_.setInstrumentDescription (std::move (d));
+        processor_.uiEditInstrument (std::move (d), "Load round-robin alternates");
     };
     releaseToggle_.onClick = [this]
     {
         auto d = processor_.instrumentDescription();
         d.loadReleaseSamples = releaseToggle_.getToggleState();
-        processor_.setInstrumentDescription (std::move (d));
+        processor_.uiEditInstrument (std::move (d), "Load release samples");
     };
     groupsViewport_.setViewedComponent (&groupsHolder_, false);
     addAndMakeVisible (groupsViewport_);
@@ -91,6 +91,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addAndMakeVisible (rootLabel_);
 
     envelopeEditor_ = std::make_unique<EnvelopeEditor> (palette_, tr_);
+    envelopeEditor_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
+    envelopeEditor_->onGestureEnd = [this] { processor_.uiEndGesture(); };
     envelopeEditor_->onChange = [this] (const neptune::core::EnvelopeDescription& e)
     {
         editZone ([e] (neptune::core::ZoneDescription& z) { z.envelope = e; });
@@ -189,7 +191,7 @@ void NeptuneEditor::chooseSample()
                                z.samplePath = path;
                                z.keyLow = 0; z.keyHigh = 127; z.velLow = 1; z.velHigh = 127; z.roundRobin = 0; z.group.clear(); z.onRelease = false;
                                d.zones.assign (1, z);
-                               safe->processor_.setInstrumentDescription (std::move (d), false);
+                               safe->processor_.uiEditInstrument (std::move (d), "Replace sample");
                                safe->lastRevision_ = 0xFFFFFFFFu;
                                safe->updateSamplerControls();
                            });
@@ -206,7 +208,7 @@ void NeptuneEditor::editZone (const std::function<void (neptune::core::ZoneDescr
     else
         for (const int row : selection)
             if (row >= 0 && row < static_cast<int> (d.zones.size())) change (d.zones[static_cast<std::size_t> (row)]);
-    processor_.setInstrumentDescription (std::move (d), /*forceReload*/ false);
+    processor_.uiEditInstrument (std::move (d), "Edit zone", "zone");
     updateSamplerControls();
 }
 
@@ -278,7 +280,7 @@ void NeptuneEditor::applyImport (const ImportWizard::Result& r)
     if (r.replace) d.zones.clear();
     for (const auto& z : r.zones) d.zones.push_back (z);
     d.roundRobinMode = r.roundRobinMode;
-    processor_.setInstrumentDescription (std::move (d), /*forceReload*/ false);
+    processor_.uiEditInstrument (std::move (d), "Import samples");
     lastRevision_ = 0xFFFFFFFFu;
     updateSamplerControls();
 }
@@ -291,7 +293,7 @@ void NeptuneEditor::removeSelectedZones()
     auto d = processor_.instrumentDescription();
     for (const int row : selection)
         if (row >= 0 && row < static_cast<int> (d.zones.size())) d.zones.erase (d.zones.begin() + row);
-    processor_.setInstrumentDescription (std::move (d), false);
+    processor_.uiEditInstrument (std::move (d), "Remove zones");
     lastRevision_ = 0xFFFFFFFFu;
     updateSamplerControls();
 }
@@ -417,7 +419,7 @@ void NeptuneEditor::rebuildLoadPanel()
                 auto& u = desc.unloadedGroups;
                 u.erase (std::remove (u.begin(), u.end(), name), u.end());
                 if (! t->getToggleState()) u.push_back (name); // décoché = laissé sur le disque
-                processor_.setInstrumentDescription (std::move (desc));
+                processor_.uiEditInstrument (std::move (desc), "Load group");
             };
             groupsHolder_.addAndMakeVisible (t);
         }
