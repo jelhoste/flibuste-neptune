@@ -33,9 +33,24 @@ void SamplerVoices::prepare (double sampleRate) noexcept
     allSoundOff();
 }
 
+void SamplerVoices::bindZone (Voice& v, const Zone& zone) noexcept
+{
+    v.zone = &zone;
+    const double semis = static_cast<double> (v.key - zone.rootNote) + zone.tuneCents / 100.0;
+    v.baseRatio = zone.sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
+}
+
 void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
 {
-    allSoundOff();
+    for (auto& v : voices_)
+    {
+        if (! v.active) continue;
+        const SampleData* current = v.zone != nullptr ? v.zone->sample.get() : nullptr;
+        const bool keep = instrument != nullptr && v.zoneIndex >= 0 && static_cast<std::size_t> (v.zoneIndex) < instrument->zones.size()
+                       && current != nullptr && instrument->zones[static_cast<std::size_t> (v.zoneIndex)].sample.get() == current;
+        if (keep) bindZone (v, instrument->zones[static_cast<std::size_t> (v.zoneIndex)]);
+        else v = Voice {};
+    }
     instrument_ = instrument;
 }
 
@@ -55,11 +70,10 @@ int SamplerVoices::heldVoices() const noexcept
                                             [] (const Voice& v) { return v.active && ! v.releasing && ! v.stolen; }));
 }
 
-void SamplerVoices::startRelease (Voice& v, double seconds) noexcept
+void SamplerVoices::steal (Voice& v) noexcept
 {
-    const double frames = std::max (1.0, seconds * sampleRate_);
-    v.envStep = static_cast<float> (v.env / frames);
-    if (v.envStep <= 0.0f) v.envStep = 1.0f;
+    v.stolen = true;
+    v.fadeStep = static_cast<float> (1.0 / std::max (1.0, kStealFadeSeconds * sampleRate_));
 }
 
 SamplerVoices::Voice* SamplerVoices::allocate() noexcept
@@ -90,23 +104,22 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
             if (v.active && ! v.releasing && ! v.stolen && (oldest == nullptr || v.order < oldest->order)) oldest = &v;
         if (oldest != nullptr)
         {
-            oldest->stolen = true;
-            startRelease (*oldest, kStealFadeSeconds);
+            steal (*oldest);
         }
     }
 
     Voice* v = allocate();
     if (v == nullptr) return;
     *v = Voice {};
-    v->zone = zone;
     v->active = true;
     v->channel = channel;
     v->key = key;
+    v->zoneIndex = static_cast<int> (zone - instrument_->zones.data());
     v->order = ++counter_;
     v->pos = 0.0;
-    const double semis = static_cast<double> (key - zone->rootNote) + zone->tuneCents / 100.0;
-    v->baseRatio = zone->sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
-    v->gain = std::clamp (velocity, 0.0f, 1.0f) * zone->gain;
+    bindZone (*v, *zone);
+    v->velocity = std::clamp (velocity, 0.0f, 1.0f);
+    v->env.begin (zone->env, sampleRate_);
 }
 
 void SamplerVoices::noteOff (int channel, int key) noexcept
@@ -117,7 +130,7 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
         if (v.zone->mode == PlayMode::Loop)
         {
             v.releasing = true;
-            startRelease (v, v.zone->releaseSeconds);
+            v.env.noteOff (v.zone->env, sampleRate_);
         }
         // one-shot : le Note Off est ignoré, le sample est joué en entier
     }
@@ -144,12 +157,14 @@ void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFra
         const float l = hermite (s.at (0, a), s.at (0, b), s.at (0, c), s.at (0, d), t);
         const float r = stereo ? hermite (s.at (1, a), s.at (1, b), s.at (1, c), s.at (1, d), t) : l;
 
-        float e = v.gain * mg;
-        if (v.releasing || v.stolen)
+        const float envValue = v.env.next (z.env, sampleRate_);
+        if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
+        float e = v.velocity * z.gain * mg * envValue;
+        if (v.stolen)
         {
-            v.env -= v.envStep;
-            if (v.env <= 0.0f) { v.active = false; return; }
-            e *= v.env;
+            v.fade -= v.fadeStep;
+            if (v.fade <= 0.0f) { v.active = false; return; }
+            e *= v.fade;
         }
         if (right != nullptr)
         {

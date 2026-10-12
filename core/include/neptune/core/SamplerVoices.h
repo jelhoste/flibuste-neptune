@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 
+#include "neptune/core/Envelope.h"
 #include "neptune/core/Instrument.h"
 
 namespace neptune::core
@@ -16,7 +17,8 @@ public:
     static constexpr double kStealFadeSeconds = 0.003;
 
     void prepare (double sampleRate) noexcept;
-    // Remplace l'instrument : toutes les voix s'arrêtent net (les zones de l'ancien peuvent disparaître).
+    // Remplace l'instrument. Les voix dont la zone existe encore (même indice, même sample) continuent avec les nouveaux
+    // réglages (édition en direct) ; les autres s'arrêtent net : les zones de l'ancien instrument vont disparaître.
     void setInstrument (const Instrument* instrument) noexcept;
 
     void noteOn (int channel, int key, float velocity) noexcept;
@@ -37,15 +39,18 @@ private:
         bool active = false;
         bool releasing = false; // relâchement (Note Off en mode boucle)
         bool stolen = false;    // en fondu rapide après un vol
+        int zoneIndex = 0;
         int channel = 0, key = 0;
         std::uint64_t order = 0;
         double pos = 0.0;       // en échantillons du fichier
         double baseRatio = 1.0; // avance par échantillon de sortie, sans l'accordage global
-        float gain = 1.0f;
-        float env = 1.0f, envStep = 0.0f;
+        float velocity = 1.0f;  // le gain de la zone est relu à chaque bloc (édition en direct)
+        EnvelopeRunner env;
+        float fade = 1.0f, fadeStep = 0.0f; // fondu rapide d'une voix volée
     };
 
-    void startRelease (Voice& v, double seconds) noexcept;
+    void steal (Voice& v) noexcept;
+    void bindZone (Voice& v, const Zone& zone) noexcept;
     Voice* allocate() noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
 

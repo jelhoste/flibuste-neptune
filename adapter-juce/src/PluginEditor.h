@@ -1,5 +1,6 @@
 #pragma once
 #include "PluginProcessor.h"
+#include "EnvelopeEditor.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "neptune/core/I18n.h"
@@ -37,9 +38,12 @@ private:
 
     // Sampler (palier 1) : chargement d'un sample et réglages de la zone (le premier jalon n'a qu'une zone).
     juce::TextButton loadButton_, modeButton_;
-    juce::Label statusLabel_, rootLabel_, releaseLabel_;
+    juce::Label statusLabel_, rootLabel_;
     juce::Slider rootSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
-    juce::Slider releaseSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    std::unique_ptr<EnvelopeEditor> envelopeEditor_;
+    juce::TextButton viewButton_; // bascule entre la vue Sampler et la vue Sonde (texte de diagnostic de l'hôte)
+    bool showProbe_ = false;
+    void updateViewVisibility();
     std::unique_ptr<juce::FileChooser> chooser_;
     bool updatingControls_ = false;
     void chooseSample();

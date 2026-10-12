@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "neptune/core/Envelope.h"
 #include "neptune/core/SampleData.h"
 
 namespace neptune::core
@@ -32,7 +33,7 @@ struct ZoneDescription
     int velLow = 1, velHigh = 127; // étendue de vélocité MIDI (1..127)
     int rootNote = 60;
     PlayMode mode = PlayMode::OneShot;
-    double releaseMs = 50.0;       // durée du fondu de relâchement (mode Loop)
+    EnvelopeDescription envelope;  // enveloppe d'amplitude de la zone (voir Envelope.h)
     double tuneCents = 0.0;        // accordage fin de la zone
     double gainDb = 0.0;
     // Points de boucle en échantillons ; loopEnd < 0 = jusqu'à la fin du fichier.
@@ -41,7 +42,7 @@ struct ZoneDescription
     bool operator== (const ZoneDescription& o) const noexcept
     {
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
-            && rootNote == o.rootNote && mode == o.mode && releaseMs == o.releaseMs && tuneCents == o.tuneCents && gainDb == o.gainDb
+            && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && tuneCents == o.tuneCents && gainDb == o.gainDb
             && loopStart == o.loopStart && loopEnd == o.loopEnd;
     }
 };
@@ -53,7 +54,8 @@ struct InstrumentDescription
     bool empty() const noexcept { return zones.empty(); }
 };
 
-// Valeurs bornées/rectifiées (note 0..127, vélocité 1..127, relâchement 1 ms..10 s, cents ±1200, gain ±60 dB, boucle ordonnée).
+// Valeurs bornées/rectifiées (note 0..127, vélocité 1..127, enveloppe : voir sanitised(EnvelopeDescription), cents ±1200,
+// gain ±60 dB, boucle ordonnée).
 ZoneDescription sanitised (ZoneDescription z);
 
 // JSON : objet {"zones":[...]} ; lecture tolérante (champ invalide -> défaut). Pas d'accès disque.
@@ -68,7 +70,7 @@ struct Zone
     int keyLow = 0, keyHigh = 127, velLow = 1, velHigh = 127;
     int rootNote = 60;
     PlayMode mode = PlayMode::OneShot;
-    double releaseSeconds = 0.05;
+    EnvelopeRuntime env;
     double tuneCents = 0.0;
     float gain = 1.0f; // linéaire
     std::int64_t loopStart = 0, loopEnd = 0; // loopEnd exclusif, > loopStart, <= frames

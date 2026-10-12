@@ -1,6 +1,6 @@
 # Passage de relais — état du projet Neptune
 
-Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale validé sous Windows (tactile) et Linux ; palier 0 complet ; palier 1 jalon 1 écrit).
+Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale validé sous Windows (tactile) et Linux ; palier 0 complet ; palier 1 jalon 1 validé, jalon 2 (enveloppe) écrit).
 
 ## Règles de travail de l'utilisateur
 
@@ -29,9 +29,9 @@ Le moteur ne produit que du silence. Le plugin charge, expose 676 paramètres «
 ## Architecture du dépôt
 
 ```
-core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile, KnobInteraction, UiState, SampleLoader, Instrument, SamplerVoices, SamplerParams)
+core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile, KnobInteraction, UiState, SampleLoader, Instrument, SamplerVoices, SamplerParams, Envelope)
 adapter-juce/    fine couche JUCE/CLAP : NeptuneParameter, PluginProcessor, PluginEditor
-tests/           Catch2 : tests du cœur (115 au 2026-10-12) + `neptune_perf_callback` (voir docs/performance.md)
+tests/           Catch2 : tests du cœur (129 au 2026-10-12) + `neptune_perf_callback` (voir docs/performance.md)
 cmake/           Dependencies.cmake : toutes les dépendances, versions figées
 design/          maquette HTML (neptune_ui.html) + briques de style NOVA copiées telles quelles
 docs/            brief, roadmap, spec, ce fichier
@@ -117,7 +117,21 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Pas repris** : les ombres (`--csh`, `--fsh`, `--ctl-sh`) et les dimensions des composants des contrôles (`nova-controls.css`) ; à décider quand les composants de l'interface seront écrits.
 - **Branché** : seulement la fenêtre de sonde (couleurs depuis le thème/contraste de `settings.json`, textes de la bannière de récupération et de la latence via les clés). Pas de menu : on édite `settings.json`, lu une fois au démarrage. Partie adaptateur compilée par la CI (verte) et **validée dans Reaper par l'utilisateur** (langue, thème, contraste).
 
-## Palier 1 — jalon 1 : un sample, tout le clavier, boucle (écrit, à valider dans Reaper)
+## Palier 1 — jalon 2 : enveloppe d'amplitude (écrit, à valider dans Reaper)
+
+- **Décisions de l'utilisateur (2026-10-12)** : **un seul Hold**, entre l'attaque et le decay (le second de la roadmap est abandonné) ; affichage **graphique** de la courbe où l'on déplace les temps ET les formes ; l'enveloppe **agit aussi en one-shot, Note Off ignoré** ; des **réglages prédéfinis pour percussions** (attaque seule, ou attaque + hold + decay), les segments étant activables/désactivables un par un.
+- **Segments** : Délai (spec : retarde le début de l'attaque, pas le sample), Attaque, Hold, Decay, niveau de Sustain, Relâchement. Chacun a un interrupteur ; désactivé = sauté ; tout désactivé = enveloppe neutre (gain 1, pas silence). Temps 0 à 10 s (relâchement ≥ 1 ms). Défaut : tout neutre, relâchement actif 50 ms (comportement du jalon 1).
+- **Formes** : linéaire ; paramétrique `shape` ∈ [−1, 1] (g(x) = x^(2^(−3·shape)), >0 convexe) ; **linéaire en dB** (plancher −60 dB, ramené à 0 exactement ; decay vers un sustain > 0 : dB exactement linéaire). Tables de 256 points précalculées par zone hors temps réel (`EnvelopeRuntime`) ; une valeur par échantillon (`EnvelopeRunner`), sans allocation.
+- **Comportements voulus** : decay vers sustain 0 → la voix est libérée dès l'enveloppe à zéro (utile pour couper la queue d'un son) ; relâchement désactivé en mode boucle → fondu de secours de 2 ms (anti-clic) ; Note Off pendant l'attaque → relâchement depuis le niveau atteint, sans saut.
+- **Édition en direct** : changer un réglage de zone republie l'instrument ; **les voix qui jouent continuent** (même indice de zone et même sample) avec les nouveaux réglages (enveloppe, hauteur, gain). Un autre sample arrête les voix.
+- **Valeurs prédéfinies** (`EnvelopePreset`, à affiner à l'oreille) : Tenu = tout neutre ; Percussion attaque seule = attaque 3 ms forme 0,4, relâchement off ; Percussion attaque + hold + decay = attaque 2 ms, hold 20 ms, decay 300 ms forme 0,6 vers 0, relâchement off. Ce sont des configurations de la même enveloppe, pas un autre type : le futur gestionnaire de presets (palier 6) pourra les réutiliser.
+- **Format** : schéma d'état **v4** ; `release_ms` des zones du jalon 1 est relu comme enveloppe (relâchement seul). Les chemins du v3 se rechargent.
+- **Éditeur graphique** (`EnvelopeEditor`, adaptateur) : 5 colonnes (Délai, Attaque, Hold, Decay, Relâchement) + plateau de sustain ; glisser un nœud horizontalement = temps (échelle cubique : précision sur les temps courts), le nœud de fin du decay aussi verticalement = niveau de sustain ; la poignée au milieu d'une courbe, glissée verticalement = forme ; **double-clic sur la poignée = forme linéaire ; appui long ou clic droit = bascule dB** (poignée creuse) ; interrupteurs par segment et menu de réglages prédéfinis. Zones de saisie de 44 px (tactile).
+- **Fenêtre** : deux vues, **Sampler** (chargement, mode, note racine, enveloppe, potards) et **Probe** (l'ancien diagnostic hôte) ; bouton en haut à droite. Le relâchement n'a plus de curseur dédié (il est dans l'enveloppe).
+- **Limites** : l'enveloppe est par zone (l'héritage par Groupe de la spec viendra avec les Groupes) ; les modifications de zone ne passent pas par l'annulation (comme avant) ; pas de lecture de la forme au clavier ; l'affichage ne montre pas la durée réelle du sample ni le sustain en temps.
+- **Coût** : `neptune_perf_callback` (64 voix en boucle, enveloppe neutre) : environ **6,5 % du budget temps réel** (5 % au jalon 1) ; l'enveloppe ajoute ~1,5 point à cette charge, sans optimisation.
+
+## Palier 1 — jalon 1 : un sample, tout le clavier, boucle (validé)
 
 - **Décisions de l'utilisateur (2026-10-12)** : FLAC par **dr_flac** (libsndfile ne le lit pas sans libFLAC, absente de la chaîne de build ; WAV/AIFF par libsndfile) ; samples **16 bits gardés en int16, le reste en float32** ; premier jalon = **1 sample, clavier, one-shot/boucle** ; « repeat » de la roadmap = **même chose que boucle** (deux modes : one-shot et boucle).
 - **Cœur** : `SampleData` (immuable, planaire), `SampleLoader` (WAV/AIFF/FLAC, mono/stéréo), `Instrument` + `InstrumentDescription` (JSON), `SamplerVoices` (64 voix tenues + 16 emplacements de fondu de vol ; interpolation de Hermite ; one-shot ignore le Note Off ; boucle = fondu de relâchement ; vol de la plus ancienne voix en 3 ms), `InstrumentSlot` (remise lock-free au thread audio, l'audio ne libère jamais de mémoire), `SamplerParams` (ids 100–102 : gain dB, accordage demi-tons, accordage cents). `Engine` joue sur la sortie 1 (canaux 0 et 1).
@@ -126,7 +140,8 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Chemins** : absolus pour l'instant (la résolution relative / recherche par nom / relocalisation de la spec §20 viendra avec les presets). Un fichier introuvable à la réouverture du projet : « Cannot load » dans la fenêtre, pas de son.
 - **Coût mesuré** (`neptune_perf_callback`, machine de développement, 64 voix en boucle, Hermite, stéréo float) : environ **5 % du budget temps réel** quel que soit le bloc (32 à 512). Aucune optimisation faite (accès `at()` avec branche int16/float par échantillon).
 - **Limites connues du jalon** : une seule zone dans l'interface (le modèle en gère plusieurs) ; pas de pédale de sustain, pitch bend ni aftertouch ; vélocité = gain linéaire (pas de courbe) ; interpolation identique en Live et en Studio (le profil est disponible dans `Engine::profile()` mais pas encore utilisé) ; pas de points de boucle lus dans les fichiers (WAV `smpl`) ni de fondu enchaîné de boucle ; note-off d'un one-shot ignoré par construction.
-- **Suite du palier 1** (ordre proposé) : enveloppe AHDSHR, zones et couches de vélocité dans l'interface, polyphonie (modes de vol, retrigger/legato, choke, limite globale réglable), filtre par voie, mixeur multi-pistes, RAM/streaming, synthé soustractif.
+- **Validation (2026-10-12)** : testé par l'utilisateur sous Windows et Linux, pointeur et tactile, avec `048_C3v11.wav` (stéréo 24 bits à 56 950 Hz, 13,4 s, note racine 48 mesurée : MIDI 48,01). Fonctionne. Rappel : la note racine par défaut vaut 60, à régler à la main (48 pour ce fichier) ; la lecture de la note dans le nom du fichier viendra avec le placement automatique (spec §3).
+- **Suite du palier 1** (ordre proposé) : zones et couches de vélocité dans l'interface, polyphonie (modes de vol, retrigger/legato, choke, limite globale réglable), filtre par voie, mixeur multi-pistes, RAM/streaming, synthé soustractif.
 
 ## Potard générique et modale (palier 0)
 

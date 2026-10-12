@@ -56,18 +56,15 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     rootLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (rootLabel_);
 
-    releaseSlider_.setRange (1.0, 5000.0, 1.0);
-    releaseSlider_.setSkewFactorFromMidPoint (200.0);
-    releaseSlider_.onValueChange = [this]
+    envelopeEditor_ = std::make_unique<EnvelopeEditor> (palette_, tr_);
+    envelopeEditor_->onChange = [this] (const neptune::core::EnvelopeDescription& e)
     {
-        if (updatingControls_) return;
-        const double v = releaseSlider_.getValue();
-        editZone ([v] (neptune::core::ZoneDescription& z) { z.releaseMs = v; });
+        editZone ([e] (neptune::core::ZoneDescription& z) { z.envelope = e; });
     };
-    addAndMakeVisible (releaseSlider_);
-    releaseLabel_.setText (text ("sampler.release"), juce::dontSendNotification);
-    releaseLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
-    addAndMakeVisible (releaseLabel_);
+    addAndMakeVisible (*envelopeEditor_);
+
+    viewButton_.onClick = [this] { showProbe_ = ! showProbe_; updateViewVisibility(); resized(); repaint(); };
+    addAndMakeVisible (viewButton_);
 
     undoButton_.setButtonText (text ("undo.undo"));
     redoButton_.setButtonText (text ("undo.redo"));
@@ -115,6 +112,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
     // La taille en dernier : resized() place les composants, qui doivent donc exister. (Fixée avant leur création,
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
+    updateViewVisibility();
     setResizable (true, true);
     setSize (1160, 920);
 }
@@ -199,14 +197,27 @@ void NeptuneEditor::updateSamplerControls()
 
     updatingControls_ = true;
     if (! rootSlider_.isMouseButtonDown()) rootSlider_.setValue (z.rootNote, juce::dontSendNotification);
-    if (! releaseSlider_.isMouseButtonDown()) releaseSlider_.setValue (z.releaseMs, juce::dontSendNotification);
     updatingControls_ = false;
 
     statusLabel_.setText (statusText(), juce::dontSendNotification);
     const bool has = ! d.zones.empty();
     modeButton_.setEnabled (has);
     rootSlider_.setEnabled (has);
-    releaseSlider_.setEnabled (has && z.mode == neptune::core::PlayMode::Loop);
+    envelopeEditor_->setEnabled (has);
+    envelopeEditor_->setEnvelope (z.envelope);
+}
+
+void NeptuneEditor::updateViewVisibility()
+{
+    const bool sampler = ! showProbe_;
+    loadButton_.setVisible (sampler);
+    modeButton_.setVisible (sampler);
+    statusLabel_.setVisible (sampler);
+    rootLabel_.setVisible (sampler);
+    rootSlider_.setVisible (sampler);
+    envelopeEditor_->setVisible (sampler);
+    for (auto* k : knobs_) k->setVisible (sampler);
+    viewButton_.setButtonText (showProbe_ ? "Sampler" : "Probe");
 }
 
 void NeptuneEditor::updateUndoButtons()
@@ -278,19 +289,19 @@ void NeptuneEditor::resized()
     recoveryLabel_.setBounds (banner);
     if (modal_) modal_->setBounds (getLocalBounds());
 
-    // Bande Sampler : chargement, état, mode, note racine, relâchement.
+    // Vue Sampler : chargement, état, mode, note racine, enveloppe graphique.
+    viewButton_.setBounds (getWidth() - 32 - 110, 32, 110, 36);
     {
-        const int y = getHeight() - 270 - 120;
-        auto r = juce::Rectangle<int> (32, y, getWidth() - 64, 36);
+        auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
         modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
         statusLabel_.setBounds (r);
-        auto r2 = juce::Rectangle<int> (32, y + 42, getWidth() - 64, 36);
-        rootLabel_.setBounds (r2.removeFromLeft (190));
+        auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
+        rootLabel_.setBounds (r2.removeFromLeft (200));
         rootSlider_.setBounds (r2.removeFromLeft (170).reduced (2));
-        r2.removeFromLeft (24);
-        releaseLabel_.setBounds (r2.removeFromLeft (230));
-        releaseSlider_.setBounds (r2.removeFromLeft (200).reduced (2));
+        const int envTop = 168;
+        const int envBottom = getHeight() - 270 - 12;
+        envelopeEditor_->setBounds (32, envTop, getWidth() - 64, juce::jmax (120, envBottom - envTop));
     }
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
@@ -330,6 +341,8 @@ void NeptuneEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
     g.drawText ("Neptune", area.removeFromTop (40), juce::Justification::centredLeft);
 
+    if (showProbe_)
+    {
     auto& ps = processor_.parameters();
     g.setColour (colour (Token::TextDim));
     g.setFont (juce::FontOptions (14.0f));
@@ -405,7 +418,10 @@ void NeptuneEditor::paint (juce::Graphics& g)
                     area.removeFromTop (24), juce::Justification::centredLeft);
     }
 
-    // Nom et valeur de chaque potard
+    } // showProbe_
+
+    // Nom et valeur de chaque potard (vue Sampler)
+    if (! showProbe_)
     {
         const auto& ps2 = processor_.parameters();
         g.setFont (juce::FontOptions (13.0f));

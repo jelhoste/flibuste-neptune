@@ -26,7 +26,8 @@ const MigrationTable& registeredMigrations()
 {
     // v1 -> v2 : « profile_lock » est facultatif (absent = non verrouillé), le document v1 est déjà un v2 valide.
     // v2 -> v3 : « instrument » est facultatif (absent = pas d'instrument), rien à transformer non plus.
-    static const MigrationTable table = { { 1, [] (nlohmann::json&) { return true; } }, { 2, [] (nlohmann::json&) { return true; } } };
+    static const MigrationTable table = { { 1, [] (nlohmann::json&) { return true; } }, { 2, [] (nlohmann::json&) { return true; } },
+          { 3, [] (nlohmann::json&) { return true; } } }; // v3 -> v4 : « release_ms » d'une zone est relu comme enveloppe par instrumentFromJson
     return table;
 }
 

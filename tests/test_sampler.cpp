@@ -45,7 +45,9 @@ std::shared_ptr<const Instrument> oneZone (std::shared_ptr<const SampleData> s, 
 {
     auto inst = std::make_shared<Instrument>();
     auto z = makeFullKeyboardZone (std::move (s), root, mode);
-    z.releaseSeconds = releaseSeconds;
+    EnvelopeDescription e;
+    e.release.ms = releaseSeconds * 1000.0;
+    z.env = EnvelopeRuntime (e);
     inst->zones.push_back (std::move (z));
     return inst;
 }
@@ -326,7 +328,7 @@ TEST_CASE ("instrument description round trips through json and is sanitised")
     ZoneDescription z;
     z.samplePath = "/tmp/a b/é.wav";
     z.keyLow = 36; z.keyHigh = 60; z.velLow = 10; z.velHigh = 100; z.rootNote = 48;
-    z.mode = PlayMode::Loop; z.releaseMs = 120.0; z.tuneCents = -12.5; z.gainDb = -3.0; z.loopStart = 100; z.loopEnd = 900;
+    z.mode = PlayMode::Loop; z.envelope.release.ms = 120.0; z.tuneCents = -12.5; z.gainDb = -3.0; z.loopStart = 100; z.loopEnd = 900;
     d.zones.push_back (z);
     CHECK (instrumentFromJson (toJson (d)) == d);
 
@@ -336,7 +338,7 @@ TEST_CASE ("instrument description round trips through json and is sanitised")
     CHECK (bad.zones[0].keyHigh == 127);
     CHECK (bad.zones[0].rootNote == 127);
     CHECK (bad.zones[0].mode == PlayMode::OneShot);
-    CHECK (bad.zones[0].releaseMs == 1.0);
+    CHECK (bad.zones[0].envelope.release.ms == 1.0); // ancien champ release_ms, borné
     CHECK (bad.zones[0].loopEnd == -1);
     CHECK (instrumentFromJson ("not json").empty());
     CHECK (instrumentFromJson (R"({"zones":"x"})").empty());
@@ -404,7 +406,7 @@ TEST_CASE ("instrument is saved in the project state; older documents have none"
     InstrumentDescription d;
     ZoneDescription z;
     z.samplePath = "/samples/organ_c4.flac";
-    z.rootNote = 60; z.mode = PlayMode::Loop; z.releaseMs = 200.0;
+    z.rootNote = 60; z.mode = PlayMode::Loop; z.envelope.release.ms = 200.0;
     d.zones.push_back (z);
 
     const auto text = state::save (set, {}, std::nullopt, &d);

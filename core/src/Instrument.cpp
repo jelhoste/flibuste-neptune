@@ -28,13 +28,73 @@ ZoneDescription sanitised (ZoneDescription z)
     z.velHigh = std::clamp (z.velHigh, 1, 127);
     if (z.velLow > z.velHigh) std::swap (z.velLow, z.velHigh);
     z.rootNote = std::clamp (z.rootNote, 0, 127);
-    z.releaseMs = std::isfinite (z.releaseMs) ? std::clamp (z.releaseMs, 1.0, 10000.0) : 50.0;
+    z.envelope = sanitised (z.envelope);
     z.tuneCents = std::isfinite (z.tuneCents) ? std::clamp (z.tuneCents, -1200.0, 1200.0) : 0.0;
     z.gainDb = std::isfinite (z.gainDb) ? std::clamp (z.gainDb, -60.0, 60.0) : 0.0;
     if (z.loopStart < 0) z.loopStart = 0;
     if (z.loopEnd >= 0 && z.loopEnd <= z.loopStart) z.loopEnd = -1; // incohérent : tout le fichier
     return z;
 }
+
+namespace
+{
+nlohmann::json segmentToJson (const EnvelopeSegment& s, bool withCurve)
+{
+    nlohmann::json o;
+    o["on"] = s.on;
+    o["ms"] = s.ms;
+    if (withCurve)
+    {
+        o["shape"] = s.curve.shape;
+        o["db"] = s.curve.db;
+    }
+    return o;
+}
+
+nlohmann::json envelopeToJson (const EnvelopeDescription& e)
+{
+    nlohmann::json o;
+    o["delay"] = segmentToJson (e.delay, false);
+    o["attack"] = segmentToJson (e.attack, true);
+    o["hold"] = segmentToJson (e.hold, false);
+    o["decay"] = segmentToJson (e.decay, true);
+    o["sustain"] = e.sustain;
+    o["release"] = segmentToJson (e.release, true);
+    return o;
+}
+
+void segmentFromJson (const nlohmann::json& parent, const char* key, EnvelopeSegment& s)
+{
+    const auto it = parent.find (key);
+    if (it == parent.end() || ! it->is_object()) return;
+    if (const auto v = it->find ("on"); v != it->end() && v->is_boolean()) s.on = v->get<bool>();
+    if (const auto v = it->find ("ms"); v != it->end() && v->is_number() && std::isfinite (v->get<double>())) s.ms = v->get<double>();
+    if (const auto v = it->find ("shape"); v != it->end() && v->is_number() && std::isfinite (v->get<double>())) s.curve.shape = v->get<double>();
+    if (const auto v = it->find ("db"); v != it->end() && v->is_boolean()) s.curve.db = v->get<bool>();
+}
+
+EnvelopeDescription envelopeFromJson (const nlohmann::json& o)
+{
+    EnvelopeDescription e;
+    const auto it = o.find ("envelope");
+    if (it != o.end() && it->is_object())
+    {
+        segmentFromJson (*it, "delay", e.delay);
+        segmentFromJson (*it, "attack", e.attack);
+        segmentFromJson (*it, "hold", e.hold);
+        segmentFromJson (*it, "decay", e.decay);
+        segmentFromJson (*it, "release", e.release);
+        if (const auto v = it->find ("sustain"); v != it->end() && v->is_number() && std::isfinite (v->get<double>()))
+            e.sustain = v->get<double>();
+    }
+    else if (const auto r = o.find ("release_ms"); r != o.end() && r->is_number() && std::isfinite (r->get<double>()))
+    {
+        e.release.on = true; // projets du jalon 1 : le relâchement seul
+        e.release.ms = r->get<double>();
+    }
+    return sanitised (std::move (e));
+}
+} // namespace
 
 std::string toJson (const InstrumentDescription& d)
 {
@@ -49,7 +109,7 @@ std::string toJson (const InstrumentDescription& d)
         o["vel_high"] = z.velHigh;
         o["root_note"] = z.rootNote;
         o["mode"] = toString (z.mode);
-        o["release_ms"] = z.releaseMs;
+        o["envelope"] = envelopeToJson (z.envelope);
         o["tune_cents"] = z.tuneCents;
         o["gain_db"] = z.gainDb;
         o["loop_start"] = z.loopStart;
@@ -89,7 +149,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.velHigh = readInt (o, "vel_high", z.velHigh);
     z.rootNote = readInt (o, "root_note", z.rootNote);
     if (const auto it = o.find ("mode"); it != o.end() && it->is_string()) playModeFromString (it->get<std::string>(), z.mode);
-    z.releaseMs = readNum (o, "release_ms", z.releaseMs);
+    z.envelope = envelopeFromJson (o);
     z.tuneCents = readNum (o, "tune_cents", z.tuneCents);
     z.gainDb = readNum (o, "gain_db", z.gainDb);
     z.loopStart = readI64 (o, "loop_start", z.loopStart);
@@ -147,7 +207,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.keyLow = zd.keyLow; z.keyHigh = zd.keyHigh; z.velLow = zd.velLow; z.velHigh = zd.velHigh;
         z.rootNote = zd.rootNote;
         z.mode = zd.mode;
-        z.releaseSeconds = zd.releaseMs / 1000.0;
+        z.env = EnvelopeRuntime (zd.envelope);
         z.tuneCents = zd.tuneCents;
         z.gain = static_cast<float> (std::pow (10.0, zd.gainDb / 20.0));
         const auto frames = z.sample->frames;

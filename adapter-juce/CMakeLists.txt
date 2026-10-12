@@ -24,6 +24,7 @@ clap_juce_extensions_plugin(
 target_sources(Neptune PRIVATE
   src/PluginProcessor.cpp
   src/PluginEditor.cpp
+  src/EnvelopeEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 
