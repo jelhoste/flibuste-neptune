@@ -67,21 +67,21 @@ EnvelopeDescription sanitised (EnvelopeDescription e)
 
 EnvelopeDescription presetEnvelope (EnvelopePreset p)
 {
-    EnvelopeDescription e; // tout neutre, relâchement 50 ms actif
+    EnvelopeDescription e; // tous les segments actifs, durées nulles, sustain 1, relâchement 50 ms
     switch (p)
     {
-        case EnvelopePreset::Sustained:
+        case EnvelopePreset::Sustained: // tous les segments : le réglage de départ
             break;
         case EnvelopePreset::PercussionAttack: // met en forme l'attaque seule ; le sample suit ensuite sa propre décroissance
+            e.delay.on = e.hold.on = e.decay.on = e.release.on = false;
             e.attack = { true, 3.0, { 0.4, false } };
-            e.release.on = false;
             break;
         case EnvelopePreset::PercussionAttackDecay: // attaque + hold + decay vers le silence : coupe la queue du son
+            e.delay.on = e.release.on = false;
             e.attack = { true, 2.0, { 0.4, false } };
             e.hold = { true, 20.0, {} };
             e.decay = { true, 300.0, { 0.6, false } };
             e.sustain = 0.0;
-            e.release.on = false;
             break;
     }
     return e;

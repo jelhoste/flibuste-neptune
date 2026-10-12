@@ -39,6 +39,16 @@ EnvelopeDescription neutral()
 }
 } // namespace
 
+TEST_CASE ("the default envelope has every segment active and is still neutral until release")
+{
+    const EnvelopeDescription d;
+    const auto v = run (d, 3000);
+    for (float x : v) REQUIRE (x == 1.0f); // tous actifs mais à 0 ms, sustain 1 : aucun effet
+    const auto released = run (d, 4000, 1000);
+    CHECK (released[999] == 1.0f);
+    CHECK (released[1000 + 2399] < 0.01f);  // relâchement de 50 ms (2400 échantillons)
+}
+
 TEST_CASE ("neutral envelope is a constant 1, not silence")
 {
     const auto v = run (neutral(), 2000);
@@ -165,10 +175,16 @@ TEST_CASE ("description is sanitised and presets are what they claim")
     CHECK (s.release.ms == 1.0);
 
     const auto sus = presetEnvelope (EnvelopePreset::Sustained);
-    CHECK_FALSE (sus.attack.on);
+    CHECK (sus.delay.on);                 // tous les segments actifs au départ
+    CHECK (sus.attack.on);
+    CHECK (sus.hold.on);
+    CHECK (sus.decay.on);
     CHECK (sus.release.on);
+    CHECK (sus.sustain == 1.0);
+    CHECK (EnvelopeDescription {} == sus);
     const auto pa = presetEnvelope (EnvelopePreset::PercussionAttack);
     CHECK (pa.attack.on);
+    CHECK_FALSE (pa.delay.on);
     CHECK_FALSE (pa.hold.on);
     CHECK_FALSE (pa.decay.on);
     CHECK_FALSE (pa.release.on);

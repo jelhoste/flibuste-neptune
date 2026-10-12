@@ -9,7 +9,7 @@ namespace
 {
 constexpr float kHitRadius = 22.0f;        // zone de saisie >= 44 px de diamètre (tactile)
 constexpr int kToggleRowHeight = 40;
-constexpr int kValueRowHeight = 32;
+constexpr int kValueRowHeight = 44;
 constexpr juce::uint32 kLongPressMs = 500;
 constexpr float kMoveSlop = 6.0f;
 const char* const kToggleKeys[5] = { "envelope.delay", "envelope.attack", "envelope.hold", "envelope.decay", "envelope.release" };
@@ -296,18 +296,21 @@ void EnvelopeEditor::paint (juce::Graphics& g)
         g.fillRoundedRectangle (c.rect.reduced (2.0f, 0.0f), 5.0f);
         g.setColour (lit ? colour (Token::Accent) : (on ? colour (Token::Border) : colour (Token::Grid)));
         g.drawRoundedRectangle (c.rect.reduced (2.5f, 0.5f), 5.0f, 1.0f);
-        g.setColour (on ? colour (Token::Text) : colour (Token::TextDim2));
-        g.setFont (juce::FontOptions (13.0f));
-        g.drawText (c.text, c.rect.toNearestInt(), juce::Justification::centred);
-        // Mode de la courbe, en petit : dB, lin (linéaire), cvx / ccv (convexe / concave). Seulement attaque, decay, relâchement.
         const int si = static_cast<int> (c.seg);
-        if (on && (si == 1 || si == 3 || si == 4))
+        const bool curved = si == 1 || si == 3 || si == 4;
+        auto box = c.rect.toNearestInt();
+        auto valueBox = curved ? box.removeFromTop (box.getHeight() / 2 + 2) : box;
+        g.setColour (on ? colour (Token::Text) : colour (Token::TextDim2));
+        g.setFont (juce::FontOptions (14.0f));
+        g.drawText (c.text, valueBox, juce::Justification::centred);
+        // Mode de la courbe, en bien visible : dB, lin (linéaire), cvx / ccv (convexe / concave). Attaque, decay, relâchement.
+        if (curved)
         {
             const auto& cv = segs[si]->curve;
             const juce::String tag = cv.db ? "dB" : (std::abs (cv.shape) < 0.02 ? "lin" : (cv.shape > 0.0 ? "cvx" : "ccv"));
-            g.setColour (cv.db ? colour (Token::Pink) : colour (Token::TextDim2));
-            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
-            g.drawText (tag, c.rect.toNearestInt().reduced (6, 2), juce::Justification::topRight);
+            g.setColour (! on ? colour (Token::TextDim2) : (cv.db ? colour (Token::Pink) : colour (Token::Accent)));
+            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.drawText (tag, box, juce::Justification::centred);
         }
     }
 }
