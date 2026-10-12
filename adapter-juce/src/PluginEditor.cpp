@@ -119,7 +119,26 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     };
     addAndMakeVisible (*envelopeEditor_);
 
-    viewButton_.onClick = [this] { showProbe_ = ! showProbe_; updateViewVisibility(); resized(); repaint(); };
+    matrix_ = std::make_unique<MappingMatrix> (palette_, tr_);
+    matrix_->onSelect = [this] (const std::vector<int>& zones) { setZoneSelection (zones); };
+    matrix_->onEdit = [this] (neptune::core::InstrumentDescription d, const char* name)
+    {
+        processor_.uiEditInstrument (std::move (d), name, "matrix");
+    };
+    matrix_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
+    matrix_->onGestureEnd = [this] { processor_.uiEndGesture(); };
+    matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
+    addChildComponent (*matrix_);
+    mappingButton_.setButtonText (text ("map.tab"));
+    mappingButton_.onClick = [this] { showMapping_ = ! showMapping_; showProbe_ = false; updateViewVisibility(); resized(); repaint(); };
+    addAndMakeVisible (mappingButton_);
+    listToggleButton_.setButtonText (text ("map.list"));
+    listToggleButton_.setClickingTogglesState (true);
+    listToggleButton_.setToggleState (true, juce::dontSendNotification);
+    listToggleButton_.onClick = [this] { listVisible_ = listToggleButton_.getToggleState(); updateViewVisibility(); resized(); };
+    addChildComponent (listToggleButton_);
+
+    viewButton_.onClick = [this] { showProbe_ = ! showProbe_; if (showProbe_) showMapping_ = false; updateViewVisibility(); resized(); repaint(); };
     addAndMakeVisible (viewButton_);
 
     undoButton_.setButtonText (text ("undo.undo"));
@@ -312,6 +331,13 @@ void NeptuneEditor::applyImport (const ImportWizard::Result& r)
     updateSamplerControls();
 }
 
+// Sélection demandée par la matrice : elle passe par la liste (source de vérité de la sélection de l'éditeur).
+void NeptuneEditor::setZoneSelection (const std::vector<int>& zones)
+{
+    zoneTable_->setSelectedRows (zones, /*notify*/ false);
+    updateSamplerControls();
+}
+
 void NeptuneEditor::removeSelectedZones()
 {
     auto selection = zoneTable_->selectedRows();
@@ -371,8 +397,10 @@ void NeptuneEditor::updateSamplerControls()
         lastRevision_ = rev;
         cachedDescription_ = processor_.instrumentDescription();
         zoneTable_->setZones (cachedDescription_.zones);
+        matrix_->setDescription (cachedDescription_);
         rebuildLoadPanel();
     }
+    matrix_->setSelection (zoneTable_->selectedRows());
     const auto& d = cachedDescription_;
     const auto selection = zoneTable_->selectedRows();
     const std::size_t shown = (! selection.empty() && selection.front() >= 0 && selection.front() < static_cast<int> (d.zones.size()))
@@ -479,8 +507,9 @@ void NeptuneEditor::rebuildLoadPanel()
 void NeptuneEditor::updateViewVisibility()
 {
     const bool sampler = ! showProbe_;
-    loadButton_.setVisible (sampler);
-    modeButton_.setVisible (sampler);
+    const bool mapping = sampler && showMapping_;
+    const bool classic = sampler && ! showMapping_;
+    // communs aux vues Sampler et Mapping
     statusLabel_.setVisible (sampler);
     rootLabel_.setVisible (sampler);
     rootSlider_.setVisible (sampler);
@@ -488,15 +517,23 @@ void NeptuneEditor::updateViewVisibility()
     importButton_.setVisible (sampler);
     removeButton_.setVisible (sampler);
     selectionLabel_.setVisible (sampler);
-    zoneTable_->setVisible (sampler);
-    loadTitle_.setVisible (sampler);
-    rrToggle_.setVisible (sampler);
-    releaseToggle_.setVisible (sampler);
-    streamToggle_.setVisible (sampler);
-    preloadLabel_.setVisible (sampler);
-    preloadBox_.setVisible (sampler);
-    groupsViewport_.setVisible (sampler);
-    for (auto* k : knobs_) k->setVisible (sampler);
+    zoneTable_->setVisible (sampler && (classic || listVisible_));
+    // propres à la vue Sampler
+    loadButton_.setVisible (classic);
+    modeButton_.setVisible (classic);
+    loadTitle_.setVisible (classic);
+    rrToggle_.setVisible (classic);
+    releaseToggle_.setVisible (classic);
+    streamToggle_.setVisible (classic);
+    preloadLabel_.setVisible (classic);
+    preloadBox_.setVisible (classic);
+    groupsViewport_.setVisible (classic);
+    for (auto* k : knobs_) k->setVisible (classic);
+    // propres à la vue Mapping
+    matrix_->setVisible (mapping);
+    listToggleButton_.setVisible (mapping);
+    mappingButton_.setVisible (sampler);
+    mappingButton_.setButtonText (showMapping_ ? "Sampler" : text ("map.tab"));
     viewButton_.setButtonText (showProbe_ ? "Sampler" : "Probe");
 }
 
@@ -571,6 +608,7 @@ void NeptuneEditor::resized()
 
     // Vue Sampler : chargement, import, état, mode, note racine ; liste des zones à gauche, enveloppe à droite.
     viewButton_.setBounds (getWidth() - 32 - 110, 32, 110, 36);
+    mappingButton_.setBounds (getWidth() - 32 - 110 - 8 - 130, 32, 130, 36);
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
@@ -583,6 +621,22 @@ void NeptuneEditor::resized()
         removeButton_.setBounds (r2.removeFromLeft (190).reduced (2));
         selectionLabel_.setBounds (r2);
         const int top = 168;
+        if (showMapping_)
+        {
+            // Vue Mapping : plein écran (pas de rangée de potards) ; liste rétractable à gauche, matrice au centre, enveloppe dessous.
+            const int mapBottom = getHeight() - 150;
+            const int mh = juce::jmax (160, mapBottom - top);
+            const int listW = listVisible_ ? juce::jmin (380, (getWidth() - 64) / 3) : 0;
+            listToggleButton_.setBounds (loadButton_.getBounds());
+            if (listVisible_) zoneTable_->setBounds (32, top, listW, mh);
+            const int x = 32 + (listVisible_ ? listW + 12 : 0);
+            const int w = getWidth() - 32 - x;
+            const int matrixH = juce::jmax (120, static_cast<int> (mh * 0.62));
+            matrix_->setBounds (x, top, w, matrixH);
+            envelopeEditor_->setBounds (x, top + matrixH + 8, w, juce::jmax (80, mh - matrixH - 8));
+        }
+        else
+        {
         const int bottom = getHeight() - 270 - 12;
         const int h = juce::jmax (120, bottom - top);
         const int tableW = juce::jmin (450, (getWidth() - 64) / 2);
@@ -601,6 +655,7 @@ void NeptuneEditor::resized()
         groupsViewport_.setBounds (lp);
         groupsSignature_.clear(); // largeur changée : les cases sont reconstruites à la prochaine mise à jour
         envelopeEditor_->setBounds (32 + tableW + 12, top, getWidth() - 64 - tableW - 12, h);
+        }
     }
     if (wizard_) wizard_->setBounds (getLocalBounds());
 

@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
+#include "neptune/core/InstrumentEdit.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/State.h"
@@ -173,8 +174,10 @@ void NeptuneProcessor::uiEditInstrument (neptune::core::InstrumentDescription d,
     for (auto& z : d.zones) z = neptune::core::sanitised (z);
     auto previous = instrumentDescription();
     if (previous == d) return;
-    undo_.perform (std::make_unique<neptune::core::SnapshotCommand<neptune::core::InstrumentDescription>> (
-        std::move (previous), std::move (d),
+    // Commande « par différences » : un geste sur quelques zones d'un gros instrument ne copie pas toute la description.
+    undo_.perform (std::make_unique<neptune::core::InstrumentEditCommand> (
+        previous, d,
+        [this] { return instrumentDescription(); },
         [this] (const neptune::core::InstrumentDescription& v) { setInstrumentDescription (v, false); },
         std::move (name), std::move (mergeKey)));
 }

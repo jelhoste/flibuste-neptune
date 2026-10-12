@@ -50,6 +50,15 @@ std::vector<int> ZoneTable::selectedRows() const
     return r;
 }
 
+void ZoneTable::setSelectedRows (const std::vector<int>& rows, bool notify)
+{
+    juce::SparseSet<int> set;
+    for (const int r : rows)
+        if (r >= 0 && r < static_cast<int> (zones_.size())) set.addRange ({ r, r + 1 });
+    table_.setSelectedRows (set, notify ? juce::sendNotificationAsync : juce::dontSendNotification);
+    if (! rows.empty() && ! set.isEmpty()) table_.scrollToEnsureRowIsOnscreen (set[0]);
+}
+
 void ZoneTable::paintRowBackground (juce::Graphics& g, int, int, int, bool selected)
 {
     if (selected) g.fillAll (colour (Token::Nav1));

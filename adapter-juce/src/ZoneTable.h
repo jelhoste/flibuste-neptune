@@ -15,6 +15,7 @@ public:
 
     void setZones (const std::vector<neptune::core::ZoneDescription>&); // garde la sélection quand c'est possible
     std::vector<int> selectedRows() const;
+    void setSelectedRows (const std::vector<int>&, bool notify = true);
     std::function<void()> onSelectionChanged;
 
     void resized() override { table_.setBounds (getLocalBounds()); }

@@ -2,6 +2,7 @@
 #include "PluginProcessor.h"
 #include "EnvelopeEditor.h"
 #include "ImportWizard.h"
+#include "MappingMatrix.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -45,6 +46,12 @@ private:
     juce::Slider rootSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     std::unique_ptr<EnvelopeEditor> envelopeEditor_;
     juce::TextButton viewButton_; // bascule entre la vue Sampler et la vue Sonde (texte de diagnostic de l'hôte)
+    // Vue Mapping (jalon 5) : matrice notes × vélocité plein écran, liste des zones rétractable.
+    std::unique_ptr<MappingMatrix> matrix_;
+    juce::TextButton mappingButton_, listToggleButton_;
+    bool showMapping_ = false;
+    bool listVisible_ = true;
+    void setZoneSelection (const std::vector<int>&);
     bool showProbe_ = false;
     void updateViewVisibility();
     std::unique_ptr<juce::FileChooser> chooser_, importChooser_;
