@@ -122,7 +122,7 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Verrou par instance** (`InstanceProfile`) : l'instance garde son profil même si le global bascule. **Décision : le verrou est sauvegardé dans le projet** (`"profile_lock": "live"|"studio"`, absent = non verrouillé). Une valeur illisible est lue comme « non verrouillé ».
 - **Schéma d'état passé en v2** (le seul changement : ce champ facultatif). Migration v1→v2 enregistrée (aucune transformation : un document v1 est un v2 valide). Conséquence : **une version plus ancienne du plugin refuse les projets enregistrés par celle-ci** (« état trop récent », rien n'est chargé).
 - **Interface** : la fenêtre de sonde a deux boutons (basculer le profil global, verrouiller/déverrouiller l'instance) et une ligne d'état. Pas de menu final.
-- **Non vérifié** : si Reaper marque le projet comme modifié quand on change le verrou (on appelle le même `updateHostDisplay` que pour les valeurs, sans certitude côté clap-juce-extensions).
+- **Projet marqué modifié** : constaté dans Reaper (2026-10-12) que le changement de verrou ne marquait pas le projet ; corrigé en déclarant un changement d'état hors paramètres (`withNonParameterStateChanged`, que le wrapper traduit en `mark_dirty` de CLAP ; vérifié dans le code de clap-juce-extensions et de JUCE 8.0.11). La bascule du profil **global** ne marque rien : elle n'est pas dans le projet (décision). À revalider dans Reaper.
 
 ## Format d'état JSON (point 3) : décisions et suite
 

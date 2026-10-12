@@ -84,9 +84,11 @@ std::string NeptuneProcessor::currentStateText() const
     return neptune::core::state::save (params_, autosave_->id(), profile_.locked());
 }
 
+// Changement d'état qui n'est pas un paramètre (le verrou de profil) : le wrapper CLAP le traduit en
+// clap_host_state.mark_dirty, ce qui fait marquer le projet comme modifié par l'hôte.
 void NeptuneProcessor::notifyStateChanged()
 {
-    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
 }
 
 void NeptuneProcessor::autosaveNow()
