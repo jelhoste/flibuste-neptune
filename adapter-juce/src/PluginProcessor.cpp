@@ -54,6 +54,9 @@ NeptuneProcessor::NeptuneProcessor()
     settings_ = neptune::core::settings::loadFile (settingsFile_, &warnings);
     for (const auto& w : warnings)
         DBG ("Neptune settings: " << juce::String (w));
+    uiStateFile_ = configDir / "ui_state.json";
+    uiState_ = neptune::core::uistate::loadFile (uiStateFile_);
+
     // Première instance du processus : le profil global vient de settings.json ; les suivantes le partagent.
     neptune::core::SharedProfile::process().initialiseOnce (settings_.profile);
     std::error_code ec;
@@ -89,6 +92,68 @@ std::string NeptuneProcessor::currentStateText() const
 void NeptuneProcessor::notifyStateChanged()
 {
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+}
+
+void NeptuneProcessor::uiBeginEdit (neptune::core::ParamId id)
+{
+    const auto index = params_.indexOf (id);
+    if (index == neptune::core::ParameterSet::npos) return;
+    getParameters()[static_cast<int> (index)]->beginChangeGesture();
+    undo_.beginGesture();
+}
+
+void NeptuneProcessor::uiSetNormalised (neptune::core::ParamId id, double normalised)
+{
+    const auto index = params_.indexOf (id);
+    if (index == neptune::core::ParameterSet::npos) return;
+    // D'abord le cœur par la pile d'annulation (elle lit l'ancienne valeur), puis l'hôte est prévenu.
+    undo_.setParameter (params_, id, params_.spec (index).fromNormalized (normalised));
+    getParameters()[static_cast<int> (index)]->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+}
+
+void NeptuneProcessor::uiEndEdit (neptune::core::ParamId id)
+{
+    const auto index = params_.indexOf (id);
+    if (index == neptune::core::ParameterSet::npos) return;
+    undo_.endGesture();
+    getParameters()[static_cast<int> (index)]->endChangeGesture();
+}
+
+void NeptuneProcessor::uiResetToDefault (neptune::core::ParamId id)
+{
+    const auto index = params_.indexOf (id);
+    if (index == neptune::core::ParameterSet::npos) return;
+    uiBeginEdit (id);
+    uiSetNormalised (id, params_.spec (index).toNormalized (params_.spec (index).defaultValue));
+    uiEndEdit (id);
+}
+
+// Annuler/rétablir changent des valeurs hors des événements de paramètres : l'hôte les relit (comme au chargement d'un état).
+bool NeptuneProcessor::uiUndo()
+{
+    const bool done = undo_.undo();
+    if (done)
+        updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true).withNonParameterStateChanged (true));
+    return done;
+}
+
+bool NeptuneProcessor::uiRedo()
+{
+    const bool done = undo_.redo();
+    if (done)
+        updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true).withNonParameterStateChanged (true));
+    return done;
+}
+
+void NeptuneProcessor::setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s)
+{
+    auto next = uiState_;
+    next.setModalSize (t, s);
+    if (next == uiState_) return;
+    uiState_ = next;
+    std::string error;
+    if (! neptune::core::uistate::saveFile (uiStateFile_, uiState_, &error))
+        DBG ("Neptune ui state not saved: " << juce::String (error));
 }
 
 void NeptuneProcessor::autosaveNow()

@@ -21,8 +21,23 @@ juce::Colour NeptuneEditor::colour (Token t) const
 NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
 {
-    setSize (1160, 820);
+    setSize (1160, 920);
     setResizable (true, true);
+    setWantsKeyboardFocus (true);
+
+    {
+        using namespace neptune::core;
+        const auto& def = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
+        for (const ParamId id : { probe::masterVolume, probe::masterPan, probe::algorithm, probe::trackParam (0, probe::kVolume) })
+            addAndMakeVisible (knobs_.add (new NeptuneKnob (processor_, id, palette_, def.knob,
+                                                            [this] (ParamId pid, uistate::Terminal t) { openModal (pid, t); })));
+    }
+    undoButton_.setButtonText (text ("undo.undo"));
+    redoButton_.setButtonText (text ("undo.redo"));
+    undoButton_.onClick = [this] { processor_.uiUndo(); };
+    redoButton_.onClick = [this] { processor_.uiRedo(); };
+    addAndMakeVisible (undoButton_);
+    addAndMakeVisible (redoButton_);
 
     restoreButton_.setButtonText (text ("recovery.restore"));
     discardButton_.setButtonText (text ("recovery.discard"));
@@ -62,6 +77,52 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     startTimerHz (30);
 }
 
+void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate::Terminal terminal)
+{
+    if (modal_) return;
+    modal_ = std::make_unique<KnobModal> (processor_, id, terminal, palette_, tr_,
+                                          [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+                                          {
+                                              // Fermeture différée : la modale ne se détruit pas depuis son propre gestionnaire.
+                                              juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
+                                          });
+    addAndMakeVisible (*modal_);
+    modal_->setBounds (getLocalBounds());
+    modal_->toFront (true);
+}
+
+void NeptuneEditor::closeModal()
+{
+    if (! modal_) return;
+    processor_.setModalSize (modal_->terminal(), modal_->panelSize());
+    modal_.reset();
+    grabKeyboardFocus();
+}
+
+void NeptuneEditor::updateUndoButtons()
+{
+    undoButton_.setEnabled (processor_.undoManager().canUndo());
+    redoButton_.setEnabled (processor_.undoManager().canRedo());
+}
+
+bool NeptuneEditor::keyPressed (const juce::KeyPress& k)
+{
+    const auto m = k.getModifiers();
+    if (! m.isCommandDown()) return false;
+    const int code = k.getKeyCode();
+    if (code == 'Z' || code == 'z')
+    {
+        if (m.isShiftDown()) processor_.uiRedo(); else processor_.uiUndo();
+        return true;
+    }
+    if (code == 'Y' || code == 'y')
+    {
+        processor_.uiRedo();
+        return true;
+    }
+    return false;
+}
+
 void NeptuneEditor::updateProfileControls()
 {
     using neptune::core::PerformanceProfile;
@@ -78,6 +139,7 @@ void NeptuneEditor::timerCallback()
 {
     updateRecoveryBanner();
     updateProfileControls();
+    updateUndoButtons();
     repaint();
 }
 
@@ -103,6 +165,23 @@ void NeptuneEditor::resized()
     discardButton_.setBounds (banner.removeFromRight (90).reduced (2));
     restoreButton_.setBounds (banner.removeFromRight (90).reduced (2));
     recoveryLabel_.setBounds (banner);
+    if (modal_) modal_->setBounds (getLocalBounds());
+
+    // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
+    {
+        const int knobSide = static_cast<int> (neptune::core::ui::effectiveHitSize (64.0, neptune::core::ui::KnobConfig {}));
+        const int top = getHeight() - 270;
+        int x = 32;
+        for (auto* k : knobs_)
+        {
+            k->setBounds (x + (140 - knobSide) / 2, top + 20, knobSide, knobSide);
+            x += 140;
+        }
+        const int btnY = top + 20 + (knobSide - 44) / 2;
+        redoButton_.setBounds (getWidth() - 32 - 110, btnY, 110, 44);
+        undoButton_.setBounds (getWidth() - 32 - 230, btnY, 110, 44);
+    }
+
     auto profileStrip = getLocalBounds().reduced (32).removeFromBottom (120).removeFromTop (32);
     profileSwitchButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
     profileLockButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
@@ -204,6 +283,23 @@ void NeptuneEditor::paint (juce::Graphics& g)
                         + (st.profile == neptune::core::settings::PerformanceProfile::Live ? "live" : "studio")
                         + ", autosave " + (st.autosaveIntervalSeconds > 0 ? juce::String (st.autosaveIntervalSeconds) + " s" : juce::String ("off")),
                     area.removeFromTop (24), juce::Justification::centredLeft);
+    }
+
+    // Nom et valeur de chaque potard
+    {
+        const auto& ps2 = processor_.parameters();
+        g.setFont (juce::FontOptions (13.0f));
+        for (auto* k : knobs_)
+        {
+            const auto b = k->getBounds();
+            const auto cell = b.withX (b.getCentreX() - 70).withWidth (140);
+            g.setColour (colour (Token::TextDim));
+            g.drawText (juce::String::fromUTF8 (ps2.find (k->paramId())->name.c_str()), cell.withY (b.getY() - 20).withHeight (18),
+                        juce::Justification::centred);
+            g.setColour (colour (Token::Accent));
+            g.drawText (juce::String::fromUTF8 (ps2.toText (k->paramId()).c_str()), cell.withY (b.getBottom() + 2).withHeight (18),
+                        juce::Justification::centred);
+        }
     }
 
     latencyLabel_.setText (juce::String::fromUTF8 (tr_.format ("latency.reported", { std::to_string (processor_.getLatencySamples()) }).c_str()),

@@ -15,6 +15,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 #include "neptune/core/Settings.h"
+#include "neptune/core/Undo.h"
+#include "neptune/core/UiState.h"
 
 // Fine couche d'adaptation : traduit JUCE/CLAP <-> cœur. Aucune logique métier ici.
 class NeptuneProcessor : public juce::AudioProcessor,
@@ -63,6 +65,19 @@ public:
     neptune::core::InstanceProfile& profile() { return profile_; }
     void notifyStateChanged(); // thread message : le verrou fait partie de l'état du projet
 
+    // Édition depuis l'interface (thread message). Chaque geste prévient l'hôte (automation) ET alimente l'annulation.
+    void uiBeginEdit (neptune::core::ParamId);
+    void uiSetNormalised (neptune::core::ParamId, double normalised);
+    void uiEndEdit (neptune::core::ParamId);
+    void uiResetToDefault (neptune::core::ParamId);
+    bool uiUndo();
+    bool uiRedo();
+    const neptune::core::UndoManager& undoManager() const { return undo_; }
+
+    // Taille mémorisée de la modale des potards (par type de terminal), enregistrée dans ui_state.json.
+    neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const { return uiState_.modalSize (t); }
+    void setModalSize (neptune::core::uistate::Terminal, neptune::core::uistate::Size);
+
     // Extensions CLAP (clap-juce-extensions) : notes au dialecte CLAP avec note_id, expressions de note, fin de note.
     bool supportsNoteDialectClap (bool isInput) override { return isInput; }
     bool supportsDirectEvent (uint16_t spaceId, uint16_t type) override;
@@ -76,6 +91,9 @@ private:
     neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
     neptune::core::InstanceProfile profile_;
+    neptune::core::UndoManager undo_; // thread message uniquement
+    neptune::core::uistate::UiState uiState_;
+    std::filesystem::path uiStateFile_;
     int probeTracks_ = 0;
     int probeOutputs_ = 0;
     HostProbe hostProbe_;

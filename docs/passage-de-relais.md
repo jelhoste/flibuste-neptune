@@ -1,6 +1,6 @@
 # Passage de relais — état du projet Neptune
 
-Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio fait).
+Note destinée à une nouvelle session de travail. Elle complète `brief-projet-sampler-clap.md`, `roadmap-sampler-clap.md` et `spec-modules.md` (qui restent la référence fonctionnelle). Dernière mise à jour : 2026-10-11 (points 1 à 5 du palier 0 faits, test de performance fait, squelettes i18n et thèmes validés, mécanisme des profils Live/Studio validé, composant potard/modale écrit).
 
 ## Règles de travail de l'utilisateur
 
@@ -22,16 +22,16 @@ Note destinée à une nouvelle session de travail. Elle complète `brief-projet-
 | 3. Format JSON versionné | **fait**, testé, CI verte, sauvegarde/rechargement de projet validés sous Windows et Linux (macOS non testé) | `core/.../State.h` (`save`/`load`, schéma v2, tout-ou-rien) et `StateMigration.h` (chaîne de migrations, une migration v1→v2 sans transformation). nlohmann/json v3.12.0. Reste pour plus tard : chemins de samples, ZIP, sous-arbre partiel (spec §20), quand il y aura des samples. |
 | 4. Vérification précoce CLAP/clap-juce-extensions | **clos, sauf expressions/modulation** | Validé dans Reaper : 64 sorties stéréo, latence à l'exécution, transport. `clap-validator` en CI (bloquant). Expressions de note et modulation de paramètres : non déclenchées par Reaper ; l'utilisateur écrira un petit plugin émetteur de test plus tard, la sonde (`HostProbe.h`) est prête à les recevoir. Voir « Constats du point 4 ». |
 | 5. Réglages globaux, autosave, récupération après crash | **fait**, 58 tests, CI verte, récupération après crash validée dans Reaper (kill -9 puis restauration) | `core/.../Settings.h`, `Autosave.h`, `FileUtil.h`. Voir « Réglages et autosave (point 5) ». |
-| Autres éléments du palier 0 (roadmap) | **à faire** | Ordre convenu : (1) **test de performance du callback audio** (outil fait, voir `docs/performance.md` ; étape CI informative, non vérifiée tant que le push n'a pas eu lieu) ; (2) ~~squelettes i18n et thèmes~~ **fait côté cœur** (voir « i18n et thèmes ») ; reste la sélection dans l'interface, qui n'a pas encore de menu ; (3) ~~mécanisme des profils Live/Studio~~ **fait** (voir « Profils Live/Studio ») ; (4) composant générique potard/modale. Les templates de sorties sont réglés : 64 stéréo fixes. |
+| Autres éléments du palier 0 (roadmap) | **à faire** | Ordre convenu : (1) **test de performance du callback audio** (outil fait, voir `docs/performance.md` ; étape CI informative, non vérifiée tant que le push n'a pas eu lieu) ; (2) ~~squelettes i18n et thèmes~~ **fait côté cœur** (voir « i18n et thèmes ») ; reste la sélection dans l'interface, qui n'a pas encore de menu ; (3) ~~mécanisme des profils Live/Studio~~ **fait** (voir « Profils Live/Studio ») ; (4) ~~composant générique potard/modale~~ **écrit** (voir « Potard générique et modale »), à valider dans Reaper. Les templates de sorties sont réglés : 64 stéréo fixes. |
 
 Le moteur ne produit que du silence. Le plugin charge, expose 676 paramètres « sonde » (`core/.../ProbePool.h`, 32 pistes × 21 + 4) et affiche leurs valeurs en direct.
 
 ## Architecture du dépôt
 
 ```
-core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile)
+core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile, KnobInteraction, UiState)
 adapter-juce/    fine couche JUCE/CLAP : NeptuneParameter, PluginProcessor, PluginEditor
-tests/           Catch2 : tests du cœur (75 au 2026-10-11) + `neptune_perf_callback` (voir docs/performance.md)
+tests/           Catch2 : tests du cœur (93 au 2026-10-12) + `neptune_perf_callback` (voir docs/performance.md)
 cmake/           Dependencies.cmake : toutes les dépendances, versions figées
 design/          maquette HTML (neptune_ui.html) + briques de style NOVA copiées telles quelles
 docs/            brief, roadmap, spec, ce fichier
@@ -114,6 +114,17 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Pas repris** : les ombres (`--csh`, `--fsh`, `--ctl-sh`) et les dimensions des composants des contrôles (`nova-controls.css`) ; à décider quand les composants de l'interface seront écrits.
 - **Branché** : seulement la fenêtre de sonde (couleurs depuis le thème/contraste de `settings.json`, textes de la bannière de récupération et de la latence via les clés). Pas de menu : on édite `settings.json`, lu une fois au démarrage. Partie adaptateur compilée par la CI (verte) et **validée dans Reaper par l'utilisateur** (langue, thème, contraste).
 
+## Potard générique et modale (palier 0)
+
+- **Gestes** (décision du 2026-10-12, spec mise à jour) : glisser vertical = valeur ; **Shift, ou clic droit maintenu et déplacé = réglage fin** ; **double-clic / double-tap = valeur par défaut** ; **appui long (clic gauche maintenu ou doigt) ou clic droit relâché sans bouger = modale** ; molette (Shift = pas fin) ; clavier : flèches, PageUp/PageDown, Début/Fin, Entrée = modale, Suppr = défaut. Au tactile le réglage fin passe par la modale. Ctrl/Cmd+Z annule, Ctrl/Cmd+Maj+Z ou Ctrl+Y rétablit.
+- **Conséquence à ne pas oublier** : le clic droit ouvre maintenant la modale, pas un menu. Quand viendront « Apprendre » (MIDI Learn, palier 3) et « Ajouter à la Façade » (palier 2), leurs entrées devront vivre dans la modale (ou un menu à part) : à décider alors.
+- **Cœur** (`KnobInteraction.h`, 14 tests) : machine à états pure (sans JUCE), pilotée par des événements horodatés. Tous les réglages sont dans `KnobConfig` : seule la sensibilité du glisser (0,006 par pixel) vient de la maquette ; **les autres valeurs sont des points de départ à affiner à l'usage** : réglage fin ×0,1, appui long 500 ms, tolérance de mouvement 3 px (souris) / 8 px (doigt), double-tap 400 ms et 6 / 24 px, pas de molette 0,02 (fin 0,002), pas de flèche 0,01 (fin 0,001, PageUp/Down 0,1 ; paramètres discrets : un pas / un dixième). **Zone tactile minimale : 44 px** (`minTouchTarget`, valeur proposée et confirmée, pas une norme vérifiée).
+- **Adaptateur** : `NeptuneKnob` (dessin « led » et « pot » portés de `nova-knob-styles.js`, jetons du thème actif), `KnobModal` (champ texte avec saisie d'unités, slider, remise au défaut, redimensionnable, superposée à la fenêtre du plugin, pas de fenêtre système). Taille de la modale mémorisée **par type de terminal** (souris/tactile) dans `ui_state.json` (`UiState.h`), distinct de `settings.json`.
+- **Undo branché** : chaque geste passe par `UndoManager` ET prévient l'hôte (début/fin de geste, `setValueNotifyingHost`). Annuler/rétablir ne sont **pas** des événements d'automation : l'hôte relit les valeurs (même mécanisme qu'au chargement d'un état) ; il n'enregistre donc pas l'annulation comme un geste d'automation.
+- **Interface** : 4 potards de test dans la fenêtre de sonde (Master Volume, Master Pan, FM Algorithm, Track 1 Volume) + boutons Annuler/Rétablir. Hauteur de la fenêtre passée de 820 à 920.
+- **Pas fait** : variante « fader vertical qui devient rotatif selon la hauteur » (c'est le mixeur, palier 1) ; potards bipolaires (le dessin les gère, rien ne les utilise) ; tailles de modale par instrument.
+- **Vérification** : adaptateur contrôlé à la syntaxe contre les vrais en-têtes JUCE 8.0.11 (4 fichiers, sans erreur) ; la CI le compile en entier. **Rien n'a encore été vu à l'écran.**
+
 ## Profils Live/Studio (mécanisme, palier 0)
 
 - **Aucun traitement n'a encore de variante** : le mécanisme est en place, `Engine::profile()` est lu à chaque bloc, rien ne change à l'oreille. Les futurs traitements à latence (oversampling, look-ahead, convolution, time-stretch) liront `Engine::profile()`.
@@ -122,7 +133,7 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Verrou par instance** (`InstanceProfile`) : l'instance garde son profil même si le global bascule. **Décision : le verrou est sauvegardé dans le projet** (`"profile_lock": "live"|"studio"`, absent = non verrouillé). Une valeur illisible est lue comme « non verrouillé ».
 - **Schéma d'état passé en v2** (le seul changement : ce champ facultatif). Migration v1→v2 enregistrée (aucune transformation : un document v1 est un v2 valide). Conséquence : **une version plus ancienne du plugin refuse les projets enregistrés par celle-ci** (« état trop récent », rien n'est chargé).
 - **Interface** : la fenêtre de sonde a deux boutons (basculer le profil global, verrouiller/déverrouiller l'instance) et une ligne d'état. Pas de menu final.
-- **Projet marqué modifié** : constaté dans Reaper (2026-10-12) que le changement de verrou ne marquait pas le projet ; corrigé en déclarant un changement d'état hors paramètres (`withNonParameterStateChanged`, que le wrapper traduit en `mark_dirty` de CLAP ; vérifié dans le code de clap-juce-extensions et de JUCE 8.0.11). La bascule du profil **global** ne marque rien : elle n'est pas dans le projet (décision). À revalider dans Reaper.
+- **Projet marqué modifié** : constaté dans Reaper (2026-10-12) que le changement de verrou ne marquait pas le projet ; corrigé en déclarant un changement d'état hors paramètres (`withNonParameterStateChanged`, que le wrapper traduit en `mark_dirty` de CLAP ; vérifié dans le code de clap-juce-extensions et de JUCE 8.0.11). La bascule du profil **global** ne marque rien : elle n'est pas dans le projet (décision). **Validé dans Reaper par l'utilisateur** (2026-10-12), ainsi que la bascule et le verrou à deux instances et la relecture du verrou après réouverture du projet.
 
 ## Format d'état JSON (point 3) : décisions et suite
 

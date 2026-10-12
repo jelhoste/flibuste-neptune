@@ -1,5 +1,7 @@
 #pragma once
 #include "PluginProcessor.h"
+#include "KnobModal.h"
+#include "NeptuneKnob.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
 
@@ -11,6 +13,7 @@ public:
     ~NeptuneEditor() override { stopTimer(); }
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override; // Ctrl/Cmd+Z : annuler ; Ctrl/Cmd+Maj+Z ou Ctrl+Y : rétablir
 
 private:
     void timerCallback() override;
@@ -26,6 +29,14 @@ private:
     juce::Label profileLabel_;
     juce::TextButton profileSwitchButton_, profileLockButton_;
     void updateProfileControls();
+
+    // Potards génériques (palier 0) et leur modale.
+    juce::OwnedArray<NeptuneKnob> knobs_;
+    std::unique_ptr<KnobModal> modal_;
+    juce::TextButton undoButton_, redoButton_;
+    void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
+    void closeModal();
+    void updateUndoButtons();
     juce::TextButton restoreButton_, discardButton_;
     bool recoveryShown_ = false;
     void updateRecoveryBanner();

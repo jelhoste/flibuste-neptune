@@ -23,7 +23,9 @@ clap_juce_extensions_plugin(
 
 target_sources(Neptune PRIVATE
   src/PluginProcessor.cpp
-  src/PluginEditor.cpp)
+  src/PluginEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
 
 target_compile_definitions(Neptune PUBLIC
   JUCE_WEB_BROWSER=0
