@@ -8,8 +8,8 @@ using neptune::core::theme::Token;
 namespace
 {
 constexpr float kHitRadius = 22.0f;        // zone de saisie >= 44 px de diamètre (tactile)
-constexpr float kChipHeight = 28.0f;
-constexpr float kLabelsHeight = 2.0f * kChipHeight + 6.0f;
+constexpr int kToggleRowHeight = 40;
+constexpr int kValueRowHeight = 32;
 constexpr juce::uint32 kLongPressMs = 500;
 constexpr float kMoveSlop = 6.0f;
 const char* const kToggleKeys[5] = { "envelope.delay", "envelope.attack", "envelope.hold", "envelope.decay", "envelope.release" };
@@ -94,7 +94,7 @@ void EnvelopeEditor::changed()
 void EnvelopeEditor::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (40);
+    auto top = r.removeFromTop (kToggleRowHeight);
     presets_.setBounds (top.removeFromRight (300).reduced (2));
     const int w = juce::jmin (84, top.getWidth() / 5);
     for (int i = 0; i < 5; ++i) toggles_[i].setBounds (top.removeFromLeft (w).reduced (2));
@@ -103,45 +103,24 @@ void EnvelopeEditor::resized()
 EnvelopeEditor::Frame EnvelopeEditor::frame() const
 {
     Frame f;
-    const auto area = getLocalBounds().toFloat().withTrimmedTop (48.0f).reduced (12.0f, 8.0f);
-    f.graph = area.withTrimmedBottom (kLabelsHeight + 6.0f);
+    const auto area = getLocalBounds().toFloat().withTrimmedTop (static_cast<float> (kToggleRowHeight + kValueRowHeight + 8)).reduced (12.0f, 8.0f);
+    f.graph = area;
     f.yTop = f.graph.getY() + 8.0f;
     f.yBottom = f.graph.getBottom() - 6.0f;
     f.layout = computeEnvelopeLayout (env_, static_cast<double> (f.graph.getWidth()) - 4.0, frozenScale_);
 
-    // Étiquettes de durée, sous la courbe : au milieu de leur segment, ou à la jonction quand il n'a pas de largeur ;
-    // réparties sur deux rangées pour ne pas se chevaucher.
-    struct Raw { int seg; float cx; float w; juce::String text; };
-    std::vector<Raw> raws;
+    // Les valeurs de durée sont toujours sous les boutons d'activation : alignées, jamais superposées.
     const EnvelopeSegment* segs[5] = { &env_.delay, &env_.attack, &env_.hold, &env_.decay, &env_.release };
-    juce::Font font (juce::FontOptions (12.0f));
     for (int i = 0; i < 5; ++i)
     {
-        const auto name = juce::String::fromUTF8 (std::string (tr_.tr (kToggleKeys[i])).c_str());
         juce::String value;
         if (! segs[i]->on) value = "off";
-        else if (segs[i]->ms < 100.0) value = juce::String (segs[i]->ms, segs[i]->ms < 10.0 ? 1 : 0) + " ms";
+        else if (segs[i]->ms < 10.0) value = juce::String (segs[i]->ms, 1) + " ms";
         else if (segs[i]->ms < 1000.0) value = juce::String (static_cast<int> (std::lround (segs[i]->ms))) + " ms";
         else value = juce::String (segs[i]->ms / 1000.0, 2) + " s";
-        const juce::String text = name + " " + value;
-        const float cx = f.graph.getX() + static_cast<float> (f.layout.active[i] ? 0.5 * (f.layout.x0[i] + f.layout.x1[i]) : f.layout.x1[i]);
-        raws.push_back ({ i, cx, juce::jmax (60.0f, font.getStringWidthFloat (text) + 14.0f), text });
-    }
-    std::sort (raws.begin(), raws.end(), [] (const Raw& a, const Raw& b) { return a.cx < b.cx; });
-    std::vector<juce::Rectangle<float>> placed;
-    const float baseY = f.graph.getBottom() + 4.0f;
-    for (const auto& r : raws)
-    {
-        juce::Rectangle<float> rect;
-        bool ok = false;
-        for (int row = 0; row < 2 && ! ok; ++row)
-        {
-            rect = juce::Rectangle<float> (juce::jlimit (f.graph.getX(), f.graph.getRight() - r.w, r.cx - 0.5f * r.w),
-                                           baseY + static_cast<float> (row) * (kChipHeight + 2.0f), r.w, kChipHeight);
-            ok = std::none_of (placed.begin(), placed.end(), [&] (const juce::Rectangle<float>& p) { return p.expanded (3.0f, 0.0f).intersects (rect); });
-        }
-        placed.push_back (rect);
-        f.chips.push_back ({ static_cast<Seg> (r.seg), rect, r.text });
+        const auto b = toggles_[i].getBounds().toFloat();
+        f.chips.push_back ({ static_cast<Seg> (i), juce::Rectangle<float> (b.getX(), static_cast<float> (kToggleRowHeight), b.getWidth(),
+                                                                          static_cast<float> (kValueRowHeight - 2)), value });
     }
     return f;
 }
@@ -157,9 +136,21 @@ EnvelopeEditor::Hit EnvelopeEditor::hitTest (juce::Point<float> p) const
     auto Y = [&] (float level) { return f.yBottom - level * (f.yBottom - f.yTop); };
     Hit best;
     float bestD = kHitRadius;
+
+    // poignée du plateau de sustain
+    {
+        const juce::Point<float> h (f.graph.getX() + static_cast<float> (0.5 * (f.layout.plateauX0 + f.layout.plateauX1)), Y (sustainLevel));
+        if (h.getDistanceFrom (p) < bestD) { bestD = h.getDistanceFrom (p); best = { Seg::Decay, Part::Sustain }; }
+    }
+    // délai à 0 ms : son nœud est collé à la marge gauche
+    if (env_.delay.on && ! f.layout.active[0])
+    {
+        const juce::Point<float> h (f.graph.getX() - 2.0f, f.yBottom);
+        if (h.getDistanceFrom (p) < bestD) { bestD = h.getDistanceFrom (p); best = { Seg::Delay, Part::Node }; }
+    }
     for (int i = 0; i < 5; ++i)
     {
-        if (! f.layout.active[i]) continue; // un segment sans largeur se règle par son étiquette
+        if (! f.layout.active[i]) continue; // un segment sans largeur se règle par sa valeur, sous son bouton
         const auto s = static_cast<Seg> (i);
         const float y0 = i == 1 ? 0.0f : (i == 4 ? sustainLevel : (i == 3 ? 1.0f : (i == 2 ? 1.0f : 0.0f)));
         const float y1 = i == 1 ? 1.0f : (i == 2 ? 1.0f : (i == 3 ? sustainLevel : 0.0f));
@@ -181,7 +172,7 @@ void EnvelopeEditor::paint (juce::Graphics& g)
     const auto f = frame();
     const auto& L = f.layout;
     g.setColour (colour (Token::BgCard));
-    g.fillRoundedRectangle (getLocalBounds().toFloat().withTrimmedTop (44.0f), 8.0f);
+    g.fillRoundedRectangle (getLocalBounds().toFloat().withTrimmedTop (static_cast<float> (kToggleRowHeight + kValueRowHeight + 4)), 8.0f);
     g.setColour (colour (Token::Grid));
     g.drawHorizontalLine (static_cast<int> (f.yTop), f.graph.getX(), f.graph.getRight());
     g.drawHorizontalLine (static_cast<int> (f.yBottom), f.graph.getX(), f.graph.getRight());
@@ -254,6 +245,30 @@ void EnvelopeEditor::paint (juce::Graphics& g)
             else g.fillEllipse (mx - 5.0f, my - 5.0f, 10.0f, 10.0f);
         }
     }
+    // nœud du délai à 0 ms, collé à la marge gauche
+    if (env_.delay.on && ! L.active[0])
+    {
+        g.setColour (colour (Token::Handle));
+        g.fillEllipse (x0 - 2.0f - 5.0f, f.yBottom - 5.0f, 10.0f, 10.0f);
+    }
+    // poignée du plateau (niveau de sustain)
+    {
+        const float hx = X (0.5 * (L.plateauX0 + L.plateauX1)), hy = Y (sustainLevel);
+        g.setColour (colour (Token::Pink));
+        g.fillRoundedRectangle (hx - 7.0f, hy - 4.0f, 14.0f, 8.0f, 2.0f);
+    }
+    // segment illuminé : bande sur sa largeur, ou repère vertical à la jonction s'il n'a pas de largeur
+    if (highlight_ != Seg::None)
+    {
+        const int i = static_cast<int> (highlight_);
+        g.setColour (colour (Token::Accent).withAlpha (0.18f));
+        if (L.active[i]) g.fillRect (juce::Rectangle<float> (X (L.x0[i]), f.yTop, static_cast<float> (L.x1[i] - L.x0[i]), f.yBottom - f.yTop));
+        else
+        {
+            g.setColour (colour (Token::Accent).withAlpha (0.7f));
+            g.drawVerticalLine (static_cast<int> (X (L.x1[i])), f.yTop, f.yBottom);
+        }
+    }
     // niveau de sustain, au-dessus du plateau
     g.setColour (colour (Token::Accent));
     g.setFont (juce::FontOptions (12.0f));
@@ -262,18 +277,31 @@ void EnvelopeEditor::paint (juce::Graphics& g)
                 juce::Justification::centred);
     g.restoreState();
 
-    // étiquettes de durée
+    // valeurs de durée, sous les boutons d'activation
     for (const auto& c : f.chips)
     {
         const bool on = segs[static_cast<int> (c.seg)]->on;
-        g.setColour (colour (Token::BgApp).withAlpha (0.6f));
-        g.fillRoundedRectangle (c.rect, 5.0f);
-        g.setColour (on ? colour (Token::Border) : colour (Token::Grid));
-        g.drawRoundedRectangle (c.rect.reduced (0.5f), 5.0f, 1.0f);
+        const bool lit = c.seg == highlight_;
+        g.setColour (lit ? colour (Token::Accent).withAlpha (0.25f) : colour (Token::BgApp).withAlpha (0.6f));
+        g.fillRoundedRectangle (c.rect.reduced (2.0f, 0.0f), 5.0f);
+        g.setColour (lit ? colour (Token::Accent) : (on ? colour (Token::Border) : colour (Token::Grid)));
+        g.drawRoundedRectangle (c.rect.reduced (2.5f, 0.5f), 5.0f, 1.0f);
         g.setColour (on ? colour (Token::Text) : colour (Token::TextDim2));
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (13.0f));
         g.drawText (c.text, c.rect.toNearestInt(), juce::Justification::centred);
     }
+}
+
+void EnvelopeEditor::mouseMove (const juce::MouseEvent& e)
+{
+    const auto hit = hitTest (e.position);
+    const Seg h = hit.part == Part::Chip ? hit.seg : Seg::None;
+    if (h != highlight_) { highlight_ = h; repaint(); }
+}
+
+void EnvelopeEditor::mouseExit (const juce::MouseEvent&)
+{
+    if (drag_.part == Part::None && highlight_ != Seg::None) { highlight_ = Seg::None; repaint(); }
 }
 
 void EnvelopeEditor::mouseDown (const juce::MouseEvent& e)
@@ -286,6 +314,7 @@ void EnvelopeEditor::mouseDown (const juce::MouseEvent& e)
     frozenScale_ = 0.0;
     if (drag_.part == Part::None) return;
     downMs_ = segment (env_, drag_.seg).ms;
+    highlight_ = drag_.part == Part::Chip ? drag_.seg : Seg::None;
     if (drag_.part != Part::Chip) frozenScale_ = frame().layout.scale; // échelle figée pendant le glissé
     if (e.mods.isPopupMenu() && drag_.part == Part::Shape) // clic droit : bascule dB
     {
@@ -327,9 +356,17 @@ void EnvelopeEditor::mouseDrag (const juce::MouseEvent& e)
     }
 
     const auto f = frame();
+    if (drag_.part == Part::Sustain)
+    {
+        env_.sustain = juce::jlimit (0.0f, 1.0f, (f.yBottom - e.position.y) / (f.yBottom - f.yTop));
+        if (env_.sustain < 0.999) env_.decay.on = true; // descendre le plateau demande un decay (0 ms = saut direct)
+        changed();
+        return;
+    }
     if (drag_.part == Part::Node)
     {
-        const double width = static_cast<double> (e.position.x - f.graph.getX()) - f.layout.x0[i];
+        // le nœud d'un délai à 0 ms est collé à la marge : sa largeur se mesure depuis le bord gauche de la courbe
+        const double width = static_cast<double> (e.position.x - f.graph.getX()) - (f.layout.active[i] ? f.layout.x0[i] : 0.0);
         seg.ms = envelopeTimeFromWidth (width, frozenScale_);
         if (drag_.seg == Seg::Decay)
             env_.sustain = juce::jlimit (0.0f, 1.0f, (f.yBottom - e.position.y) / (f.yBottom - f.yTop));
@@ -357,7 +394,8 @@ void EnvelopeEditor::mouseUp (const juce::MouseEvent&)
     drag_ = {};
     frozenScale_ = 0.0; // au relâchement : tout est recalculé
     stopTimer();
-    if (hit.part == Part::Chip && tapped) askValue (hit.seg); // toucher une étiquette : saisie en chiffres
+    highlight_ = Seg::None;
+    if (hit.part == Part::Chip && tapped) askValue (hit.seg); // toucher une valeur : saisie en chiffres
     repaint();
 }
 

@@ -7,14 +7,19 @@
 #include "neptune/core/Theme.h"
 
 // Éditeur graphique de l'enveloppe (palier 1) : une seule courbe continue ; la largeur de chaque segment reflète sa durée
-// (neptune::core::computeEnvelopeLayout), un segment à 0 ms n'a pas de largeur. Les durées sont écrites sous la courbe.
+// (neptune::core::computeEnvelopeLayout), un segment à 0 ms n'a pas de largeur.
 //
+// Rangée du haut : un bouton d'activation par segment (Dly, Atk, Hold, Dec, Rel), et SOUS chacun la valeur de sa durée,
+// toujours alignée (jamais superposée). La valeur se glisse horizontalement (marche aussi depuis 0 ms) ou se touche
+// pour saisir des chiffres ; le segment correspondant s'illumine sur la courbe.
+//
+// Sur la courbe, on peut aussi tout régler directement :
 //  - nœud de fin de segment : glisser horizontalement = durée (le nœud du decay aussi verticalement = niveau de sustain) ;
+//  - nœud du délai à 0 ms : collé à la marge gauche, à tirer vers la droite ;
+//  - poignée du plateau : glisser verticalement = niveau de sustain (active le decay au besoin) ;
 //  - poignée au milieu d'une courbe : glisser verticalement = forme ; double-clic = linéaire ; appui long / clic droit = dB ;
-//  - étiquette de durée : glisser horizontalement = faire varier la valeur (marche aussi pour 0 ms), toucher = saisir en
-//    chiffres ;
 //  - pendant un glissé l'échelle est figée : ce qui précède ne bouge pas ; au relâchement tout est recalculé.
-// Une ligne de boutons active/désactive chaque segment ; un menu propose les réglages prédéfinis (percussion...).
+// Un menu propose les réglages prédéfinis (percussion...).
 class EnvelopeEditor : public juce::Component, private juce::Timer
 {
 public:
@@ -30,10 +35,12 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
 
 private:
     enum class Seg { Delay = 0, Attack = 1, Hold = 2, Decay = 3, Release = 4, None = 5 };
-    enum class Part { Node, Shape, Chip, None };
+    enum class Part { Node, Shape, Chip, Sustain, None };
     struct Hit { Seg seg = Seg::None; Part part = Part::None; };
     struct Chip { Seg seg; juce::Rectangle<float> rect; juce::String text; };
     struct Frame { juce::Rectangle<float> graph; float yTop, yBottom; neptune::core::EnvelopeLayout layout; std::vector<Chip> chips; };
@@ -53,6 +60,7 @@ private:
     juce::TextButton toggles_[5];
     juce::ComboBox presets_;
     bool updating_ = false;
+    Seg highlight_ = Seg::None; // segment illuminé (valeur touchée ou survolée)
 
     Hit drag_;
     double frozenScale_ = 0.0;
