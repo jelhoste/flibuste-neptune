@@ -370,34 +370,67 @@ TEST_CASE ("plan: sustain and release files of the same note are different place
     CHECK (attack == 3); // RR1, RR2 et SUS : trois échantillons à la même place (SUS = principal, numéro 0)
 }
 
-TEST_CASE ("a file without round-robin number is the main sample, alternates can be left out")
+TEST_CASE ("a file without round-robin number is the main sample of its place")
 {
     Template t = positionalTemplate();
     KeywordRule rr;
     rr.keyword = "RR"; rr.valueRole = Role::RoundRobin; rr.digitsMin = 1; rr.digitsMax = 1;
     t.keywords = { rr };
-    const std::vector<std::string> files = { wav ("048_C3v1_RR1"), wav ("048_C3v1_RR2"), wav ("048_C3v1"), wav ("050_D3v1_RR2"), wav ("050_D3v1_RR3") };
-
-    const auto all = planImport (files, t, {});
-    CHECK (all.errors() == 0);
-    CHECK (all.warnings() == 0);
-    CHECK (includedZones (all).size() == 5);
+    const auto plan = planImport ({ wav ("048_C3v1_RR1"), wav ("048_C3v1_RR2"), wav ("048_C3v1"), wav ("050_D3v1_RR2"), wav ("050_D3v1_RR3") }, t, {});
+    CHECK (plan.errors() == 0);
+    CHECK (plan.warnings() == 0);
+    CHECK (includedZones (plan).size() == 5);
     bool mainIsZero = false;
-    for (const auto& z : all.zones)
+    for (const auto& z : plan.zones)
         if (z.zone.rootNote == 48 && z.zone.roundRobin == 0) mainIsZero = true;
     CHECK (mainIsZero);
+}
 
-    PlanOptions light;
-    light.mainRoundRobinOnly = true;
-    const auto lite = planImport (files, t, light);
-    CHECK (lite.errors() == 0);
-    const auto zones = includedZones (lite);
-    REQUIRE (zones.size() == 2);                 // une par place
-    CHECK (zones[0].roundRobin == 0);            // 048 : le principal, sans numéro
-    CHECK (zones[1].roundRobin == 2);            // 050 : pas de principal, le plus petit numéro
-    int skipped = 0;
-    for (const auto& z : lite.zones) skipped += z.skipped ? 1 : 0;
-    CHECK (skipped == 3);
+TEST_CASE ("loading options: main round-robin only, release samples, unloaded groups")
+{
+    InstrumentDescription d;
+    auto add = [&] (const std::string& group, int note, int rr, bool release = false)
+    {
+        ZoneDescription z;
+        z.samplePath = "/lib/" + group + std::to_string (note) + "_" + std::to_string (rr) + (release ? "_rel" : "") + ".wav";
+        z.group = group; z.rootNote = z.keyLow = z.keyHigh = note; z.roundRobin = rr; z.onRelease = release;
+        d.zones.push_back (z);
+    };
+    add ("", 48, 0);  add ("", 48, 1);  add ("", 48, 2);       // principal + 2 alternatives
+    add ("", 50, 2);  add ("", 50, 3);                          // pas de principal : le plus petit numéro
+    add ("", 48, 0, true);                                      // relâchement
+    add ("pedal", 48, 0); add ("pedal", 48, 1);                 // table « pedal »
+
+    auto count = [] (const std::vector<bool>& m) { return static_cast<int> (std::count (m.begin(), m.end(), true)); };
+    CHECK (count (loadedZones (d)) == 8);                        // tout
+
+    d.mainRoundRobinOnly = true;
+    const auto light = loadedZones (d);
+    CHECK (count (light) == 4);   // 48 principal, 50 rr 2, le relâchement et le principal de « pedal »
+    CHECK (light[0]);             // 48 principal
+    CHECK_FALSE (light[1]);       // 48 rr 1
+    CHECK_FALSE (light[2]);       // 48 rr 2
+    CHECK (light[3]);             // 50 rr 2 : le plus petit
+    CHECK_FALSE (light[4]);       // 50 rr 3
+    CHECK (light[5]);             // le relâchement est une place à part
+    CHECK (light[6]);             // pedal principal
+    CHECK_FALSE (light[7]);
+
+    d.loadReleaseSamples = false;
+    d.unloadedGroups = { "pedal" };
+    const auto leaner = loadedZones (d);
+    CHECK (count (leaner) == 2);  // 48 principal et 50 rr 2 seulement
+    CHECK_FALSE (leaner[5]);
+    CHECK_FALSE (leaner[6]);
+
+    d.mainRoundRobinOnly = false;
+    CHECK (count (loadedZones (d)) == 5); // sans le mode léger : les 5 de la table principale
+
+    // la description reste complète ; seuls les réglages de chargement sont sauvegardés
+    InstrumentDescription back = instrumentFromJson (toJson (d));
+    CHECK (back == d);
+    CHECK_FALSE (back.loadReleaseSamples);
+    CHECK (back.unloadedGroups.size() == 1);
 }
 
 TEST_CASE ("two main samples at the same place are a duplicate")

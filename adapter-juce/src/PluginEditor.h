@@ -5,6 +5,7 @@
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
+#include <map>
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
 
@@ -60,6 +61,16 @@ private:
     void closeWizard();
     void applyImport (const ImportWizard::Result&);
     void removeSelectedZones();
+
+    // Tables chargées en mémoire : alternatives round-robin, relâchements, un Groupe à la fois (vidage réversible).
+    juce::Label loadTitle_;
+    juce::ToggleButton rrToggle_, releaseToggle_;
+    juce::OwnedArray<juce::ToggleButton> groupToggles_;
+    juce::Component groupsHolder_;
+    juce::Viewport groupsViewport_;
+    std::map<std::string, std::uint64_t> sizeCache_;
+    std::string groupsSignature_;
+    void rebuildLoadPanel();
     bool updatingControls_ = false;
     void chooseSample();
     void editZone (const std::function<void (neptune::core::ZoneDescription&)>&);

@@ -144,9 +144,6 @@ struct PlanOptions
     RangeOptions velocities;
     int layerCountOverride = 0;  // 0 : lu dans les noms, sinon déduit du plus grand numéro de couche rencontré
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
-    // Instrument plus léger : ne charge que l'échantillon principal de chaque place (celui sans numéro de round-robin,
-    // sinon le plus petit numéro) ; les alternatives ne sont pas importées.
-    bool mainRoundRobinOnly = false;
 };
 
 enum class Severity { Info, Warning, Error };
@@ -162,8 +159,7 @@ struct PlannedZone
 {
     std::string path;
     ZoneDescription zone;
-    bool included = true; // faux : exclu par une erreur (nom illisible, doublon) ou volontairement (skipped)
-    bool skipped = false; // exclu volontairement (alternative de round-robin avec mainRoundRobinOnly) : pas une erreur
+    bool included = true; // faux : exclu par une erreur (nom illisible, doublon)
 };
 
 struct Plan

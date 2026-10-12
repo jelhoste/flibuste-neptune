@@ -61,9 +61,23 @@ struct InstrumentDescription
 {
     std::vector<ZoneDescription> zones;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
-    bool operator== (const InstrumentDescription& o) const noexcept { return zones == o.zones && roundRobinMode == o.roundRobinMode; }
+
+    // Ce qui est chargé en mémoire (réglable en cours d'utilisation ; les zones restent toutes dans la description) :
+    bool mainRoundRobinOnly = false;           // ne charger que l'échantillon principal de chaque place
+    bool loadReleaseSamples = true;            // zones déclenchées au relâchement
+    std::vector<std::string> unloadedGroups;   // noms de Groupe (articulations, pédales...) laissés sur le disque
+
+    bool operator== (const InstrumentDescription& o) const noexcept
+    {
+        return zones == o.zones && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
+            && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups;
+    }
     bool empty() const noexcept { return zones.empty(); }
 };
+
+// Quelles zones de la description sont chargées en mémoire, selon les options ci-dessus. Le principal d'une place
+// (mêmes étendues, même Groupe, même déclenchement) est la zone sans numéro de round-robin, sinon le plus petit numéro.
+std::vector<bool> loadedZones (const InstrumentDescription& d);
 
 // Valeurs bornées/rectifiées (note 0..127, vélocité 1..127, enveloppe : voir sanitised(EnvelopeDescription), cents ±1200,
 // gain ±60 dB, boucle ordonnée).

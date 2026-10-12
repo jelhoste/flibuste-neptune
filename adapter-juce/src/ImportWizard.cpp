@@ -303,10 +303,6 @@ ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette
     rrMode_.setSelectedId (1, juce::dontSendNotification);
     rrMode_.onChange = [this] { recompute(); };
     panel_.addAndMakeVisible (rrMode_);
-    mainOnly_.setButtonText (t ("import.main_only"));
-    mainOnly_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
-    mainOnly_.onClick = [this] { recompute(); };
-    panel_.addAndMakeVisible (mainOnly_);
 
     strip_ = std::make_unique<ExampleStrip> (*this);
     strip_->setStem (exampleStem_);
@@ -393,8 +389,6 @@ void ImportWizard::resized()
     opt2.removeFromLeft (20);
     rrLabel_.setBounds (opt2.removeFromLeft (110));
     rrMode_.setBounds (opt2.removeFromLeft (200).reduced (2));
-    opt2.removeFromLeft (16);
-    mainOnly_.setBounds (opt2);
 
     auto bottom = r.removeFromBottom (44);
     cancelButton_.setBounds (bottom.removeFromRight (120).reduced (2));
@@ -507,7 +501,6 @@ void ImportWizard::recompute()
     options_.keys = { strat (keyStrategy_.getSelectedId()), belowKeys_.getText().getIntValue(), aboveKeys_.getText().getIntValue() };
     options_.velocities = { strat (velStrategy_.getSelectedId()), belowVel_.getText().getIntValue(), aboveVel_.getText().getIntValue() };
     options_.layerCountOverride = layersEdit_.getText().getIntValue();
-    options_.mainRoundRobinOnly = mainOnly_.getToggleState();
     options_.roundRobinMode = rrMode_.getSelectedId() == 2 ? RoundRobinMode::Random
                             : (rrMode_.getSelectedId() == 3 ? RoundRobinMode::RandomNoRepeat : RoundRobinMode::Sequential);
 
@@ -577,7 +570,7 @@ void ImportWizard::paintRowBackground (juce::Graphics& g, int row, int, int, boo
     if (row >= 0 && row < static_cast<int> (shown_.size()))
     {
         const auto& pz = plan_.zones[static_cast<std::size_t> (shown_[static_cast<std::size_t> (row)])];
-        if (! pz.included && ! pz.skipped) g.fillAll (colour (Token::KnobHot).withAlpha (0.18f));
+        if (! pz.included) g.fillAll (colour (Token::KnobHot).withAlpha (0.18f));
     }
 }
 
@@ -604,7 +597,7 @@ void ImportWizard::paintCell (juce::Graphics& g, int row, int column, int width,
         }
         default: break;
     }
-    g.setColour (pz.included ? colour (Token::Text) : (pz.skipped ? colour (Token::TextDim2) : colour (Token::KnobHot2)));
+    g.setColour (pz.included ? colour (Token::Text) : colour (Token::KnobHot2));
     g.setFont (juce::FontOptions (13.0f));
     g.drawText (text, 4, 0, width - 6, height, juce::Justification::centredLeft, true);
 }

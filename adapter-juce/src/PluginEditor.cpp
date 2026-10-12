@@ -45,6 +45,28 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addAndMakeVisible (removeButton_);
     selectionLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (selectionLabel_);
+    loadTitle_.setText (text ("load.title"), juce::dontSendNotification);
+    loadTitle_.setColour (juce::Label::textColourId, colour (Token::Text));
+    addAndMakeVisible (loadTitle_);
+    for (auto* t : { &rrToggle_, &releaseToggle_ })
+    {
+        t->setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+        addAndMakeVisible (t);
+    }
+    rrToggle_.onClick = [this]
+    {
+        auto d = processor_.instrumentDescription();
+        d.mainRoundRobinOnly = ! rrToggle_.getToggleState(); // coché = les alternatives sont chargées
+        processor_.setInstrumentDescription (std::move (d));
+    };
+    releaseToggle_.onClick = [this]
+    {
+        auto d = processor_.instrumentDescription();
+        d.loadReleaseSamples = releaseToggle_.getToggleState();
+        processor_.setInstrumentDescription (std::move (d));
+    };
+    groupsViewport_.setViewedComponent (&groupsHolder_, false);
+    addAndMakeVisible (groupsViewport_);
     zoneTable_ = std::make_unique<ZoneTable> (palette_, tr_);
     zoneTable_->onSelectionChanged = [this] { lastRevision_ = 0xFFFFFFFFu; updateSamplerControls(); };
     addAndMakeVisible (*zoneTable_);
@@ -311,6 +333,7 @@ void NeptuneEditor::updateSamplerControls()
         lastRevision_ = rev;
         cachedDescription_ = processor_.instrumentDescription();
         zoneTable_->setZones (cachedDescription_.zones);
+        rebuildLoadPanel();
     }
     const auto& d = cachedDescription_;
     const auto selection = zoneTable_->selectedRows();
@@ -336,6 +359,74 @@ void NeptuneEditor::updateSamplerControls()
                              juce::dontSendNotification);
 }
 
+void NeptuneEditor::rebuildLoadPanel()
+{
+    const auto& d = cachedDescription_;
+    auto sizeOf = [this] (const std::string& path) -> std::uint64_t
+    {
+        auto it = sizeCache_.find (path);
+        if (it == sizeCache_.end())
+            it = sizeCache_.emplace (path, static_cast<std::uint64_t> (juce::jmax<juce::int64> (0, juce::File (juce::String::fromUTF8 (path.c_str())).getSize()))).first;
+        return it->second;
+    };
+    // Ce que chaque case commande, en Mo (taille des fichiers : indicatif).
+    std::uint64_t alternates = 0, release = 0;
+    std::map<std::string, std::uint64_t> groups;
+    {
+        auto all = d;
+        all.mainRoundRobinOnly = true; all.loadReleaseSamples = true; all.unloadedGroups.clear();
+        const auto mask = neptune::core::loadedZones (all); // avec « principal seulement » : ce qui reste est le principal
+        for (std::size_t i = 0; i < d.zones.size(); ++i)
+        {
+            const auto& z = d.zones[i];
+            const auto bytes = sizeOf (z.samplePath);
+            if (z.onRelease) release += bytes;
+            else if (! z.group.empty()) groups[z.group] += bytes;
+            if (! mask[i] && ! z.onRelease && z.group.empty()) alternates += bytes;
+        }
+    }
+    auto mb = [] (std::uint64_t b) { return juce::String (static_cast<double> (b) / (1024.0 * 1024.0), 0).toStdString(); };
+
+    std::string signature = std::to_string (alternates) + "/" + std::to_string (release);
+    for (const auto& [g, b] : groups) signature += "|" + g + ":" + std::to_string (b);
+    for (const auto& u : d.unloadedGroups) signature += "!" + u;
+    const bool has = ! d.zones.empty();
+
+    rrToggle_.setButtonText (juce::String::fromUTF8 (tr_.format ("load.round_robin", { mb (alternates) }).c_str()));
+    releaseToggle_.setButtonText (juce::String::fromUTF8 (tr_.format ("load.release", { mb (release) }).c_str()));
+    rrToggle_.setToggleState (! d.mainRoundRobinOnly, juce::dontSendNotification);
+    releaseToggle_.setToggleState (d.loadReleaseSamples, juce::dontSendNotification);
+    rrToggle_.setEnabled (has);
+    releaseToggle_.setEnabled (has);
+
+    // Une case par Groupe nommé (articulation, pédale, micro...) : reconstruites seulement si elles changent.
+    if (signature != groupsSignature_)
+    {
+        groupsSignature_ = signature;
+        groupToggles_.clear();
+        for (const auto& [name, bytes] : groups)
+        {
+            auto* t = groupToggles_.add (new juce::ToggleButton());
+            t->setButtonText (juce::String::fromUTF8 (tr_.format ("load.group", { name, mb (bytes) }).c_str()));
+            t->setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+            t->setToggleState (std::find (d.unloadedGroups.begin(), d.unloadedGroups.end(), name) == d.unloadedGroups.end(),
+                               juce::dontSendNotification);
+            t->onClick = [this, name, t]
+            {
+                auto desc = processor_.instrumentDescription();
+                auto& u = desc.unloadedGroups;
+                u.erase (std::remove (u.begin(), u.end(), name), u.end());
+                if (! t->getToggleState()) u.push_back (name); // décoché = laissé sur le disque
+                processor_.setInstrumentDescription (std::move (desc));
+            };
+            groupsHolder_.addAndMakeVisible (t);
+        }
+        const int w = juce::jmax (200, groupsViewport_.getWidth() - 20);
+        for (int i = 0; i < groupToggles_.size(); ++i) groupToggles_[i]->setBounds (0, i * 28, w, 28);
+        groupsHolder_.setSize (w, juce::jmax (1, groupToggles_.size()) * 28);
+    }
+}
+
 void NeptuneEditor::updateViewVisibility()
 {
     const bool sampler = ! showProbe_;
@@ -349,6 +440,10 @@ void NeptuneEditor::updateViewVisibility()
     removeButton_.setVisible (sampler);
     selectionLabel_.setVisible (sampler);
     zoneTable_->setVisible (sampler);
+    loadTitle_.setVisible (sampler);
+    rrToggle_.setVisible (sampler);
+    releaseToggle_.setVisible (sampler);
+    groupsViewport_.setVisible (sampler);
     for (auto* k : knobs_) k->setVisible (sampler);
     viewButton_.setButtonText (showProbe_ ? "Sampler" : "Probe");
 }
@@ -439,7 +534,14 @@ void NeptuneEditor::resized()
         const int bottom = getHeight() - 270 - 12;
         const int h = juce::jmax (120, bottom - top);
         const int tableW = juce::jmin (450, (getWidth() - 64) / 2);
-        zoneTable_->setBounds (32, top, tableW, h);
+        const int panelH = 160;
+        zoneTable_->setBounds (32, top, tableW, juce::jmax (80, h - panelH - 6));
+        auto lp = juce::Rectangle<int> (32, top + juce::jmax (80, h - panelH - 6) + 6, tableW, panelH);
+        loadTitle_.setBounds (lp.removeFromTop (24));
+        rrToggle_.setBounds (lp.removeFromTop (28));
+        releaseToggle_.setBounds (lp.removeFromTop (28));
+        groupsViewport_.setBounds (lp);
+        groupsSignature_.clear(); // largeur changée : les cases sont reconstruites à la prochaine mise à jour
         envelopeEditor_->setBounds (32 + tableW + 12, top, getWidth() - 64 - tableW - 12, h);
     }
     if (wizard_) wizard_->setBounds (getLocalBounds());

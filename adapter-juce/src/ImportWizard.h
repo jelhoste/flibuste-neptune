@@ -70,7 +70,6 @@ private:
     Panel panel_;
     juce::Label keywordsLabel_;
     juce::TextButton addKeywordButton_;
-    juce::ToggleButton mainOnly_;
     juce::OwnedArray<KeywordRow> keywordRows_;
     juce::Viewport keywordsViewport_;
     juce::Component keywordsHolder_;

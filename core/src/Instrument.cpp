@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
+#include <tuple>
 
 #include <nlohmann/json.hpp>
 
@@ -141,6 +143,9 @@ std::string toJson (const InstrumentDescription& d)
     }
     nlohmann::json doc;
     doc["round_robin_mode"] = toString (d.roundRobinMode);
+    if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
+    if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
+    if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
     doc["zones"] = std::move (zones);
     return doc.dump();
 }
@@ -192,6 +197,11 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (doc.is_discarded() || ! doc.is_object()) return d;
     if (const auto m = doc.find ("round_robin_mode"); m != doc.end() && m->is_string())
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
+    if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
+    if (const auto m = doc.find ("load_release_samples"); m != doc.end() && m->is_boolean()) d.loadReleaseSamples = m->get<bool>();
+    if (const auto m = doc.find ("unloaded_groups"); m != doc.end() && m->is_array())
+        for (const auto& g : *m)
+            if (g.is_string() && g.get<std::string>().size() <= 128 && d.unloadedGroups.size() < 256) d.unloadedGroups.push_back (g.get<std::string>());
     const auto zones = doc.find ("zones");
     if (zones == doc.end() || ! zones->is_array()) return d;
     constexpr std::size_t kMaxZones = 4096;
@@ -270,6 +280,39 @@ const Zone* Instrument::select (int key, float velocity, bool release) const noe
     return nullptr;
 }
 
+std::vector<bool> loadedZones (const InstrumentDescription& d)
+{
+    std::vector<bool> mask (d.zones.size(), true);
+    for (std::size_t i = 0; i < d.zones.size(); ++i)
+    {
+        const auto& z = d.zones[i];
+        if (z.onRelease && ! d.loadReleaseSamples) mask[i] = false;
+        else if (! z.group.empty() && std::find (d.unloadedGroups.begin(), d.unloadedGroups.end(), z.group) != d.unloadedGroups.end()) mask[i] = false;
+    }
+    if (d.mainRoundRobinOnly)
+    {
+        using Place = std::tuple<std::string, bool, int, int, int, int>;
+        std::map<Place, int> best;
+        auto place = [] (const ZoneDescription& z) { return Place { z.group, z.onRelease, z.keyLow, z.keyHigh, z.velLow, z.velHigh }; };
+        for (std::size_t i = 0; i < d.zones.size(); ++i)
+            if (mask[i])
+            {
+                const auto p = place (d.zones[i]);
+                const auto f = best.find (p);
+                if (f == best.end() || d.zones[i].roundRobin < f->second) best[p] = d.zones[i].roundRobin;
+            }
+        std::map<Place, bool> taken;
+        for (std::size_t i = 0; i < d.zones.size(); ++i)
+            if (mask[i])
+            {
+                const auto p = place (d.zones[i]);
+                if (d.zones[i].roundRobin != best[p] || taken[p]) mask[i] = false; // un seul par place
+                else taken[p] = true;
+            }
+    }
+    return mask;
+}
+
 std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& description, std::vector<std::string>* warnings,
                                                    SampleCache* externalCache, const std::function<bool (int, int)>& progress)
 {
@@ -278,13 +321,15 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     std::map<std::string, int> groupIds;
     SampleCache localCache;
     SampleCache& cache = externalCache != nullptr ? *externalCache : localCache;
+    const std::vector<bool> mask = loadedZones (description);
     int done = 0;
-    const int total = static_cast<int> (description.zones.size());
-    for (const auto& zd0 : description.zones)
+    const int total = static_cast<int> (std::count (mask.begin(), mask.end(), true));
+    for (std::size_t zi = 0; zi < description.zones.size(); ++zi)
     {
+        if (! mask[zi]) continue; // laissée sur le disque (principal seulement, Groupe ou relâchement non chargés)
         if (progress && ! progress (done, total)) return nullptr;
         ++done;
-        const ZoneDescription zd = sanitised (zd0);
+        const ZoneDescription zd = sanitised (description.zones[zi]);
         auto it = cache.find (zd.samplePath);
         if (it == cache.end())
         {
@@ -315,12 +360,13 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         inst->zones.push_back (std::move (z));
     }
     inst->finalize();
-    // On ne garde en cache que ce que la description utilise encore.
-    for (auto it = cache.begin(); it != cache.end();)
+    // On ne garde en cache que ce qui est chargé : décharger une table libère vraiment la mémoire.
     {
-        const bool used = std::any_of (description.zones.begin(), description.zones.end(),
-                                       [&] (const ZoneDescription& zd) { return zd.samplePath == it->first; });
-        it = used ? std::next (it) : cache.erase (it);
+        std::set<std::string> used;
+        for (std::size_t zi = 0; zi < description.zones.size(); ++zi)
+            if (mask[zi]) used.insert (description.zones[zi].samplePath);
+        for (auto it = cache.begin(); it != cache.end();)
+            it = used.count (it->first) ? std::next (it) : cache.erase (it);
     }
     return inst;
 }

@@ -348,7 +348,6 @@ struct Item
     int note = -1;
     int keyLow = 0, keyHigh = 127, velLow = 1, velHigh = 127;
     int rr = 0;
-    bool skipped = false;
 };
 
 // Étendues « à mi-chemin » : valeurs triées distinctes -> (bas, haut) par valeur.
@@ -561,30 +560,6 @@ Plan planImport (const std::vector<std::string>& paths, const Template& t, const
         }
     }
 
-    // ---- instrument léger : un seul échantillon par place ----
-    if (options.mainRoundRobinOnly)
-    {
-        std::map<Place, int> bestRr;
-        for (const auto& it : items)
-        {
-            if (! it.included) continue;
-            const Place pl { it.parsed.group, it.parsed.release, it.note, it.keyLow, it.keyHigh, it.velLow, it.velHigh };
-            const auto f = bestRr.find (pl);
-            if (f == bestRr.end() || it.rr < f->second) bestRr[pl] = it.rr;
-        }
-        for (auto& it : items)
-        {
-            if (! it.included) continue;
-            const Place pl { it.parsed.group, it.parsed.release, it.note, it.keyLow, it.keyHigh, it.velLow, it.velHigh };
-            if (it.rr != bestRr[pl])
-            {
-                it.included = false;
-                it.skipped = true;
-                diag (Severity::Info, it.parsed.stem, "round-robin alternate not loaded (main sample only)");
-            }
-        }
-    }
-
     // ---- diagnostics d'ensemble ----
     {
         std::map<std::pair<std::string, bool>, std::vector<const Item*>> byGroup;
@@ -627,7 +602,6 @@ Plan planImport (const std::vector<std::string>& paths, const Template& t, const
         PlannedZone pz;
         pz.path = it.path;
         pz.included = it.included;
-        pz.skipped = it.skipped;
         pz.zone.samplePath = it.path;
         pz.zone.rootNote = std::max (0, it.note);
         pz.zone.keyLow = it.keyLow;
