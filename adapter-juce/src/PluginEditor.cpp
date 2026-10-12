@@ -252,6 +252,7 @@ void NeptuneEditor::openWizard (std::vector<std::string> paths)
     const auto saved = processor_.lastImportTemplate();
     auto templ = saved.empty() ? neptune::core::import::Template {} : neptune::core::import::Template::fromJson (saved);
     wizard_ = std::make_unique<ImportWizard> (std::move (paths), palette_, tr_, std::move (templ),
+        processor_.instrumentDescription(), fileInfo_, neptune::core::memory::availablePhysicalBytes(),
         [safe = juce::Component::SafePointer<NeptuneEditor> (this)] (const ImportWizard::Result& r)
         {
             if (safe == nullptr) return;
@@ -279,6 +280,9 @@ void NeptuneEditor::applyImport (const ImportWizard::Result& r)
     auto d = processor_.instrumentDescription();
     if (r.replace) d.zones.clear();
     for (const auto& z : r.zones) d.zones.push_back (z);
+    // Import léger : en remplaçant, le choix de l'assistant s'applique tel quel ; en ajoutant, on ne fait que restreindre.
+    d.mainRoundRobinOnly = r.replace ? r.mainRoundRobinOnly : (d.mainRoundRobinOnly || r.mainRoundRobinOnly);
+    d.loadReleaseSamples = r.replace ? r.loadReleaseSamples : (d.loadReleaseSamples && r.loadReleaseSamples);
     d.roundRobinMode = r.roundRobinMode;
     processor_.uiEditInstrument (std::move (d), "Import samples");
     lastRevision_ = 0xFFFFFFFFu;
@@ -364,14 +368,9 @@ void NeptuneEditor::updateSamplerControls()
 void NeptuneEditor::rebuildLoadPanel()
 {
     const auto& d = cachedDescription_;
-    auto sizeOf = [this] (const std::string& path) -> std::uint64_t
-    {
-        auto it = sizeCache_.find (path);
-        if (it == sizeCache_.end())
-            it = sizeCache_.emplace (path, static_cast<std::uint64_t> (juce::jmax<juce::int64> (0, juce::File (juce::String::fromUTF8 (path.c_str())).getSize()))).first;
-        return it->second;
-    };
-    // Ce que chaque case commande, en Mo (taille des fichiers : indicatif).
+    // Mémoire exacte lue dans l'en-tête des fichiers (la même règle que le chargement).
+    auto sizeOf = [this] (const std::string& path) -> std::uint64_t { return fileInfo_.ramBytes (path); };
+    // Ce que chaque case commande, en Mo (mémoire réelle après décodage).
     std::uint64_t alternates = 0, release = 0;
     std::map<std::string, std::uint64_t> groups;
     {

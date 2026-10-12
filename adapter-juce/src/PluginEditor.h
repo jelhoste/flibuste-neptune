@@ -68,7 +68,7 @@ private:
     juce::OwnedArray<juce::ToggleButton> groupToggles_;
     juce::Component groupsHolder_;
     juce::Viewport groupsViewport_;
-    std::map<std::string, std::uint64_t> sizeCache_;
+    neptune::core::memory::FileInfoCache fileInfo_; // en-têtes des fichiers : mémoire exacte, un fichier n'est ouvert qu'une fois
     std::string groupsSignature_;
     void rebuildLoadPanel();
     bool updatingControls_ = false;

@@ -33,6 +33,15 @@ bool hasExtension (const std::filesystem::path& p, const char* ext)
 
 std::string fileName (const std::filesystem::path& p) { return p.filename().string(); }
 
+// Règles de conservation en mémoire, communes au chargement et à l'estimation (probeAudioFile) : un seul endroit.
+bool sndfileKeepsInt16 (int sub) { return sub == SF_FORMAT_PCM_16; }
+int sndfileBitDepth (int sub)
+{
+    return sub == SF_FORMAT_PCM_16 ? 16 : sub == SF_FORMAT_PCM_24 ? 24 : sub == SF_FORMAT_PCM_32 ? 32
+         : sub == SF_FORMAT_PCM_S8 || sub == SF_FORMAT_PCM_U8 ? 8 : sub == SF_FORMAT_FLOAT ? 32 : sub == SF_FORMAT_DOUBLE ? 64 : 0;
+}
+bool flacKeepsInt16 (int bitsPerSample) { return bitsPerSample <= 16; }
+
 // ----- libsndfile (WAV, AIFF, ...) -----
 SampleLoadResult loadWithSndfile (const std::filesystem::path& path)
 {
@@ -51,7 +60,7 @@ SampleLoadResult loadWithSndfile (const std::filesystem::path& path)
     if (info.frames <= 0 || info.samplerate <= 0) return fail ("empty or invalid audio file");
 
     const auto sub = info.format & SF_FORMAT_SUBMASK;
-    const bool keep16 = (sub == SF_FORMAT_PCM_16);
+    const bool keep16 = sndfileKeepsInt16 (sub);
     const std::int64_t frames = info.frames;
     const int ch = info.channels;
 
@@ -60,8 +69,7 @@ SampleLoadResult loadWithSndfile (const std::filesystem::path& path)
     data->frames = frames;
     data->sampleRate = static_cast<double> (info.samplerate);
     data->name = fileName (path);
-    data->sourceBitDepth = sub == SF_FORMAT_PCM_16 ? 16 : sub == SF_FORMAT_PCM_24 ? 24 : sub == SF_FORMAT_PCM_32 ? 32
-                         : sub == SF_FORMAT_PCM_S8 || sub == SF_FORMAT_PCM_U8 ? 8 : sub == SF_FORMAT_FLOAT ? 32 : sub == SF_FORMAT_DOUBLE ? 64 : 0;
+    data->sourceBitDepth = sndfileBitDepth (sub);
 
     if (keep16) data->pcm16.resize (static_cast<std::size_t> (frames) * static_cast<std::size_t> (ch));
     else data->pcm32.resize (static_cast<std::size_t> (frames) * static_cast<std::size_t> (ch));
@@ -120,7 +128,7 @@ SampleLoadResult loadFlac (const std::filesystem::path& path)
     const std::int64_t frames = static_cast<std::int64_t> (f->totalPCMFrameCount);
     if (frames <= 0 || f->sampleRate == 0) return fail ("empty FLAC file or unknown length");
 
-    const bool keep16 = f->bitsPerSample <= 16;
+    const bool keep16 = flacKeepsInt16 (static_cast<int> (f->bitsPerSample));
     auto data = std::make_shared<SampleData>();
     data->channels = ch;
     data->frames = frames;
@@ -156,7 +164,74 @@ SampleLoadResult loadFlac (const std::filesystem::path& path)
     r.sample = std::move (data);
     return r;
 }
+
+AudioFileInfo probeFailure (std::string msg)
+{
+    AudioFileInfo i;
+    i.error = std::move (msg);
+    return i;
+}
+
+AudioFileInfo probeWithSndfile (const std::filesystem::path& path)
+{
+    SF_INFO info {};
+   #if defined (_WIN32)
+    SNDFILE* f = sf_wchar_open (path.c_str(), SFM_READ, &info);
+   #else
+    SNDFILE* f = sf_open (path.c_str(), SFM_READ, &info);
+   #endif
+    if (f == nullptr) return probeFailure (std::string ("cannot open: ") + sf_strerror (nullptr));
+    sf_close (f);
+    if (info.channels < 1 || info.channels > 2)
+        return probeFailure ("unsupported channel count: " + std::to_string (info.channels) + " (mono and stereo only)");
+    if (info.frames <= 0 || info.samplerate <= 0) return probeFailure ("empty or invalid audio file");
+
+    const auto sub = info.format & SF_FORMAT_SUBMASK;
+    AudioFileInfo r;
+    r.ok = true;
+    r.channels = info.channels;
+    r.frames = info.frames;
+    r.sampleRate = static_cast<double> (info.samplerate);
+    r.bitDepth = sndfileBitDepth (sub);
+    r.keptAsInt16 = sndfileKeepsInt16 (sub);
+    return r;
+}
+
+AudioFileInfo probeFlac (const std::filesystem::path& path)
+{
+   #if defined (_WIN32)
+    drflac* f = drflac_open_file_w (path.c_str(), nullptr);
+   #else
+    drflac* f = drflac_open_file (path.c_str(), nullptr);
+   #endif
+    if (f == nullptr) return probeFailure ("cannot open FLAC file");
+    struct Closer { drflac* f; ~Closer() { drflac_close (f); } } closer { f };
+
+    const int ch = static_cast<int> (f->channels);
+    if (ch < 1 || ch > 2) return probeFailure ("unsupported channel count: " + std::to_string (ch) + " (mono and stereo only)");
+    const std::int64_t frames = static_cast<std::int64_t> (f->totalPCMFrameCount);
+    if (frames <= 0 || f->sampleRate == 0) return probeFailure ("empty FLAC file or unknown length");
+
+    AudioFileInfo r;
+    r.ok = true;
+    r.channels = ch;
+    r.frames = frames;
+    r.sampleRate = static_cast<double> (f->sampleRate);
+    r.bitDepth = static_cast<int> (f->bitsPerSample);
+    r.keptAsInt16 = flacKeepsInt16 (r.bitDepth);
+    return r;
+}
 } // namespace
+
+AudioFileInfo probeAudioFile (const std::filesystem::path& path)
+{
+    std::error_code ec;
+    if (! std::filesystem::is_regular_file (path, ec)) return probeFailure ("file not found: " + path.string());
+    AudioFileInfo r = hasExtension (path, ".flac") ? probeFlac (path) : probeWithSndfile (path);
+    if (r.ok)
+        r.ramBytes = static_cast<std::uint64_t> (r.frames) * static_cast<std::uint64_t> (r.channels) * (r.keptAsInt16 ? 2u : 4u);
+    return r;
+}
 
 SampleLoadResult loadSampleFile (const std::filesystem::path& path)
 {

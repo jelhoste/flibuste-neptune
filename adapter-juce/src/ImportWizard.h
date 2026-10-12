@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include "neptune/core/I18n.h"
+#include "neptune/core/Instrument.h"
+#include "neptune/core/MemoryBudget.h"
 #include "neptune/core/Theme.h"
 #include "neptune/core/ZoneImport.h"
 
@@ -20,11 +22,18 @@ public:
         std::vector<neptune::core::ZoneDescription> zones;
         neptune::core::RoundRobinMode roundRobinMode = neptune::core::RoundRobinMode::Sequential;
         bool replace = true;
+        // Import léger : ce que l'utilisateur a choisi de charger en mémoire (avec les zones, c'est ce qui est estimé).
+        bool mainRoundRobinOnly = false;
+        bool loadReleaseSamples = true;
         neptune::core::import::Template templ;
     };
 
+    // `existing` : l'instrument actuel (pour « Ajouter » et pour la mémoire déjà occupée). `fileInfo` : cache partagé des
+    // en-têtes de fichiers. `availableBytes` : RAM disponible (0 = inconnue).
     ImportWizard (std::vector<std::string> paths, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&,
-                  neptune::core::import::Template initial, std::function<void (const Result&)> onImport, std::function<void()> onCancel);
+                  neptune::core::import::Template initial, neptune::core::InstrumentDescription existing,
+                  neptune::core::memory::FileInfoCache& fileInfo, std::uint64_t availableBytes,
+                  std::function<void (const Result&)> onImport, std::function<void()> onCancel);
 
     ~ImportWizard() override; // défini dans le .cpp : ExampleStrip et RuleRow y sont complets
 
@@ -45,6 +54,7 @@ private:
     void cellClicked (int row, int column, const juce::MouseEvent&) override; // montre ce nom dans l'exemple
 
     void recompute();
+    void updateMemory(); // estimation de la mémoire et boutons, sans refaire le plan
     void rebuildRules();
     void rebuildKeywords();
     void addKeyword (neptune::core::import::KeywordRule);
@@ -54,7 +64,10 @@ private:
     juce::Colour colour (neptune::core::theme::Token tk) const;
 
     std::vector<std::string> paths_;
-    std::map<std::string, juce::int64> sizes_;
+    neptune::core::InstrumentDescription existing_;
+    neptune::core::memory::FileInfoCache& fileInfo_;
+    std::uint64_t availableBytes_ = 0;
+    int includedCount_ = 0;
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     neptune::core::import::Template template_;
@@ -62,8 +75,7 @@ private:
     neptune::core::import::Plan plan_;
     std::vector<int> shown_;                       // indices dans plan_.zones affichés dans l'aperçu
     std::map<std::string, std::string> statusOf_;  // nom (sans extension) -> message
-    double estimatedMegabytes_ = 0.0;
-    bool blocked_ = false;
+    bool replaceBlocked_ = false, addBlocked_ = false;
     std::function<void (const Result&)> onImport_;
     std::function<void()> onCancel_;
 
@@ -82,6 +94,7 @@ private:
     juce::Viewport rulesViewport_;
     juce::Component rulesHolder_;
     juce::TableListBox table_ { "preview", this };
+    juce::ToggleButton alternatesToggle_, releaseToggle_;
     juce::TextButton replaceButton_, addButton_, cancelButton_;
     std::string exampleStem_;
 

@@ -7,8 +7,7 @@ using neptune::core::theme::Token;
 
 namespace
 {
-constexpr double kWarnMegabytes = 1000.0;
-constexpr double kBlockMegabytes = 3000.0; // tant que le streaming disque n'existe pas
+std::string megabytes (std::uint64_t bytes) { return std::to_string (static_cast<long long> (bytes / (1024ull * 1024ull))); }
 
 juce::String u8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
@@ -231,13 +230,13 @@ juce::Colour ImportWizard::colour (Token tk) const
 }
 
 ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette& palette, const i18n::Translator& tr,
-                            import::Template initial, std::function<void (const Result&)> onImport, std::function<void()> onCancel)
-    : paths_ (std::move (paths)), palette_ (palette), tr_ (tr), template_ (std::move (initial)),
+                            import::Template initial, InstrumentDescription existing, memory::FileInfoCache& fileInfo,
+                            std::uint64_t availableBytes, std::function<void (const Result&)> onImport, std::function<void()> onCancel)
+    : paths_ (std::move (paths)), existing_ (std::move (existing)), fileInfo_ (fileInfo), availableBytes_ (availableBytes),
+      palette_ (palette), tr_ (tr), template_ (std::move (initial)),
       onImport_ (std::move (onImport)), onCancel_ (std::move (onCancel))
 {
     std::sort (paths_.begin(), paths_.end());
-    for (const auto& p : paths_)
-        sizes_[p] = juce::File (u8 (p)).getSize();
     exampleStem_ = paths_.empty() ? std::string() : stemOf (paths_.front());
 
     panel_.owner = this;
@@ -336,6 +335,18 @@ ImportWizard::ImportWizard (std::vector<std::string> paths, const theme::Palette
     cancelButton_.onClick = [this] { if (onCancel_) onCancel_(); };
     for (auto* b : { &replaceButton_, &addButton_, &cancelButton_ }) panel_.addAndMakeVisible (*b);
 
+    // Import léger : décocher réduit la mémoire estimée (et ce qui sera chargé). On part de l'état de l'instrument actuel.
+    alternatesToggle_.setButtonText (t ("import.light_alternates"));
+    releaseToggle_.setButtonText (t ("import.light_release"));
+    alternatesToggle_.setToggleState (! existing_.mainRoundRobinOnly, juce::dontSendNotification);
+    releaseToggle_.setToggleState (existing_.loadReleaseSamples, juce::dontSendNotification);
+    for (auto* b : { &alternatesToggle_, &releaseToggle_ })
+    {
+        b->setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+        b->onClick = [this] { updateMemory(); };
+        panel_.addAndMakeVisible (*b);
+    }
+
     rebuildRules();
     rebuildKeywords();
     recompute();
@@ -391,10 +402,15 @@ void ImportWizard::resized()
     rrMode_.setBounds (opt2.removeFromLeft (200).reduced (2));
 
     auto bottom = r.removeFromBottom (44);
+    {
+        auto lightRow = r.removeFromBottom (28);
+        alternatesToggle_.setBounds (lightRow.removeFromLeft (320));
+        releaseToggle_.setBounds (lightRow.removeFromLeft (320));
+    }
     cancelButton_.setBounds (bottom.removeFromRight (120).reduced (2));
     addButton_.setBounds (bottom.removeFromRight (200).reduced (2));
     replaceButton_.setBounds (bottom.removeFromRight (230).reduced (2));
-    ramLabel_.setBounds (r.removeFromBottom (24));
+    ramLabel_.setBounds (r.removeFromBottom (40));
     summaryLabel_.setBounds (r.removeFromBottom (26));
     table_.setBounds (r.reduced (0, 4));
 }
@@ -518,41 +534,74 @@ void ImportWizard::recompute()
     }
 
     shown_.clear();
-    double bytes = 0.0;
-    int included = 0;
+    includedCount_ = 0;
     for (std::size_t i = 0; i < plan_.zones.size(); ++i)
     {
         shown_.push_back (static_cast<int> (i));
-        if (plan_.zones[i].included)
-        {
-            ++included;
-            const auto it = sizes_.find (plan_.zones[i].path);
-            if (it != sizes_.end()) bytes += static_cast<double> (it->second);
-        }
+        if (plan_.zones[i].included) ++includedCount_;
     }
     // Problèmes d'abord : l'utilisateur voit tout de suite ce qui ne va pas
     std::stable_sort (shown_.begin(), shown_.end(), [this] (int a, int b)
     {
         return plan_.zones[static_cast<std::size_t> (a)].included < plan_.zones[static_cast<std::size_t> (b)].included;
     });
-    estimatedMegabytes_ = bytes / (1024.0 * 1024.0);
-    blocked_ = estimatedMegabytes_ > kBlockMegabytes;
 
-    summaryLabel_.setText (u8 (tr_.format ("import.summary", { std::to_string (paths_.size()), std::to_string (included),
+    summaryLabel_.setText (u8 (tr_.format ("import.summary", { std::to_string (paths_.size()), std::to_string (includedCount_),
                                                               std::to_string (plan_.errors()), std::to_string (plan_.warnings()),
                                                               std::to_string (plan_.detectedLayerCount) })),
                            juce::dontSendNotification);
-    const auto mb = std::to_string (static_cast<long long> (estimatedMegabytes_));
-    ramLabel_.setText (blocked_ ? u8 (tr_.format ("import.ram_blocked", { mb, std::to_string (static_cast<int> (kBlockMegabytes)) }))
-                                : u8 (tr_.format ("import.ram", { mb })),
-                       juce::dontSendNotification);
-    ramLabel_.setColour (juce::Label::textColourId, blocked_ ? colour (Token::KnobHot) : (estimatedMegabytes_ > kWarnMegabytes ? colour (Token::Accent) : colour (Token::TextDim)));
-
-    const bool can = included > 0 && ! blocked_;
-    replaceButton_.setEnabled (can);
-    addButton_.setEnabled (can);
+    updateMemory();
     table_.updateContent();
     table_.repaint();
+}
+
+// Mémoire réelle (en-têtes des fichiers : frames x canaux x 2 ou 4 octets), pour chacun des deux résultats possibles.
+void ImportWizard::updateMemory()
+{
+    const bool wantAlternates = alternatesToggle_.getToggleState();
+    const bool wantRelease = releaseToggle_.getToggleState();
+    const auto fresh = import::includedZones (plan_);
+
+    InstrumentDescription replaceDesc = existing_;
+    replaceDesc.zones = fresh;
+    replaceDesc.mainRoundRobinOnly = ! wantAlternates;
+    replaceDesc.loadReleaseSamples = wantRelease;
+
+    InstrumentDescription addDesc = existing_;
+    addDesc.zones.insert (addDesc.zones.end(), fresh.begin(), fresh.end());
+    addDesc.mainRoundRobinOnly = existing_.mainRoundRobinOnly || ! wantAlternates;
+    addDesc.loadReleaseSamples = existing_.loadReleaseSamples && wantRelease;
+
+    int unreadable = 0;
+    const auto replaceBytes = memory::estimateInstrumentBytes (replaceDesc, fileInfo_, &unreadable);
+    const auto addBytes = existing_.zones.empty() ? replaceBytes : memory::estimateInstrumentBytes (addDesc, fileInfo_);
+    const auto currentBytes = memory::estimateInstrumentBytes (existing_, fileInfo_);
+
+    // La mémoire déjà prise par l'instrument actuel n'est plus « disponible » : elle compte dans la marge de l'instrument.
+    const auto limits = memory::limitsFor (availableBytes_ == 0 ? 0 : availableBytes_ + currentBytes);
+    const auto replaceVerdict = memory::judge (replaceBytes, limits);
+    const auto addVerdict = memory::judge (addBytes, limits);
+    replaceBlocked_ = replaceVerdict == memory::Verdict::Refuse;
+    addBlocked_ = addVerdict == memory::Verdict::Refuse;
+
+    std::string text = existing_.zones.empty()
+        ? tr_.format ("import.ram", { megabytes (replaceBytes) })
+        : tr_.format ("import.ram_both", { megabytes (replaceBytes), megabytes (addBytes) });
+    text += " (" + (limits.fromAvailable
+                        ? tr_.format ("import.avail", { megabytes (availableBytes_), megabytes (limits.refuseBytes) })
+                        : tr_.format ("import.avail_unknown", { megabytes (limits.refuseBytes) })) + ")";
+    if (unreadable > 0) text += " - " + tr_.format ("import.unreadable", { std::to_string (unreadable) });
+    if (replaceBlocked_ || addBlocked_) text += " - " + std::string (tr_.tr ("import.ram_hint"));
+    ramLabel_.setText (u8 (text), juce::dontSendNotification);
+
+    const bool blockedAll = replaceBlocked_ && addBlocked_;
+    const bool warn = replaceVerdict == memory::Verdict::Warn || addVerdict == memory::Verdict::Warn;
+    ramLabel_.setColour (juce::Label::textColourId, replaceBlocked_ || addBlocked_ ? colour (blockedAll ? Token::KnobHot : Token::KnobHot2)
+                                                                                  : (warn ? colour (Token::Accent) : colour (Token::TextDim)));
+
+    const bool any = includedCount_ > 0;
+    replaceButton_.setEnabled (any && ! replaceBlocked_);
+    addButton_.setEnabled (any && ! addBlocked_);
 }
 
 void ImportWizard::finish (bool replace)
@@ -561,6 +610,8 @@ void ImportWizard::finish (bool replace)
     r.zones = import::includedZones (plan_);
     r.roundRobinMode = options_.roundRobinMode;
     r.replace = replace;
+    r.mainRoundRobinOnly = ! alternatesToggle_.getToggleState();
+    r.loadReleaseSamples = releaseToggle_.getToggleState();
     r.templ = template_;
     if (onImport_) onImport_ (r);
 }

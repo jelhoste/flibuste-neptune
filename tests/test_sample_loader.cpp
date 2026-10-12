@@ -157,3 +157,46 @@ TEST_CASE ("loading failures give a message and never throw")
     CHECK_FALSE (r.ok());
     CHECK (r.error.find ("channel") != std::string::npos);
 }
+
+TEST_CASE ("probe predicts exactly the memory the loader will use, from the header only")
+{
+    TempDir d;
+    std::vector<float> mono (100, 0.1f), stereo (200, 0.1f);
+    struct Case { std::filesystem::path file; };
+    const std::vector<std::filesystem::path> files = {
+        writeWav (d.path / "m16.wav", 1, 44100, SF_FORMAT_PCM_16, mono),
+        writeWav (d.path / "s16.wav", 2, 44100, SF_FORMAT_PCM_16, stereo),
+        writeWav (d.path / "m24.wav", 1, 44100, SF_FORMAT_PCM_24, mono),
+        writeWav (d.path / "s24.wav", 2, 48000, SF_FORMAT_PCM_24, stereo),
+        writeWav (d.path / "m32.wav", 1, 44100, SF_FORMAT_PCM_32, mono),
+        writeWav (d.path / "sf.wav", 2, 44100, SF_FORMAT_FLOAT, stereo),
+    };
+    for (const auto& f : files)
+    {
+        INFO (f.filename().string());
+        const auto p = probeAudioFile (f);
+        const auto r = loadSampleFile (f);
+        REQUIRE (p.ok);
+        REQUIRE (r.ok());
+        CHECK (p.ramBytes == r.sample->bytes());
+        CHECK (p.frames == r.sample->frames);
+        CHECK (p.channels == r.sample->channels);
+        CHECK (p.bitDepth == r.sample->sourceBitDepth);
+        CHECK (p.keptAsInt16 == r.sample->isInt16());
+    }
+    // 24 bits stéréo = 100 frames x 2 canaux x 4 octets ; 16 bits mono = 100 x 1 x 2
+    CHECK (probeAudioFile (d.path / "s24.wav").ramBytes == 800);
+    CHECK (probeAudioFile (d.path / "m16.wav").ramBytes == 200);
+
+    writeBytes (d.path / "x16.flac", kFlac16Mono64, sizeof kFlac16Mono64);
+    writeBytes (d.path / "x24.flac", kFlac24Mono64, sizeof kFlac24Mono64);
+    CHECK (probeAudioFile (d.path / "x16.flac").ramBytes == 64 * 2);
+    CHECK (probeAudioFile (d.path / "x24.flac").ramBytes == 64 * 4);
+    CHECK (probeAudioFile (d.path / "x24.flac").bitDepth == 24);
+
+    CHECK_FALSE (probeAudioFile (d.path / "missing.wav").ok);
+    std::vector<float> six (6 * 10, 0.1f);
+    const auto bad = probeAudioFile (writeWav (d.path / "six.wav", 6, 48000, SF_FORMAT_PCM_16, six));
+    CHECK_FALSE (bad.ok);
+    CHECK (bad.ramBytes == 0);
+}
