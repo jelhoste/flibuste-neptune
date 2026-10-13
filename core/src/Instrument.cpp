@@ -30,6 +30,22 @@ bool roundRobinModeFromString (std::string_view s, RoundRobinMode& out)
     return false;
 }
 
+const char* toString (PolyphonyMode m) noexcept
+{
+    switch (m) { case PolyphonyMode::Mono: return "mono"; case PolyphonyMode::Legato: return "legato"; default: return "poly"; }
+}
+const char* toString (VoiceStealMode m) noexcept
+{
+    switch (m)
+    {
+        case VoiceStealMode::Quietest: return "quietest";
+        case VoiceStealMode::KeepLow: return "keep_low";
+        case VoiceStealMode::KeepHigh: return "keep_high";
+        default: return "oldest";
+    }
+}
+const char* toString (SameKeyMode m) noexcept { return m == SameKeyMode::Cut ? "cut" : "stack"; }
+
 const char* toString (PlayMode m) noexcept { return m == PlayMode::Loop ? "loop" : "one_shot"; }
 
 bool playModeFromString (std::string_view s, PlayMode& out)
@@ -146,6 +162,12 @@ std::string toJson (const InstrumentDescription& d)
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
+    if (d.polyphony != PolyphonyMode::Poly) doc["polyphony"] = toString (d.polyphony);
+    if (d.maxVoices != InstrumentDescription::defaultMaxVoices) doc["max_voices"] = d.maxVoices;
+    if (d.stealMode != VoiceStealMode::Oldest) doc["voice_steal"] = toString (d.stealMode);
+    if (d.sameKey != SameKeyMode::Stack) doc["same_key"] = toString (d.sameKey);
+    if (d.cutFadeMs != 3) doc["cut_fade_ms"] = d.cutFadeMs;
+    if (d.glideMs != 0) doc["glide_ms"] = d.glideMs;
     if (d.velocityFadeWidth != 0) doc["velocity_fade_width"] = d.velocityFadeWidth;
     if (d.velocityFadeLinear) doc["velocity_fade_linear"] = true;
     if (! d.velocityCurve.isLinear())
@@ -212,6 +234,20 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
     if (const auto m = doc.find ("load_release_samples"); m != doc.end() && m->is_boolean()) d.loadReleaseSamples = m->get<bool>();
+    auto readString = [&] (const char* k) -> std::string
+    {
+        const auto it = doc.find (k);
+        return it != doc.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    if (const auto v = readString ("polyphony"); v == "mono") d.polyphony = PolyphonyMode::Mono;
+    else if (v == "legato") d.polyphony = PolyphonyMode::Legato;
+    d.maxVoices = std::clamp (readInt (doc, "max_voices", InstrumentDescription::defaultMaxVoices), 1, InstrumentDescription::maxVoicesLimit);
+    if (const auto v = readString ("voice_steal"); v == "quietest") d.stealMode = VoiceStealMode::Quietest;
+    else if (v == "keep_low") d.stealMode = VoiceStealMode::KeepLow;
+    else if (v == "keep_high") d.stealMode = VoiceStealMode::KeepHigh;
+    if (readString ("same_key") == "cut") d.sameKey = SameKeyMode::Cut;
+    d.cutFadeMs = std::clamp (readInt (doc, "cut_fade_ms", 3), 1, InstrumentDescription::maxCutFadeMs);
+    d.glideMs = std::clamp (readInt (doc, "glide_ms", 0), 0, InstrumentDescription::maxGlideMs);
     d.velocityFadeWidth = std::clamp (readInt (doc, "velocity_fade_width", 0), 0, InstrumentDescription::maxVelocityFadeWidth);
     if (const auto m = doc.find ("velocity_fade_linear"); m != doc.end() && m->is_boolean()) d.velocityFadeLinear = m->get<bool>();
     if (const auto m = doc.find ("velocity_curve"); m != doc.end() && m->is_object())
@@ -422,6 +458,12 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     inst->velocityLinear = sanitised (description.velocityCurve).isLinear();
     inst->fadeWidth = std::clamp (description.velocityFadeWidth, 0, InstrumentDescription::maxVelocityFadeWidth);
     inst->fadeLinear = description.velocityFadeLinear;
+    inst->polyphony = description.polyphony;
+    inst->maxVoices = std::clamp (description.maxVoices, 1, InstrumentDescription::maxVoicesLimit);
+    inst->stealMode = description.stealMode;
+    inst->sameKey = description.sameKey;
+    inst->cutFadeMs = std::clamp (description.cutFadeMs, 1, InstrumentDescription::maxCutFadeMs);
+    inst->glideMs = std::clamp (description.glideMs, 0, InstrumentDescription::maxGlideMs);
     std::map<std::string, int> groupIds;
     SampleCache localCache;
     SampleCache& cache = externalCache != nullptr ? *externalCache : localCache;

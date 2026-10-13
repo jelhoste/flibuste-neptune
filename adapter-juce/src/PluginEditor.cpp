@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "VelocityPanel.h"
+#include "PolyphonyPanel.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 
@@ -130,6 +131,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     matrix_->onGestureEnd = [this] { processor_.uiEndGesture(); };
     matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
     matrix_->onOpenVelocity = [this] (juce::Component& anchor) { openVelocityPanel (anchor); };
+    matrix_->onOpenPolyphony = [this] (juce::Component& anchor) { openPolyphonyPanel (anchor); };
     addChildComponent (*matrix_);
     listToggleButton_.setButtonText (text ("map.list"));
     listToggleButton_.setClickingTogglesState (true);
@@ -347,7 +349,42 @@ void NeptuneEditor::openVelocityPanel (juce::Component& anchor)
         desc.velocityCurve = curve;
         safe->processor_.uiEditInstrument (std::move (desc), "Velocity response", "velocity");
     };
+    panel->onUndo = [safe] { if (safe != nullptr) safe->processor_.uiUndo(); };
+    panel->onRedo = [safe] { if (safe != nullptr) safe->processor_.uiRedo(); };
+    velocityPanel_ = panel.get();
+    juce::Component::SafePointer<VelocityPanel> focus (panel.get());
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+    juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); }); // Ctrl+Z dans la fenêtre
+}
+
+// Polyphonie de l'instrument : même principe que la réponse de vélocité (fenêtre flottante, annulable).
+void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
+{
+    auto fromDescription = [] (const neptune::core::InstrumentDescription& d)
+    {
+        PolyphonyPanel::Settings s;
+        s.mode = d.polyphony; s.maxVoices = d.maxVoices; s.steal = d.stealMode; s.sameKey = d.sameKey;
+        s.cutFadeMs = d.cutFadeMs; s.glideMs = d.glideMs;
+        return s;
+    };
+    auto panel = std::make_unique<PolyphonyPanel> (palette_, tr_, fromDescription (processor_.instrumentDescription()));
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    panel->onGestureBegin = [safe] { if (safe != nullptr) safe->processor_.uiBeginGesture(); };
+    panel->onGestureEnd = [safe] { if (safe != nullptr) safe->processor_.uiEndGesture(); };
+    panel->onUndo = [safe] { if (safe != nullptr) safe->processor_.uiUndo(); };
+    panel->onRedo = [safe] { if (safe != nullptr) safe->processor_.uiRedo(); };
+    panel->onChange = [safe] (const PolyphonyPanel::Settings& s)
+    {
+        if (safe == nullptr) return;
+        auto desc = safe->processor_.instrumentDescription();
+        desc.polyphony = s.mode; desc.maxVoices = s.maxVoices; desc.stealMode = s.steal; desc.sameKey = s.sameKey;
+        desc.cutFadeMs = s.cutFadeMs; desc.glideMs = s.glideMs;
+        safe->processor_.uiEditInstrument (std::move (desc), "Polyphony", "polyphony");
+    };
+    polyphonyPanel_ = panel.get();
+    juce::Component::SafePointer<PolyphonyPanel> focus (panel.get());
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+    juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
 }
 
 // Sélection demandée par la matrice : elle passe par la liste (source de vérité de la sélection de l'éditeur).
@@ -420,6 +457,16 @@ void NeptuneEditor::updateSamplerControls()
         rebuildLoadPanel();
     }
     matrix_->setSelection (zoneTable_->selectedRows());
+    if (polyphonyPanel_ != nullptr)
+    {
+        PolyphonyPanel::Settings ps;
+        const auto& cd = cachedDescription_;
+        ps.mode = cd.polyphony; ps.maxVoices = cd.maxVoices; ps.steal = cd.stealMode; ps.sameKey = cd.sameKey;
+        ps.cutFadeMs = cd.cutFadeMs; ps.glideMs = cd.glideMs;
+        polyphonyPanel_->setValues (ps);
+    }
+    if (velocityPanel_ != nullptr) // annuler/rétablir pendant que la fenêtre est ouverte : elle suit
+        velocityPanel_->setValues (cachedDescription_.velocityFadeWidth, cachedDescription_.velocityFadeLinear, cachedDescription_.velocityCurve);
     const auto& d = cachedDescription_;
     const auto selection = zoneTable_->selectedRows();
     const std::size_t shown = (! selection.empty() && selection.front() >= 0 && selection.front() < static_cast<int> (d.zones.size()))

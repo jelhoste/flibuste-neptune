@@ -27,7 +27,7 @@ namespace neptune::core
 class DiskStreamer
 {
 public:
-    static constexpr int kSlots = 80;               // = voix tenues + emplacements de fondu (SamplerVoices)
+    static constexpr int kSlots = 320;              // = voix tenues + emplacements de fondu (SamplerVoices) ; ~42 Mo de tampons
     static constexpr int kRingFrames = 16384;       // puissance de 2 ; par canal ; ~0,37 s à 44,1 kHz
     static constexpr int kChunkFrames = 4096;       // frames lues d'un coup depuis le disque
 

@@ -44,6 +44,8 @@ void SamplerVoices::bindZone (Voice& v, const Zone& zone) noexcept
     v.zone = &zone;
     const double semis = static_cast<double> (v.key - zone.rootNote) + zone.tuneCents / 100.0;
     v.baseRatio = zone.sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
+    v.targetRatio = v.baseRatio;
+    v.glideLeft = 0;
 }
 
 void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
@@ -58,10 +60,14 @@ void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
         else discard (v);
     }
     instrument_ = instrument;
+    stealFadeSeconds_ = instrument != nullptr ? static_cast<double> (std::clamp (instrument->cutFadeMs, 1, InstrumentDescription::maxCutFadeMs)) / 1000.0
+                                              : kStealFadeSeconds;
+    numHeld_ = 0;
 }
 
 void SamplerVoices::allSoundOff() noexcept
 {
+    numHeld_ = 0;
     for (auto& v : voices_) discard (v);
 }
 
@@ -79,7 +85,7 @@ int SamplerVoices::heldVoices() const noexcept
 void SamplerVoices::steal (Voice& v) noexcept
 {
     v.stolen = true;
-    v.fadeStep = static_cast<float> (1.0 / std::max (1.0, kStealFadeSeconds * sampleRate_));
+    v.fadeStep = static_cast<float> (1.0 / std::max (1.0, stealFadeSeconds_ * sampleRate_));
 }
 
 SamplerVoices::Voice* SamplerVoices::allocate() noexcept
@@ -96,28 +102,133 @@ SamplerVoices::Voice* SamplerVoices::allocate() noexcept
     return best;
 }
 
+void SamplerVoices::startNote (int channel, int key, float velocity) noexcept
+{
+    Instrument::Pick picks[Instrument::maxPicks];
+    const int n = instrument_->selectLayers (key, velocity, /*release*/ false, picks, Instrument::maxPicks);
+    for (int i = 0; i < n; ++i) startVoice (channel, key, velocity, *picks[i].zone, picks[i].gain);
+}
+
+void SamplerVoices::pushHeld (int channel, int key, float velocity) noexcept
+{
+    removeHeld (channel, key); // une même touche n'y figure qu'une fois (la plus récente en dernier)
+    if (numHeld_ >= kMaxHeldKeys)
+    {
+        for (int i = 1; i < numHeld_; ++i) held_[static_cast<std::size_t> (i - 1)] = held_[static_cast<std::size_t> (i)];
+        --numHeld_;
+    }
+    held_[static_cast<std::size_t> (numHeld_++)] = { channel, key, velocity };
+}
+
+void SamplerVoices::removeHeld (int channel, int key) noexcept
+{
+    int w = 0;
+    for (int i = 0; i < numHeld_; ++i)
+        if (! (held_[static_cast<std::size_t> (i)].channel == channel && held_[static_cast<std::size_t> (i)].key == key))
+            held_[static_cast<std::size_t> (w++)] = held_[static_cast<std::size_t> (i)];
+    numHeld_ = w;
+}
+
+void SamplerVoices::cutKey (int channel, int key) noexcept
+{
+    for (auto& v : voices_)
+        if (v.active && ! v.stolen && v.channel == channel && v.key == key) steal (v);
+}
+
+void SamplerVoices::cutAll() noexcept
+{
+    for (auto& v : voices_)
+        if (v.active && ! v.stolen) steal (v);
+}
+
+bool SamplerVoices::retargetHeld (int newKey) noexcept
+{
+    bool any = false;
+    const int glideFrames = instrument_ != nullptr ? static_cast<int> (instrument_->glideMs * 0.001 * sampleRate_) : 0;
+    for (auto& v : voices_)
+    {
+        if (! v.active || v.releasing || v.stolen || v.zone == nullptr) continue;
+        v.key = newKey;
+        const double semis = static_cast<double> (newKey - v.zone->rootNote) + v.zone->tuneCents / 100.0;
+        v.targetRatio = v.zone->sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
+        if (glideFrames > 0)
+        {
+            v.glideLeft = glideFrames;
+            v.glideDelta = (v.targetRatio - v.baseRatio) / static_cast<double> (glideFrames);
+        }
+        else
+        {
+            v.baseRatio = v.targetRatio;
+            v.glideLeft = 0;
+        }
+        any = true;
+    }
+    return any;
+}
+
 void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
 {
     if (instrument_ == nullptr) return;
     // Courbe de réponse de l'instrument : avant le choix des couches et le volume.
     const float shaped = std::clamp (instrument_->shapeVelocity (velocity), 0.0f, 1.0f);
     if (key >= 0 && key < 128) heldVelocity_[static_cast<std::size_t> (key)] = shaped;
-    Instrument::Pick picks[Instrument::maxPicks];
-    const int n = instrument_->selectLayers (key, shaped, /*release*/ false, picks, Instrument::maxPicks);
-    for (int i = 0; i < n; ++i) startVoice (channel, key, shaped, *picks[i].zone, picks[i].gain);
+
+    if (instrument_->polyphony != PolyphonyMode::Poly)
+    {
+        // Mono : une seule note à la fois (la plus récente) ; les touches tenues sont mémorisées pour revenir à la précédente.
+        const bool otherHeld = numHeld_ > 0;
+        pushHeld (channel, key, shaped);
+        if (instrument_->polyphony == PolyphonyMode::Legato && otherHeld && retargetHeld (key)) return; // la voix continue
+        cutAll();
+        startNote (channel, key, shaped);
+        return;
+    }
+    if (instrument_->sameKey == SameKeyMode::Cut) cutKey (channel, key);
+    startNote (channel, key, shaped);
+}
+
+SamplerVoices::Voice* SamplerVoices::chooseVictim (int newKey, bool& dropNew) noexcept
+{
+    dropNew = false;
+    Voice* victim = nullptr;
+    auto better = [] (const Voice& a, const Voice* b, VoiceStealMode mode)
+    {
+        if (b == nullptr) return true;
+        switch (mode)
+        {
+            case VoiceStealMode::Quietest: return a.level < b->level || (a.level == b->level && a.order < b->order);
+            case VoiceStealMode::KeepLow: return a.key > b->key || (a.key == b->key && a.order < b->order);   // vole la plus aiguë
+            case VoiceStealMode::KeepHigh: return a.key < b->key || (a.key == b->key && a.order < b->order);  // vole la plus grave
+            default: return a.order < b->order;
+        }
+    };
+    const auto mode = instrument_ != nullptr ? instrument_->stealMode : VoiceStealMode::Oldest;
+    for (auto& v : voices_)
+        if (v.active && ! v.releasing && ! v.stolen && better (v, victim, mode)) victim = &v;
+    // « garder les graves/aigus » : si la nouvelle note est elle-même la plus extrême, c'est elle qu'on abandonne
+    if (victim != nullptr)
+    {
+        if (mode == VoiceStealMode::KeepLow && newKey >= victim->key) dropNew = true;
+        if (mode == VoiceStealMode::KeepHigh && newKey <= victim->key) dropNew = true;
+    }
+    return victim;
 }
 
 void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone& zone, float layerGain) noexcept
 {
     if (zone.sample == nullptr || zone.loopEnd <= zone.loopStart) return;
 
-    // Limite de voix : on fait s'éteindre la plus ancienne voix tenue (fondu court, pas de clic).
-    if (heldVoices() >= kMaxVoices)
+    // Limite de voix (réglable par instrument ; les modes mono/legato n'ont pas de limite propre) : on fait s'éteindre une voix
+    // tenue selon le mode de vol (fondu court, pas de clic).
+    const int limit = (instrument_ != nullptr && instrument_->polyphony == PolyphonyMode::Poly)
+                          ? std::clamp (instrument_->maxVoices, 1, kMaxVoices) : kMaxVoices;
+    for (int guard = 0; heldVoices() >= limit && guard < kMaxVoices; ++guard)
     {
-        Voice* oldest = nullptr;
-        for (auto& v : voices_)
-            if (v.active && ! v.releasing && ! v.stolen && (oldest == nullptr || v.order < oldest->order)) oldest = &v;
-        if (oldest != nullptr) steal (*oldest);
+        bool dropNew = false;
+        Voice* victim = chooseVictim (key, dropNew);
+        if (victim == nullptr) break;
+        if (dropNew) return;
+        steal (*victim);
     }
 
     Voice* v = allocate();
@@ -132,6 +243,8 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     bindZone (*v, zone);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     v->layerGain = layerGain;
+    v->level = v->velocity * zone.gain * layerGain;
+    v->targetRatio = v->baseRatio;
     v->env.begin (zone.env, sampleRate_);
     // Échantillon dont seul le début est en mémoire : le reste est lu sur le disque. Les zones en boucle gardent tout ce
     // qui précède la fin de boucle en mémoire (voir residentFramesNeeded) et n'ont donc jamais besoin du flux.
@@ -148,6 +261,29 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
 
 void SamplerVoices::noteOff (int channel, int key) noexcept
 {
+    if (instrument_ != nullptr && instrument_->polyphony != PolyphonyMode::Poly)
+    {
+        // Mono/legato : la touche relâchée sort de la pile ; s'il en reste une tenue et que c'était celle qui sonnait, on y revient.
+        bool wasSounding = false;
+        for (const auto& v : voices_)
+            if (v.active && ! v.releasing && ! v.stolen && v.channel == channel && v.key == key) { wasSounding = true; break; }
+        removeHeld (channel, key);
+        if (wasSounding && numHeld_ > 0)
+        {
+            const HeldKey back = held_[static_cast<std::size_t> (numHeld_ - 1)];
+            if (instrument_->polyphony == PolyphonyMode::Legato && retargetHeld (back.key))
+            {
+                // la voix continue à la hauteur de la touche précédente
+            }
+            else
+            {
+                cutAll();
+                startNote (back.channel, back.key, back.velocity);
+            }
+            releaseZonesFor (channel, key);
+            return;
+        }
+    }
     for (auto& v : voices_)
     {
         if (! v.active || v.releasing || v.stolen || v.channel != channel || v.key != key) continue;
@@ -159,16 +295,19 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
         // one-shot : le Note Off est ignoré, le sample est joué en entier
     }
 
-    // Zones déclenchées au relâchement (bruit de mécanique, fin de note) : jouées à la vélocité du Note On.
-    if (instrument_ != nullptr && key >= 0 && key < 128)
-    {
-        const float vel = heldVelocity_[static_cast<std::size_t> (key)];
-        // vel est déjà passée par la courbe de l'instrument (voir noteOn)
-        const float v = vel > 0.0f ? vel : 0.5f;
-        Instrument::Pick picks[Instrument::maxPicks];
-        const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks);
-        for (int i = 0; i < n; ++i) startVoice (channel, key, v, *picks[i].zone, picks[i].gain);
-    }
+    releaseZonesFor (channel, key);
+}
+
+// Zones déclenchées au relâchement (bruit de mécanique, fin de note) : jouées à la vélocité du Note On (déjà passée par la
+// courbe de l'instrument, voir noteOn).
+void SamplerVoices::releaseZonesFor (int channel, int key) noexcept
+{
+    if (instrument_ == nullptr || key < 0 || key >= 128) return;
+    const float vel = heldVelocity_[static_cast<std::size_t> (key)];
+    const float v = vel > 0.0f ? vel : 0.5f;
+    Instrument::Pick picks[Instrument::maxPicks];
+    const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks);
+    for (int i = 0; i < n; ++i) startVoice (channel, key, v, *picks[i].zone, picks[i].gain);
 }
 
 void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept
@@ -184,7 +323,9 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     const SampleData& s = *z.sample;
     const bool stereo = s.channels >= 2;
     const bool loop = z.mode == PlayMode::Loop;
-    const double inc = v.baseRatio * pitchFactor;
+    double ratio = v.baseRatio;
+    float lastEnv = 0.0f;
+    double inc = ratio * pitchFactor;
     const double frames = static_cast<double> (s.frames);
     const float gStep = numFrames > 0 ? (g1 - g0) / static_cast<float> (numFrames) : 0.0f;
     float mg = g0;
@@ -262,12 +403,21 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
         mg += gStep;
         v.pos += inc;
+        if (v.glideLeft > 0) // legato : glissando de la hauteur
+        {
+            ratio += v.glideDelta;
+            if (--v.glideLeft == 0) ratio = v.targetRatio;
+            inc = ratio * pitchFactor;
+        }
+        lastEnv = envValue;
         if (loop && v.pos >= static_cast<double> (z.loopEnd))
         {
             const double len = static_cast<double> (z.loopEnd - z.loopStart);
             v.pos = static_cast<double> (z.loopStart) + std::fmod (v.pos - static_cast<double> (z.loopStart), len);
         }
     }
+    v.baseRatio = ratio; // le glissando du legato se poursuit au bloc suivant
+    v.level = v.velocity * z.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
 }
 
 void SamplerVoices::render (float* left, float* right, int numFrames, float gainStart, float gainEnd, double masterTuneCents) noexcept

@@ -17,6 +17,10 @@ public:
 
     std::function<void (int width, bool linear, const neptune::core::VelocityCurve&)> onChange;
     std::function<void()> onGestureBegin, onGestureEnd;
+    std::function<void()> onUndo, onRedo; // Ctrl/Cmd+Z, Ctrl/Cmd+Maj+Z, Ctrl/Cmd+Y : la fenêtre flottante n'est pas dans l'éditeur
+
+    // Remet les réglages à jour après une annulation/un rétablissement venu d'ailleurs (sans notification) ; ignoré pendant un geste.
+    void setValues (int fadeWidth, bool fadeLinear, const neptune::core::VelocityCurve&);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -24,6 +28,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     juce::Colour colour (neptune::core::theme::Token t) const;
@@ -45,6 +50,7 @@ private:
     juce::ToggleButton linearToggle_;
     juce::ComboBox presets_;
     bool updating_ = false;
+    bool sliderDragging_ = false;
     int dragPoint_ = -1;
     juce::Rectangle<float> graphArea_;
 

@@ -3,6 +3,8 @@
 #include "EnvelopeEditor.h"
 #include "ImportWizard.h"
 #include "MappingMatrix.h"
+#include "VelocityPanel.h"
+#include "PolyphonyPanel.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -52,6 +54,9 @@ private:
     bool listVisible_ = true;
     void setZoneSelection (const std::vector<int>&);
     void openVelocityPanel (juce::Component& anchor);
+    juce::Component::SafePointer<VelocityPanel> velocityPanel_;
+    void openPolyphonyPanel (juce::Component& anchor);
+    juce::Component::SafePointer<PolyphonyPanel> polyphonyPanel_;
     bool showProbe_ = false;
     void updateViewVisibility();
     std::unique_ptr<juce::FileChooser> chooser_, importChooser_;

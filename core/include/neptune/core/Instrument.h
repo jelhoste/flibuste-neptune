@@ -59,6 +59,14 @@ struct ZoneDescription
     }
 };
 
+// Polyphonie de l'instrument (palier 1, jalon 6).
+enum class PolyphonyMode { Poly, Mono, Legato };       // Mono : une note à la fois, la nouvelle repart ; Legato : la voix continue et change de hauteur
+enum class VoiceStealMode { Oldest, Quietest, KeepLow, KeepHigh }; // voix volée quand la limite est atteinte (KeepLow : on garde les graves)
+enum class SameKeyMode { Stack, Cut };                 // même touche rejouée : empiler ou couper l'ancienne voix
+const char* toString (PolyphonyMode) noexcept;
+const char* toString (VoiceStealMode) noexcept;
+const char* toString (SameKeyMode) noexcept;
+
 struct InstrumentDescription
 {
     std::vector<ZoneDescription> zones;
@@ -84,12 +92,23 @@ struct InstrumentDescription
     bool velocityFadeLinear = false;  // faux : puissance constante ; vrai : linéaire en amplitude
     static constexpr int maxVelocityFadeWidth = 64;
 
+    // Polyphonie (voir ci-dessus). Les modes Mono/Legato ignorent la limite et le mode de vol de voix.
+    PolyphonyMode polyphony = PolyphonyMode::Poly;
+    int maxVoices = defaultMaxVoices;                // limite de voix tenues, 1..maxVoicesLimit
+    VoiceStealMode stealMode = VoiceStealMode::Oldest;
+    SameKeyMode sameKey = SameKeyMode::Stack;
+    int cutFadeMs = 3;                               // fondu d'une voix volée / coupée (1..maxCutFadeMs)
+    int glideMs = 0;                                 // glissando du legato (0..maxGlideMs)
+    static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
+
     // Copie tout sauf les zones (réglages de chargement, de streaming et de réponse de vélocité).
     void copySettingsFrom (const InstrumentDescription& o)
     {
         roundRobinMode = o.roundRobinMode; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
         unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
+        polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
+        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept
@@ -97,7 +116,9 @@ struct InstrumentDescription
         return zones == o.zones && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
             && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
-            && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear;
+            && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
+            && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
+            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs;
     }
     bool empty() const noexcept { return zones.empty(); }
 };
@@ -153,6 +174,14 @@ struct Instrument
     bool velocityLinear = true; // courbe linéaire : la vélocité passe telle quelle (exacte, sans table)
     int fadeWidth = 0;
     bool fadeLinear = false;
+
+    // Polyphonie (recopiée de la description par buildInstrument)
+    PolyphonyMode polyphony = PolyphonyMode::Poly;
+    int maxVoices = 64;
+    VoiceStealMode stealMode = VoiceStealMode::Oldest;
+    SameKeyMode sameKey = SameKeyMode::Stack;
+    int cutFadeMs = 3;
+    int glideMs = 0;
 
     // Vélocité (0..1) après la courbe de l'instrument.
     float shapeVelocity (float velocity) const noexcept { return velocityLinear ? velocity : lookup (velocityLut, velocity); }

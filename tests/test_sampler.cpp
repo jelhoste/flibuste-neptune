@@ -243,20 +243,22 @@ TEST_CASE ("polyphony: oldest held voice is stolen with a short fade, never beyo
     SamplerVoices v;
     v.prepare (48000.0);
     v.setInstrument (inst.get());
-    for (int k = 0; k < SamplerVoices::kMaxVoices; ++k) v.noteOn (0, k, 0.5f);
-    CHECK (v.heldVoices() == SamplerVoices::kMaxVoices);
+    const int limit = inst->maxVoices; // 64 par défaut ; le plafond du moteur est kMaxVoices
+    CHECK (limit == 64);
+    for (int k = 0; k < limit; ++k) v.noteOn (0, k, 0.5f);
+    CHECK (v.heldVoices() == limit);
 
     v.noteOn (0, 100, 0.5f); // 65e note : vole la plus ancienne (touche 0)
-    CHECK (v.heldVoices() == SamplerVoices::kMaxVoices);
-    CHECK (v.activeVoices() == SamplerVoices::kMaxVoices + 1); // la volée s'éteint en fondu
+    CHECK (v.heldVoices() == limit);
+    CHECK (v.activeVoices() == limit + 1); // la volée s'éteint en fondu
 
     renderVoices (v, 480); // 10 ms > fondu de 3 ms
-    CHECK (v.activeVoices() == SamplerVoices::kMaxVoices);
+    CHECK (v.activeVoices() == limit);
 
-    // Rafale : jamais plus de kMaxVoices tenues, jamais de dépassement de capacité.
+    // Rafale : jamais plus de `limit` tenues, jamais de dépassement de capacité.
     for (int k = 0; k < 500; ++k) v.noteOn (0, k % 128, 0.5f);
-    CHECK (v.heldVoices() <= SamplerVoices::kMaxVoices);
-    CHECK (v.activeVoices() <= SamplerVoices::kMaxVoices + SamplerVoices::kFadeSlots);
+    CHECK (v.heldVoices() <= limit);
+    CHECK (v.activeVoices() <= SamplerVoices::kMaxVoices + SamplerVoices::kFadeSlots); // capacité du moteur, sans rendu entre les notes
 }
 
 TEST_CASE ("a stolen voice fades instead of cutting")
@@ -269,7 +271,7 @@ TEST_CASE ("a stolen voice fades instead of cutting")
     SamplerVoices v;
     v.prepare (48000.0);
     v.setInstrument (inst.get());
-    for (int k = 0; k < SamplerVoices::kMaxVoices; ++k) v.noteOn (0, 60, 1.0f);
+    for (int k = 0; k < 64; ++k) v.noteOn (0, 60, 1.0f);
     renderVoices (v, 256);
     v.noteOn (0, 61, 1.0f);
     const auto out = renderVoices (v, 512, 512);

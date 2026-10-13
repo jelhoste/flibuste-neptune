@@ -22,8 +22,8 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     addAndMakeVisible (widthLabel_);
     widthSlider_.setRange (0, InstrumentDescription::maxVelocityFadeWidth, 1);
     widthSlider_.setValue (fadeWidth_, juce::dontSendNotification);
-    widthSlider_.onDragStart = [this] { if (onGestureBegin) onGestureBegin(); };
-    widthSlider_.onDragEnd = [this] { if (onGestureEnd) onGestureEnd(); };
+    widthSlider_.onDragStart = [this] { sliderDragging_ = true; if (onGestureBegin) onGestureBegin(); };
+    widthSlider_.onDragEnd = [this] { sliderDragging_ = false; if (onGestureEnd) onGestureEnd(); };
     widthSlider_.onValueChange = [this] { if (updating_) return; fadeWidth_ = static_cast<int> (widthSlider_.getValue()); changed(); };
     addAndMakeVisible (widthSlider_);
 
@@ -39,8 +39,8 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     shapeSlider_.setRange (-1.0, 1.0, 0.01);
     shapeSlider_.setValue (curve_.shape, juce::dontSendNotification);
     shapeSlider_.setDoubleClickReturnValue (true, 0.0);
-    shapeSlider_.onDragStart = [this] { if (onGestureBegin) onGestureBegin(); };
-    shapeSlider_.onDragEnd = [this] { if (onGestureEnd) onGestureEnd(); };
+    shapeSlider_.onDragStart = [this] { sliderDragging_ = true; if (onGestureBegin) onGestureBegin(); };
+    shapeSlider_.onDragEnd = [this] { sliderDragging_ = false; if (onGestureEnd) onGestureEnd(); };
     shapeSlider_.onValueChange = [this]
     {
         if (updating_) return;
@@ -68,6 +68,7 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     readout_.setText (text ("vel.hint"), juce::dontSendNotification);
     readout_.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (readout_);
+    setWantsKeyboardFocus (true);
     setSize (400, 500);
 }
 
@@ -177,6 +178,7 @@ int VelocityPanel::pointAt (juce::Point<float> p) const
 
 void VelocityPanel::mouseDown (const juce::MouseEvent& e)
 {
+    grabKeyboardFocus();
     dragPoint_ = pointAt (e.position);
     if (dragPoint_ < 0) return;
     if (e.mods.isPopupMenu()) // clic droit : supprime le point
@@ -229,4 +231,43 @@ void VelocityPanel::mouseDoubleClick (const juce::MouseEvent& e)
     }
     changed();
     if (onGestureEnd) onGestureEnd();
+}
+
+bool VelocityPanel::keyPressed (const juce::KeyPress& k)
+{
+    const auto m = k.getModifiers();
+    if (! (m.isCommandDown() || m.isCtrlDown())) return false;
+    const int code = k.getKeyCode();
+    if (code == 'Z' || code == 'z')
+    {
+        if (m.isShiftDown()) { if (onRedo) onRedo(); } else if (onUndo) onUndo();
+        return true;
+    }
+    if (code == 'Y' || code == 'y')
+    {
+        if (onRedo) onRedo();
+        return true;
+    }
+    return false;
+}
+
+void VelocityPanel::setValues (int fadeWidth, bool fadeLinear, const VelocityCurve& curve)
+{
+    if (sliderDragging_ || dragPoint_ >= 0) return;
+    const auto c = sanitised (curve);
+    if (fadeWidth == fadeWidth_ && fadeLinear == fadeLinear_ && c == curve_) return;
+    fadeWidth_ = fadeWidth;
+    fadeLinear_ = fadeLinear;
+    curve_ = c;
+    updating_ = true;
+    widthSlider_.setValue (fadeWidth_, juce::dontSendNotification);
+    linearToggle_.setToggleState (fadeLinear_, juce::dontSendNotification);
+    shapeSlider_.setValue (curve_.shape, juce::dontSendNotification);
+    shapeSlider_.setEnabled (curve_.points.empty());
+    int match = 0;
+    for (int i = 0; i < numVelocityPresets; ++i)
+        if (curve_ == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;
+    presets_.setSelectedId (match, juce::dontSendNotification);
+    updating_ = false;
+    repaint();
 }

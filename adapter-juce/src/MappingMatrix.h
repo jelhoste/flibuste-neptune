@@ -30,6 +30,7 @@ public:
     std::function<void()> onGestureBegin, onGestureEnd;
     std::function<void()> onDeleteRequested;
     std::function<void (juce::Component& anchor)> onOpenVelocity; // réponse de vélocité / fondu entre couches
+    std::function<void (juce::Component& anchor)> onOpenPolyphony; // limite et vol de voix, mono / legato
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -75,7 +76,7 @@ private:
     std::string viewSignature_;
 
     juce::ComboBox viewBox_;
-    juce::TextButton zoomIn_, zoomOut_, zoomFit_, duplicate_, velocity_;
+    juce::TextButton zoomIn_, zoomOut_, zoomFit_, duplicate_, velocity_, polyphony_;
     juce::Label hint_;
     juce::ScrollBar scroll_ { false };
     double keyStart_ = 0.0, keySpan_ = 128.0;

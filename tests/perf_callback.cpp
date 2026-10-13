@@ -89,6 +89,7 @@ Result run (const Scenario& s)
         }
         auto inst = std::make_shared<neptune::core::Instrument>();
         inst->zones.push_back (neptune::core::makeFullKeyboardZone (std::move (sample), 60, neptune::core::PlayMode::Loop));
+        inst->maxVoices = 256; // la mesure à 128 et 256 voix (le défaut d'un instrument reste 64)
         engine.publishInstrument (std::move (inst));
         engine.process (chans.data(), kChannels, s.blockSize); // adopte l'instrument
     }
@@ -163,6 +164,8 @@ int main (int argc, char** argv)
     {
         scenarios.push_back ({ "idle_" + std::to_string (bs), bs, 0, 0 });
         scenarios.push_back ({ "loaded_" + std::to_string (bs), bs, 64, 64 });
+        scenarios.push_back ({ "v128_" + std::to_string (bs), bs, 128, 64 });
+        scenarios.push_back ({ "v256_" + std::to_string (bs), bs, 256, 64 });
     }
 
     std::vector<Result> results;

@@ -13,8 +13,8 @@ namespace neptune::core
 class SamplerVoices
 {
 public:
-    static constexpr int kMaxVoices = 64;  // notes simultanées (limite de voix ; un réglage par instrument viendra)
-    static constexpr int kFadeSlots = 16;  // emplacements supplémentaires pour les voix volées qui s'éteignent
+    static constexpr int kMaxVoices = 256; // plafond de voix tenues ; la limite réelle est un réglage par instrument (64 par défaut)
+    static constexpr int kFadeSlots = 64;  // emplacements supplémentaires pour les voix volées qui s'éteignent (un accord vole beaucoup de voix d'un coup)
     static constexpr double kStealFadeSeconds = 0.003;
 
     static_assert (kMaxVoices + kFadeSlots == DiskStreamer::kSlots, "un emplacement de streaming par voix");
@@ -53,11 +53,23 @@ private:
         float layerGain = 1.0f; // fondu entre couches de vélocité (fixé au Note On)
         EnvelopeRunner env;
         float fade = 1.0f, fadeStep = 0.0f; // fondu rapide d'une voix volée
+        float level = 0.0f;                 // niveau courant (vélocité x gains x enveloppe) : sert au vol « plus faible »
+        double targetRatio = 1.0;           // legato : hauteur visée ; baseRatio y glisse sur glideLeft échantillons
+        double glideDelta = 0.0;
+        int glideLeft = 0;
         bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
         std::uint32_t streamGen = 0;
     };
 
     void steal (Voice& v) noexcept;
+    void cutKey (int channel, int key) noexcept;       // même touche : coupe l'ancienne (fondu)
+    void cutAll() noexcept;                            // mono : coupe tout ce qui sonne (fondu)
+    bool retargetHeld (int newKey) noexcept;           // legato : les voix tenues changent de hauteur ; faux s'il n'y en a pas
+    Voice* chooseVictim (int newKey, bool& dropNew) noexcept;
+    void startNote (int channel, int key, float velocity) noexcept; // choisit les couches et démarre les voix
+    void releaseZonesFor (int channel, int key) noexcept; // zones déclenchées au relâchement
+    void pushHeld (int channel, int key, float velocity) noexcept;
+    void removeHeld (int channel, int key) noexcept;
     void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
     template <bool Streamed>
     void renderVoiceT (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
@@ -70,6 +82,11 @@ private:
     const Instrument* instrument_ = nullptr;
     DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;
+    double stealFadeSeconds_ = kStealFadeSeconds;
+    struct HeldKey { int channel = 0, key = 0; float velocity = 0.0f; };
+    static constexpr int kMaxHeldKeys = 16;
+    std::array<HeldKey, kMaxHeldKeys> held_ {};      // touches tenues (modes mono/legato), la plus récente en dernier
+    int numHeld_ = 0;
     std::uint64_t counter_ = 0;
     std::array<float, 128> heldVelocity_ {}; // vélocité du dernier Note On par touche (zones déclenchées au relâchement)
 };

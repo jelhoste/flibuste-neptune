@@ -39,11 +39,13 @@ MappingMatrix::MappingMatrix (const theme::Palette& palette, const i18n::Transla
     duplicate_.setButtonText (text ("map.duplicate"));
     velocity_.setButtonText (text ("map.velocity"));
     velocity_.onClick = [this] { if (onOpenVelocity) onOpenVelocity (velocity_); };
+    polyphony_.setButtonText (text ("map.polyphony"));
+    polyphony_.onClick = [this] { if (onOpenPolyphony) onOpenPolyphony (polyphony_); };
     zoomIn_.onClick = [this] { zoom (0.6, keyStart_ + keySpan_ / 2.0); };
     zoomOut_.onClick = [this] { zoom (1.0 / 0.6, keyStart_ + keySpan_ / 2.0); };
     zoomFit_.onClick = [this] { keyStart_ = 0.0; keySpan_ = 128.0; clampView(); updateScrollBar(); repaint(); };
     duplicate_.onClick = [this] { duplicateSelection(); };
-    for (auto* b : { &zoomIn_, &zoomOut_, &zoomFit_, &duplicate_, &velocity_ }) addAndMakeVisible (*b);
+    for (auto* b : { &zoomIn_, &zoomOut_, &zoomFit_, &duplicate_, &velocity_, &polyphony_ }) addAndMakeVisible (*b);
     hint_.setText (text ("map.hint"), juce::dontSendNotification);
     hint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     hint_.setJustificationType (juce::Justification::centredRight);
@@ -213,12 +215,13 @@ void MappingMatrix::resized()
 {
     auto r = getLocalBounds();
     auto bar = r.removeFromTop (kToolbarH).reduced (2);
-    viewBox_.setBounds (bar.removeFromLeft (190));
-    zoomOut_.setBounds (bar.removeFromLeft (40));
-    zoomIn_.setBounds (bar.removeFromLeft (40));
-    zoomFit_.setBounds (bar.removeFromLeft (84));
-    duplicate_.setBounds (bar.removeFromLeft (104));
-    velocity_.setBounds (bar.removeFromLeft (110));
+    viewBox_.setBounds (bar.removeFromLeft (170));
+    zoomOut_.setBounds (bar.removeFromLeft (36));
+    zoomIn_.setBounds (bar.removeFromLeft (36));
+    zoomFit_.setBounds (bar.removeFromLeft (72));
+    duplicate_.setBounds (bar.removeFromLeft (92));
+    velocity_.setBounds (bar.removeFromLeft (96));
+    polyphony_.setBounds (bar.removeFromLeft (104));
     hint_.setBounds (bar);
     scroll_.setBounds (kLeftMargin, getHeight() - kScrollH, getWidth() - kLeftMargin - 4, kScrollH);
     updateScrollBar();
