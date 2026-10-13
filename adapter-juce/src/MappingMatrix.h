@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <array>
 #include <functional>
 #include <vector>
 #include "neptune/core/I18n.h"
@@ -16,7 +17,7 @@
 //  - molette : zoom sur les notes ; barre : défilement. Zones de saisie larges (tactile).
 // La logique des modifications est dans core/MappingEdit.h : chaque geste est recalculé depuis la description du début du
 // geste, et se termine en UNE entrée d'annulation (onGestureBegin/End + clé de fusion côté éditeur).
-class MappingMatrix : public juce::Component, private juce::ScrollBar::Listener
+class MappingMatrix : public juce::Component, private juce::ScrollBar::Listener, private juce::Timer
 {
 public:
     MappingMatrix (const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
@@ -24,6 +25,9 @@ public:
     void setDescription (const neptune::core::InstrumentDescription&); // sans notification ; ignoré pendant un glissé
     void setSelection (const std::vector<int>& zones);                 // indices de zones (comme la liste)
     void duplicateSelection();                                         // copies sur place, sélectionnées
+    // Une note vient d'être jouée (clavier de l'écran, MIDI de l'hôte) : affiche un curseur à (touche, vélocité) qui s'estompe
+    // et entoure les rectangles de la vue qui contiennent ce point (la zone qui joue).
+    void notePlayed (int key, int velocity);
 
     std::function<void (const std::vector<int>&)> onSelect;
     std::function<void (neptune::core::InstrumentDescription, const char* name)> onEdit;
@@ -49,6 +53,7 @@ private:
                  neptune::core::mapping::Edge second = neptune::core::mapping::Edge::VelLow; };
 
     void scrollBarMoved (juce::ScrollBar*, double newStart) override;
+    void timerCallback() override;
     juce::Colour colour (neptune::core::theme::Token t) const;
     juce::String text (const char* key) const;
 
@@ -90,6 +95,9 @@ private:
     neptune::core::InstrumentDescription base_;     // description au début du geste
     std::vector<int> editZones_;                    // zones modifiées par le geste
     bool keyboardDrag_ = false;
+    struct Played { int velocity = 0; juce::uint32 time = 0; };
+    std::array<Played, 128> played_ {};
+    std::array<bool, 128> latched_ {};  // touches verrouillées par Maj+clic (pour tester legato et accords à la souris)
     bool duplicating_ = false, started_ = false, extendOnUp_ = false, toggleOnUp_ = false;
     int hoverPlace_ = -1;
     int pressedKey_ = -1;     // touche du clavier enfoncée à la souris / au doigt

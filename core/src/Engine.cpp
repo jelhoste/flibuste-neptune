@@ -1,5 +1,6 @@
 #include "neptune/core/Engine.h"
 #include <algorithm>
+#include <cmath>
 #include "neptune/core/SamplerParams.h"
 
 namespace neptune::core
@@ -34,6 +35,16 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
 {
     ++activeNotes_;
     voices_.noteOn (channel, key, velocity);
+    if (key >= 0 && key < 128) // trace pour l'interface (file à producteur unique : le thread audio)
+    {
+        const auto head = traceHead_.load (std::memory_order_relaxed);
+        if (head - traceTail_.load (std::memory_order_acquire) < kTraceSize)
+        {
+            const int v = std::clamp (static_cast<int> (std::lround (voices_.lastShapedVelocity() * 127.0f)), 1, 127);
+            trace_[head & (kTraceSize - 1)].store (static_cast<std::uint16_t> ((key << 8) | v), std::memory_order_relaxed);
+            traceHead_.store (head + 1, std::memory_order_release);
+        }
+    }
 }
 
 void Engine::noteOff (int channel, int key) noexcept
@@ -43,6 +54,17 @@ void Engine::noteOff (int channel, int key) noexcept
 }
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
+
+bool Engine::popNoteTrace (NoteTrace& out) noexcept
+{
+    const auto tail = traceTail_.load (std::memory_order_relaxed);
+    if (tail == traceHead_.load (std::memory_order_acquire)) return false;
+    const auto packed = trace_[tail & (kTraceSize - 1)].load (std::memory_order_relaxed);
+    out.key = packed >> 8;
+    out.velocity = packed & 0xFF;
+    traceTail_.store (tail + 1, std::memory_order_release);
+    return true;
+}
 
 bool Engine::postUiEvent (const UiEvent& e) noexcept
 {

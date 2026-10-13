@@ -749,6 +749,7 @@ void NeptuneEditor::updateProfileControls()
 
 void NeptuneEditor::timerCallback()
 {
+    for (int k = 0, v = 0; processor_.popNoteTrace (k, v);) matrix_->notePlayed (k, v); // curseur de la matrice
     updateRecoveryBanner();
     updateProfileControls();
     updateUndoButtons();

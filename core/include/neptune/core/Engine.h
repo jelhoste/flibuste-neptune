@@ -48,6 +48,11 @@ public:
     };
     bool postUiEvent (const UiEvent&) noexcept;
 
+    // Notes jouées, pour l'interface (curseur de vélocité de la matrice) : touche et vélocité 1..127 APRÈS la courbe de
+    // l'instrument (celle qui choisit la couche). Producteur : thread audio ; consommateur : thread de message.
+    struct NoteTrace { int key = 0, velocity = 0; };
+    bool popNoteTrace (NoteTrace&) noexcept;
+
     int activeVoices() const noexcept { return voices_.activeVoices(); }
     double sampleRate() const noexcept { return sampleRate_; }
     // Sous-alimentations du streaming depuis le démarrage (une voix s'est éteinte faute de données du disque).
@@ -63,6 +68,9 @@ private:
     static constexpr std::size_t kUiQueueSize = 256; // puissance de 2
     std::array<UiEvent, kUiQueueSize> uiQueue_ {};
     std::atomic<std::size_t> uiHead_ { 0 }, uiTail_ { 0 }; // écrit par l'interface / par l'audio
+    static constexpr std::size_t kTraceSize = 64;           // puissance de 2
+    std::array<std::atomic<std::uint16_t>, kTraceSize> trace_ {};
+    std::atomic<std::size_t> traceHead_ { 0 }, traceTail_ { 0 };
 
     InstrumentSlot slot_;
     DiskStreamer streamer_;

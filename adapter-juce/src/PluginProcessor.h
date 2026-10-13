@@ -99,6 +99,14 @@ public:
     void uiNoteOff (int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f }); }
     void uiPreviewZone (int zoneIndex) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewZone, 0, zoneIndex, 0.0f }); }
     void uiPreviewRelease() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewRelease, 0, 0, 0.0f }); }
+    // Notes jouées (touche, vélocité après courbe) pour le curseur de la matrice ; thread de message.
+    bool popNoteTrace (int& key, int& velocity)
+    {
+        neptune::core::Engine::NoteTrace t;
+        if (! engine_.popNoteTrace (t)) return false;
+        key = t.key; velocity = t.velocity;
+        return true;
+    }
     void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f }); }
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const;

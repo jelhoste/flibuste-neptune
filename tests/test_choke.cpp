@@ -308,3 +308,52 @@ TEST_CASE ("interface events reach the engine through the queue, in order, and a
     engine.process (out, 2, 256);
     CHECK (engine.postUiEvent ({ Engine::UiEvent::Type::NoteOff, 0, 60, 0.0f })); // vidée : à nouveau acceptée
 }
+
+TEST_CASE ("conditional zones win over normal ones whatever the declaration order")
+{
+    // zone normale déclarée AVANT la zone Legato : la transition doit quand même être jouée quand une touche est tenue
+    Instrument inst;
+    inst.zones = { zoneAt (0.5f, 48, 84), zoneAt (0.2f, 48, 84, 0, 0, 0, 0, TriggerCondition::Legato) };
+    Rig r (std::move (inst));
+    r.v.noteOn (0, 60, 1.0f);
+    CHECK_THAT (r.settle(), WithinAbs (0.5, 1e-5));          // première note : normale
+    r.v.noteOn (0, 64, 1.0f);
+    CHECK_THAT (r.settle(), WithinAbs (0.5 + 0.2, 1e-5));    // transition (la note 60 tenue continue de sonner)
+}
+
+TEST_CASE ("legato beats first beats normal when several conditions hold")
+{
+    Instrument inst;
+    inst.zones = { zoneAt (0.5f, 48, 84), zoneAt (0.3f, 48, 84, 0, 0, 0, 0, TriggerCondition::First),
+                   zoneAt (0.2f, 48, 84, 0, 0, 0, 0, TriggerCondition::Legato) };
+    Rig r (std::move (inst));
+    r.v.noteOn (0, 60, 1.0f);   // rien de tenu : « Premier » gagne sur « normale »
+    CHECK_THAT (r.settle(), WithinAbs (0.3, 1e-5));
+    r.v.noteOn (0, 64, 1.0f);   // une touche tenue : « Legato » gagne
+    CHECK_THAT (r.settle(), WithinAbs (0.3 + 0.2, 1e-5));
+}
+
+TEST_CASE ("played notes are traced for the interface with the velocity after the curve")
+{
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    auto inst = std::make_shared<Instrument>();
+    inst->zones.push_back (zoneAt (0.5f, 0, 127));
+    inst->finalize();
+    engine.publishInstrument (inst);
+    std::vector<float> l (64, 0.0f), r (64, 0.0f);
+    float* out[2] = { l.data(), r.data() };
+    engine.process (out, 2, 64);
+
+    Engine::NoteTrace t;
+    CHECK_FALSE (engine.popNoteTrace (t));
+    engine.noteOn (0, 60, 100.0f / 127.0f);
+    engine.noteOn (0, 72, 1.0f / 127.0f);
+    REQUIRE (engine.popNoteTrace (t));
+    CHECK (t.key == 60);
+    CHECK (t.velocity == 100);
+    REQUIRE (engine.popNoteTrace (t));
+    CHECK (t.key == 72);
+    CHECK (t.velocity == 1);
+    CHECK_FALSE (engine.popNoteTrace (t));
+}

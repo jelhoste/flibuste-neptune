@@ -255,6 +255,7 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
     if (instrument_ == nullptr) return;
     // Courbe de réponse de l'instrument : avant le choix des couches et le volume.
     const float shaped = std::clamp (instrument_->shapeVelocity (velocity), 0.0f, 1.0f);
+    lastShaped_ = shaped;
     if (key >= 0 && key < 128)
     {
         heldVelocity_[static_cast<std::size_t> (key)] = shaped;

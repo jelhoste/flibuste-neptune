@@ -28,6 +28,7 @@ public:
 
     void noteOn (int channel, int key, float velocity) noexcept;
     void noteOff (int channel, int key) noexcept;
+    float lastShapedVelocity() const noexcept { return lastShaped_; } // vélocité du dernier Note On après la courbe de l'instrument
 
     // Écoute d'une zone (bouton de lecture de la liste) : démarre une voix de CETTE zone à sa note racine, sans passer par la
     // sélection des couches ni le choke. Le canal est hors de la plage MIDI : aucune confusion avec les notes de l'hôte.
@@ -97,6 +98,7 @@ private:
     static constexpr int kMaxHeldKeys = 16;
     std::array<HeldKey, kMaxHeldKeys> held_ {};      // touches tenues (modes mono/legato), la plus récente en dernier
     int numHeld_ = 0;
+    float lastShaped_ = 0.0f;
     // Touches physiquement tenues, avec les Groupes des zones qu'elles ont déclenchées (conditions « Premier » / « Legato » :
     // indépendantes des voix, qui peuvent être coupées par le mode mono ou avoir fini leur échantillon).
     struct DownKey { int channel = 0, key = 0; int nGroups = 0; std::array<int, 4> groups {}; };

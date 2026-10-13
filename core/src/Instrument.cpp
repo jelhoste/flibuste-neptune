@@ -395,19 +395,28 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
         out[0] = { z, 1.0f };
         return 1;
     }
+    // Deux passes : les zones à condition (« Legato », puis « Premier ») dont la condition est satisfaite passent avant les
+    // zones d'attaque normales, QUEL QUE SOIT l'ordre de déclaration. Dans une passe, la première zone qui couvre la note gagne.
     int family = -1;
-    for (const int zi : keyZones_[static_cast<std::size_t> (key)])
+    for (int pass = 0; pass < 3 && family < 0; ++pass) // 0 : Legato, 1 : Premier, 2 : toujours (et relâchement)
     {
-        const Zone& z = zones[static_cast<std::size_t> (zi)];
-        if (! z.sample || z.onRelease != release || vInt < z.velLow || vInt > z.velHigh) continue;
-        if (! release && z.trigger != TriggerCondition::Always)
+        for (const int zi : keyZones_[static_cast<std::size_t> (key)])
         {
-            const bool other = held != nullptr && held->otherHeld != nullptr && held->otherHeld (held->context, z.groupId);
-            if (z.trigger == TriggerCondition::First && other) continue;   // une autre note du Groupe est tenue
-            if (z.trigger == TriggerCondition::Legato && ! other) continue; // pas de note tenue : pas de transition liée
+            const Zone& z = zones[static_cast<std::size_t> (zi)];
+            if (! z.sample || z.onRelease != release || vInt < z.velLow || vInt > z.velHigh) continue;
+            const TriggerCondition t = release ? TriggerCondition::Always : z.trigger;
+            if (pass == 0 && t != TriggerCondition::Legato) continue;
+            if (pass == 1 && t != TriggerCondition::First) continue;
+            if (pass == 2 && t != TriggerCondition::Always) continue;
+            if (pass < 2)
+            {
+                const bool other = held != nullptr && held->otherHeld != nullptr && held->otherHeld (held->context, z.groupId);
+                if (t == TriggerCondition::First && other) continue;    // une autre note du Groupe est tenue
+                if (t == TriggerCondition::Legato && ! other) continue; // rien de tenu : pas de transition liée
+            }
+            family = zoneFamily_[static_cast<std::size_t> (zi)];
+            break;
         }
-        family = zoneFamily_[static_cast<std::size_t> (zi)];
-        break;
     }
     if (family < 0) return 0;
 

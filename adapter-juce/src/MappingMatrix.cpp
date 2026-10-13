@@ -17,6 +17,7 @@ constexpr int kLeftMargin = 36;
 constexpr int kScrollH = 14;
 constexpr float kEdgeSlop = 12.0f;   // zone de saisie d'un bord : >= 24 px de large au total
 constexpr float kMoveSlop = 4.0f;
+constexpr juce::uint32 kCursorMs = 900; // durée d'affichage du curseur d'une note jouée
 
 juce::String u8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 bool isBlackKey (int k) { const int p = k % 12; return p == 1 || p == 3 || p == 6 || p == 8 || p == 10; }
@@ -330,6 +331,35 @@ void MappingMatrix::paint (juce::Graphics& g)
             }
         }
 
+    // Curseur des notes jouées : barre à (touche, vélocité) et contour des rectangles qui contiennent ce point
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        for (int k = 0; k < 128; ++k)
+        {
+            const auto& pl = played_[static_cast<std::size_t> (k)];
+            if (pl.velocity <= 0) continue;
+            const auto age = now - pl.time;
+            if (age > kCursorMs) continue;
+            const float a = 1.0f - static_cast<float> (age) / static_cast<float> (kCursorMs);
+            const float y = velY (pl.velocity - 0.5);
+            for (const auto& p : places_)
+            {
+                if (k < p.keyLow || k > p.keyHigh || pl.velocity < p.velLow || pl.velocity > p.velHigh) continue;
+                g.setColour (colour (Token::KnobHot).withAlpha (0.35f + 0.65f * a));
+                g.drawRect (placeRect (p).reduced (1.0f), 3.0f);
+            }
+            const float cx = (keyX (k) + keyX (k + 1)) * 0.5f;
+            const float w = juce::jmax (18.0f, keyX (k + 1) - keyX (k));
+            g.setColour (colour (Token::Text).withAlpha (0.25f + 0.75f * a));
+            g.fillRoundedRectangle (cx - w * 0.5f, y - 2.0f, w, 4.0f, 2.0f);
+            juce::Path tri;
+            tri.addTriangle (cx - 5.0f, y - 11.0f, cx + 5.0f, y - 11.0f, cx, y - 3.0f);
+            g.fillPath (tri);
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawText (juce::String (pl.velocity), static_cast<int> (cx) - 20, static_cast<int> (y) - 27, 40, 14, juce::Justification::centred);
+        }
+    }
+
     if (op_ == Op::Band)
     {
         const auto band = juce::Rectangle<float> (downPos_, bandEnd_);
@@ -353,7 +383,7 @@ void MappingMatrix::paint (juce::Graphics& g)
     for (int k = juce::jmax (0, static_cast<int> (std::floor (keyStart_))); k <= juce::jmin (127, static_cast<int> (std::ceil (keyStart_ + keySpan_))); ++k)
     {
         const auto r = juce::Rectangle<float> (keyX (k), ky, keyX (k + 1) - keyX (k), kh);
-        g.setColour (k == pressedKey_ ? colour (Token::Accent) : isBlackKey (k) ? colour (Token::PanelBg) : colour (Token::Text).withAlpha (0.85f));
+        g.setColour (k == pressedKey_ ? colour (Token::Accent) : latched_[static_cast<std::size_t> (k)] ? colour (Token::KnobHot) : isBlackKey (k) ? colour (Token::PanelBg) : colour (Token::Text).withAlpha (0.85f));
         g.fillRect (r.reduced (0.5f));
         if (k == pressedKey_) // vélocité jouée : repère à la hauteur du doigt
         {
@@ -452,7 +482,7 @@ bool MappingMatrix::playKeyboard (juce::Point<float> p, bool starting)
     const float velocity = (1.0f + t * 126.0f) / 127.0f;
     if (key != pressedKey_)
     {
-        if (pressedKey_ >= 0 && onNoteOff) onNoteOff (pressedKey_);
+        if (pressedKey_ >= 0 && onNoteOff && ! latched_[static_cast<std::size_t> (pressedKey_)]) onNoteOff (pressedKey_);
         pressedKey_ = key;
         if (onNoteOn) onNoteOn (key, velocity);
     }
@@ -464,6 +494,19 @@ bool MappingMatrix::playKeyboard (juce::Point<float> p, bool starting)
 void MappingMatrix::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    if (e.mods.isShiftDown() && keyboardArea().contains (e.position))
+    {
+        // Maj+clic : verrouille / libère une touche (elle reste enfoncée) : accords et legato jouables à la souris
+        const auto kb = keyboardArea();
+        const int key = juce::jlimit (0, 127, static_cast<int> (std::floor (keyStart_ + (e.position.x - kb.getX()) / kb.getWidth() * keySpan_)));
+        const float t = juce::jlimit (0.0f, 1.0f, (e.position.y - kb.getY()) / kb.getHeight());
+        auto idx = static_cast<std::size_t> (key);
+        latched_[idx] = ! latched_[idx];
+        if (latched_[idx]) { if (onNoteOn) onNoteOn (key, (1.0f + t * 126.0f) / 127.0f); }
+        else if (onNoteOff) onNoteOff (key);
+        repaint();
+        return;
+    }
     if (playKeyboard (e.position, true)) { op_ = Op::None; keyboardDrag_ = true; return; }
     if (! plotArea().expanded (kEdgeSlop).contains (e.position)) return;
     down_ = hitTest (e.position);
@@ -555,7 +598,7 @@ void MappingMatrix::mouseUp (const juce::MouseEvent& e)
     if (keyboardDrag_)
     {
         keyboardDrag_ = false;
-        if (pressedKey_ >= 0 && onNoteOff) onNoteOff (pressedKey_);
+        if (pressedKey_ >= 0 && onNoteOff && ! latched_[static_cast<std::size_t> (pressedKey_)]) onNoteOff (pressedKey_);
         pressedKey_ = -1;
         repaint();
         return;
@@ -654,4 +697,22 @@ bool MappingMatrix::keyPressed (const juce::KeyPress& k)
         return true;
     }
     return false;
+}
+
+void MappingMatrix::notePlayed (int key, int velocity)
+{
+    if (key < 0 || key > 127) return;
+    played_[static_cast<std::size_t> (key)] = { juce::jlimit (1, 127, velocity), juce::Time::getMillisecondCounter() };
+    if (! isTimerRunning()) startTimerHz (30);
+    repaint();
+}
+
+void MappingMatrix::timerCallback()
+{
+    const auto now = juce::Time::getMillisecondCounter();
+    bool any = false;
+    for (const auto& p : played_)
+        if (p.velocity > 0 && now - p.time <= kCursorMs) { any = true; break; }
+    repaint();
+    if (! any) stopTimer();
 }
