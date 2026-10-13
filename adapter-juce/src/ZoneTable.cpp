@@ -1,4 +1,5 @@
 #include "ZoneTable.h"
+#include <algorithm>
 
 using neptune::core::theme::Token;
 
@@ -165,9 +166,17 @@ void ZoneTable::setSelectedRows (const std::vector<int>& rows, bool notify)
     if (! rows.empty() && ! set.isEmpty()) table_.scrollToEnsureRowIsOnscreen (set[0]);
 }
 
-void ZoneTable::paintRowBackground (juce::Graphics& g, int, int, int, bool selected)
+void ZoneTable::setPlayingRows (const std::vector<int>& rows)
+{
+    if (rows == playing_) return;
+    playing_ = rows;
+    table_.repaint();
+}
+
+void ZoneTable::paintRowBackground (juce::Graphics& g, int row, int, int, bool selected)
 {
     if (selected) g.fillAll (colour (Token::Nav1));
+    if (std::binary_search (playing_.begin(), playing_.end(), row)) g.fillAll (colour (Token::KnobHot).withAlpha (0.28f)); // sonne
 }
 
 void ZoneTable::paintCell (juce::Graphics& g, int row, int column, int width, int height, bool)

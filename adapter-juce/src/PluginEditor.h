@@ -6,6 +6,7 @@
 #include "VelocityPanel.h"
 #include "PolyphonyPanel.h"
 #include "ChokePanel.h"
+#include "VoicesView.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -52,6 +53,13 @@ private:
     // Vue Mapping (jalon 5) : matrice notes × vélocité plein écran, liste des zones rétractable.
     std::unique_ptr<MappingMatrix> matrix_;
     juce::TextButton listToggleButton_;
+    // Moniteur des voix (débogage) : remplace l'enveloppe dans la zone en bas à droite quand il est affiché
+    std::unique_ptr<VoicesView> voicesView_;
+    juce::TextButton voicesButton_;
+    bool showVoices_ = false;
+    struct SeenVoice { neptune::core::Engine::VoiceInfo info; juce::uint32 lastSeen = 0; bool present = false; };
+    std::map<std::uint64_t, SeenVoice> seenVoices_;
+    void updateVoices();
     // Déclenchement et choke des zones sélectionnées
     juce::Label triggerLabel_, chokeLabel_;
     juce::ComboBox triggerBox_, chokeBox_;

@@ -28,6 +28,7 @@ public:
     // Une note vient d'être jouée (clavier de l'écran, MIDI de l'hôte) : affiche un curseur à (touche, vélocité) qui s'estompe
     // et entoure les rectangles de la vue qui contiennent ce point (la zone qui joue).
     void notePlayed (int key, int velocity);
+    void setSoundingZones (const std::vector<int>& zones); // zones dont une voix sonne (indices de la description, triés)
 
     std::function<void (const std::vector<int>&)> onSelect;
     std::function<void (neptune::core::InstrumentDescription, const char* name)> onEdit;
@@ -97,6 +98,7 @@ private:
     bool keyboardDrag_ = false;
     struct Played { int velocity = 0; juce::uint32 time = 0; };
     std::array<Played, 128> played_ {};
+    std::vector<int> sounding_;
     std::array<bool, 128> latched_ {};  // touches verrouillées par Maj+clic (pour tester legato et accords à la souris)
     bool duplicating_ = false, started_ = false, extendOnUp_ = false, toggleOnUp_ = false;
     int hoverPlace_ = -1;

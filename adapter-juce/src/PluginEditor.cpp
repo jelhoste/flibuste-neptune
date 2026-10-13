@@ -171,6 +171,13 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     listToggleButton_.onClick = [this] { listVisible_ = listToggleButton_.getToggleState(); updateViewVisibility(); resized(); };
     addAndMakeVisible (listToggleButton_);
 
+    voicesView_ = std::make_unique<VoicesView> (palette_, tr_);
+    addChildComponent (*voicesView_);
+    voicesButton_.setButtonText (text ("voices.button"));
+    voicesButton_.setClickingTogglesState (true);
+    voicesButton_.onClick = [this] { showVoices_ = voicesButton_.getToggleState(); updateViewVisibility(); resized(); };
+    addChildComponent (voicesButton_);
+
     triggerLabel_.setText (text ("trig.label"), juce::dontSendNotification);
     chokeLabel_.setText (text ("choke.label"), juce::dontSendNotification);
     for (auto* l : { &triggerLabel_, &chokeLabel_ })
@@ -459,6 +466,78 @@ void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
     juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
 }
 
+// Moniteur des voix : ce qui sonne, plus (quelques instants) ce qui vient de finir ; surbrillance dans la liste et la matrice.
+void NeptuneEditor::updateVoices()
+{
+    neptune::core::Engine::VoiceInfo info[neptune::core::Engine::kVoiceSnapshot];
+    const int n = processor_.readVoices (info, neptune::core::Engine::kVoiceSnapshot);
+    const auto now = juce::Time::getMillisecondCounter();
+    for (auto& [order, s] : seenVoices_) s.present = false;
+    std::vector<int> sounding;
+    for (int i = 0; i < n; ++i)
+    {
+        auto& s = seenVoices_[info[i].order];
+        s.info = info[i];
+        s.lastSeen = now;
+        s.present = true;
+        if (info[i].sourceIndex >= 0) sounding.push_back (info[i].sourceIndex);
+    }
+    constexpr juce::uint32 kKeepMs = 700;
+    for (auto it = seenVoices_.begin(); it != seenVoices_.end();)
+        it = (! it->second.present && now - it->second.lastSeen > kKeepMs) ? seenVoices_.erase (it) : std::next (it);
+    while (seenVoices_.size() > 160) seenVoices_.erase (seenVoices_.begin()); // les plus anciennes d'abord
+
+    std::sort (sounding.begin(), sounding.end());
+    sounding.erase (std::unique (sounding.begin(), sounding.end()), sounding.end());
+    zoneTable_->setPlayingRows (sounding);
+    matrix_->setSoundingZones (sounding);
+
+    if (! showVoices_) return;
+    const auto& d = cachedDescription_;
+    int held = 0, releasing = 0, fading = 0;
+    std::vector<VoicesView::Row> rows;
+    for (auto it = seenVoices_.rbegin(); it != seenVoices_.rend(); ++it) // la plus récente en haut
+    {
+        const auto& s = it->second;
+        const auto& v = s.info;
+        VoicesView::Row r;
+        const bool known = v.sourceIndex >= 0 && v.sourceIndex < static_cast<int> (d.zones.size());
+        const neptune::core::ZoneDescription* z = known ? &d.zones[static_cast<std::size_t> (v.sourceIndex)] : nullptr;
+        r.sample = z != nullptr ? juce::File (juce::String::fromUTF8 (z->samplePath.c_str())).getFileName() : juce::String ("?");
+        r.key = juce::String (v.key) + "  " + juce::String::fromUTF8 (neptune::core::import::midiToNoteName (v.key, neptune::core::import::NoteConvention {}).c_str());
+        r.velocity = juce::String (v.velocity);
+        r.zone = known ? juce::String (v.sourceIndex) : juce::String ("-");
+        if (z != nullptr)
+        {
+            r.trigger = text (z->onRelease ? "trig.release" : z->trigger == neptune::core::TriggerCondition::First ? "trig.first"
+                                                          : z->trigger == neptune::core::TriggerCondition::Legato ? "trig.legato" : "trig.attack");
+            r.group = juce::String::fromUTF8 (z->group.c_str());
+            r.choke = z->chokeCuts == 0 && z->chokeCutBy == 0 ? juce::String()
+                    : z->chokeCuts == z->chokeCutBy ? juce::String (z->chokeCuts)
+                                                    : juce::String (z->chokeCuts) + ">" + juce::String (z->chokeCutBy);
+        }
+        r.finished = ! s.present;
+        r.fading = v.fading;
+        r.releasing = v.releasing;
+        r.preview = v.preview;
+        r.state = text (r.finished ? "voices.state_finished" : v.preview ? "voices.state_preview" : v.fading ? "voices.state_fading"
+                                  : v.releasing ? "voices.state_release" : "voices.state_held");
+        r.layerGain = juce::String (v.layerGain, 2);
+        r.level = juce::String (v.level, 2);
+        r.progress = v.progress;
+        r.source = text (v.streaming ? "voices.source_disk" : "voices.source_ram");
+        if (s.present)
+        {
+            if (v.fading) ++fading; else if (v.releasing) ++releasing; else ++held;
+        }
+        rows.push_back (std::move (r));
+    }
+    const int total = held + releasing + fading;
+    const auto summary = juce::String::fromUTF8 (tr_.format ("voices.summary", { std::to_string (total), std::to_string (held), std::to_string (releasing),
+                                                                                  std::to_string (fading), std::to_string (processor_.streamUnderruns()) }).c_str());
+    voicesView_->setRows (std::move (rows), summary);
+}
+
 // Choke avancé (coupe / est coupée par) des zones sélectionnées.
 void NeptuneEditor::openChokePanel (juce::Component& anchor)
 {
@@ -688,7 +767,9 @@ void NeptuneEditor::updateViewVisibility()
     statusLabel_.setVisible (mapping);
     rootLabel_.setVisible (mapping);
     rootSlider_.setVisible (mapping);
-    envelopeEditor_->setVisible (mapping);
+    envelopeEditor_->setVisible (mapping && ! showVoices_);
+    voicesView_->setVisible (mapping && showVoices_);
+    voicesButton_.setVisible (mapping);
     importButton_.setVisible (mapping);
     removeButton_.setVisible (mapping);
     selectionLabel_.setVisible (mapping);
@@ -754,6 +835,7 @@ void NeptuneEditor::timerCallback()
     updateProfileControls();
     updateUndoButtons();
     updateSamplerControls();
+    updateVoices();
     repaint();
 }
 
@@ -790,6 +872,7 @@ void NeptuneEditor::resized()
         importButton_.setBounds (r.removeFromLeft (130).reduced (2));
         modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
         listToggleButton_.setBounds (r.removeFromLeft (150).reduced (2));
+        voicesButton_.setBounds (r.removeFromLeft (140).reduced (2));
         statusLabel_.setBounds (r);
         auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));
@@ -827,6 +910,7 @@ void NeptuneEditor::resized()
         const int matrixH = juce::jmax (120, static_cast<int> (h * 0.62));
         matrix_->setBounds (x, top, w, matrixH);
         envelopeEditor_->setBounds (x, top + matrixH + 8, w, juce::jmax (80, h - matrixH - 8));
+        voicesView_->setBounds (envelopeEditor_->getBounds());
     }
     if (wizard_) wizard_->setBounds (getLocalBounds());
 

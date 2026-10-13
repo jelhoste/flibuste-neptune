@@ -357,3 +357,55 @@ TEST_CASE ("played notes are traced for the interface with the velocity after th
     CHECK (t.velocity == 1);
     CHECK_FALSE (engine.popNoteTrace (t));
 }
+
+TEST_CASE ("the voice monitor snapshot reports what sounds, with zone, key, velocity and state")
+{
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    auto inst = std::make_shared<Instrument>();
+    Zone a = zoneAt (0.4f, 0, 63);
+    a.sourceIndex = 7;
+    Zone b = zoneAt (0.2f, 64, 127);
+    b.sourceIndex = 9;
+    b.mode = PlayMode::Loop;
+    inst->zones = { a, b };
+    inst->finalize();
+    engine.publishInstrument (inst);
+    std::vector<float> l (256, 0.0f), r (256, 0.0f);
+    float* out[2] = { l.data(), r.data() };
+    engine.process (out, 2, 256);
+    Engine::VoiceInfo v[Engine::kVoiceSnapshot];
+    CHECK (engine.readVoices (v, Engine::kVoiceSnapshot) == 0);
+
+    engine.noteOn (0, 60, 100.0f / 127.0f);
+    engine.noteOn (0, 70, 30.0f / 127.0f);
+    engine.process (out, 2, 256);
+    const int n = engine.readVoices (v, Engine::kVoiceSnapshot);
+    REQUIRE (n == 2);
+    int seen = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        if (v[i].key == 60)
+        {
+            CHECK (v[i].sourceIndex == 7);
+            CHECK (v[i].velocity == 100);
+            CHECK_FALSE (v[i].releasing);
+            ++seen;
+        }
+        if (v[i].key == 70)
+        {
+            CHECK (v[i].sourceIndex == 9);
+            CHECK (v[i].velocity == 30);
+            ++seen;
+        }
+        CHECK (v[i].level > 0.0f);
+    }
+    CHECK (seen == 2);
+
+    engine.noteOff (0, 70); // boucle : passe en relâchement
+    engine.process (out, 2, 64);
+    const int m = engine.readVoices (v, Engine::kVoiceSnapshot);
+    bool releasing = false;
+    for (int i = 0; i < m; ++i) releasing = releasing || (v[i].key == 70 && v[i].releasing);
+    CHECK (releasing);
+}

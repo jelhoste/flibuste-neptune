@@ -298,6 +298,15 @@ void MappingMatrix::paint (juce::Graphics& g)
                     g.drawLine (x, inner.getBottom(), x + inner.getHeight(), inner.getY(), 1.0f);
                 g.restoreState();
             }
+            // une voix de cette place sonne : remplissage vif (la zone qui joue, voir aussi le curseur de la dernière note)
+            if (! sounding_.empty())
+                for (const int z : p.zones)
+                    if (std::binary_search (sounding_.begin(), sounding_.end(), z))
+                    {
+                        g.setColour (colour (Token::KnobHot).withAlpha (0.42f));
+                        g.fillRect (inner);
+                        break;
+                    }
             g.setColour (sel ? colour (Token::Accent) : colour (Token::Border));
             g.drawRect (inner, sel ? 2.0f : 1.0f);
             if (static_cast<int> (i) == hoverPlace_) { g.setColour (colour (Token::Text).withAlpha (0.8f)); g.drawRect (inner.reduced (1.5f), 1.0f); }
@@ -697,6 +706,13 @@ bool MappingMatrix::keyPressed (const juce::KeyPress& k)
         return true;
     }
     return false;
+}
+
+void MappingMatrix::setSoundingZones (const std::vector<int>& zones)
+{
+    if (zones == sounding_) return;
+    sounding_ = zones;
+    repaint();
 }
 
 void MappingMatrix::notePlayed (int key, int velocity)

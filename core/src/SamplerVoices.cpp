@@ -72,6 +72,25 @@ void SamplerVoices::allSoundOff() noexcept
     for (auto& v : voices_) discard (v);
 }
 
+SamplerVoices::VoiceInfo SamplerVoices::describe (const Voice& v) const noexcept
+{
+    VoiceInfo i;
+    i.sourceIndex = v.zone->sourceIndex;
+    i.key = v.key;
+    i.preview = v.channel == kPreviewChannel;
+    i.channel = i.preview ? 0 : v.channel;
+    i.velocity = std::clamp (static_cast<int> (std::lround (v.velocity * 127.0f)), 1, 127);
+    i.releasing = v.releasing;
+    i.fading = v.stolen;
+    i.streaming = v.streaming;
+    i.layerGain = v.layerGain;
+    i.level = v.level;
+    const double frames = v.zone->sample != nullptr ? static_cast<double> (v.zone->sample->frames) : 0.0;
+    i.progress = frames > 0.0 ? static_cast<float> (std::clamp (v.pos / frames, 0.0, 1.0)) : 0.0f;
+    i.order = v.order;
+    return i;
+}
+
 int SamplerVoices::activeVoices() const noexcept
 {
     return static_cast<int> (std::count_if (voices_.begin(), voices_.end(), [] (const Voice& v) { return v.active; }));

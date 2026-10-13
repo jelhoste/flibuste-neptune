@@ -53,6 +53,12 @@ public:
     struct NoteTrace { int key = 0, velocity = 0; };
     bool popNoteTrace (NoteTrace&) noexcept;
 
+    // Voix qui sonnent, pour le moniteur de l'interface : copie cohérente du dernier bloc (verrou de séquence : le thread audio
+    // n'attend jamais). Thread de message ; rend le nombre de voix copiées.
+    using VoiceInfo = SamplerVoices::VoiceInfo;
+    static constexpr int kVoiceSnapshot = SamplerVoices::kMaxVoices + SamplerVoices::kFadeSlots;
+    int readVoices (VoiceInfo* out, int maxOut) const noexcept;
+
     int activeVoices() const noexcept { return voices_.activeVoices(); }
     double sampleRate() const noexcept { return sampleRate_; }
     // Sous-alimentations du streaming depuis le démarrage (une voix s'est éteinte faute de données du disque).
@@ -68,6 +74,11 @@ private:
     static constexpr std::size_t kUiQueueSize = 256; // puissance de 2
     std::array<UiEvent, kUiQueueSize> uiQueue_ {};
     std::atomic<std::size_t> uiHead_ { 0 }, uiTail_ { 0 }; // écrit par l'interface / par l'audio
+    // instantané des voix (2 mots de 64 bits par voix), protégé par un compteur de séquence (impair = écriture en cours)
+    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t> (kVoiceSnapshot) * 2u> voiceWords_ {};
+    std::atomic<std::uint32_t> voiceSeq_ { 0 };
+    std::atomic<int> voiceCount_ { 0 };
+    void publishVoices() noexcept;
     static constexpr std::size_t kTraceSize = 64;           // puissance de 2
     std::array<std::atomic<std::uint16_t>, kTraceSize> trace_ {};
     std::atomic<std::size_t> traceHead_ { 0 }, traceTail_ { 0 };

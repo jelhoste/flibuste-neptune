@@ -110,5 +110,67 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     float* right = (numChannels >= 2 && out[1] != nullptr) ? out[1] : nullptr;
     voices_.render (out[0], right, numFrames, lastGain_, gain, cents);
     lastGain_ = gain;
+    publishVoices();
+}
+
+void Engine::publishVoices() noexcept
+{
+    const auto seq = voiceSeq_.load (std::memory_order_relaxed);
+    voiceSeq_.store (seq + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence (std::memory_order_release);
+    int n = 0;
+    voices_.forEachVoice ([this, &n] (const VoiceInfo& v)
+    {
+        if (n >= kVoiceSnapshot) return;
+        const auto q = [] (float x) { return static_cast<std::uint64_t> (std::clamp (x, 0.0f, 1.0f) * 255.0f + 0.5f); };
+        const std::uint64_t flags = (v.releasing ? 1u : 0u) | (v.fading ? 2u : 0u) | (v.streaming ? 4u : 0u) | (v.preview ? 8u : 0u);
+        std::uint64_t w0 = static_cast<std::uint64_t> (v.sourceIndex + 1) & 0xFFFFFFull;
+        w0 |= static_cast<std::uint64_t> (v.key & 0xFF) << 24;
+        w0 |= static_cast<std::uint64_t> (v.velocity & 0xFF) << 32;
+        w0 |= flags << 40;
+        w0 |= q (v.layerGain) << 48;
+        w0 |= q (v.level) << 56;
+        std::uint64_t w1 = v.order & 0xFFFFFFFFFFull;
+        w1 |= static_cast<std::uint64_t> (v.channel & 0xFF) << 40;
+        w1 |= q (v.progress) << 48;
+        voiceWords_[static_cast<std::size_t> (n) * 2].store (w0, std::memory_order_relaxed);
+        voiceWords_[static_cast<std::size_t> (n) * 2 + 1].store (w1, std::memory_order_relaxed);
+        ++n;
+    });
+    voiceCount_.store (n, std::memory_order_relaxed);
+    std::atomic_thread_fence (std::memory_order_release);
+    voiceSeq_.store (seq + 2, std::memory_order_release);
+}
+
+int Engine::readVoices (VoiceInfo* out, int maxOut) const noexcept
+{
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        const auto before = voiceSeq_.load (std::memory_order_acquire);
+        if ((before & 1u) != 0) continue; // écriture en cours : on réessaie
+        const int n = std::min (voiceCount_.load (std::memory_order_relaxed), std::min (maxOut, kVoiceSnapshot));
+        for (int i = 0; i < n; ++i)
+        {
+            const auto w0 = voiceWords_[static_cast<std::size_t> (i) * 2].load (std::memory_order_relaxed);
+            const auto w1 = voiceWords_[static_cast<std::size_t> (i) * 2 + 1].load (std::memory_order_relaxed);
+            VoiceInfo& v = out[i];
+            v.sourceIndex = static_cast<int> (w0 & 0xFFFFFFull) - 1;
+            v.key = static_cast<int> ((w0 >> 24) & 0xFF);
+            v.velocity = static_cast<int> ((w0 >> 32) & 0xFF);
+            const auto flags = (w0 >> 40) & 0xFF;
+            v.releasing = (flags & 1u) != 0;
+            v.fading = (flags & 2u) != 0;
+            v.streaming = (flags & 4u) != 0;
+            v.preview = (flags & 8u) != 0;
+            v.layerGain = static_cast<float> ((w0 >> 48) & 0xFF) / 255.0f;
+            v.level = static_cast<float> ((w0 >> 56) & 0xFF) / 255.0f;
+            v.order = w1 & 0xFFFFFFFFFFull;
+            v.channel = static_cast<int> ((w1 >> 40) & 0xFF);
+            v.progress = static_cast<float> ((w1 >> 48) & 0xFF) / 255.0f;
+        }
+        std::atomic_thread_fence (std::memory_order_acquire);
+        if (voiceSeq_.load (std::memory_order_relaxed) == before) return n;
+    }
+    return 0; // trop de collisions d'écriture (très improbable) : cette image est ignorée
 }
 } // namespace neptune::core

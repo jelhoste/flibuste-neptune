@@ -42,6 +42,29 @@ public:
     // de gainStart à gainEnd sur le bloc. masterTuneCents transpose toutes les voix.
     void render (float* left, float* right, int numFrames, float gainStart, float gainEnd, double masterTuneCents) noexcept;
 
+    // Ce qui sonne en ce moment (moniteur de voix de l'interface, débogage). Thread audio.
+    struct VoiceInfo
+    {
+        int sourceIndex = -1;       // indice de la zone dans la description (-1 : zone construite à la main)
+        int key = 0, channel = 0;
+        int velocity = 0;           // 1..127, après la courbe de l'instrument
+        bool releasing = false;     // en relâchement (enveloppe)
+        bool fading = false;        // en fondu rapide (vol de voix, coupure, choke)
+        bool streaming = false;     // lue depuis le disque au-delà du préchargement
+        bool preview = false;       // écoute depuis la liste des zones
+        float layerGain = 1.0f;     // gain de couche (fondu entre couches de vélocité)
+        float level = 0.0f;         // niveau courant (vélocité x gains x enveloppe), 0..1 environ
+        float progress = 0.0f;      // position dans l'échantillon, 0..1
+        std::uint64_t order = 0;    // ordre de démarrage
+    };
+    // Appelle `f(const VoiceInfo&)` pour chaque voix qui sonne (sans tampon intermédiaire : appelé à chaque bloc audio).
+    template <typename F>
+    void forEachVoice (F&& f) const noexcept
+    {
+        for (const auto& v : voices_)
+            if (v.active && v.zone != nullptr) f (describe (v));
+    }
+
     int activeVoices() const noexcept;    // voix qui sonnent (y compris en relâchement)
     int heldVoices() const noexcept;      // voix comptées dans la limite (ni relâchées ni en fondu de vol)
 
@@ -69,6 +92,7 @@ private:
         std::uint32_t streamGen = 0;
     };
 
+    VoiceInfo describe (const Voice& v) const noexcept;
     void steal (Voice& v) noexcept;
     void cutKey (int channel, int key) noexcept;       // même touche : coupe l'ancienne (fondu)
     void cutAll() noexcept;                            // mono : coupe tout ce qui sonne (fondu)

@@ -15,6 +15,7 @@ public:
 
     void setZones (const std::vector<neptune::core::ZoneDescription>&); // garde la sélection quand c'est possible
     std::vector<int> selectedRows() const;
+    void setPlayingRows (const std::vector<int>& rows); // lignes dont une voix sonne (surbrillance, moniteur de voix)
     void setSelectedRows (const std::vector<int>&, bool notify = true);
     std::function<void()> onSelectionChanged;
     // Modification d'une cellule : colonne 7 (déclenchement : 1 attaque, 2 relâchement, 3 premier, 4 legato), 8 (groupe de choke
@@ -36,6 +37,7 @@ private:
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     std::vector<neptune::core::ZoneDescription> zones_;
+    std::vector<int> playing_;
     juce::TableListBox table_ { "zones", this };
     class ComboCell;
     class PlayCell;
