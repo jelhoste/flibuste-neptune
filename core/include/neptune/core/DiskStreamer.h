@@ -41,9 +41,11 @@ public:
     bool running() const noexcept { return running_.load (std::memory_order_acquire); }
 
     // --- thread audio ---------------------------------------------------------------------------------------------
-    // Demande le flux du fichier de `sample` à partir de sample.resident(). Rend false si impossible (pas démarré, chemin
-    // trop long) : la voix jouera alors ce qui est en mémoire puis s'arrêtera.
-    bool claim (int slot, const SampleData& sample) noexcept;
+    // Les emplacements forment un POOL partagé entre toutes les pistes (un seul thread audio : pas de verrou).
+    // Demande le flux du fichier de `sample` à partir de sample.resident() et rend l'emplacement attribué, ou -1 si impossible
+    // (pas démarré, chemin trop long, pool épuisé) : la voix jouera alors ce qui est en mémoire puis s'arrêtera.
+    int claim (const SampleData& sample) noexcept;
+    // Rend l'emplacement au pool (sans effet s'il n'est pas actif).
     void release (int slot) noexcept;
     // Publie la plus ancienne frame encore nécessaire à la voix (autorise le disque à écraser avant).
     void setReadPos (int slot, std::int64_t frame) noexcept { slots_[static_cast<std::size_t> (slot)].readPos.store (frame, std::memory_order_release); }
@@ -90,6 +92,7 @@ private:
     Slot* const slots_ = slotStorage_.get();
     std::vector<float> storage_;
     std::thread thread_;
+    std::vector<int> freeSlots_;                   // pile des emplacements libres : thread audio uniquement après start()
     std::atomic<bool> running_ { false };
     std::atomic<bool> stop_ { false };
     std::atomic<std::uint32_t> underruns_ { 0 };

@@ -402,7 +402,7 @@ TEST_CASE ("engine without an instrument is silent and notes are harmless")
     CHECK (e.activeVoices() == 0);
 }
 
-TEST_CASE ("instrument is saved in the project state; older documents have none")
+TEST_CASE ("instrument is saved in the project state (track 1 of the mixer); older documents have none")
 {
     ParameterSet set;
     InstrumentDescription d;
@@ -410,15 +410,17 @@ TEST_CASE ("instrument is saved in the project state; older documents have none"
     z.samplePath = "/samples/organ_c4.flac";
     z.rootNote = 60; z.mode = PlayMode::Loop; z.envelope.release.ms = 200.0;
     d.zones.push_back (z);
+    MixerState mixer;
+    mixer.tracks[0].instrument = d;
 
-    const auto text = state::save (set, {}, std::nullopt, &d);
+    const auto text = state::save (set, {}, std::nullopt, &mixer);
     const auto r = state::load (set, text);
     REQUIRE (r.ok());
-    REQUIRE (r.instrument.has_value());
-    CHECK (*r.instrument == d);
+    REQUIRE (r.mixer.has_value());
+    CHECK (r.mixer->tracks[0].instrument == d);
 
-    CHECK_FALSE (state::load (set, state::save (set)).instrument.has_value());
-    CHECK_FALSE (state::load (set, R"({"format":"neptune-state","schema_version":2,"parameters":{}})").instrument.has_value());
+    CHECK_FALSE (state::load (set, state::save (set)).mixer.has_value());
+    CHECK_FALSE (state::load (set, R"({"format":"neptune-state","schema_version":2,"parameters":{}})").mixer.has_value());
 }
 
 TEST_CASE ("building an instrument reuses the cache and reports missing files")

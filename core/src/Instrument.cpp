@@ -555,7 +555,8 @@ std::int64_t residentFramesNeeded (const InstrumentDescription& d, const ZoneDes
 }
 
 std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& description, std::vector<std::string>* warnings,
-                                                   SampleCache* externalCache, const std::function<bool (int, int)>& progress)
+                                                   SampleCache* externalCache, const std::function<bool (int, int)>& progress,
+                                                   const std::set<std::string>* keep)
 {
     auto inst = std::make_shared<Instrument>();
     inst->roundRobinMode = description.roundRobinMode;
@@ -673,6 +674,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     // On ne garde en cache que ce qui est chargé : décharger une table libère vraiment la mémoire.
     {
         std::set<std::string> used;
+        if (keep != nullptr) used = *keep;
         for (std::size_t zi = 0; zi < description.zones.size(); ++zi)
             if (mask[zi]) used.insert (description.zones[zi].samplePath);
         for (auto it = cache.begin(); it != cache.end();)

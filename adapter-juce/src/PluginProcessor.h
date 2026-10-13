@@ -9,11 +9,14 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include "HostProbe.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
+#include "neptune/core/Mixer.h"
+#include "neptune/core/MixerState.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 #include "neptune/core/Settings.h"
@@ -87,36 +90,57 @@ public:
         int channels = 0, bitDepth = 0;
         double sampleRate = 0.0, seconds = 0.0, megabytes = 0.0;
     };
-    neptune::core::InstrumentDescription instrumentDescription() const; // copie
+    // Piste sélectionnée : toutes les fonctions « instrument » ci-dessous agissent sur elle (sauf mention d'une piste).
+    int selectedTrack() const noexcept { return selectedTrack_.load(); }
+    void selectTrack (int track); // thread de message ; pas annulable ; n'altère ni l'instrument ni l'audio
+    neptune::core::InstrumentDescription instrumentDescription() const { return instrumentDescription (selectedTrack()); }
+    neptune::core::InstrumentDescription instrumentDescription (int track) const; // copie
     // Thread de message. `forceReload` : relire les fichiers même si le chemin n'a pas changé. Marque le projet modifié.
-    void setInstrumentDescription (neptune::core::InstrumentDescription, bool forceReload = false);
+    void setInstrumentDescription (neptune::core::InstrumentDescription d, bool forceReload = false) { setInstrumentDescription (selectedTrack(), std::move (d), forceReload); }
+    void setInstrumentDescription (int track, neptune::core::InstrumentDescription, bool forceReload = false);
     // Même chose, mais annulable : passe par l'historique (une seule entrée par geste si `mergeKey` est non vide et que
     // uiBeginGesture/uiEndGesture entourent le geste). À utiliser pour toute modification venant de l'utilisateur.
     void uiEditInstrument (neptune::core::InstrumentDescription, std::string name, std::string mergeKey = {});
     void uiBeginGesture() { undo_.beginGesture(); }
+
+    // Mixeur : réglages de bande (nom, canal MIDI, routage, envois, mode de pan), bus, master. Annulables.
+    neptune::core::MixerState mixerState() const; // copie
+    neptune::core::mixer::StripSettings trackSettings (int track) const;
+    neptune::core::mixer::StripSettings busSettings (int bus) const;
+    neptune::core::mixer::MasterSettings masterSettings() const;
+    void uiEditTrack (int track, neptune::core::mixer::StripSettings, std::string name, std::string mergeKey = {});
+    void uiEditBus (int bus, neptune::core::mixer::StripSettings, std::string name, std::string mergeKey = {});
+    void uiEditMaster (neptune::core::mixer::MasterSettings, std::string name, std::string mergeKey = {});
+    neptune::core::Engine::Meter trackMeter (int track) const { return engine_.trackMeter (track); }
+    neptune::core::Engine::Meter busMeter (int bus) const { return engine_.busMeter (bus); }
+    neptune::core::Engine::Meter masterMeter() const { return engine_.masterMeter(); }
+
     // Jeu depuis l'interface (clavier de la matrice, bouton d'écoute) : thread de message ; appliqué au bloc audio suivant.
-    void uiNoteOn (int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity }); }
-    void uiNoteOff (int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f }); }
-    void uiPreviewZone (int zoneIndex) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewZone, 0, zoneIndex, 0.0f }); }
-    void uiPreviewRelease() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewRelease, 0, 0, 0.0f }); }
-    // Notes jouées (touche, vélocité après courbe) pour le curseur de la matrice ; thread de message.
-    bool popNoteTrace (int& key, int& velocity)
+    // Toujours sur la piste sélectionnée.
+    void uiNoteOn (int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity, selectedTrack() }); }
+    void uiNoteOff (int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f, selectedTrack() }); }
+    void uiPreviewZone (int zoneIndex) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewZone, 0, zoneIndex, 0.0f, selectedTrack() }); }
+    void uiPreviewRelease() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewRelease, 0, 0, 0.0f, selectedTrack() }); }
+    // Notes jouées (piste, touche, vélocité après courbe) pour le curseur de la matrice ; thread de message.
+    bool popNoteTrace (int& track, int& key, int& velocity)
     {
         neptune::core::Engine::NoteTrace t;
         if (! engine_.popNoteTrace (t)) return false;
-        key = t.key; velocity = t.velocity;
+        track = t.track; key = t.key; velocity = t.velocity;
         return true;
     }
     // Voix qui sonnent (moniteur) : thread de message.
     int readVoices (neptune::core::Engine::VoiceInfo* out, int maxOut) const { return engine_.readVoices (out, maxOut); }
-    void uiPanic() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::Panic, 0, 0, 0.0f }); }
+    void uiPanic() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::Panic, 0, 0, 0.0f, 0 }); }
     void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
-    void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f }); }
+    void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f, selectedTrack() }); }
     void uiEndGesture() { undo_.endGesture(); }
-    InstrumentStatus instrumentStatus() const;
+    InstrumentStatus instrumentStatus() const { return instrumentStatus (selectedTrack()); }
+    InstrumentStatus instrumentStatus (int track) const;
     // Voix éteintes faute de données du disque (streaming) depuis le chargement du plugin.
     std::uint32_t streamUnderruns() const noexcept { return engine_.streamUnderruns(); }
-    // Change à chaque modification de la description : l'interface compare ce nombre au lieu de comparer tout l'instrument.
+    // Change à chaque modification (instrument de n'importe quelle piste, réglages du mixeur, sélection) : l'interface compare
+    // ce nombre au lieu de comparer tout l'état.
     std::uint32_t instrumentRevision() const noexcept { return revision_.load(); }
 
     // Taille mémorisée de la modale des potards (par type de terminal), enregistrée dans ui_state.json.
@@ -141,8 +165,9 @@ private:
     neptune::core::InstanceProfile profile_;
     neptune::core::UndoManager undo_; // thread message uniquement
     mutable juce::CriticalSection instrumentLock_;
-    neptune::core::InstrumentDescription instrument_; // protégé par instrumentLock_
-    InstrumentStatus status_;                          // protégé par instrumentLock_
+    neptune::core::MixerState mixer_;                                   // protégé par instrumentLock_
+    std::array<InstrumentStatus, neptune::core::mixer::numTracks> status_; // protégé par instrumentLock_
+    std::atomic<int> selectedTrack_ { 0 };
     std::atomic<std::uint32_t> revision_ { 0 };
     neptune::core::uistate::UiState uiState_;
     std::filesystem::path uiStateFile_;
@@ -152,8 +177,10 @@ private:
 
     void autosaveNow();
     class InstrumentLoader;
-    void adoptInstrumentFromState (const std::optional<neptune::core::InstrumentDescription>&);
-    void setStatus (InstrumentStatus);
+    void adoptMixerFromState (const std::optional<neptune::core::MixerState>&);
+    std::set<std::string> otherTracksPaths (int track) const;
+    void setStatus (int track, InstrumentStatus);
+    void pushMixerSettingsToEngine();
     std::string currentStateText() const; // état complet tel qu'écrit dans le projet et dans l'autosave
     void adoptStateIdentity (const std::string& idFromState);
 

@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -261,9 +262,11 @@ private:
 // À la fin, il ne contient plus que les fichiers de la description.
 using SampleCache = std::map<std::string, std::shared_ptr<const SampleData>>;
 // `progress(done, total)` est appelée après chaque zone ; si elle rend false, la construction s'arrête et rend nul.
+// `keep` (facultatif) : chemins à CONSERVER dans le cache même s'ils ne sont pas dans cette description (cache partagé entre pistes).
 std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& description, std::vector<std::string>* warnings = nullptr,
                                                    SampleCache* cache = nullptr,
-                                                   const std::function<bool (int done, int total)>& progress = {});
+                                                   const std::function<bool (int done, int total)>& progress = {},
+                                                   const std::set<std::string>* keep = nullptr);
 
 // Zone qui couvre tout le clavier à partir d'un sample déjà chargé (tests, outils).
 Zone makeFullKeyboardZone (std::shared_ptr<const SampleData> sample, int rootNote, PlayMode mode);

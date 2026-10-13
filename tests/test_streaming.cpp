@@ -125,20 +125,21 @@ TEST_CASE ("disk streamer fills the ring with the data that follows the preload"
     REQUIRE (part.ok());
 
     DiskStreamer streamer;
-    CHECK_FALSE (streamer.claim (0, *part.sample)); // pas démarré : refusé
+    CHECK (streamer.claim (*part.sample) == -1); // pas démarré : refusé
     streamer.start();
-    REQUIRE (streamer.claim (3, *part.sample));
-    const auto gen = streamer.generation (3);
-    REQUIRE (waitFor ([&] { return streamer.view (3, gen).ready && streamer.view (3, gen).writePos >= 12000; }));
-    const auto v = streamer.view (3, gen);
+    const int slot = streamer.claim (*part.sample);
+    REQUIRE (slot >= 0);
+    const auto gen = streamer.generation (slot);
+    REQUIRE (waitFor ([&] { return streamer.view (slot, gen).ready && streamer.view (slot, gen).writePos >= 12000; }));
+    const auto v = streamer.view (slot, gen);
     for (std::int64_t k = 1000; k < 12000; k += 7)
     {
         const auto idx = static_cast<std::size_t> (k & (DiskStreamer::kRingFrames - 1));
         REQUIRE (v.left[idx] == full.sample->at (0, k));
         REQUIRE (v.right[idx] == full.sample->at (1, k));
     }
-    streamer.release (3);
-    CHECK_FALSE (streamer.view (3, gen).ready);
+    streamer.release (slot);
+    CHECK_FALSE (streamer.view (slot, gen).ready);
 }
 
 TEST_CASE ("a streamed voice renders exactly what the all-RAM voice renders")
@@ -171,14 +172,15 @@ TEST_CASE ("a streamed voice renders exactly what the all-RAM voice renders")
     str.noteOn (0, 60, 1.0f);
 
     const int block = 256;
-    const auto gen = streamer.generation (0); // la première voix prend l'emplacement 0
+    const int slot = 0; // le pool rend d'abord l'emplacement 0
+    const auto gen = streamer.generation (slot);
     std::vector<float> aL (block), aR (block), bL (block), bR (block);
     int blocks = 0;
     while (ram.activeVoices() > 0 && blocks < 400)
     {
         // le test va plus vite que le temps réel : on laisse le disque avoir de l'avance (en vrai, c'est le tampon)
         const std::int64_t needed = std::min<std::int64_t> (40000, static_cast<std::int64_t> (blocks + 1) * block + 6000);
-        REQUIRE (waitFor ([&] { return streamer.view (0, gen).ready && streamer.view (0, gen).writePos >= needed; }));
+        REQUIRE (waitFor ([&] { return streamer.view (slot, gen).ready && streamer.view (slot, gen).writePos >= needed; }));
         std::fill (aL.begin(), aL.end(), 0.0f); std::fill (aR.begin(), aR.end(), 0.0f);
         std::fill (bL.begin(), bL.end(), 0.0f); std::fill (bR.begin(), bR.end(), 0.0f);
         ram.render (aL.data(), aR.data(), block, 1.0f, 1.0f, 0.0);
@@ -193,7 +195,7 @@ TEST_CASE ("a streamed voice renders exactly what the all-RAM voice renders")
     CHECK (blocks > 100);
     CHECK (str.activeVoices() == 0);
     CHECK (streamer.underruns() == 0);
-    CHECK_FALSE (streamer.view (0, gen).ready); // l'emplacement a été rendu à la fin de la voix
+    CHECK_FALSE (streamer.view (slot, gen).ready); // l'emplacement a été rendu à la fin de la voix
 }
 
 TEST_CASE ("underrun: a streamed voice fades out and stops, and the incident is counted")

@@ -1,5 +1,5 @@
 # Nombre de pistes du pool de paramètres « sonde » (palier 0, point 4). 32 pistes = 676 paramètres.
-set(NEPTUNE_PROBE_TRACKS 32 CACHE STRING "Pistes du pool sonde")
+set(NEPTUNE_PROBE_TRACKS 16 CACHE STRING "Pistes du mixeur (paramètres exposés à l'hôte)")
 
 # Sorties stéréo déclarées à l'hôte (sonde, point 4 : jusqu'à 64 prévues). Le wrapper plafonne à 128 canaux de sortie.
 set(NEPTUNE_PROBE_OUTPUTS 64 CACHE STRING "Sorties stéréo de la sonde")
@@ -33,6 +33,7 @@ target_sources(Neptune PRIVATE
   src/ChokePanel.cpp
   src/VoicesView.cpp
   src/FilterEditor.cpp
+  src/MixerView.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

@@ -4,6 +4,7 @@
 #include "ChokePanel.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
+#include "neptune/core/Mixer.h"
 
 using neptune::core::theme::Token;
 
@@ -237,8 +238,28 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     chokeMoreButton_.onClick = [this] { openChokePanel (chokeMoreButton_); };
     addAndMakeVisible (chokeMoreButton_);
 
-    viewButton_.onClick = [this] { showProbe_ = ! showProbe_; updateViewVisibility(); resized(); repaint(); };
+    viewButton_.setButtonText ("Probe");
+    viewButton_.onClick = [this] { setView (false, true); };
     addAndMakeVisible (viewButton_);
+    mixerButton_.setButtonText (text ("mix.tab"));
+    mixerButton_.onClick = [this] { setView (true, false); };
+    addAndMakeVisible (mixerButton_);
+    mappingButton_.setButtonText (text ("map.tab"));
+    mappingButton_.onClick = [this] { setView (false, false); };
+    addAndMakeVisible (mappingButton_);
+
+    mixerView_ = std::make_unique<MixerView> (processor_, palette_, tr_);
+    mixerView_->onSelectTrack = [this] (int t) { processor_.selectTrack (t); };
+    addChildComponent (*mixerView_);
+
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t) trackBox_.addItem (juce::String (t + 1), t + 1);
+    trackBox_.onChange = [this]
+    {
+        if (updatingControls_) return;
+        const int id = trackBox_.getSelectedId();
+        if (id >= 1) processor_.selectTrack (id - 1);
+    };
+    addAndMakeVisible (trackBox_);
 
     undoButton_.setButtonText (text ("undo.undo"));
     redoButton_.setButtonText (text ("undo.redo"));
@@ -523,7 +544,9 @@ void NeptuneEditor::openFilterEditor()
     {
         if (safe == nullptr) return;
         using namespace neptune::core;
-        const ParamId ids[4] = { sampler::filter1Cutoff, sampler::filter1Resonance, sampler::filter2Cutoff, sampler::filter2Resonance };
+        const int tr = safe->processor_.selectedTrack();
+        const ParamId ids[4] = { mixer::samplerParam (tr, mixer::kFilter1Cutoff), mixer::samplerParam (tr, mixer::kFilter1Resonance),
+                                 mixer::samplerParam (tr, mixer::kFilter2Cutoff), mixer::samplerParam (tr, mixer::kFilter2Resonance) };
         const ParamId id = ids[juce::jlimit (0, 3, index)];
         if (phase == 0) safe->processor_.uiBeginEdit (id);
         else if (phase == 2) safe->processor_.uiEndEdit (id);
@@ -549,10 +572,11 @@ void NeptuneEditor::updateFilterEditor()
     using namespace neptune::core;
     const auto& ps = processor_.parameters();
     FilterEditor::DefaultParams p;
-    p.cutoffHz[0] = ps.get (sampler::filter1Cutoff);
-    p.cutoffHz[1] = ps.get (sampler::filter2Cutoff);
-    p.resonance[0] = ps.get (sampler::filter1Resonance) / 100.0;
-    p.resonance[1] = ps.get (sampler::filter2Resonance) / 100.0;
+    const int tr = processor_.selectedTrack();
+    p.cutoffHz[0] = ps.get (mixer::samplerParam (tr, mixer::kFilter1Cutoff));
+    p.cutoffHz[1] = ps.get (mixer::samplerParam (tr, mixer::kFilter2Cutoff));
+    p.resonance[0] = ps.get (mixer::samplerParam (tr, mixer::kFilter1Resonance)) / 100.0;
+    p.resonance[1] = ps.get (mixer::samplerParam (tr, mixer::kFilter2Resonance)) / 100.0;
     const auto& d = cachedDescription_;
     const auto sel = zoneTable_->selectedRows();
     int count = 0;
@@ -588,7 +612,7 @@ void NeptuneEditor::updateVoices()
         s.info = info[i];
         s.lastSeen = now;
         s.present = true;
-        if (info[i].sourceIndex >= 0) sounding.push_back (info[i].sourceIndex);
+        if (info[i].sourceIndex >= 0 && info[i].track == processor_.selectedTrack()) sounding.push_back (info[i].sourceIndex);
     }
     constexpr juce::uint32 kKeepMs = 700;
     for (auto it = seenVoices_.begin(); it != seenVoices_.end();)
@@ -600,7 +624,8 @@ void NeptuneEditor::updateVoices()
     zoneTable_->setPlayingRows (sounding);
     matrix_->setSoundingZones (sounding);
 
-    const auto& d = cachedDescription_;
+    std::array<neptune::core::InstrumentDescription, neptune::core::mixer::numTracks> descs; // une description par piste, lue une fois
+    std::array<bool, neptune::core::mixer::numTracks> haveDesc {};
     int held = 0, releasing = 0, fading = 0;
     std::vector<VoicesView::Row> rows;
     for (auto it = seenVoices_.rbegin(); it != seenVoices_.rend(); ++it) // la plus récente en haut
@@ -608,12 +633,15 @@ void NeptuneEditor::updateVoices()
         const auto& s = it->second;
         const auto& v = s.info;
         VoicesView::Row r;
+        const auto tr = static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, v.track));
+        if (! haveDesc[tr]) { descs[tr] = processor_.instrumentDescription (static_cast<int> (tr)); haveDesc[tr] = true; }
+        const auto& d = descs[tr];
         const bool known = v.sourceIndex >= 0 && v.sourceIndex < static_cast<int> (d.zones.size());
         const neptune::core::ZoneDescription* z = known ? &d.zones[static_cast<std::size_t> (v.sourceIndex)] : nullptr;
         r.sample = z != nullptr ? juce::File (juce::String::fromUTF8 (z->samplePath.c_str())).getFileName() : juce::String ("?");
         r.key = juce::String (v.key) + "  " + juce::String::fromUTF8 (neptune::core::import::midiToNoteName (v.key, neptune::core::import::NoteConvention {}).c_str());
         r.velocity = juce::String (v.velocity);
-        r.zone = known ? juce::String (v.sourceIndex) : juce::String ("-");
+        r.zone = juce::String (v.track + 1) + ":" + (known ? juce::String (v.sourceIndex) : juce::String ("-")); // piste:zone
         if (z != nullptr)
         {
             r.trigger = text (z->onRelease ? "trig.release" : z->trigger == neptune::core::TriggerCondition::First ? "trig.first"
@@ -867,8 +895,11 @@ void NeptuneEditor::rebuildLoadPanel()
 
 void NeptuneEditor::updateViewVisibility()
 {
-    // Deux vues : Mapping (tout l'instrument : matrice, liste, enveloppe, chargement, potards) et Sonde (diagnostic de l'hôte).
-    const bool mapping = ! showProbe_;
+    // Trois vues : Mixeur, Mapping (tout l'instrument de la piste sélectionnée : matrice, liste, enveloppe, chargement, potards)
+    // et Sonde (diagnostic de l'hôte).
+    const bool mapping = ! showProbe_ && ! showMixer_;
+    mixerView_->setVisible (showMixer_);
+    trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (mapping);
     modeButton_.setVisible (mapping);
     statusLabel_.setVisible (mapping);
@@ -897,7 +928,50 @@ void NeptuneEditor::updateViewVisibility()
     preloadBox_.setVisible (mapping);
     groupsViewport_.setVisible (mapping);
     for (auto* k : knobs_) k->setVisible (mapping);
-    viewButton_.setButtonText (showProbe_ ? text ("map.tab") : juce::String ("Probe"));
+    mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
+    mappingButton_.setToggleState (mapping, juce::dontSendNotification);
+    viewButton_.setToggleState (showProbe_, juce::dontSendNotification);
+}
+
+void NeptuneEditor::setView (bool mixer, bool probe)
+{
+    showMixer_ = mixer;
+    showProbe_ = probe;
+    updateViewVisibility();
+    resized();
+    repaint();
+}
+
+// Piste sélectionnée : la liste déroulante du haut et les potards d'instrument (gain, accordage, filtres) la suivent.
+void NeptuneEditor::updateTrackBox()
+{
+    const auto rev = processor_.instrumentRevision();
+    if (rev == trackBoxRevision_ && trackBox_.getSelectedId() == processor_.selectedTrack() + 1) return;
+    trackBoxRevision_ = rev;
+    updatingControls_ = true;
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+    {
+        const auto s = processor_.trackSettings (t);
+        const auto label = juce::String (t + 1) + (s.name.empty() ? juce::String() : "  " + juce::String::fromUTF8 (s.name.c_str()));
+        trackBox_.changeItemText (t + 1, label);
+    }
+    trackBox_.setSelectedId (processor_.selectedTrack() + 1, juce::dontSendNotification);
+    updatingControls_ = false;
+}
+
+void NeptuneEditor::rebindKnobs()
+{
+    const int track = processor_.selectedTrack();
+    if (track == knobTrack_) return;
+    knobTrack_ = track;
+    zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
+    int k = 0;
+    for (auto* knob : knobs_)
+    {
+        knob->setParamId (neptune::core::mixer::samplerParam (track, static_cast<neptune::core::mixer::SamplerKind> (k)));
+        ++k;
+    }
+    repaint();
 }
 
 void NeptuneEditor::updateUndoButtons()
@@ -938,7 +1012,10 @@ void NeptuneEditor::updateProfileControls()
 
 void NeptuneEditor::timerCallback()
 {
-    for (int k = 0, v = 0; processor_.popNoteTrace (k, v);) matrix_->notePlayed (k, v); // curseur de la matrice
+    for (int t = 0, k = 0, v = 0; processor_.popNoteTrace (t, k, v);)
+        if (t == processor_.selectedTrack()) matrix_->notePlayed (k, v); // curseur de la matrice (piste sélectionnée)
+    updateTrackBox();
+    rebindKnobs();
     updateRecoveryBanner();
     updateProfileControls();
     updateUndoButtons();
@@ -974,8 +1051,12 @@ void NeptuneEditor::resized()
 
     // Vue Mapping : chargement, import, état, mode, note racine en haut ; à gauche la liste des zones (rétractable) et le
     // panneau « Chargé en mémoire » ; au centre la matrice puis l'enveloppe ; les potards en bas.
-    viewButton_.setBounds (getWidth() - 32 - 110, 32, 110, 36);
-    panicButton_.setBounds (getWidth() - 32 - 110 - 8 - 150, 32, 150, 36);
+    viewButton_.setBounds (getWidth() - 32 - 100, 32, 100, 36);
+    mappingButton_.setBounds (getWidth() - 32 - 100 - 4 - 100, 32, 100, 36);
+    mixerButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
+    panicButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
+    trackBox_.setBounds (190, 32, 220, 36);
+    mixerView_->setBounds (32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 80 - 150));
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
@@ -1143,7 +1224,7 @@ void NeptuneEditor::paint (juce::Graphics& g)
     } // showProbe_
 
     // Nom et valeur de chaque potard (vue Mapping)
-    if (! showProbe_)
+    if (! showProbe_ && ! showMixer_)
     {
         const auto& ps2 = processor_.parameters();
         g.setFont (juce::FontOptions (13.0f));

@@ -29,7 +29,7 @@ inline std::int64_t wrapIndex (const Zone& z, std::int64_t k) noexcept
 
 void SamplerVoices::discard (Voice& v) noexcept
 {
-    if (v.streaming && streamer_ != nullptr) streamer_->release (static_cast<int> (&v - voices_.data()));
+    if (v.streaming && streamer_ != nullptr) streamer_->release (v.streamSlot);
     v = Voice {};
 }
 
@@ -361,10 +361,11 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     // qui précède la fin de boucle en mémoire (voir residentFramesNeeded) et n'ont donc jamais besoin du flux.
     if (zone.mode == PlayMode::OneShot && zone.sample->isStreamed() && streamer_ != nullptr)
     {
-        const int slot = static_cast<int> (v - voices_.data());
-        if (streamer_->claim (slot, *zone.sample))
+        const int slot = streamer_->claim (*zone.sample);
+        if (slot >= 0)
         {
             v->streaming = true;
+            v->streamSlot = slot;
             v->streamGen = streamer_->generation (slot);
         }
     }
@@ -469,7 +470,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     DiskStreamer::View ring;
     if constexpr (Streamed)
     {
-        const int slot = static_cast<int> (&v - voices_.data());
+        const int slot = v.streamSlot;
         if (v.streaming && streamer_ != nullptr)
         {
             streamer_->setReadPos (slot, std::max<std::int64_t> (resident, static_cast<std::int64_t> (v.pos) - 1));
@@ -600,8 +601,9 @@ void SamplerVoices::render (float* left, float* right, int numFrames, float gain
         for (auto& v : voices_)
             if (v.streaming && ! v.active)
             {
-                streamer_->release (static_cast<int> (&v - voices_.data()));
+                streamer_->release (v.streamSlot);
                 v.streaming = false;
+                v.streamSlot = -1;
             }
 }
 

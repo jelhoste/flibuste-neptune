@@ -18,8 +18,6 @@ public:
     static constexpr int kFadeSlots = 64;  // emplacements supplémentaires pour les voix volées qui s'éteignent (un accord vole beaucoup de voix d'un coup)
     static constexpr double kStealFadeSeconds = 0.003;
 
-    static_assert (kMaxVoices + kFadeSlots == DiskStreamer::kSlots, "un emplacement de streaming par voix");
-
     // Coupure et résonance des filtres hérités de l'instrument (paramètres automatisables), lues une fois par bloc.
     struct FilterParams
     {
@@ -59,6 +57,7 @@ public:
     // Ce qui sonne en ce moment (moniteur de voix de l'interface, débogage). Thread audio.
     struct VoiceInfo
     {
+        int track = 0;              // piste (rempli par Engine)
         int sourceIndex = -1;       // indice de la zone dans la description (-1 : zone construite à la main)
         int key = 0, channel = 0;
         int velocity = 0;           // 1..127, après la courbe de l'instrument
@@ -109,6 +108,7 @@ private:
         std::array<float, 2> fenvValue { 0.0f, 0.0f };
         int fcount = 0;
         bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
+        int streamSlot = -1;
         std::uint32_t streamGen = 0;
     };
 

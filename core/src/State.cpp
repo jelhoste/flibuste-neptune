@@ -26,8 +26,23 @@ const MigrationTable& registeredMigrations()
 {
     // v1 -> v2 : « profile_lock » est facultatif (absent = non verrouillé), le document v1 est déjà un v2 valide.
     // v2 -> v3 : « instrument » est facultatif (absent = pas d'instrument), rien à transformer non plus.
-    static const MigrationTable table = { { 1, [] (nlohmann::json&) { return true; } }, { 2, [] (nlohmann::json&) { return true; } },
-          { 3, [] (nlohmann::json&) { return true; } } }; // v3 -> v4 : « release_ms » d'une zone est relu comme enveloppe par instrumentFromJson
+    static const MigrationTable table = {
+        { 1, [] (nlohmann::json&) { return true; } },
+        { 2, [] (nlohmann::json&) { return true; } },
+        { 3, [] (nlohmann::json&) { return true; } }, // v3 -> v4 : « release_ms » d'une zone est relu comme enveloppe par instrumentFromJson
+        // v4 -> v5 : l'instrument unique du document devient celui de la piste 1 du mixeur ; la sélection est la piste 1.
+        { 4, [] (nlohmann::json& doc)
+          {
+              const auto it = doc.find ("instrument");
+              if (it == doc.end()) return true;
+              nlohmann::json track = nlohmann::json::object();
+              track["instrument"] = std::move (*it);
+              nlohmann::json tracks = nlohmann::json::array();
+              tracks.push_back (std::move (track));
+              doc.erase ("instrument");
+              doc["mixer"] = { { "selected_track", 0 }, { "tracks", std::move (tracks) } };
+              return true;
+          } } };
     return table;
 }
 
@@ -52,7 +67,7 @@ bool migrate (nlohmann::json& doc, int from, int to, const MigrationTable& table
 }
 
 std::string save (const ParameterSet& set, std::string_view instanceId, std::optional<PerformanceProfile> profileLock,
-                 const InstrumentDescription* instrument)
+                 const MixerState* mixer)
 {
     nlohmann::json params = nlohmann::json::object();
     for (std::size_t i = 0; i < set.size(); ++i)
@@ -65,8 +80,8 @@ std::string save (const ParameterSet& set, std::string_view instanceId, std::opt
         doc["instance_id"] = std::string (instanceId);
     if (profileLock)
         doc["profile_lock"] = toString (*profileLock);
-    if (instrument != nullptr)
-        doc["instrument"] = nlohmann::json::parse (toJson (*instrument));
+    if (mixer != nullptr)
+        doc["mixer"] = nlohmann::json::parse (toJson (*mixer));
     doc["parameters"] = std::move (params);
     return doc.dump (2);
 }
@@ -114,8 +129,8 @@ LoadResult load (ParameterSet& set, std::string_view text)
         result.instanceId = id->get<std::string>();
     if (const auto lk = doc.find ("profile_lock"); lk != doc.end() && lk->is_string())
         result.profileLock = profileFromString (lk->get<std::string>()); // valeur inconnue : non verrouillé
-    if (const auto ins = doc.find ("instrument"); ins != doc.end() && ins->is_object())
-        result.instrument = instrumentFromJson (ins->dump());
+    if (const auto mx = doc.find ("mixer"); mx != doc.end() && mx->is_object())
+        result.mixer = mixerFromJson (mx->dump());
 
     for (const auto& [key, value] : params->items())
     {

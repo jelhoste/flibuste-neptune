@@ -1,0 +1,131 @@
+#pragma once
+// Mixeur (palier 1, jalon 9) : modèle des pistes, bus et master, identifiants de paramètres et lois de pan.
+//
+// Chemin du signal d'une piste (ordre réel de traitement, voir spec §1) : instrument -> [trim = gain de l'instrument] ->
+// (inserts : emplacements réservés, aucun module pour l'instant) -> fader -> pan -> sorties. Les 4 points de captation d'un
+// envoi sont donc : 0 pré-inserts, 1 post-inserts / pré-fader (identiques tant qu'il n'y a pas d'inserts), 2 post-fader /
+// pré-pan, 3 post-pan (défaut).
+//
+// Routage (par piste et par bus) :
+//  - sortie principale : le Master (défaut) ou un bus ; activable / désactivable (le « bouton Envoi vers Master » de la spec) ;
+//  - sortie directe : aucune ou une sortie physique 1..64, INDÉPENDANTE de la sortie principale (les deux peuvent être actives) ;
+//  - 8 envois : bus de destination, point de captation, niveau (paramètre automatisable), pan, mute.
+// Pour qu'aucun cycle ne soit possible par construction, un bus ne peut router (sortie principale ou envoi) que vers un bus
+// d'indice SUPÉRIEUR au sien ; toute autre cible est ignorée par le moteur.
+#include <array>
+#include <cmath>
+#include <string>
+
+#include "neptune/core/Parameter.h"
+#include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
+
+namespace neptune::core::mixer
+{
+constexpr int numTracks = 16;
+constexpr int numBuses = 16;
+constexpr int numSends = 8;
+constexpr int numOutputs = 64; // sorties stéréo physiques déclarées à l'hôte
+
+// ---- identifiants de paramètres (stables : ne jamais renuméroter) ----
+constexpr ParamId masterTrim = 5;   // dB, -12..+12
+constexpr ParamId masterMono = 6;   // bascule : réduction mono
+constexpr ParamId busBase = 3000;   // bus b -> 3000 + 100.b
+constexpr ParamId busStride = 100;
+enum BusOffset : ParamId { kBusVolume = 0, kBusPan = 1, kBusMute = 2, kBusSolo = 3, kBusSendLevel = 20 };
+constexpr ParamId busParam (int bus, ParamId offset) { return busBase + busStride * static_cast<ParamId> (bus) + offset; }
+
+// Paramètres de l'instrument d'une piste. La piste 0 garde les identifiants historiques 100..106 (projets existants) ; les
+// autres pistes les ont dans leur bloc d'identifiants (offsets 30..36).
+enum SamplerKind : int { kGain = 0, kTuneSemitones, kTuneCents, kFilter1Cutoff, kFilter1Resonance, kFilter2Cutoff, kFilter2Resonance, kSamplerKinds };
+constexpr ParamId samplerParam (int track, SamplerKind kind)
+{
+    constexpr ParamId legacy[kSamplerKinds] = { sampler::gain, sampler::tuneSemitones, sampler::tuneCents, sampler::filter1Cutoff,
+                                                sampler::filter1Resonance, sampler::filter2Cutoff, sampler::filter2Resonance };
+    return track == 0 ? legacy[kind] : probe::trackParam (track, 30 + static_cast<ParamId> (kind));
+}
+
+// Ajoute au jeu : les paramètres d'instrument des pistes 1..n-1, ceux du master (trim, mono) et ceux des bus.
+// (Les paramètres de piste volume/pan/mute/solo/envois viennent de probe::buildPool ; ceux de la piste 0, de sampler::addParams.)
+bool addParams (ParameterSet& set, int tracks, int buses, std::string* error = nullptr);
+
+// ---- réglages non automatisables (sauvegardés dans le projet) ----
+enum class TapPoint : int { PreInsert = 0, PostInsertPreFader = 1, PostFaderPrePan = 2, PostPan = 3 };
+enum class PanMode : int { Balance = 0, True = 1 };
+
+struct SendSettings
+{
+    int destination = 0;                 // 0 aucun, 1..numBuses : bus
+    TapPoint tap = TapPoint::PostPan;
+    double pan = 0.0;                    // -1..1
+    bool mute = false;
+    bool operator== (const SendSettings& o) const noexcept
+    {
+        return destination == o.destination && tap == o.tap && pan == o.pan && mute == o.mute;
+    }
+};
+
+struct Routing
+{
+    int mainDest = 0;          // 0 : Master ; 1..numBuses : bus
+    bool mainEnabled = true;   // « Envoi vers Master » / vers le bus de sortie
+    int directOut = 0;         // 0 : aucune ; 1..numOutputs : sortie physique (additive)
+    bool operator== (const Routing& o) const noexcept
+    {
+        return mainDest == o.mainDest && mainEnabled == o.mainEnabled && directOut == o.directOut;
+    }
+};
+
+struct StripSettings
+{
+    std::string name;
+    int color = 0;                       // indice de palette
+    int midiChannel = 0;                 // pistes : 0 = tous, 1..16
+    Routing routing;
+    PanMode panMode = PanMode::Balance;
+    std::array<SendSettings, numSends> sends;
+    bool slim = false;
+
+    bool operator== (const StripSettings& o) const noexcept
+    {
+        return name == o.name && color == o.color && midiChannel == o.midiChannel && routing == o.routing
+            && panMode == o.panMode && sends == o.sends && slim == o.slim;
+    }
+};
+
+struct MasterSettings
+{
+    int output = 1;                      // sortie physique du master (1..numOutputs)
+    PanMode panMode = PanMode::Balance;
+    bool operator== (const MasterSettings& o) const noexcept { return output == o.output && panMode == o.panMode; }
+};
+
+// Bornes les réglages (indices, cycles interdits : un bus ne route que vers un bus d'indice supérieur).
+StripSettings sanitisedStrip (StripSettings s, bool isBus, int index);
+MasterSettings sanitised (MasterSettings m);
+
+// ---- traitement ----
+// Gains (gauche, droite) appliqués à un signal stéréo pour un pan dans [-1,1].
+//  Balance : le canal opposé est atténué (linéaire), rien n'est touché au centre ;
+//  Pan vrai : loi à puissance constante, -3 dB par canal au centre, tout à gauche = (1, 0).
+inline void panGains (PanMode mode, float pan, float& left, float& right) noexcept
+{
+    if (pan < -1.0f) pan = -1.0f;
+    if (pan > 1.0f) pan = 1.0f;
+    if (mode == PanMode::Balance)
+    {
+        left = pan > 0.0f ? 1.0f - pan : 1.0f;
+        right = pan < 0.0f ? 1.0f + pan : 1.0f;
+        return;
+    }
+    const float theta = (pan + 1.0f) * 0.78539816339f; // (pan + 1) . pi/4
+    left = std::cos (theta);
+    right = std::sin (theta);
+}
+
+// dB -> gain linéaire ; en deçà de `floorDb` (le « -inf » des faders) : silence.
+inline float dbToGain (double db, double floorDb = -100.0) noexcept
+{
+    return db <= floorDb ? 0.0f : static_cast<float> (std::pow (10.0, db / 20.0));
+}
+} // namespace neptune::core::mixer

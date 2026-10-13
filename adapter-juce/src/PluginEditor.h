@@ -8,6 +8,7 @@
 #include "ChokePanel.h"
 #include "VoicesView.h"
 #include "FilterEditor.h"
+#include "MixerView.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -80,6 +81,16 @@ private:
     void openPolyphonyPanel (juce::Component& anchor);
     juce::Component::SafePointer<PolyphonyPanel> polyphonyPanel_;
     bool showProbe_ = false;
+    bool showMixer_ = false;
+    // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
+    juce::TextButton mixerButton_, mappingButton_;
+    std::unique_ptr<MixerView> mixerView_;
+    juce::ComboBox trackBox_;   // piste sélectionnée
+    int knobTrack_ = -1;        // piste sur laquelle les potards d'instrument sont branchés
+    std::uint32_t trackBoxRevision_ = 0xFFFFFFFFu;
+    void setView (bool mixer, bool probe);
+    void rebindKnobs();
+    void updateTrackBox();
     void updateViewVisibility();
     std::unique_ptr<juce::FileChooser> chooser_, importChooser_;
 

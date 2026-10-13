@@ -2,13 +2,14 @@
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
 #include "neptune/core/InstrumentEdit.h"
+#include "neptune/core/Mixer.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/State.h"
 #include <set>
 
 #ifndef NEPTUNE_PROBE_TRACKS
- #define NEPTUNE_PROBE_TRACKS 32
+ #define NEPTUNE_PROBE_TRACKS 16
 #endif
 
 // Nombre de sorties stéréo déclarées à l'hôte (sonde du point 4 : la cible du projet est jusqu'à 64).
@@ -29,21 +30,23 @@ std::filesystem::path configDirectory()
 }
 }
 
-// Thread de chargement des samples : construit l'instrument (lit le disque), le publie au moteur, et libère les
-// instruments rendus par le thread audio. Seul consommateur de la file de collecte (InstrumentSlot::collect).
+// Thread de chargement des samples : construit les instruments (lit le disque), les publie au moteur piste par piste, et
+// libère les instruments rendus par le thread audio. Seul consommateur de la file de collecte (InstrumentSlot::collect).
+// Le cache de fichiers est PARTAGÉ entre les pistes : deux pistes qui jouent les mêmes fichiers n'en gardent qu'une copie.
 class NeptuneProcessor::InstrumentLoader : public juce::Thread
 {
 public:
     explicit InstrumentLoader (NeptuneProcessor& owner) : juce::Thread ("Neptune sample loader"), owner_ (owner) { startThread(); }
     ~InstrumentLoader() override { stopThread (15000); }
 
-    void request (neptune::core::InstrumentDescription d, bool force)
+    void request (int track, neptune::core::InstrumentDescription d, bool force)
     {
         {
             const juce::ScopedLock lock (lock_);
-            pending_ = std::move (d);
-            hasPending_ = true;
-            force_ = force_ || force;
+            auto& r = pending_[static_cast<std::size_t> (track)];
+            r.description = std::move (d);
+            r.has = true;
+            r.force = r.force || force;
         }
         notify();
     }
@@ -55,144 +58,310 @@ public:
             wait (500);
             owner_.engine_.collectGarbage();
 
+            int track = -1;
             neptune::core::InstrumentDescription d;
             bool force = false;
             {
                 const juce::ScopedLock lock (lock_);
-                if (! hasPending_) continue;
-                d = std::move (pending_);
-                hasPending_ = false;
-                force = force_;
-                force_ = false;
+                for (std::size_t t = 0; t < pending_.size(); ++t)
+                    if (pending_[t].has)
+                    {
+                        track = static_cast<int> (t);
+                        d = std::move (pending_[t].description);
+                        force = pending_[t].force;
+                        pending_[t].has = false;
+                        pending_[t].force = false;
+                        break;
+                    }
             }
-
-            if (force) cache_.clear();
-            InstrumentStatus st;
-            if (d.empty())
-            {
-                owner_.engine_.publishInstrument (std::make_shared<neptune::core::Instrument>());
-                owner_.setStatus (st); // None
-                continue;
-            }
-
-            st.kind = InstrumentStatus::Kind::Loading;
-            st.total = static_cast<int> (d.zones.size());
-            owner_.setStatus (st);
-            std::vector<std::string> warnings;
-            // Abandonne dès qu'une nouvelle demande arrive (le cache garde ce qui est déjà lu) ou à l'arrêt du plugin.
-            auto inst = neptune::core::buildInstrument (d, &warnings, &cache_, [&] (int done, int total)
-            {
-                if (threadShouldExit() || hasPendingRequest()) return false;
-                if (done % 16 == 0)
-                {
-                    InstrumentStatus p;
-                    p.kind = InstrumentStatus::Kind::Loading;
-                    p.done = done;
-                    p.total = total;
-                    owner_.setStatus (std::move (p));
-                }
-                return true;
-            });
-            if (threadShouldExit()) break;
-            if (inst == nullptr) continue; // annulé : la demande suivante est traitée au tour d'après
-
-            owner_.engine_.publishInstrument (inst);
-            st = {};
-            if (! inst->zones.empty())
-            {
-                const auto& sd = *inst->zones.front().sample;
-                st.kind = InstrumentStatus::Kind::Loaded;
-                st.name = sd.name;
-                st.channels = sd.channels;
-                st.bitDepth = sd.sourceBitDepth;
-                st.sampleRate = sd.sampleRate;
-                st.seconds = sd.durationSeconds();
-                st.zones = static_cast<int> (inst->zones.size());
-                std::set<const neptune::core::SampleData*> distinct;
-                double bytes = 0.0;
-                for (const auto& z : inst->zones)
-                    if (distinct.insert (z.sample.get()).second) bytes += static_cast<double> (z.sample->bytes());
-                st.files = static_cast<int> (distinct.size());
-                st.megabytes = bytes / (1024.0 * 1024.0);
-            }
-            else
-            {
-                st.kind = InstrumentStatus::Kind::Error;
-                st.error = warnings.empty() ? "no usable zone" : warnings.front();
-            }
-            owner_.setStatus (st);
+            if (track < 0) continue;
+            buildAndPublish (track, std::move (d), force);
+            if (hasAnyPending()) notify(); // d'autres pistes attendent : pas d'attente de 500 ms
         }
     }
 
-    bool hasPendingRequest()
+private:
+    struct Request
     {
-        const juce::ScopedLock lock (lock_);
-        return hasPending_;
+        neptune::core::InstrumentDescription description;
+        bool has = false, force = false;
+    };
+
+    void buildAndPublish (int track, neptune::core::InstrumentDescription d, bool force)
+    {
+        if (force) cache_.clear();
+        InstrumentStatus st;
+        if (d.empty())
+        {
+            owner_.engine_.publishInstrument (track, std::make_shared<neptune::core::Instrument>());
+            owner_.setStatus (track, st); // None
+            return;
+        }
+
+        st.kind = InstrumentStatus::Kind::Loading;
+        st.total = static_cast<int> (d.zones.size());
+        owner_.setStatus (track, st);
+        std::vector<std::string> warnings;
+        // Fichiers des AUTRES pistes : à conserver dans le cache partagé (buildInstrument purge ce qui n'est pas dans sa description)
+        std::set<std::string> keep;
+        {
+            const auto others = owner_.otherTracksPaths (track);
+            keep.insert (others.begin(), others.end());
+        }
+        // Abandonne dès qu'une nouvelle demande arrive pour CETTE piste (le cache garde ce qui est déjà lu) ou à l'arrêt du plugin.
+        auto inst = neptune::core::buildInstrument (d, &warnings, &cache_, [&] (int done, int total)
+        {
+            if (threadShouldExit() || hasPendingFor (track)) return false;
+            if (done % 16 == 0)
+            {
+                InstrumentStatus p;
+                p.kind = InstrumentStatus::Kind::Loading;
+                p.done = done;
+                p.total = total;
+                owner_.setStatus (track, std::move (p));
+            }
+            return true;
+        }, &keep);
+        if (threadShouldExit() || inst == nullptr) return; // annulé : la demande suivante est traitée au tour d'après
+
+        owner_.engine_.publishInstrument (track, inst);
+        st = {};
+        if (! inst->zones.empty())
+        {
+            const auto& sd = *inst->zones.front().sample;
+            st.kind = InstrumentStatus::Kind::Loaded;
+            st.name = sd.name;
+            st.channels = sd.channels;
+            st.bitDepth = sd.sourceBitDepth;
+            st.sampleRate = sd.sampleRate;
+            st.seconds = sd.durationSeconds();
+            st.zones = static_cast<int> (inst->zones.size());
+            std::set<const neptune::core::SampleData*> distinct;
+            double bytes = 0.0;
+            for (const auto& z : inst->zones)
+                if (distinct.insert (z.sample.get()).second) bytes += static_cast<double> (z.sample->bytes());
+            st.files = static_cast<int> (distinct.size());
+            st.megabytes = bytes / (1024.0 * 1024.0);
+        }
+        else
+        {
+            st.kind = InstrumentStatus::Kind::Error;
+            st.error = warnings.empty() ? "no usable zone" : warnings.front();
+        }
+        owner_.setStatus (track, st);
     }
 
-private:
+    bool hasPendingFor (int track)
+    {
+        const juce::ScopedLock lock (lock_);
+        return pending_[static_cast<std::size_t> (track)].has;
+    }
+
+    bool hasAnyPending()
+    {
+        const juce::ScopedLock lock (lock_);
+        for (const auto& r : pending_)
+            if (r.has) return true;
+        return false;
+    }
+
     NeptuneProcessor& owner_;
     juce::CriticalSection lock_;
-    neptune::core::InstrumentDescription pending_;
-    bool hasPending_ = false, force_ = false;
-    neptune::core::SampleCache cache_; // thread du chargeur uniquement
+    std::array<Request, neptune::core::mixer::numTracks> pending_;
+    neptune::core::SampleCache cache_; // thread du chargeur uniquement, partagé par toutes les pistes
 };
 
-neptune::core::InstrumentDescription NeptuneProcessor::instrumentDescription() const
+neptune::core::InstrumentDescription NeptuneProcessor::instrumentDescription (int track) const
 {
     const juce::ScopedLock lock (instrumentLock_);
-    return instrument_;
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].instrument;
 }
 
-NeptuneProcessor::InstrumentStatus NeptuneProcessor::instrumentStatus() const
+// Chemins des fichiers que les AUTRES pistes ont besoin de garder en mémoire (cache partagé du chargeur).
+std::set<std::string> NeptuneProcessor::otherTracksPaths (int track) const
+{
+    std::set<std::string> paths;
+    const juce::ScopedLock lock (instrumentLock_);
+    for (std::size_t t = 0; t < mixer_.tracks.size(); ++t)
+    {
+        if (static_cast<int> (t) == track) continue;
+        const auto& d = mixer_.tracks[t].instrument;
+        const auto mask = neptune::core::loadedZones (d);
+        for (std::size_t i = 0; i < d.zones.size() && i < mask.size(); ++i)
+            if (mask[i]) paths.insert (d.zones[i].samplePath);
+    }
+    return paths;
+}
+
+NeptuneProcessor::InstrumentStatus NeptuneProcessor::instrumentStatus (int track) const
 {
     const juce::ScopedLock lock (instrumentLock_);
-    return status_;
+    return status_[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))];
 }
 
-void NeptuneProcessor::setStatus (InstrumentStatus s)
+void NeptuneProcessor::setStatus (int track, InstrumentStatus s)
 {
     const juce::ScopedLock lock (instrumentLock_);
-    status_ = std::move (s);
+    status_[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))] = std::move (s);
 }
 
-void NeptuneProcessor::setInstrumentDescription (neptune::core::InstrumentDescription d, bool forceReload)
+void NeptuneProcessor::setInstrumentDescription (int track, neptune::core::InstrumentDescription d, bool forceReload)
 {
+    track = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
     for (auto& z : d.zones) z = neptune::core::sanitised (z);
     {
         const juce::ScopedLock lock (instrumentLock_);
-        if (d == instrument_ && ! forceReload) return;
-        instrument_ = d;
+        auto& cur = mixer_.tracks[static_cast<std::size_t> (track)].instrument;
+        if (d == cur && ! forceReload) return;
+        cur = d;
     }
     ++revision_;
-    loader_->request (std::move (d), forceReload);
+    loader_->request (track, std::move (d), forceReload);
     notifyStateChanged(); // la description fait partie de l'état du projet
 }
 
 void NeptuneProcessor::uiEditInstrument (neptune::core::InstrumentDescription d, std::string name, std::string mergeKey)
 {
+    const int track = selectedTrack();
     for (auto& z : d.zones) z = neptune::core::sanitised (z);
-    auto previous = instrumentDescription();
+    auto previous = instrumentDescription (track);
     if (previous == d) return;
     // Commande « par différences » : un geste sur quelques zones d'un gros instrument ne copie pas toute la description.
     undo_.perform (std::make_unique<neptune::core::InstrumentEditCommand> (
         previous, d,
-        [this] { return instrumentDescription(); },
-        [this] (const neptune::core::InstrumentDescription& v) { setInstrumentDescription (v, false); },
+        [this, track] { return instrumentDescription (track); },
+        [this, track] (const neptune::core::InstrumentDescription& v) { setInstrumentDescription (track, v, false); },
+        std::move (name), std::move (mergeKey)));
+}
+
+void NeptuneProcessor::selectTrack (int track)
+{
+    track = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
+    if (track == selectedTrack_.load()) return;
+    selectedTrack_.store (track);
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        mixer_.selectedTrack = track;
+    }
+    ++revision_;
+    notifyStateChanged();
+}
+
+// ---- réglages du mixeur
+neptune::core::MixerState NeptuneProcessor::mixerState() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_;
+}
+
+neptune::core::mixer::StripSettings NeptuneProcessor::trackSettings (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].strip;
+}
+
+neptune::core::mixer::StripSettings NeptuneProcessor::busSettings (int bus) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.buses[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numBuses - 1, bus))];
+}
+
+neptune::core::mixer::MasterSettings NeptuneProcessor::masterSettings() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.master;
+}
+
+void NeptuneProcessor::pushMixerSettingsToEngine()
+{
+    const auto m = mixerState();
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t) engine_.setTrackSettings (t, m.tracks[static_cast<std::size_t> (t)].strip);
+    for (int b = 0; b < neptune::core::mixer::numBuses; ++b) engine_.setBusSettings (b, m.buses[static_cast<std::size_t> (b)]);
+    engine_.setMasterSettings (m.master);
+}
+
+namespace
+{
+using neptune::core::mixer::StripSettings;
+}
+
+void NeptuneProcessor::uiEditTrack (int track, StripSettings s, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    track = juce::jlimit (0, mixer::numTracks - 1, track);
+    s = mixer::sanitisedStrip (std::move (s), false, track);
+    const auto previous = trackSettings (track);
+    if (previous == s) return;
+    undo_.perform (std::make_unique<SnapshotCommand<StripSettings>> (
+        previous, s,
+        [this, track] (const StripSettings& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.tracks[static_cast<std::size_t> (track)].strip = v; }
+            engine_.setTrackSettings (track, v);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
+void NeptuneProcessor::uiEditBus (int bus, StripSettings s, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    bus = juce::jlimit (0, mixer::numBuses - 1, bus);
+    s = mixer::sanitisedStrip (std::move (s), true, bus);
+    const auto previous = busSettings (bus);
+    if (previous == s) return;
+    undo_.perform (std::make_unique<SnapshotCommand<StripSettings>> (
+        previous, s,
+        [this, bus] (const StripSettings& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.buses[static_cast<std::size_t> (bus)] = v; }
+            engine_.setBusSettings (bus, v);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
+void NeptuneProcessor::uiEditMaster (neptune::core::mixer::MasterSettings m, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    m = mixer::sanitised (m);
+    const auto previous = masterSettings();
+    if (previous == m) return;
+    undo_.perform (std::make_unique<SnapshotCommand<mixer::MasterSettings>> (
+        previous, m,
+        [this] (const mixer::MasterSettings& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.master = v; }
+            engine_.setMasterSettings (v);
+            ++revision_;
+            notifyStateChanged();
+        },
         std::move (name), std::move (mergeKey)));
 }
 
 // Chargement d'un état (projet ou autosave) : ne marque pas le projet modifié.
-void NeptuneProcessor::adoptInstrumentFromState (const std::optional<neptune::core::InstrumentDescription>& d)
+void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::MixerState>& m)
 {
-    if (! d) return;
+    if (! m) return;
+    std::array<bool, neptune::core::mixer::numTracks> changed {};
     {
         const juce::ScopedLock lock (instrumentLock_);
-        if (*d == instrument_) return;
-        instrument_ = *d;
+        for (std::size_t t = 0; t < mixer_.tracks.size(); ++t)
+        {
+            changed[t] = ! (mixer_.tracks[t].instrument == m->tracks[t].instrument);
+            mixer_.tracks[t] = m->tracks[t];
+        }
+        mixer_.buses = m->buses;
+        mixer_.master = m->master;
+        mixer_.selectedTrack = m->selectedTrack;
     }
+    selectedTrack_.store (m->selectedTrack);
+    pushMixerSettingsToEngine();
     ++revision_;
-    loader_->request (*d, false);
+    for (std::size_t t = 0; t < m->tracks.size(); ++t)
+        if (changed[t]) loader_->request (static_cast<int> (t), m->tracks[t].instrument, false);
 }
 
 NeptuneProcessor::BusesProperties NeptuneProcessor::makeBuses (int numOutputs)
@@ -213,8 +382,11 @@ NeptuneProcessor::NeptuneProcessor()
     jassert (ok);
     const bool samplerOk = neptune::core::sampler::addParams (params_, &error);
     jassert (samplerOk);
-    juce::ignoreUnused (ok, samplerOk);
+    const bool mixerOk = neptune::core::mixer::addParams (params_, probeTracks_, neptune::core::mixer::numBuses, &error);
+    jassert (mixerOk);
+    juce::ignoreUnused (ok, samplerOk, mixerOk);
     engine_.attachParameters (&params_);
+    pushMixerSettingsToEngine();
 
     for (std::size_t i = 0; i < params_.size(); ++i)
         addParameter (new NeptuneParameter (params_, i, hostProbe_)); // l'AudioProcessor en prend la propriété
@@ -257,8 +429,8 @@ NeptuneProcessor::~NeptuneProcessor()
 
 std::string NeptuneProcessor::currentStateText() const
 {
-    const auto instrument = instrumentDescription();
-    return neptune::core::state::save (params_, autosave_->id(), profile_.locked(), &instrument);
+    const auto mixer = mixerState();
+    return neptune::core::state::save (params_, autosave_->id(), profile_.locked(), &mixer);
 }
 
 // Changement d'état qui n'est pas un paramètre (le verrou de profil) : le wrapper CLAP le traduit en
@@ -398,7 +570,7 @@ void NeptuneProcessor::restoreRecovered()
     else
     {
         profile_.setLocked (result.profileLock);
-        adoptInstrumentFromState (result.instrument);
+        adoptMixerFromState (result.mixer);
     }
     autosave_->resolveRecovered();
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
@@ -484,7 +656,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     undo_.clear(); // l'historique d'un autre état ne s'applique plus (il restaurerait un ancien instrument)
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
-    adoptInstrumentFromState (result.instrument);
+    adoptMixerFromState (result.mixer);
     adoptStateIdentity (result.instanceId);
 
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`

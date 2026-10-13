@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "neptune/core/Instrument.h"
+#include "neptune/core/MixerState.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 
@@ -15,7 +16,7 @@ namespace neptune::core::state
 {
 // Version de schéma écrite par cette version du plugin. À incrémenter à chaque changement de structure,
 // avec une migration (voir StateMigration.h) de la version précédente vers la nouvelle.
-constexpr int currentSchemaVersion = 4; // v2 : "profile_lock" ; v3 : "instrument" (Sampler) ; v4 : enveloppe dans les zones (release_ms -> envelope)
+constexpr int currentSchemaVersion = 5; // v2 : "profile_lock" ; v3 : "instrument" (Sampler) ; v4 : enveloppe dans les zones (release_ms -> envelope) ; v5 : "mixer" (pistes, bus, master)
 
 enum class Status
 {
@@ -35,7 +36,7 @@ struct LoadResult
     int ignored = 0;     // entrées ignorées : id inconnu du pool, ou valeur non numérique
     std::string instanceId; // identifiant d'instance enregistré dans l'état (vide si absent) ; non validé, voir AutosaveStore::isValidId
     std::optional<PerformanceProfile> profileLock; // verrou de profil de l'instance ; absent ou illisible = non verrouillé
-    std::optional<InstrumentDescription> instrument; // description de l'instrument ; absente du document = aucune (inchangée par le plugin)
+    std::optional<MixerState> mixer; // pistes (instrument + bande), bus, master ; absent du document = inchangé par le plugin
 
     bool ok() const noexcept { return status == Status::Ok; }
 };
@@ -44,9 +45,9 @@ struct LoadResult
 // afin qu'un changement futur de valeur par défaut ne modifie pas un preset existant.
 // `instanceId` (optionnel) est inscrit dans le document : il relie l'état du projet à l'autosave de l'instance (Autosave.h).
 // `profileLock` : profil sur lequel l'instance est verrouillée (absent du document si non verrouillée).
-// `instrument` : description de l'instrument du Sampler (chemins et réglages de zone, sans audio).
+// `mixer` : instruments des pistes (chemins et réglages de zone, sans audio), réglages de bande, bus, master.
 std::string save (const ParameterSet& set, std::string_view instanceId = {}, std::optional<PerformanceProfile> profileLock = std::nullopt,
-                  const InstrumentDescription* instrument = nullptr);
+                  const MixerState* mixer = nullptr);
 
 // Charge un état complet. Tout ou rien : si le statut n'est pas Ok, `set` n'est pas modifié.
 // Les paramètres absents du fichier reviennent à leur valeur par défaut.

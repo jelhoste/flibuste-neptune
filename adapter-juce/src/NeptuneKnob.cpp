@@ -128,6 +128,16 @@ bool NeptuneKnob::keyPressed (const juce::KeyPress& k)
     return interaction_.key (key, shift);
 }
 
+void NeptuneKnob::setParamId (neptune::core::ParamId id)
+{
+    if (id == id_) return;
+    id_ = id;
+    index_ = processor_.parameters().indexOf (id);
+    interaction_.setValue (processor_.parameters().getNormalized (id_));
+    lastVersion_ = 0;
+    repaint();
+}
+
 void NeptuneKnob::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();

@@ -17,6 +17,7 @@ public:
     ~NeptuneKnob() override { stopTimer(); }
 
     neptune::core::ParamId paramId() const { return id_; }
+    void setParamId (neptune::core::ParamId); // rebranche le potard sur un autre paramètre (piste sélectionnée)
 
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;

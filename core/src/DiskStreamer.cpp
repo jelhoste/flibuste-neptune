@@ -30,15 +30,19 @@ void DiskStreamer::start()
         slots_[static_cast<std::size_t> (i)].ring[0] = storage_.data() + static_cast<std::size_t> (i) * 2u * kRingFrames;
         slots_[static_cast<std::size_t> (i)].ring[1] = slots_[static_cast<std::size_t> (i)].ring[0] + kRingFrames;
     }
+    freeSlots_.clear();
+    freeSlots_.reserve (kSlots);
+    for (int i = kSlots - 1; i >= 0; --i) freeSlots_.push_back (i);
     thread_ = std::thread ([this] { threadMain(); });
     running_.store (true, std::memory_order_release);
 }
 
-bool DiskStreamer::claim (int slot, const SampleData& sample) noexcept
+int DiskStreamer::claim (const SampleData& sample) noexcept
 {
-    if (! running_.load (std::memory_order_acquire) || slot < 0 || slot >= kSlots) return false;
-    if (sample.path.empty() || sample.path.size() >= maxStreamPathBytes || sample.channels < 1 || sample.channels > 2) return false;
+    if (! running_.load (std::memory_order_acquire) || freeSlots_.empty()) return -1;
+    if (sample.path.empty() || sample.path.size() >= maxStreamPathBytes || sample.channels < 1 || sample.channels > 2) return -1;
 
+    const int slot = freeSlots_.back();
     auto& s = slots_[static_cast<std::size_t> (slot)];
     const std::uint32_t r = s.request.load (std::memory_order_relaxed);
     const std::uint32_t next = (r & 1u) != 0 ? r + 2u : r + 1u; // toujours impair, et différent du précédent
@@ -49,7 +53,8 @@ bool DiskStreamer::claim (int slot, const SampleData& sample) noexcept
     p.totalFrames = sample.frames;
     s.readPos.store (p.startFrame, std::memory_order_relaxed);
     s.request.store (next, std::memory_order_release);
-    return true;
+    freeSlots_.pop_back();
+    return slot;
 }
 
 void DiskStreamer::release (int slot) noexcept
@@ -57,7 +62,9 @@ void DiskStreamer::release (int slot) noexcept
     if (slot < 0 || slot >= kSlots) return;
     auto& s = slots_[static_cast<std::size_t> (slot)];
     const std::uint32_t r = s.request.load (std::memory_order_relaxed);
-    if ((r & 1u) != 0) s.request.store (r + 1u, std::memory_order_release);
+    if ((r & 1u) == 0) return; // déjà libre
+    s.request.store (r + 1u, std::memory_order_release);
+    freeSlots_.push_back (slot);
 }
 
 DiskStreamer::View DiskStreamer::view (int slot, std::uint32_t gen) const noexcept
