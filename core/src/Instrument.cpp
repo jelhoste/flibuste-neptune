@@ -1,4 +1,5 @@
 #include "neptune/core/Instrument.h"
+#include "neptune/core/DescriptionJson.h"
 
 #include <algorithm>
 #include <cmath>
@@ -311,6 +312,16 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     return sanitised (std::move (z));
 }
 } // namespace
+
+namespace detail
+{
+nlohmann::json envelopeJson (const EnvelopeDescription& e) { return envelopeToJson (e); }
+EnvelopeDescription envelopeFrom (const nlohmann::json& parent) { return envelopeFromJson (parent); }
+nlohmann::json filterJson (const FilterSettings& f) { return filterToJson (f); }
+FilterSettings filterFrom (const nlohmann::json& o) { return filterFromJson (o); }
+int jsonInt (const nlohmann::json& o, const char* key, int def) { return readInt (o, key, def); }
+double jsonNum (const nlohmann::json& o, const char* key, double def) { return readNum (o, key, def); }
+} // namespace detail
 
 InstrumentDescription instrumentFromJson (std::string_view text)
 {

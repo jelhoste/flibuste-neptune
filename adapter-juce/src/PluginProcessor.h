@@ -20,6 +20,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 #include "neptune/core/Settings.h"
+#include "neptune/core/Synth.h"
 #include "neptune/core/Undo.h"
 #include "neptune/core/UiState.h"
 
@@ -103,6 +104,23 @@ public:
     void uiEditInstrument (neptune::core::InstrumentDescription, std::string name, std::string mergeKey = {});
     void uiBeginGesture() { undo_.beginGesture(); }
 
+    // Pistes : type de génération (Sampler / Synthé), pistes actives, patch du synthé.
+    neptune::core::TrackType trackType (int track) const;
+    bool trackActive (int track) const;
+    int activeTrackCount() const;
+    bool trackHasContent (int track) const; // instrument chargé ou patch modifié : un changement de type le perdrait (confirmation)
+    neptune::core::SynthDescription synthDescription() const { return synthDescription (selectedTrack()); }
+    neptune::core::SynthDescription synthDescription (int track) const; // copie
+    // Édition du patch de la piste sélectionnée : annulable, fusionnée par geste.
+    void uiEditSynth (neptune::core::SynthDescription, std::string name, std::string mergeKey = {});
+    // Change le type de la piste : la configuration d'instrument est perdue (spec §1), les réglages de bande sont conservés.
+    // Vide l'historique d'annulation.
+    void uiSetTrackType (int track, neptune::core::TrackType);
+    // Active la première piste libre (un synthé par défaut) et la sélectionne ; rend son indice, ou -1 si les 16 sont actives.
+    int uiAddTrack();
+    // Retire une piste (remise à l'état d'origine). Faux s'il n'en reste qu'une. Vide l'historique d'annulation.
+    bool uiRemoveTrack (int track);
+
     // Mixeur : réglages de bande (nom, canal MIDI, routage, envois, mode de pan), bus, master. Annulables.
     neptune::core::MixerState mixerState() const; // copie
     neptune::core::mixer::StripSettings trackSettings (int track) const;
@@ -119,6 +137,9 @@ public:
     // Toujours sur la piste sélectionnée.
     void uiNoteOn (int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity, selectedTrack() }); }
     void uiNoteOff (int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f, selectedTrack() }); }
+    // Même chose sur une piste précise (le clavier du synthé : une touche tenue doit s'arrêter sur la piste où elle a démarré).
+    void uiNoteOnTrack (int track, int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity, track }); }
+    void uiNoteOffTrack (int track, int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f, track }); }
     void uiPreviewZone (int zoneIndex) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewZone, 0, zoneIndex, 0.0f, selectedTrack() }); }
     void uiPreviewRelease() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewRelease, 0, 0, 0.0f, selectedTrack() }); }
     // Notes jouées (piste, touche, vélocité après courbe) pour le curseur de la matrice ; thread de message.
@@ -181,6 +202,8 @@ private:
     std::set<std::string> otherTracksPaths (int track) const;
     void setStatus (int track, InstrumentStatus);
     void pushMixerSettingsToEngine();
+    void publishSynthPatch (int track, const neptune::core::SynthDescription&);
+    void resetTrackParameters (int track, bool includeMixer); // valeurs d'origine (instrument ; fader, pan, mute, solo, envois si includeMixer)
     std::string currentStateText() const; // état complet tel qu'écrit dans le projet et dans l'autosave
     void adoptStateIdentity (const std::string& idFromState);
 

@@ -34,6 +34,7 @@ target_sources(Neptune PRIVATE
   src/VoicesView.cpp
   src/FilterEditor.cpp
   src/MixerView.cpp
+  src/SynthView.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

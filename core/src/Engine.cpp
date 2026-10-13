@@ -40,6 +40,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     for (auto& t : tracks_)
     {
         t.voices.prepare (sampleRate);
+        t.synth.prepare (sampleRate);
         t.lastGain = 1.0f;
         t.lastFader = 1.0f;
         t.lastPanL = t.lastPanR = 1.0f;
@@ -59,6 +60,24 @@ void Engine::publishInstrument (int track, std::shared_ptr<const Instrument> ins
         for (const auto& z : instrument->zones)
             if (z.sample != nullptr && z.sample->isStreamed()) { streamer_.start(); break; }
     tracks_[static_cast<std::size_t> (track)].slot.publish (std::move (instrument));
+}
+
+void Engine::setTrackType (int track, TrackType type) noexcept
+{
+    if (track < 0 || track >= kTracks) return;
+    tracks_[static_cast<std::size_t> (track)].type.store (static_cast<int> (type), std::memory_order_relaxed);
+}
+
+void Engine::publishSynth (int track, std::shared_ptr<const SynthPatch> patch)
+{
+    if (track < 0 || track >= kTracks) return;
+    tracks_[static_cast<std::size_t> (track)].synthSlot.publish (std::move (patch));
+}
+
+void Engine::setTrackActive (int track, bool active) noexcept
+{
+    if (track < 0 || track >= kTracks) return;
+    tracks_[static_cast<std::size_t> (track)].active.store (active ? 1 : 0, std::memory_order_relaxed);
 }
 
 void Engine::setTrackSettings (int track, const mixer::StripSettings& s) noexcept
@@ -126,8 +145,15 @@ void Engine::pushTrace (int track, int key, float shaped) noexcept
 void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexcept
 {
     if (track < 0 || track >= kTracks) return;
-    ++activeNotes_;
     auto& t = tracks_[static_cast<std::size_t> (track)];
+    if (t.active.load (std::memory_order_relaxed) == 0) return;
+    ++activeNotes_;
+    if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
+    {
+        t.synth.noteOn (channel, key, velocity);
+        if (key >= 0 && key < 128) pushTrace (track, key, velocity);
+        return;
+    }
     t.voices.noteOn (channel, key, velocity);
     if (key >= 0 && key < 128) pushTrace (track, key, t.voices.lastShapedVelocity());
 }
@@ -136,7 +162,9 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
 {
     if (track < 0 || track >= kTracks) return;
     activeNotes_ = std::max (0, activeNotes_ - 1);
-    tracks_[static_cast<std::size_t> (track)].voices.noteOff (channel, key);
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth)) t.synth.noteOff (channel, key);
+    else t.voices.noteOff (channel, key);
 }
 
 void Engine::noteOn (int channel, int key, float velocity) noexcept
@@ -160,13 +188,13 @@ void Engine::noteOff (int channel, int key) noexcept
 void Engine::panic() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) t.voices.panic();
+    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); }
 }
 
 void Engine::releaseAll() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) t.voices.releaseAll();
+    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); }
 }
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
@@ -174,7 +202,7 @@ void Engine::setParameter (std::uint32_t, double) noexcept {}
 int Engine::activeVoices() const noexcept
 {
     int n = 0;
-    for (const auto& t : tracks_) n += t.voices.activeVoices();
+    for (const auto& t : tracks_) n += t.voices.activeVoices() + t.synth.activeVoices();
     return n;
 }
 
@@ -209,7 +237,7 @@ void Engine::drainUiEvents() noexcept
         {
             case UiEvent::Type::NoteOn: noteOnTrack (tr, e.channel, e.key, e.velocity); break;
             case UiEvent::Type::NoteOff: noteOffTrack (tr, e.channel, e.key); break;
-            case UiEvent::Type::PreviewZone: tracks_[static_cast<std::size_t> (tr)].voices.previewZone (e.key); break;
+            case UiEvent::Type::PreviewZone: if (tracks_[static_cast<std::size_t> (tr)].type.load() == 0) tracks_[static_cast<std::size_t> (tr)].voices.previewZone (e.key); break;
             case UiEvent::Type::PreviewRelease: tracks_[static_cast<std::size_t> (tr)].voices.releasePreview(); break;
             case UiEvent::Type::PreviewStop: tracks_[static_cast<std::size_t> (tr)].voices.stopPreview(); break;
             case UiEvent::Type::Panic: panic(); break;
@@ -227,7 +255,19 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         if (out[c] != nullptr) std::fill (out[c], out[c] + numFrames, 0.0f);
 
     for (auto& t : tracks_)
+    {
         if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());
+        if (t.synthSlot.adoptPending()) t.synth.setPatch (t.synthSlot.current());
+        // changement de type ou désactivation : les voix de la piste s'arrêtent net (rien ne doit sonner sous l'ancien type)
+        const int type = t.type.load (std::memory_order_relaxed), active = t.active.load (std::memory_order_relaxed);
+        if (type != t.appliedType || (active == 0 && t.appliedActive != 0))
+        {
+            t.voices.allSoundOff();
+            t.synth.allSoundOff();
+            t.appliedType = type;
+        }
+        t.appliedActive = active;
+    }
     drainUiEvents();
     if (numChannels < 1 || out[0] == nullptr || numFrames <= 0) return;
 
@@ -368,29 +408,43 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     for (int ti = 0; ti < kTracks; ++ti)
     {
         auto& t = tracks_[static_cast<std::size_t> (ti)];
+        if (t.active.load (std::memory_order_relaxed) == 0) { t.lastSend.fill (0.0f); continue; }
+        const bool synthTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth);
         const bool wasSilent = t.peakL.load (std::memory_order_relaxed) == 0.0f && t.peakR.load (std::memory_order_relaxed) == 0.0f;
         // piste sans instrument, ou au repos et déjà silencieuse : rien à faire (le cas de presque toutes les pistes)
-        if (wasSilent && (t.slot.current() == nullptr || t.voices.activeVoices() == 0)) { t.lastSend.fill (0.0f); continue; }
+        const bool idle = synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
+        if (wasSilent && idle) { t.lastSend.fill (0.0f); continue; }
 
         std::fill (raw_.l.begin(), raw_.l.begin() + n, 0.0f);
         std::fill (raw_.r.begin(), raw_.r.begin() + n, 0.0f);
         // instrument : gain, accordage et filtres hérités (paramètres de CETTE piste)
         float gain = 1.0f;
         double cents = 0.0;
+        SamplerVoices::FilterParams fp;
         if (params_ != nullptr)
         {
             const auto& s = t.idx.sampler;
             if (s[kGain] != ParameterSet::npos) gain = static_cast<float> (sampler::dbToGain (params_->getAt (s[kGain])));
             if (s[kTuneSemitones] != ParameterSet::npos) cents += params_->getAt (s[kTuneSemitones]) * 100.0;
             if (s[kTuneCents] != ParameterSet::npos) cents += params_->getAt (s[kTuneCents]);
-            SamplerVoices::FilterParams fp;
             if (s[kFilter1Cutoff] != ParameterSet::npos) fp.cutoffHz[0] = params_->getAt (s[kFilter1Cutoff]);
             if (s[kFilter1Resonance] != ParameterSet::npos) fp.resonance[0] = params_->getAt (s[kFilter1Resonance]) / 100.0;
             if (s[kFilter2Cutoff] != ParameterSet::npos) fp.cutoffHz[1] = params_->getAt (s[kFilter2Cutoff]);
             if (s[kFilter2Resonance] != ParameterSet::npos) fp.resonance[1] = params_->getAt (s[kFilter2Resonance]) / 100.0;
-            t.voices.setFilterParams (fp);
         }
-        t.voices.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, cents);
+        if (synthTrack)
+        {
+            SynthVoices::Params sp;
+            sp.cutoffHz = fp.cutoffHz[0];
+            sp.resonance = fp.resonance[0];
+            sp.tuneCents = cents;
+            t.synth.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, sp);
+        }
+        else
+        {
+            t.voices.setFilterParams (fp);
+            t.voices.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, cents);
+        }
         t.lastGain = gain;
 
         const bool muted = param (t.idx.mute, 0.0) >= 0.5 || (trackSolo && param (t.idx.solo, 0.0) < 0.5);
@@ -473,7 +527,7 @@ void Engine::publishVoices() noexcept
     int n = 0;
     for (int ti = 0; ti < kTracks; ++ti)
     {
-        tracks_[static_cast<std::size_t> (ti)].voices.forEachVoice ([this, &n, ti] (const VoiceInfo& v)
+        auto pack = [this, &n, ti] (const VoiceInfo& v)
         {
             if (n >= kVoiceSnapshot) return;
             const auto q = [] (float x) { return static_cast<std::uint64_t> (std::clamp (x, 0.0f, 1.0f) * 255.0f + 0.5f); };
@@ -491,7 +545,19 @@ void Engine::publishVoices() noexcept
             voiceWords_[static_cast<std::size_t> (n) * 2].store (w0, std::memory_order_relaxed);
             voiceWords_[static_cast<std::size_t> (n) * 2 + 1].store (w1, std::memory_order_relaxed);
             ++n;
-        });
+        };
+        auto& tr = tracks_[static_cast<std::size_t> (ti)];
+        if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
+            tr.synth.forEachVoice ([&pack] (const SynthVoices::VoiceInfo& s)
+            {
+                VoiceInfo v;
+                v.sourceIndex = -1; // le synthé n'a pas de zone
+                v.key = s.key; v.channel = s.channel; v.velocity = s.velocity;
+                v.releasing = s.releasing; v.fading = s.fading; v.level = s.level; v.order = s.order;
+                pack (v);
+            });
+        else
+            tr.voices.forEachVoice (pack);
     }
     voiceCount_.store (n, std::memory_order_relaxed);
     std::atomic_thread_fence (std::memory_order_release);

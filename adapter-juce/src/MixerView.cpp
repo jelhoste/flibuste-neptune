@@ -8,7 +8,7 @@ using neptune::core::theme::Token;
 namespace
 {
 constexpr int kStripW = 58;
-constexpr int kStripH = 268;
+constexpr int kStripH = 292;
 constexpr int kMasterW = 112;
 constexpr double kFaderMinDb = -100.0, kFaderMaxDb = 6.0;
 
@@ -261,6 +261,13 @@ public:
 
         if (! isBus)
         {
+            typeButton_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.type_tip"))));
+            typeButton_.onClick = [this] { showTypeMenu(); };
+            addAndMakeVisible (typeButton_);
+            removeButton_.setButtonText (juce::String::fromUTF8 ("\xc3\x97"));
+            removeButton_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.remove_tip"))));
+            removeButton_.onClick = [this] { owner_.requestRemove (index_); };
+            addAndMakeVisible (removeButton_);
             for (const auto* item : { "All" }) midi_.addItem (item, 1);
             for (int c = 1; c <= 16; ++c) midi_.addItem (juce::String (c), c + 1);
             midi_.onChange = [this]
@@ -317,6 +324,11 @@ public:
     void refresh (bool selected)
     {
         selected_ = selected;
+        if (! isBus_)
+        {
+            const bool synth = owner_.processor_.trackType (index_) == TrackType::Synth;
+            typeButton_.setButtonText (u8 (std::string (owner_.tr_.tr (synth ? "mix.type_short_synth" : "mix.type_short_sampler"))));
+        }
         const auto s = settings();
         const juce::String fallback = (isBus_ ? "Bus " : "") + juce::String (index_ + 1);
         name_.setText (s.name.empty() ? fallback : u8 (s.name), juce::dontSendNotification);
@@ -345,6 +357,12 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (2);
+        auto head = r.removeFromTop (24);
+        if (! isBus_)
+        {
+            removeButton_.setBounds (head.removeFromRight (20).reduced (0, 1));
+            typeButton_.setBounds (head.reduced (0, 1));
+        }
         name_.setBounds (r.removeFromTop (18));
         if (! isBus_) midi_.setBounds (r.removeFromTop (22).reduced (0, 1));
         routing_.setBounds (r.removeFromTop (22).reduced (0, 1));
@@ -363,6 +381,12 @@ public:
         g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f);
         g.setColour (owner_.colour (selected_ ? Token::Accent : Token::Border));
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, selected_ ? 2.0f : 1.0f);
+        if (isBus_) // le haut d'une bande de bus : l'étiquette que les pistes remplacent par leur générateur
+        {
+            g.setColour (owner_.colour (Token::TextDim));
+            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+            g.drawText ("BUS", 2, 6, getWidth() - 4, 14, juce::Justification::centred);
+        }
         // pastille de couleur
         static const juce::uint32 palette[16] = { 0xff5c6bc0, 0xff26a69a, 0xffffa726, 0xffef5350, 0xff8d6e63, 0xff66bb6a, 0xffab47bc, 0xff42a5f5,
                                                  0xffffee58, 0xffec407a, 0xff78909c, 0xff26c6da, 0xffd4e157, 0xffff7043, 0xff7e57c2, 0xffbdbdbd };
@@ -389,6 +413,23 @@ public:
     }
 
 private:
+    void showTypeMenu()
+    {
+        const auto current = owner_.processor_.trackType (index_);
+        juce::PopupMenu menu;
+        menu.addItem (1, u8 (std::string (owner_.tr_.tr ("mix.type_sampler"))), true, current == TrackType::Sampler);
+        menu.addItem (2, u8 (std::string (owner_.tr_.tr ("mix.type_synth"))), true, current == TrackType::Synth);
+        menu.addSeparator();
+        menu.addItem (3, u8 (std::string (owner_.tr_.tr ("mix.type_fm"))), false);          // plus tard
+        menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), false);       // plus tard
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (160),
+                            [safe = juce::Component::SafePointer<Strip> (this)] (int choice)
+                            {
+                                if (safe == nullptr || choice == 0) return;
+                                safe->owner_.requestTypeChange (safe->index_, choice == 2 ? TrackType::Synth : TrackType::Sampler);
+                            });
+    }
+
     juce::Rectangle<int> meterArea() const { return { getWidth() - 16, faderArea_.getY(), 12, faderArea_.getHeight() }; }
     mixer::StripSettings settings() const { return isBus_ ? owner_.processor_.busSettings (index_) : owner_.processor_.trackSettings (index_); }
     void commit (mixer::StripSettings s)
@@ -406,6 +447,7 @@ private:
     float peakL_ = 0.0f, peakR_ = 0.0f;
     juce::Label name_;
     juce::ComboBox midi_;
+    juce::TextButton typeButton_, removeButton_;
     juce::TextButton routing_;
     BoundSlider pan_, fader_;
     BoundToggle mute_, solo_;
@@ -565,6 +607,12 @@ MixerView::MixerView (NeptuneProcessor& p, const theme::Palette& palette, const 
     }
     master_ = std::make_unique<MasterStrip> (*this);
     addAndMakeVisible (*master_);
+    addTrack_.setButtonText (juce::String::fromUTF8 (std::string (tr.tr ("mix.add_track")).c_str()));
+    addTrack_.onClick = [this]
+    {
+        if (processor_.uiAddTrack() >= 0) refresh();
+    };
+    addAndMakeVisible (addTrack_);
     tracksTitle_.setText (juce::String::fromUTF8 (std::string (tr.tr ("mix.tracks")).c_str()), juce::dontSendNotification);
     busesTitle_.setText (juce::String::fromUTF8 (std::string (tr.tr ("mix.buses")).c_str()), juce::dontSendNotification);
     for (auto* l : { &tracksTitle_, &busesTitle_ })
@@ -586,23 +634,40 @@ juce::Colour MixerView::colour (Token t) const
 
 void MixerView::resized()
 {
+    layoutTracks();
+}
+
+// Pistes actives packées à gauche, le bouton « + Piste » juste après la dernière ; bus et master à leur place.
+void MixerView::layoutTracks()
+{
     auto r = getLocalBounds();
     auto masterArea = r.removeFromRight (kMasterW + 6);
     master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (kStripH * 2 + 40));
     const int gap = 1;
-    auto place = [&] (auto& strips, juce::Rectangle<int> area)
+    tracksTitle_.setBounds (r.removeFromTop (20));
     {
+        auto area = r.removeFromTop (kStripH);
         int x = area.getX();
-        for (auto& s : strips)
+        for (int t = 0; t < mixer::numTracks; ++t)
+        {
+            auto& s = *tracks_[static_cast<std::size_t> (t)];
+            if (! shownTracks_[static_cast<std::size_t> (t)]) continue;
+            s.setBounds (x, area.getY(), kStripW, kStripH);
+            x += kStripW + gap;
+        }
+        addTrack_.setVisible (processor_.activeTrackCount() < mixer::numTracks);
+        addTrack_.setBounds (x + 4, area.getY() + 4, kStripW + 20, 36);
+    }
+    busesTitle_.setBounds (r.removeFromTop (20));
+    {
+        auto area = r.removeFromTop (kStripH);
+        int x = area.getX();
+        for (auto& s : buses_)
         {
             s->setBounds (x, area.getY(), kStripW, kStripH);
             x += kStripW + gap;
         }
-    };
-    tracksTitle_.setBounds (r.removeFromTop (20));
-    place (tracks_, r.removeFromTop (kStripH));
-    busesTitle_.setBounds (r.removeFromTop (20));
-    place (buses_, r.removeFromTop (kStripH));
+    }
 }
 
 void MixerView::paint (juce::Graphics&) {}
@@ -610,9 +675,18 @@ void MixerView::paint (juce::Graphics&) {}
 void MixerView::refresh()
 {
     const int selected = processor_.selectedTrack();
-    for (int t = 0; t < mixer::numTracks; ++t) tracks_[static_cast<std::size_t> (t)]->refresh (t == selected);
+    bool layoutChanged = false;
+    for (int t = 0; t < mixer::numTracks; ++t)
+    {
+        const bool active = processor_.trackActive (t);
+        auto& s = *tracks_[static_cast<std::size_t> (t)];
+        if (active != shownTracks_[static_cast<std::size_t> (t)]) { shownTracks_[static_cast<std::size_t> (t)] = active; layoutChanged = true; }
+        s.setVisible (active);
+        if (active) s.refresh (t == selected);
+    }
     for (int b = 0; b < mixer::numBuses; ++b) buses_[static_cast<std::size_t> (b)]->refresh (false);
     master_->refresh();
+    if (layoutChanged) layoutTracks();
 }
 
 void MixerView::timerCallback()
@@ -626,6 +700,7 @@ void MixerView::timerCallback()
     }
     for (int t = 0; t < mixer::numTracks; ++t)
     {
+        if (! shownTracks_[static_cast<std::size_t> (t)]) continue;
         auto& s = *tracks_[static_cast<std::size_t> (t)];
         s.syncValues();
         s.updateMeter (processor_.trackMeter (t));
@@ -638,6 +713,40 @@ void MixerView::timerCallback()
     }
     master_->syncValues();
     master_->updateMeter (processor_.masterMeter());
+}
+
+// Changement de générateur : la configuration d'instrument est perdue (spec §1), donc une confirmation si la piste en a une.
+void MixerView::requestTypeChange (int track, TrackType type)
+{
+    if (processor_.trackType (track) == type) return;
+    auto apply = [safe = juce::Component::SafePointer<MixerView> (this), track, type]
+    {
+        if (safe == nullptr) return;
+        safe->processor_.uiSetTrackType (track, type);
+        safe->refresh();
+    };
+    if (! processor_.trackHasContent (track)) { apply(); return; }
+    auto text = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); };
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("mix.confirm_title"),
+                                                                                text ("mix.confirm_type"), text ("mix.continue"), text ("mix.cancel"), this),
+                                  [apply] (int result) { if (result == 1) apply(); }); // 1 : premier bouton
+}
+
+void MixerView::requestRemove (int track)
+{
+    if (processor_.activeTrackCount() <= 1) return; // le mixeur garde toujours une piste
+    auto apply = [safe = juce::Component::SafePointer<MixerView> (this), track]
+    {
+        if (safe == nullptr) return;
+        safe->processor_.uiRemoveTrack (track);
+        safe->refresh();
+    };
+    if (! processor_.trackHasContent (track)) { apply(); return; }
+    auto text = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); };
+    const auto message = juce::String::fromUTF8 (tr_.format ("mix.confirm_remove", { std::to_string (track + 1) }).c_str());
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("mix.confirm_title"),
+                                                                                message, text ("mix.continue"), text ("mix.cancel"), this),
+                                  [apply] (int result) { if (result == 1) apply(); });
 }
 
 // Solo exclusif (Maj+clic) : coupe les solos et les mutes des autres bandes du même domaine (pistes ou bus).

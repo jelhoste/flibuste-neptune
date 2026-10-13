@@ -9,6 +9,7 @@
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/SamplerParams.h"
+#include "neptune/core/Synth.h"
 #include "neptune/core/ProbePool.h"
 #include <nlohmann/json.hpp>
 
@@ -38,6 +39,7 @@ struct Scenario
     int heldNotes;       // notes tenues pendant la mesure (noteOn avant, aucune libération)
     int paramsPerBlock;  // setParameter appelés avant chaque bloc (automation de l'hôte)
     int filter = 0;      // filtres par voie : 0 aucun, 1 SVF passe-bas 24 dB (+ enveloppe), 2 Ladder 24 dB saturé, 3 deux filtres en série, 4 SVF 24 dB statique
+    int synth = 0;       // 0 : piste Sampler ; 1 : piste Synthé, dent de scie + SVF 24 dB statique ; 2 : idem avec enveloppe de filtre
 };
 
 struct Result
@@ -74,8 +76,19 @@ Result run (const Scenario& s)
             ids.push_back (probe::trackParam (t, off));
         }
 
+    if (s.synth > 0)
+    {
+        neptune::core::SynthDescription d;
+        d.maxVoices = neptune::core::SynthDescription::maxVoicesLimit;
+        d.filter.cutoffHz = 3000.0;
+        d.filter.envDepthOctaves = s.synth == 2 ? 2.0 : 0.0;
+        d.filter.env.attack.ms = 50.0;
+        engine.setTrackType (0, neptune::core::TrackType::Synth);
+        engine.publishSynth (0, std::make_shared<neptune::core::SynthPatch> (d));
+        engine.process (chans.data(), kChannels, s.blockSize); // adopte le patch
+    }
     // Charge représentative : un instrument stéréo float de 2 s joué en boucle, notes tenues réparties sur le clavier.
-    if (s.heldNotes > 0)
+    if (s.heldNotes > 0 && s.synth == 0)
     {
         auto sample = std::make_shared<neptune::core::SampleData>();
         sample->channels = 2;
@@ -197,6 +210,9 @@ int main (int argc, char** argv)
             scenarios.push_back ({ "ladder_64v", bs, 64, 64, 2 });
             scenarios.push_back ({ "2filt_64v", bs, 64, 64, 3 });
             scenarios.push_back ({ "2filt_256v", bs, 256, 64, 3 });
+            scenarios.push_back ({ "synth_16v", bs, 16, 64, 0, 1 });
+            scenarios.push_back ({ "synth_64v", bs, 64, 64, 0, 1 });
+            scenarios.push_back ({ "synth_64v_env", bs, 64, 64, 0, 2 });
         }
     }
 

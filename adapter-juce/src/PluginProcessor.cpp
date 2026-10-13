@@ -6,6 +6,7 @@
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/State.h"
+#include "neptune/core/Synth.h"
 #include <set>
 
 #ifndef NEPTUNE_PROBE_TRACKS
@@ -238,13 +239,156 @@ void NeptuneProcessor::selectTrack (int track)
 {
     track = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
     if (track == selectedTrack_.load()) return;
-    selectedTrack_.store (track);
     {
         const juce::ScopedLock lock (instrumentLock_);
+        if (! mixer_.tracks[static_cast<std::size_t> (track)].active) return; // une piste inactive n'est pas sélectionnable
         mixer_.selectedTrack = track;
     }
+    selectedTrack_.store (track);
     ++revision_;
     notifyStateChanged();
+}
+
+// ---- pistes : type, activité, patch du synthé
+neptune::core::TrackType NeptuneProcessor::trackType (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].type;
+}
+
+bool NeptuneProcessor::trackActive (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].active;
+}
+
+int NeptuneProcessor::activeTrackCount() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.activeCount();
+}
+
+bool NeptuneProcessor::trackHasContent (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    const auto& t = mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))];
+    return ! t.instrument.empty() || ! (t.synth == neptune::core::SynthDescription {});
+}
+
+neptune::core::SynthDescription NeptuneProcessor::synthDescription (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].synth;
+}
+
+void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    const int track = selectedTrack();
+    d = sanitised (std::move (d));
+    const auto previous = synthDescription (track);
+    if (previous == d) return;
+    undo_.perform (std::make_unique<SnapshotCommand<SynthDescription>> (
+        previous, d,
+        [this, track] (const SynthDescription& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.tracks[static_cast<std::size_t> (track)].synth = v; }
+            publishSynthPatch (track, v);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
+void NeptuneProcessor::resetTrackParameters (int track, bool includeMixer)
+{
+    using namespace neptune::core;
+    std::vector<ParamId> ids;
+    for (int k = 0; k < mixer::kSamplerKinds; ++k) ids.push_back (mixer::samplerParam (track, static_cast<mixer::SamplerKind> (k)));
+    if (includeMixer)
+    {
+        for (const auto off : { probe::kVolume, probe::kPan, probe::kMute, probe::kSolo }) ids.push_back (probe::trackParam (track, off));
+        for (int s = 0; s < mixer::numSends; ++s) ids.push_back (probe::trackParam (track, probe::kSendLevel + static_cast<ParamId> (s)));
+    }
+    for (const auto id : ids)
+    {
+        const auto index = params_.indexOf (id);
+        if (index == ParameterSet::npos) continue;
+        const auto& spec = params_.spec (index);
+        if (params_.get (id) == spec.defaultValue) continue;
+        uiResetToDefault (id);
+    }
+}
+
+void NeptuneProcessor::uiSetTrackType (int track, neptune::core::TrackType type)
+{
+    using namespace neptune::core;
+    track = juce::jlimit (0, mixer::numTracks - 1, track);
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        auto& t = mixer_.tracks[static_cast<std::size_t> (track)];
+        if (t.type == type) return;
+        t.type = type;
+        t.instrument = InstrumentDescription {};
+        t.synth = SynthDescription {};
+    }
+    engine_.setTrackType (track, type);
+    publishSynthPatch (track, SynthDescription {});
+    loader_->request (track, InstrumentDescription {}, false); // libère les samples de l'ancien instrument
+    resetTrackParameters (track, false);
+    undo_.clear(); // l'historique parlait de l'ancienne configuration de cette piste
+    ++revision_;
+    notifyStateChanged();
+}
+
+int NeptuneProcessor::uiAddTrack()
+{
+    using namespace neptune::core;
+    int index = -1;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        index = mixer_.firstInactive();
+        if (index < 0) return -1;
+        mixer_.resetTrack (index);
+        auto& t = mixer_.tracks[static_cast<std::size_t> (index)];
+        t.active = true;
+        t.type = TrackType::Synth;
+    }
+    resetTrackParameters (index, true);
+    engine_.setTrackSettings (index, trackSettings (index));
+    engine_.setTrackType (index, TrackType::Synth);
+    engine_.setTrackActive (index, true);
+    publishSynthPatch (index, SynthDescription {});
+    loader_->request (index, InstrumentDescription {}, false);
+    undo_.clear();
+    selectTrack (index);
+    ++revision_;
+    notifyStateChanged();
+    return index;
+}
+
+bool NeptuneProcessor::uiRemoveTrack (int track)
+{
+    using namespace neptune::core;
+    track = juce::jlimit (0, mixer::numTracks - 1, track);
+    int selected = 0;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        if (! mixer_.tracks[static_cast<std::size_t> (track)].active || mixer_.activeCount() <= 1) return false;
+        mixer_.resetTrack (track); // remet aussi la sélection sur une piste active si c'était celle-ci
+        selected = mixer_.selectedTrack;
+    }
+    engine_.setTrackActive (track, false);
+    engine_.setTrackType (track, TrackType::Sampler);
+    engine_.setTrackSettings (track, trackSettings (track));
+    publishSynthPatch (track, SynthDescription {});
+    loader_->request (track, InstrumentDescription {}, false);
+    resetTrackParameters (track, true);
+    undo_.clear();
+    selectedTrack_.store (selected);
+    ++revision_;
+    notifyStateChanged();
+    return true;
 }
 
 // ---- réglages du mixeur
@@ -272,10 +416,22 @@ neptune::core::mixer::MasterSettings NeptuneProcessor::masterSettings() const
     return mixer_.master;
 }
 
+void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthDescription& d)
+{
+    engine_.publishSynth (track, std::make_shared<const neptune::core::SynthPatch> (d));
+}
+
 void NeptuneProcessor::pushMixerSettingsToEngine()
 {
     const auto m = mixerState();
-    for (int t = 0; t < neptune::core::mixer::numTracks; ++t) engine_.setTrackSettings (t, m.tracks[static_cast<std::size_t> (t)].strip);
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+    {
+        const auto& ts = m.tracks[static_cast<std::size_t> (t)];
+        engine_.setTrackSettings (t, ts.strip);
+        engine_.setTrackType (t, ts.type);
+        engine_.setTrackActive (t, ts.active);
+        publishSynthPatch (t, ts.synth);
+    }
     for (int b = 0; b < neptune::core::mixer::numBuses; ++b) engine_.setBusSettings (b, m.buses[static_cast<std::size_t> (b)]);
     engine_.setMasterSettings (m.master);
 }
@@ -386,6 +542,7 @@ NeptuneProcessor::NeptuneProcessor()
     jassert (mixerOk);
     juce::ignoreUnused (ok, samplerOk, mixerOk);
     engine_.attachParameters (&params_);
+    mixer_ = neptune::core::MixerState::freshProject(); // projet neuf : une seule piste, un synthé
     pushMixerSettingsToEngine();
 
     for (std::size_t i = 0; i < params_.size(); ++i)

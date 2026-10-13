@@ -82,6 +82,47 @@ MixerState::MixerState()
 {
     for (int t = 0; t < mixer::numTracks; ++t)
         tracks[static_cast<std::size_t> (t)].strip.midiChannel = t == 0 ? 0 : t + 1;
+    tracks[0].active = true;
+}
+
+MixerState MixerState::freshProject()
+{
+    MixerState m;
+    m.tracks[0].type = TrackType::Synth;
+    return m;
+}
+
+int MixerState::activeCount() const noexcept
+{
+    int n = 0;
+    for (const auto& t : tracks) n += t.active ? 1 : 0;
+    return n;
+}
+
+int MixerState::firstInactive() const noexcept
+{
+    for (std::size_t t = 0; t < tracks.size(); ++t)
+        if (! tracks[t].active) return static_cast<int> (t);
+    return -1;
+}
+
+void MixerState::resetTrack (int track)
+{
+    if (track < 0 || track >= mixer::numTracks) return;
+    const MixerState defaults;
+    tracks[static_cast<std::size_t> (track)] = defaults.tracks[static_cast<std::size_t> (track)];
+    tracks[static_cast<std::size_t> (track)].active = false;
+    fixSelection();
+}
+
+void MixerState::fixSelection() noexcept
+{
+    selectedTrack = std::clamp (selectedTrack, 0, mixer::numTracks - 1);
+    if (tracks[static_cast<std::size_t> (selectedTrack)].active) return;
+    for (std::size_t t = 0; t < tracks.size(); ++t)
+        if (tracks[t].active) { selectedTrack = static_cast<int> (t); return; }
+    tracks[0].active = true; // jamais de mixeur sans piste
+    selectedTrack = 0;
 }
 
 std::string toJson (const MixerState& m)
@@ -96,8 +137,12 @@ std::string toJson (const MixerState& m)
         if (! (m.tracks[t] == defaults.tracks[t]))
         {
             o = stripToJson (m.tracks[t].strip);
+            o["active"] = m.tracks[t].active; // toujours écrit : sa valeur par défaut dépend de la piste (v5 : déduite du contenu)
+            if (m.tracks[t].type != TrackType::Sampler) o["type"] = toString (m.tracks[t].type);
             if (! m.tracks[t].instrument.empty() || ! (m.tracks[t].instrument == defaults.tracks[t].instrument))
                 o["instrument"] = json::parse (toJson (m.tracks[t].instrument));
+            if (! (m.tracks[t].synth == defaults.tracks[t].synth))
+                o["synth"] = json::parse (toJson (m.tracks[t].synth));
         }
         tracks.push_back (std::move (o));
     }
@@ -116,6 +161,7 @@ std::string toJson (const MixerState& m)
 MixerState mixerFromJson (std::string_view text)
 {
     MixerState m;
+    const MixerState defaults;
     const auto doc = json::parse (text.begin(), text.end(), nullptr, false);
     if (doc.is_discarded() || ! doc.is_object()) return m;
     m.selectedTrack = std::clamp (intOf (doc, "selected_track", 0), 0, mixer::numTracks - 1);
@@ -124,9 +170,21 @@ MixerState mixerFromJson (std::string_view text)
         {
             const auto& o = (*it)[t];
             if (! o.is_object()) continue;
-            m.tracks[t].strip = stripFromJson (o, m.tracks[t].strip, false, static_cast<int> (t));
+            auto& tr = m.tracks[t];
+            tr.strip = stripFromJson (o, tr.strip, false, static_cast<int> (t));
+            if (const auto it = o.find ("type"); it != o.end() && it->is_string()) trackTypeFromString (it->get<std::string>(), tr.type);
             if (const auto ins = o.find ("instrument"); ins != o.end() && ins->is_object())
-                m.tracks[t].instrument = instrumentFromJson (ins->dump());
+                tr.instrument = instrumentFromJson (ins->dump());
+            if (const auto sy = o.find ("synth"); sy != o.end() && sy->is_object())
+                tr.synth = synthFromJson (sy->dump());
+            // « active » absent (projets v5, antérieurs aux pistes actives) : la piste 1 et toute piste qui a du contenu
+            // (instrument, nom, routage...) sont actives, les autres sont masquées.
+            if (const auto it = o.find ("active"); it != o.end() && it->is_boolean()) tr.active = it->get<bool>();
+            else
+            {
+                const TrackState& def = defaults.tracks[t];
+                tr.active = t == 0 || ! tr.instrument.empty() || ! (tr.strip == def.strip) || tr.type != TrackType::Sampler;
+            }
         }
     if (const auto it = doc.find ("buses"); it != doc.end() && it->is_array())
         for (std::size_t b = 0; b < it->size() && b < m.buses.size(); ++b)
@@ -138,6 +196,7 @@ MixerState mixerFromJson (std::string_view text)
             m.master.panMode = mixer::PanMode::True;
         m.master = mixer::sanitised (m.master);
     }
+    m.fixSelection();
     return m;
 }
 } // namespace neptune::core

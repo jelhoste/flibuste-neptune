@@ -6,17 +6,20 @@
 #include <vector>
 
 #include "neptune/core/DiskStreamer.h"
+#include "neptune/core/HandoffSlot.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/InstrumentSlot.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 #include "neptune/core/SamplerVoices.h"
+#include "neptune/core/Synth.h"
+#include "neptune/core/SynthVoices.h"
 
 namespace neptune::core
 {
 // Frontière unique entre le cœur et les adaptateurs (JUCE/CLAP, tests, futur web).
-// Palier 1 : N pistes Sampler (chacune son instrument, ses voix, son canal MIDI), 16 bus, un Master ; sorties directes sur
+// Palier 1 : N pistes, Sampler ou Synthé (chacune son instrument ou son patch, ses voix, son canal MIDI), 16 bus, un Master ; sorties directes sur
 // jusqu'à 64 paires stéréo. Les voix d'une piste ne sont jamais celles d'une autre ; le thread disque et ses emplacements de
 // streaming sont, eux, partagés (pool).
 class Engine
@@ -50,7 +53,14 @@ public:
     // Démarre le thread disque (et ses tampons) la première fois qu'un instrument en streaming est publié.
     void publishInstrument (int track, std::shared_ptr<const Instrument> instrument);
     void publishInstrument (std::shared_ptr<const Instrument> instrument) { publishInstrument (0, std::move (instrument)); }
-    void collectGarbage() { for (auto& t : tracks_) t.slot.collect(); } // thread de message, régulièrement
+    void collectGarbage() { for (auto& t : tracks_) { t.slot.collect(); t.synthSlot.collect(); } } // thread de message, régulièrement
+
+    // Type de génération d'une piste (Sampler / Synthé) et patch du synthé : thread de message, pris en compte au bloc suivant.
+    // Un changement de type coupe net les voix de la piste.
+    void setTrackType (int track, TrackType type) noexcept;
+    void publishSynth (int track, std::shared_ptr<const SynthPatch> patch);
+    // Piste active : une piste inactive ne reçoit aucune note et ne produit rien (le mixeur ne l'affiche pas). Par défaut, toutes.
+    void setTrackActive (int track, bool active) noexcept;
 
     // Réglages non automatisables du mixeur (routage, canal MIDI, mode de pan...) : thread de message, pris en compte au bloc suivant.
     void setTrackSettings (int track, const mixer::StripSettings&) noexcept;
@@ -89,7 +99,11 @@ public:
     Meter masterMeter() const noexcept;
 
     int activeVoices() const noexcept;
-    int activeVoices (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].voices.activeVoices(); }
+    int activeVoices (int track) const noexcept
+    {
+        const auto& t = tracks_[static_cast<std::size_t> (track)];
+        return t.voices.activeVoices() + t.synth.activeVoices();
+    }
     double sampleRate() const noexcept { return sampleRate_; }
     // Sous-alimentations du streaming depuis le démarrage (une voix s'est éteinte faute de données du disque).
     std::uint32_t streamUnderruns() const noexcept { return streamer_.underruns(); }
@@ -119,6 +133,11 @@ private:
     {
         InstrumentSlot slot;
         SamplerVoices voices;
+        HandoffSlot<SynthPatch> synthSlot;
+        SynthVoices synth;
+        std::atomic<int> type { 0 };   // TrackType
+        std::atomic<int> active { 1 };
+        int appliedType = 0, appliedActive = 1; // thread audio : ce qui a déjà été pris en compte
         AtomicStrip config;
         ParamIndices idx;
         float lastGain = 1.0f;                      // gain de l'instrument (lissé)

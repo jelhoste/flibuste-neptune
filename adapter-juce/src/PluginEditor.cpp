@@ -194,6 +194,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     {
         processor_.uiPanic();
         matrix_->clearHeldKeys();
+        synthView_->releaseKeys();
     };
     addAndMakeVisible (panicButton_);
     addChildComponent (voicesButton_);
@@ -251,6 +252,22 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     mixerView_ = std::make_unique<MixerView> (processor_, palette_, tr_);
     mixerView_->onSelectTrack = [this] (int t) { processor_.selectTrack (t); };
     addChildComponent (*mixerView_);
+
+    synthView_ = std::make_unique<SynthView> (palette_, tr_);
+    synthView_->onChange = [this] (const neptune::core::SynthDescription& d) { processor_.uiEditSynth (d, "Synth", "synth"); };
+    synthView_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
+    synthView_->onGestureEnd = [this] { processor_.uiEndGesture(); };
+    synthView_->onNoteOn = [this] (int key, float velocity)
+    {
+        const int track = processor_.selectedTrack();
+        synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))] = track;
+        processor_.uiNoteOnTrack (track, key, velocity);
+    };
+    synthView_->onNoteOff = [this] (int key)
+    {
+        processor_.uiNoteOffTrack (synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))], key);
+    };
+    addChildComponent (*synthView_);
 
     for (int t = 0; t < neptune::core::mixer::numTracks; ++t) trackBox_.addItem (juce::String (t + 1), t + 1);
     trackBox_.onChange = [this]
@@ -895,42 +912,58 @@ void NeptuneEditor::rebuildLoadPanel()
 
 void NeptuneEditor::updateViewVisibility()
 {
-    // Trois vues : Mixeur, Mapping (tout l'instrument de la piste sélectionnée : matrice, liste, enveloppe, chargement, potards)
-    // et Sonde (diagnostic de l'hôte).
+    // Quatre vues : Mixeur, Mapping (tout l'instrument d'une piste Sampler : matrice, liste, enveloppe, chargement, potards),
+    // Synthé (le patch d'une piste Synthé, à la place du Mapping) et Sonde (diagnostic de l'hôte).
     const bool mapping = ! showProbe_ && ! showMixer_;
+    const bool synth = mapping && selectedIsSynth();
+    const bool sampler = mapping && ! synth;
+    synthShown_ = synth;
     mixerView_->setVisible (showMixer_);
+    synthView_->setVisible (synth);
     trackBox_.setVisible (! showProbe_);
-    loadButton_.setVisible (mapping);
-    modeButton_.setVisible (mapping);
-    statusLabel_.setVisible (mapping);
-    rootLabel_.setVisible (mapping);
-    rootSlider_.setVisible (mapping);
-    envelopeEditor_->setVisible (mapping && ! showVoices_);
-    voicesView_->setVisible (mapping && showVoices_);
-    voicesButton_.setVisible (mapping);
-    filtersButton_.setVisible (mapping);
-    importButton_.setVisible (mapping);
-    removeButton_.setVisible (mapping);
-    selectionLabel_.setVisible (mapping);
-    zoneTable_->setVisible (mapping && listVisible_);
-    listToggleButton_.setVisible (mapping);
-    triggerLabel_.setVisible (mapping);
-    triggerBox_.setVisible (mapping);
-    chokeLabel_.setVisible (mapping);
-    chokeBox_.setVisible (mapping);
-    chokeMoreButton_.setVisible (mapping);
-    matrix_->setVisible (mapping);
-    loadTitle_.setVisible (mapping);
-    rrToggle_.setVisible (mapping);
-    releaseToggle_.setVisible (mapping);
-    streamToggle_.setVisible (mapping);
-    preloadLabel_.setVisible (mapping);
-    preloadBox_.setVisible (mapping);
-    groupsViewport_.setVisible (mapping);
-    for (auto* k : knobs_) k->setVisible (mapping);
+    loadButton_.setVisible (sampler);
+    modeButton_.setVisible (sampler);
+    statusLabel_.setVisible (sampler);
+    rootLabel_.setVisible (sampler);
+    rootSlider_.setVisible (sampler);
+    envelopeEditor_->setVisible (sampler && ! showVoices_);
+    voicesView_->setVisible (sampler && showVoices_);
+    voicesButton_.setVisible (sampler);
+    filtersButton_.setVisible (sampler);
+    importButton_.setVisible (sampler);
+    removeButton_.setVisible (sampler);
+    selectionLabel_.setVisible (sampler);
+    zoneTable_->setVisible (sampler && listVisible_);
+    listToggleButton_.setVisible (sampler);
+    triggerLabel_.setVisible (sampler);
+    triggerBox_.setVisible (sampler);
+    chokeLabel_.setVisible (sampler);
+    chokeBox_.setVisible (sampler);
+    chokeMoreButton_.setVisible (sampler);
+    matrix_->setVisible (sampler);
+    loadTitle_.setVisible (sampler);
+    rrToggle_.setVisible (sampler);
+    releaseToggle_.setVisible (sampler);
+    streamToggle_.setVisible (sampler);
+    preloadLabel_.setVisible (sampler);
+    preloadBox_.setVisible (sampler);
+    groupsViewport_.setVisible (sampler);
+    // gain, accordage, coupure et résonance valent pour les deux types ; le second filtre n'existe que dans le Sampler
+    int k = 0;
+    for (auto* knob : knobs_)
+    {
+        const bool secondFilter = k >= static_cast<int> (neptune::core::mixer::kFilter2Cutoff);
+        knob->setVisible (mapping && ! (synth && secondFilter));
+        ++k;
+    }
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
     mappingButton_.setToggleState (mapping, juce::dontSendNotification);
     viewButton_.setToggleState (showProbe_, juce::dontSendNotification);
+}
+
+void NeptuneEditor::updateSynthView()
+{
+    if (synthView_->isVisible()) synthView_->setDescription (processor_.synthDescription());
 }
 
 void NeptuneEditor::setView (bool mixer, bool probe)
@@ -949,11 +982,14 @@ void NeptuneEditor::updateTrackBox()
     if (rev == trackBoxRevision_ && trackBox_.getSelectedId() == processor_.selectedTrack() + 1) return;
     trackBoxRevision_ = rev;
     updatingControls_ = true;
-    for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+    trackBox_.clear (juce::dontSendNotification);
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t) // seulement les pistes actives
     {
+        if (! processor_.trackActive (t)) continue;
         const auto s = processor_.trackSettings (t);
-        const auto label = juce::String (t + 1) + (s.name.empty() ? juce::String() : "  " + juce::String::fromUTF8 (s.name.c_str()));
-        trackBox_.changeItemText (t + 1, label);
+        const auto kind = processor_.trackType (t) == neptune::core::TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
+        const auto label = juce::String (t + 1) + "  " + text (kind) + (s.name.empty() ? juce::String() : "  " + juce::String::fromUTF8 (s.name.c_str()));
+        trackBox_.addItem (label, t + 1);
     }
     trackBox_.setSelectedId (processor_.selectedTrack() + 1, juce::dontSendNotification);
     updatingControls_ = false;
@@ -964,6 +1000,7 @@ void NeptuneEditor::rebindKnobs()
     const int track = processor_.selectedTrack();
     if (track == knobTrack_) return;
     knobTrack_ = track;
+    synthView_->releaseKeys(); // touches tenues à l'écran : relâchées sur la piste où elles ont démarré
     zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
     int k = 0;
     for (auto* knob : knobs_)
@@ -1016,6 +1053,8 @@ void NeptuneEditor::timerCallback()
         if (t == processor_.selectedTrack()) matrix_->notePlayed (k, v); // curseur de la matrice (piste sélectionnée)
     updateTrackBox();
     rebindKnobs();
+    if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())) { updateViewVisibility(); resized(); } // type de la piste changé
+    updateSynthView();
     updateRecoveryBanner();
     updateProfileControls();
     updateUndoButtons();
@@ -1057,6 +1096,7 @@ void NeptuneEditor::resized()
     panicButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
     trackBox_.setBounds (190, 32, 220, 36);
     mixerView_->setBounds (32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 80 - 150));
+    synthView_->setBounds (32, 80, getWidth() - 64, juce::jmax (300, getHeight() - 270 - 12 - 80));
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
@@ -1230,6 +1270,7 @@ void NeptuneEditor::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (13.0f));
         for (auto* k : knobs_)
         {
+            if (! k->isVisible()) continue;
             const auto b = k->getBounds();
             const auto cell = b.withX (b.getCentreX() - kKnobCell / 2).withWidth (kKnobCell);
             g.setColour (colour (Token::TextDim));

@@ -9,6 +9,7 @@
 #include "VoicesView.h"
 #include "FilterEditor.h"
 #include "MixerView.h"
+#include "SynthView.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -85,6 +86,12 @@ private:
     // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
     juce::TextButton mixerButton_, mappingButton_;
     std::unique_ptr<MixerView> mixerView_;
+    // Vue Synthé : remplace la vue Mapping quand la piste sélectionnée est un synthé.
+    std::unique_ptr<SynthView> synthView_;
+    bool synthShown_ = false;
+    std::array<int, 128> synthKeyTrack_ {}; // piste sur laquelle chaque touche du clavier à l'écran a démarré
+    bool selectedIsSynth() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Synth; }
+    void updateSynthView();
     juce::ComboBox trackBox_;   // piste sélectionnée
     int knobTrack_ = -1;        // piste sur laquelle les potards d'instrument sont branchés
     std::uint32_t trackBoxRevision_ = 0xFFFFFFFFu;

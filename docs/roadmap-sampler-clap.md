@@ -43,7 +43,7 @@ Ces briques doivent exister *avant* de coder la moindre fonctionnalité "métier
 - Table de samples : note de référence, étendue de notes, couches de vélocité.
 - Formats de samples via bibliothèque mature (ex. libsndfile) : WAV/AIFF/FLAC a minima.
 - RAM vs streaming disque : les deux modes (tout-RAM / hybride préchargement+stream), réglable par preset, préséance utilisateur.
-- **Module Synthé soustractif** (2e type de génération de piste) : 3 oscillateurs + sous-oscillateur + bruit, mixeur des sources, 2 filtres (série/parallèle configurable), unisson générique avec courbe de répartition, 2 enveloppes de filtre indépendantes + enveloppe de volume + enveloppe de pitch dédiée (même moteur AHDSHR généralisé). Voir `spec-modules.md` section 2.
+- **Module Synthé soustractif** (2e type de génération de piste) : 3 oscillateurs + sous-oscillateur + bruit, mixeur des sources, 2 filtres (série/parallèle configurable), unisson générique avec courbe de répartition, 2 enveloppes de filtre indépendantes + enveloppe de volume + enveloppe de pitch dédiée (même moteur AHDSHR généralisé). Voir `spec-modules.md` section 2. **Premier jet livré le 2026-10-13** (1 oscillateur, enveloppe de volume, 1 filtre avec son enveloppe, polyphonie ; voir `passage-de-relais.md`) : le reste de la liste reste à faire.
 
 **Livrable** : sampleur jouable, mono-piste à multi-piste simple, sans effets ni modulation avancée.
 

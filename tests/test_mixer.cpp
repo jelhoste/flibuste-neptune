@@ -320,6 +320,8 @@ TEST_CASE ("mixer state: defaults, JSON round trip, bounds")
 
     MixerState m;
     m.selectedTrack = 3;
+    m.tracks[2].active = true;
+    m.tracks[3].active = true;
     m.tracks[2].strip.name = "Piano";
     m.tracks[2].strip.color = 5;
     m.tracks[2].strip.midiChannel = 7;
@@ -348,7 +350,7 @@ TEST_CASE ("mixer state: defaults, JSON round trip, bounds")
     CHECK (mixerFromJson ("[1,2]") == MixerState {});
     const auto wild = mixerFromJson (R"({"selected_track": 99, "tracks": [{"midi_channel": 50, "routing": {"direct_out": 999}}],
                                          "buses": [{"routing": {"main_dest": 1}}], "master": {"output": 0}})");
-    CHECK (wild.selectedTrack == mixer::numTracks - 1);
+    CHECK (wild.selectedTrack == 0);               // la piste 16 n'est pas active : la sélection revient à la première active
     CHECK (wild.tracks[0].strip.midiChannel == 16);
     CHECK (wild.tracks[0].strip.routing.directOut == mixer::numOutputs);
     CHECK (wild.buses[0].routing.mainDest == 0);   // bus 1 -> bus 1 : un bus ne route que vers un bus supérieur
