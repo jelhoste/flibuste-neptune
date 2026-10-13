@@ -85,7 +85,9 @@ private:
 
     void threadMain();
 
-    std::array<Slot, kSlots> slots_;
+    // Sur le tas : les emplacements pèsent ~700 Ko (chemins) ; une instance locale (tests) ne doit pas déborder la pile (1 Mo sous Windows).
+    std::unique_ptr<Slot[]> slotStorage_ { new Slot[kSlots] };
+    Slot* const slots_ = slotStorage_.get();
     std::vector<float> storage_;
     std::thread thread_;
     std::atomic<bool> running_ { false };

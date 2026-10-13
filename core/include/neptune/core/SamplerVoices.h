@@ -3,6 +3,7 @@
 // one-shot / boucle, fondu de relâchement, vol de voix. Aucune allocation : tout est dimensionné à la construction.
 #include <array>
 #include <cstdint>
+#include <vector>
 
 #include "neptune/core/DiskStreamer.h"
 #include "neptune/core/Envelope.h"
@@ -134,7 +135,8 @@ private:
     Voice* allocate() noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
 
-    std::array<Voice, kMaxVoices + kFadeSlots> voices_ {};
+    // Sur le tas : 320 voix avec leurs états de filtre pèsent plusieurs centaines de Ko (pile de 1 Mo sous Windows).
+    std::vector<Voice> voices_ = std::vector<Voice> (kMaxVoices + kFadeSlots);
     const Instrument* instrument_ = nullptr;
     DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;
