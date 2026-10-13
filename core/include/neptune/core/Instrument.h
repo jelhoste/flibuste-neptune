@@ -171,6 +171,7 @@ struct Zone
     bool onRelease = false;
     TriggerCondition trigger = TriggerCondition::Always;
     int chokeCuts = 0, chokeCutBy = 0;
+    int sourceIndex = -1; // indice de la zone dans la description (écoute depuis la liste) ; -1 = construite à la main
 };
 
 struct Instrument

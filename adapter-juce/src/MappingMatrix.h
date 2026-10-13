@@ -29,6 +29,8 @@ public:
     std::function<void (neptune::core::InstrumentDescription, const char* name)> onEdit;
     std::function<void()> onGestureBegin, onGestureEnd;
     std::function<void()> onDeleteRequested;
+    std::function<void (int key, float velocity)> onNoteOn;  // clavier sous la matrice : bas de la touche = vélocité forte, haut = faible
+    std::function<void (int key)> onNoteOff;
     std::function<void (juce::Component& anchor)> onOpenVelocity; // réponse de vélocité / fondu entre couches
     std::function<void (juce::Component& anchor)> onOpenPolyphony; // limite et vol de voix, mono / legato
 
@@ -87,8 +89,13 @@ private:
     juce::Point<float> downPos_, bandEnd_;
     neptune::core::InstrumentDescription base_;     // description au début du geste
     std::vector<int> editZones_;                    // zones modifiées par le geste
+    bool keyboardDrag_ = false;
     bool duplicating_ = false, started_ = false, extendOnUp_ = false, toggleOnUp_ = false;
     int hoverPlace_ = -1;
+    int pressedKey_ = -1;     // touche du clavier enfoncée à la souris / au doigt
+    float pressedVelocity_ = 0.0f;
+    juce::Rectangle<float> keyboardArea() const;
+    bool playKeyboard (juce::Point<float>, bool starting);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MappingMatrix)
 };

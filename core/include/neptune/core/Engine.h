@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+#include <atomic>
 #include <cstdint>
 
 #include <memory>
@@ -36,6 +38,16 @@ public:
     void publishInstrument (std::shared_ptr<const Instrument> instrument);
     void collectGarbage() { slot_.collect(); } // thread de message, régulièrement
 
+    // Événements venus de l'interface (clavier de la matrice, bouton d'écoute des zones). Thread de message UNIQUEMENT (un seul
+    // producteur) ; le thread audio les applique au début du bloc suivant. Rend false si la file est pleine.
+    struct UiEvent
+    {
+        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop } type = Type::NoteOn;
+        int channel = 0, key = 0;      // NoteOn / NoteOff ; PreviewZone : `key` = indice de zone
+        float velocity = 0.0f;
+    };
+    bool postUiEvent (const UiEvent&) noexcept;
+
     int activeVoices() const noexcept { return voices_.activeVoices(); }
     double sampleRate() const noexcept { return sampleRate_; }
     // Sous-alimentations du streaming depuis le démarrage (une voix s'est éteinte faute de données du disque).
@@ -47,6 +59,10 @@ private:
     int maxBlockSize_ = 0;
     int activeNotes_ = 0;
     PerformanceProfile profile_ = PerformanceProfile::Live;
+
+    static constexpr std::size_t kUiQueueSize = 256; // puissance de 2
+    std::array<UiEvent, kUiQueueSize> uiQueue_ {};
+    std::atomic<std::size_t> uiHead_ { 0 }, uiTail_ { 0 }; // écrit par l'interface / par l'audio
 
     InstrumentSlot slot_;
     DiskStreamer streamer_;

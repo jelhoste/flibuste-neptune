@@ -13,12 +13,118 @@ ZoneTable::ZoneTable (const neptune::core::theme::Palette& palette, const neptun
     h.addColumn (name ("import.col_velocity"), 4, 70, 40, 140, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("import.col_rr"), 5, 34, 24, 80, juce::TableHeaderComponent::notSortable);
     h.addColumn ("Mode", 6, 64, 40, 120, juce::TableHeaderComponent::notSortable);
+    h.addColumn (name ("trig.label"), 7, 104, 80, 160, juce::TableHeaderComponent::notSortable);
+    h.addColumn (name ("choke.cuts_short"), 8, 62, 50, 100, juce::TableHeaderComponent::notSortable);
+    h.addColumn (name ("choke.cut_by_short"), 9, 74, 50, 120, juce::TableHeaderComponent::notSortable);
+    h.addColumn (juce::String::fromUTF8 ("\xe2\x96\xb6"), 10, 36, 30, 60, juce::TableHeaderComponent::notSortable);
     table_.setMultipleSelectionEnabled (true);
     table_.setRowHeight (24);
     table_.setColour (juce::ListBox::backgroundColourId, colour (Token::BgCard));
     table_.setColour (juce::ListBox::outlineColourId, colour (Token::Border));
     table_.setOutlineThickness (1);
     addAndMakeVisible (table_);
+}
+
+// Cellule à liste déroulante (déclenchement, groupes de choke) : modifie la ligne, ou toute la sélection si la ligne en fait partie.
+class ZoneTable::ComboCell : public juce::Component
+{
+public:
+    ComboCell (ZoneTable& owner, int column) : owner_ (owner), column_ (column)
+    {
+        if (column == 7)
+        {
+            auto name = [&owner] (const char* key) { return juce::String::fromUTF8 (std::string (owner.tr_.tr (key)).c_str()); };
+            box_.addItem (name ("trig.attack"), 1);
+            box_.addItem (name ("trig.release"), 2);
+            box_.addItem (name ("trig.first"), 3);
+            box_.addItem (name ("trig.legato"), 4);
+        }
+        else
+        {
+            box_.addItem (juce::String::fromUTF8 (std::string (owner.tr_.tr ("choke.none")).c_str()), 1);
+            for (int g = 1; g <= neptune::core::maxChokeGroup; ++g) box_.addItem (juce::String (g), g + 1);
+        }
+        box_.onChange = [this]
+        {
+            if (updating_ || box_.getSelectedId() < 1 || ! owner_.onCellEdited) return;
+            owner_.onCellEdited (row_, column_, column_ == 7 ? box_.getSelectedId() : box_.getSelectedId() - 1);
+        };
+        addAndMakeVisible (box_);
+    }
+    void resized() override { box_.setBounds (getLocalBounds().reduced (1)); }
+    void update (int row, const neptune::core::ZoneDescription& z)
+    {
+        row_ = row;
+        updating_ = true;
+        int id = 1;
+        if (column_ == 7)
+            id = z.onRelease ? 2 : z.trigger == neptune::core::TriggerCondition::First ? 3 : z.trigger == neptune::core::TriggerCondition::Legato ? 4 : 1;
+        else
+            id = (column_ == 8 ? z.chokeCuts : z.chokeCutBy) + 1;
+        box_.setSelectedId (id, juce::dontSendNotification);
+        updating_ = false;
+    }
+
+private:
+    ZoneTable& owner_;
+    int column_;
+    int row_ = 0;
+    bool updating_ = false;
+    juce::ComboBox box_;
+};
+
+// Petit bouton d'écoute : appui = joue la zone à sa note racine, relâchement = Note Off (une boucle se relâche) ; Maj+clic = stop.
+class ZoneTable::PlayCell : public juce::Component
+{
+public:
+    explicit PlayCell (ZoneTable& owner) : owner_ (owner) {}
+    void update (int row) { row_ = row; }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat().reduced (8.0f, 5.0f);
+        g.setColour (down_ ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent));
+        juce::Path p;
+        p.addTriangle (r.getX() + 2.0f, r.getY(), r.getX() + 2.0f, r.getBottom(), r.getRight(), r.getCentreY());
+        g.fillPath (p);
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        down_ = true;
+        shift_ = e.mods.isShiftDown();
+        if (owner_.onPlay) owner_.onPlay (row_, true, shift_);
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (down_ && ! shift_ && owner_.onPlay) owner_.onPlay (row_, false, false);
+        down_ = false;
+        repaint();
+    }
+
+private:
+    ZoneTable& owner_;
+    int row_ = 0;
+    bool down_ = false, shift_ = false;
+};
+
+juce::Component* ZoneTable::refreshComponentForCell (int row, int column, bool, juce::Component* existing)
+{
+    if (row < 0 || row >= static_cast<int> (zones_.size()) || column < 7)
+    {
+        delete existing;
+        return nullptr;
+    }
+    if (column == 10)
+    {
+        auto* cell = dynamic_cast<PlayCell*> (existing);
+        if (cell == nullptr) { delete existing; cell = new PlayCell (*this); }
+        cell->update (row);
+        return cell;
+    }
+    auto* cell = dynamic_cast<ComboCell*> (existing);
+    if (cell == nullptr) { delete existing; cell = new ComboCell (*this, column); }
+    cell->update (row, zones_[static_cast<std::size_t> (row)]);
+    return cell;
 }
 
 juce::Colour ZoneTable::colour (Token t) const

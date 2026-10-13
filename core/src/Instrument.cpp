@@ -561,6 +561,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         const auto frames = z.sample->frames;
         z.roundRobin = zd.roundRobin;
         z.onRelease = zd.onRelease;
+        z.sourceIndex = static_cast<int> (zi);
         z.trigger = zd.trigger;
         z.chokeCuts = zd.chokeCuts;
         z.chokeCutBy = zd.chokeCutBy;

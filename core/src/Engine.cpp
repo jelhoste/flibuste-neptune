@@ -44,12 +44,36 @@ void Engine::noteOff (int channel, int key) noexcept
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
 
+bool Engine::postUiEvent (const UiEvent& e) noexcept
+{
+    const auto head = uiHead_.load (std::memory_order_relaxed);
+    if (head - uiTail_.load (std::memory_order_acquire) >= kUiQueueSize) return false;
+    uiQueue_[head & (kUiQueueSize - 1)] = e;
+    uiHead_.store (head + 1, std::memory_order_release);
+    return true;
+}
+
 void Engine::process (float* const* out, int numChannels, int numFrames) noexcept
 {
     for (int c = 0; c < numChannels; ++c)
         if (out[c] != nullptr) std::fill (out[c], out[c] + numFrames, 0.0f);
 
     if (slot_.adoptPending()) voices_.setInstrument (slot_.current());
+
+    // événements de l'interface (après l'adoption : ils s'adressent à l'instrument courant)
+    for (auto tail = uiTail_.load (std::memory_order_relaxed); tail != uiHead_.load (std::memory_order_acquire); ++tail)
+    {
+        const UiEvent& e = uiQueue_[tail & (kUiQueueSize - 1)];
+        switch (e.type)
+        {
+            case UiEvent::Type::NoteOn: noteOn (e.channel, e.key, e.velocity); break;
+            case UiEvent::Type::NoteOff: noteOff (e.channel, e.key); break;
+            case UiEvent::Type::PreviewZone: voices_.previewZone (e.key); break;
+            case UiEvent::Type::PreviewRelease: voices_.releasePreview(); break;
+            case UiEvent::Type::PreviewStop: voices_.stopPreview(); break;
+        }
+        uiTail_.store (tail + 1, std::memory_order_release);
+    }
     if (numChannels < 1 || out[0] == nullptr) return;
 
     float gain = 1.0f;

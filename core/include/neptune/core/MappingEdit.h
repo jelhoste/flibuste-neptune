@@ -11,14 +11,20 @@
 
 namespace neptune::core::mapping
 {
-// Ce que la matrice affiche : les zones d'attaque sans Groupe, les relâchements, ou un Groupe nommé (attaque).
+// Ce que la matrice affiche : les zones d'une catégorie de déclenchement (attaque, « Premier », « Legato » ou relâchement)
+// d'un même Groupe nommé (ou sans Groupe). Chaque combinaison présente dans l'instrument est une vue.
 struct View
 {
-    enum class Kind { Main, Release, Group } kind = Kind::Main;
-    std::string group; // pour Kind::Group
+    enum class Category { Attack, First, Legato, Release } category = Category::Attack;
+    std::string group; // "" = zones sans Groupe
     bool accepts (const ZoneDescription&) const noexcept;
-    bool operator== (const View& o) const noexcept { return kind == o.kind && group == o.group; }
+    bool operator== (const View& o) const noexcept { return category == o.category && group == o.group; }
 };
+
+// Les vues qui ont au moins une zone, dans un ordre stable : l'attaque sans Groupe d'abord (toujours présente), puis par Groupe
+// et par catégorie.
+std::vector<View> views (const InstrumentDescription&);
+View viewOf (const ZoneDescription&) noexcept;
 
 struct Place
 {
@@ -32,10 +38,6 @@ struct Place
 
 // Places de la vue, triées par (note basse, vélocité basse). Les chevauchements sont marqués.
 std::vector<Place> places (const InstrumentDescription&, const View&);
-
-// Noms de Groupe présents (attaque), triés ; pour remplir le sélecteur de vue.
-std::vector<std::string> groupNames (const InstrumentDescription&);
-bool hasReleaseZones (const InstrumentDescription&);
 
 enum class Edge { KeyLow, KeyHigh, VelLow, VelHigh };
 

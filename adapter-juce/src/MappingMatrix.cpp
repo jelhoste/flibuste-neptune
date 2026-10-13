@@ -12,7 +12,7 @@ using neptune::core::theme::Token;
 namespace
 {
 constexpr int kToolbarH = 40;
-constexpr int kKeyboardH = 34;
+constexpr int kKeyboardH = 46;
 constexpr int kLeftMargin = 36;
 constexpr int kScrollH = 14;
 constexpr float kEdgeSlop = 12.0f;   // zone de saisie d'un bord : >= 24 px de large au total
@@ -85,23 +85,32 @@ void MappingMatrix::setSelection (const std::vector<int>& zones)
 
 void MappingMatrix::rebuildViewChoices()
 {
-    std::string signature = mapping::hasReleaseZones (description_) ? "r" : "-";
-    const auto groups = mapping::groupNames (description_);
-    for (const auto& g : groups) signature += "|" + g;
+    const auto all = mapping::views (description_);
+    std::string signature;
+    for (const auto& v : all) signature += std::to_string (static_cast<int> (v.category)) + ":" + v.group + "|";
     if (signature == viewSignature_) return;
     viewSignature_ = signature;
 
     viewChoices_.clear();
     viewBox_.clear (juce::dontSendNotification);
-    auto add = [this] (mapping::View v, const juce::String& label)
+    auto categoryLabel = [this] (mapping::View::Category c, bool grouped)
     {
-        viewChoices_.push_back (std::move (v));
-        viewBox_.addItem (label, static_cast<int> (viewChoices_.size()));
+        switch (c)
+        {
+            case mapping::View::Category::First: return text (grouped ? "trig.first" : "map.view_first");
+            case mapping::View::Category::Legato: return text (grouped ? "trig.legato" : "map.view_legato");
+            case mapping::View::Category::Release: return text (grouped ? "trig.release" : "map.view_release");
+            default: return text (grouped ? "trig.attack" : "map.view_main");
+        }
     };
-    add ({ mapping::View::Kind::Main, {} }, text ("map.view_main"));
-    if (mapping::hasReleaseZones (description_)) add ({ mapping::View::Kind::Release, {} }, text ("map.view_release"));
-    for (const auto& g : groups) add ({ mapping::View::Kind::Group, g }, u8 (tr_.format ("map.view_group", { g })));
-
+    for (const auto& v : all)
+    {
+        viewChoices_.push_back (v);
+        const juce::String label = v.group.empty()
+            ? categoryLabel (v.category, false)
+            : u8 (tr_.format ("map.view_group", { v.group })) + "  -  " + categoryLabel (v.category, true);
+        viewBox_.addItem (label, static_cast<int> (viewChoices_.size()));
+    }
     int select = 1;
     for (std::size_t i = 0; i < viewChoices_.size(); ++i)
         if (viewChoices_[i] == view_) select = static_cast<int> (i) + 1;
@@ -344,8 +353,15 @@ void MappingMatrix::paint (juce::Graphics& g)
     for (int k = juce::jmax (0, static_cast<int> (std::floor (keyStart_))); k <= juce::jmin (127, static_cast<int> (std::ceil (keyStart_ + keySpan_))); ++k)
     {
         const auto r = juce::Rectangle<float> (keyX (k), ky, keyX (k + 1) - keyX (k), kh);
-        g.setColour (isBlackKey (k) ? colour (Token::PanelBg) : colour (Token::Text).withAlpha (0.85f));
+        g.setColour (k == pressedKey_ ? colour (Token::Accent) : isBlackKey (k) ? colour (Token::PanelBg) : colour (Token::Text).withAlpha (0.85f));
         g.fillRect (r.reduced (0.5f));
+        if (k == pressedKey_) // vélocité jouée : repère à la hauteur du doigt
+        {
+            g.setColour (colour (Token::BgApp));
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawText (juce::String (static_cast<int> (std::lround (pressedVelocity_ * 127.0f))), r.toNearestInt().withWidth (juce::jmax (28, r.toNearestInt().getWidth())),
+                        juce::Justification::centredTop, false);
+        }
         if (k % 12 == 0 && r.getWidth() > 6.0f)
         {
             g.setColour (isBlackKey (k) ? colour (Token::Text) : colour (Token::BgApp));
@@ -420,9 +436,35 @@ void MappingMatrix::mouseMove (const juce::MouseEvent& e)
     if (hover != hoverPlace_) { hoverPlace_ = hover; repaint(); }
 }
 
+juce::Rectangle<float> MappingMatrix::keyboardArea() const
+{
+    const auto plot = plotArea();
+    return { plot.getX(), plot.getBottom() + 2.0f, plot.getWidth(), static_cast<float> (kKeyboardH) };
+}
+
+// Joue la touche sous le doigt : haut de la touche = vélocité faible, bas = forte (comme dans beaucoup de sampleurs).
+bool MappingMatrix::playKeyboard (juce::Point<float> p, bool starting)
+{
+    const auto kb = keyboardArea();
+    if (starting && ! kb.contains (p)) return false;
+    const int key = juce::jlimit (0, 127, static_cast<int> (std::floor (keyStart_ + (p.x - kb.getX()) / kb.getWidth() * keySpan_)));
+    const float t = juce::jlimit (0.0f, 1.0f, (p.y - kb.getY()) / kb.getHeight());
+    const float velocity = (1.0f + t * 126.0f) / 127.0f;
+    if (key != pressedKey_)
+    {
+        if (pressedKey_ >= 0 && onNoteOff) onNoteOff (pressedKey_);
+        pressedKey_ = key;
+        if (onNoteOn) onNoteOn (key, velocity);
+    }
+    pressedVelocity_ = velocity;
+    repaint();
+    return true;
+}
+
 void MappingMatrix::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    if (playKeyboard (e.position, true)) { op_ = Op::None; keyboardDrag_ = true; return; }
     if (! plotArea().expanded (kEdgeSlop).contains (e.position)) return;
     down_ = hitTest (e.position);
     downPos_ = e.position;
@@ -454,6 +496,7 @@ void MappingMatrix::mouseDown (const juce::MouseEvent& e)
 
 void MappingMatrix::mouseDrag (const juce::MouseEvent& e)
 {
+    if (keyboardDrag_) { playKeyboard (e.position, false); return; } // glissando : la note suit le doigt
     if (op_ == Op::None) return;
     if (op_ == Op::Band)
     {
@@ -509,6 +552,14 @@ void MappingMatrix::mouseDrag (const juce::MouseEvent& e)
 
 void MappingMatrix::mouseUp (const juce::MouseEvent& e)
 {
+    if (keyboardDrag_)
+    {
+        keyboardDrag_ = false;
+        if (pressedKey_ >= 0 && onNoteOff) onNoteOff (pressedKey_);
+        pressedKey_ = -1;
+        repaint();
+        return;
+    }
     const Op op = op_;
     const bool started = started_;
     op_ = Op::None;

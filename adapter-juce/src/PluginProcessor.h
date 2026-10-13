@@ -94,6 +94,12 @@ public:
     // uiBeginGesture/uiEndGesture entourent le geste). À utiliser pour toute modification venant de l'utilisateur.
     void uiEditInstrument (neptune::core::InstrumentDescription, std::string name, std::string mergeKey = {});
     void uiBeginGesture() { undo_.beginGesture(); }
+    // Jeu depuis l'interface (clavier de la matrice, bouton d'écoute) : thread de message ; appliqué au bloc audio suivant.
+    void uiNoteOn (int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity }); }
+    void uiNoteOff (int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f }); }
+    void uiPreviewZone (int zoneIndex) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewZone, 0, zoneIndex, 0.0f }); }
+    void uiPreviewRelease() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewRelease, 0, 0, 0.0f }); }
+    void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f }); }
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const;
     // Voix éteintes faute de données du disque (streaming) depuis le chargement du plugin.

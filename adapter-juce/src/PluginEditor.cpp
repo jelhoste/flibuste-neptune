@@ -92,6 +92,35 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addAndMakeVisible (groupsViewport_);
     zoneTable_ = std::make_unique<ZoneTable> (palette_, tr_);
     zoneTable_->onSelectionChanged = [this] { lastRevision_ = 0xFFFFFFFFu; updateSamplerControls(); };
+    zoneTable_->onCellEdited = [this] (int row, int column, int value)
+    {
+        // la ligne éditée fait partie d'une sélection multiple : la modification s'applique à toute la sélection
+        auto rows = zoneTable_->selectedRows();
+        if (std::find (rows.begin(), rows.end(), row) == rows.end()) rows = { row };
+        auto d = processor_.instrumentDescription();
+        for (const int r : rows)
+        {
+            if (r < 0 || r >= static_cast<int> (d.zones.size())) continue;
+            auto& z = d.zones[static_cast<std::size_t> (r)];
+            if (column == 7)
+            {
+                z.onRelease = value == 2;
+                z.trigger = value == 3 ? neptune::core::TriggerCondition::First
+                          : value == 4 ? neptune::core::TriggerCondition::Legato : neptune::core::TriggerCondition::Always;
+            }
+            else if (column == 8) z.chokeCuts = value;
+            else if (column == 9) z.chokeCutBy = value;
+        }
+        processor_.uiEditInstrument (std::move (d), "Edit zone", "zone");
+        lastRevision_ = 0xFFFFFFFFu;
+        updateSamplerControls();
+    };
+    zoneTable_->onPlay = [this] (int row, bool down, bool stop)
+    {
+        if (stop) processor_.uiPreviewStop();
+        else if (down) processor_.uiPreviewZone (row);
+        else processor_.uiPreviewRelease();
+    };
     addAndMakeVisible (*zoneTable_);
 
     modeButton_.onClick = [this]
@@ -131,6 +160,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     matrix_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
     matrix_->onGestureEnd = [this] { processor_.uiEndGesture(); };
     matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
+    matrix_->onNoteOn = [this] (int key, float velocity) { processor_.uiNoteOn (key, velocity); };
+    matrix_->onNoteOff = [this] (int key) { processor_.uiNoteOff (key); };
     matrix_->onOpenVelocity = [this] (juce::Component& anchor) { openVelocityPanel (anchor); };
     matrix_->onOpenPolyphony = [this] (juce::Component& anchor) { openPolyphonyPanel (anchor); };
     addChildComponent (*matrix_);

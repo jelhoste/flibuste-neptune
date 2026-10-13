@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 
+#include "neptune/core/Engine.h"
 #include "neptune/core/InstrumentEdit.h"
 #include "neptune/core/MappingEdit.h"
 #include "neptune/core/SamplerVoices.h"
@@ -171,7 +172,13 @@ TEST_CASE ("places and layer fades keep different trigger conditions apart")
     a.keyLow = b.keyLow = 60; a.keyHigh = b.keyHigh = 62;
     b.trigger = TriggerCondition::Legato;
     d.zones = { a, b };
-    CHECK (mapping::places (d, mapping::View {}).size() == 2); // pas des alternatives round-robin l'une de l'autre
+    // deux vues distinctes (Attaque / Legato) : jamais mélangées, donc jamais en « chevauchement » ni en round-robin
+    const auto vs = mapping::views (d);
+    REQUIRE (vs.size() == 2);
+    CHECK (vs[1].category == mapping::View::Category::Legato);
+    CHECK (mapping::places (d, vs[0]).size() == 1);
+    CHECK (mapping::places (d, vs[1]).size() == 1);
+    CHECK_FALSE (mapping::places (d, vs[0])[0].overlaps);
 
     const std::vector<LayerKey> keys = { { 0, 127, 1, 40, 0, false, 0 }, { 0, 127, 41, 127, 0, false, 1 } };
     for (const auto& f : computeLayerFades (keys, 20)) { CHECK_FALSE (f.hasIn); CHECK_FALSE (f.hasOut); }
@@ -212,4 +219,92 @@ TEST_CASE ("choke and trigger settings are saved, bounded, and undoable")
     CHECK (current == edited);
     um.undo();
     CHECK (current == d);
+}
+
+TEST_CASE ("legato transition zones play in mono (retrigger) mode: the held key is tracked, not the voices")
+{
+    Instrument inst;
+    inst.zones = { zoneAt (0.2f, 48, 84, 0, 0, 0, 0, TriggerCondition::Legato), zoneAt (0.5f, 48, 84) };
+    inst.polyphony = PolyphonyMode::Mono;
+    Rig r (std::move (inst));
+    r.v.noteOn (0, 60, 1.0f);
+    CHECK_THAT (r.settle(), WithinAbs (0.5, 1e-5));   // première note : zone normale
+    r.v.noteOn (0, 64, 1.0f);                         // 60 tenue : la transition (et plus rien d'autre, c'est du mono)
+    CHECK_THAT (r.settle(), WithinAbs (0.2, 1e-5));
+    r.v.noteOff (0, 64);                              // retour à 60 (toujours tenue)
+    r.v.noteOff (0, 60);
+    r.v.noteOn (0, 67, 1.0f);                         // plus rien de tenu : zone normale
+    CHECK_THAT (r.settle(), WithinAbs (0.5, 1e-5));
+}
+
+TEST_CASE ("a held key still counts when its sample has ended")
+{
+    Instrument inst;
+    Zone first = zoneAt (0.5f, 48, 84);
+    first.sample = constant (0.5f, 1000); // très court : fini presque tout de suite
+    first.loopEnd = 1000;
+    inst.zones = { zoneAt (0.2f, 48, 84, 0, 0, 0, 0, TriggerCondition::Legato), first };
+    Rig r (std::move (inst));
+    r.v.noteOn (0, 60, 1.0f);
+    r.settle (4096);                                  // l'échantillon est terminé, la touche est toujours enfoncée
+    CHECK (r.v.activeVoices() == 0);
+    r.v.noteOn (0, 64, 1.0f);
+    CHECK_THAT (r.settle (256), WithinAbs (0.2, 1e-5)); // transition liée : une touche est tenue
+}
+
+TEST_CASE ("zone preview plays that zone at its root note and can be released or stopped")
+{
+    Instrument inst;
+    Zone loop = zoneAt (0.4f, 60, 72);
+    loop.mode = PlayMode::Loop;
+    Zone shot = zoneAt (0.1f, 80, 90);
+    loop.sourceIndex = 0;
+    shot.sourceIndex = 1;
+    inst.zones = { loop, shot };
+    Rig r (std::move (inst));
+    r.v.previewZone (1);
+    CHECK (r.v.activeVoices() == 1);
+    CHECK_THAT (r.settle(), WithinAbs (0.1 * (1 + 0.0), 0.2)); // un seul son : celui de la zone 1 (vélocité du milieu de plage)
+    r.v.previewZone (0);                                      // remplace l'écoute précédente
+    r.settle (4096);
+    CHECK (r.v.activeVoices() == 1);
+    r.v.releasePreview();                                     // boucle : relâchement
+    r.settle (96000);
+    CHECK (r.v.activeVoices() == 0);
+    r.v.previewZone (1);
+    r.v.stopPreview();
+    r.settle (4096);
+    CHECK (r.v.activeVoices() == 0);
+    r.v.previewZone (99);                                     // indice invalide : ignoré
+    CHECK (r.v.activeVoices() == 0);
+}
+
+TEST_CASE ("interface events reach the engine through the queue, in order, and a full queue refuses")
+{
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    auto inst = std::make_shared<Instrument>();
+    inst->zones.push_back (zoneAt (0.5f, 0, 127));
+    inst->zones.back().sourceIndex = 0;
+    inst->finalize();
+    engine.publishInstrument (inst);
+
+    std::vector<float> l (256, 0.0f), r (256, 0.0f);
+    float* out[2] = { l.data(), r.data() };
+    engine.process (out, 2, 256); // adopte l'instrument
+    CHECK (engine.activeVoices() == 0);
+
+    CHECK (engine.postUiEvent ({ Engine::UiEvent::Type::NoteOn, 0, 60, 1.0f }));
+    engine.process (out, 2, 256);
+    CHECK (engine.activeVoices() == 1);
+    CHECK_THAT (l[200], WithinAbs (0.5, 1e-5));
+    CHECK (engine.postUiEvent ({ Engine::UiEvent::Type::PreviewZone, 0, 0, 0.0f }));
+    engine.process (out, 2, 256);
+    CHECK (engine.activeVoices() == 2);
+
+    int accepted = 0;
+    for (int i = 0; i < 1000; ++i) accepted += engine.postUiEvent ({ Engine::UiEvent::Type::NoteOff, 0, 60, 0.0f }) ? 1 : 0;
+    CHECK (accepted == 256); // la file est pleine : les suivants sont refusés sans rien casser
+    engine.process (out, 2, 256);
+    CHECK (engine.postUiEvent ({ Engine::UiEvent::Type::NoteOff, 0, 60, 0.0f })); // vidée : à nouveau acceptée
 }

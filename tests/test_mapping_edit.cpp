@@ -46,11 +46,14 @@ TEST_CASE ("places group round-robin alternates and respect the view")
     CHECK (main[0].zones == std::vector<int> { 0, 1 }); // a1 + a2 : une seule place
     CHECK_FALSE (main[0].overlaps);
 
-    CHECK (places (d, View { View::Kind::Release, {} }).size() == 1);
-    CHECK (places (d, View { View::Kind::Group, "pedal" }).size() == 1);
-    CHECK (places (d, View { View::Kind::Group, "absent" }).empty());
-    CHECK (groupNames (d) == std::vector<std::string> { "pedal" });
-    CHECK (hasReleaseZones (d));
+    CHECK (places (d, View { View::Category::Release, {} }).size() == 1);
+    CHECK (places (d, View { View::Category::Attack, "pedal" }).size() == 1);
+    CHECK (places (d, View { View::Category::Attack, "absent" }).empty());
+    const auto vs = views (d);
+    REQUIRE (vs.size() == 3); // attaque, relâchement, Groupe « pedal »
+    CHECK (vs[0] == View {});
+    CHECK (vs[1].category == View::Category::Release);
+    CHECK (vs[2].group == "pedal");
 }
 
 TEST_CASE ("overlaps are flagged, not prevented")

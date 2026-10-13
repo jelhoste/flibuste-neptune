@@ -68,7 +68,7 @@ void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
 void SamplerVoices::allSoundOff() noexcept
 {
     numHeld_ = 0;
-    keyDown_.fill (0);
+    numDown_ = 0;
     for (auto& v : voices_) discard (v);
 }
 
@@ -103,13 +103,57 @@ SamplerVoices::Voice* SamplerVoices::allocate() noexcept
     return best;
 }
 
+void SamplerVoices::markDown (int channel, int key) noexcept
+{
+    for (int i = 0; i < numDown_; ++i)
+        if (down_[static_cast<std::size_t> (i)].channel == channel && down_[static_cast<std::size_t> (i)].key == key)
+        {
+            down_[static_cast<std::size_t> (i)] = { channel, key, 0, {} }; // touche rejouée : ses Groupes repartent de zéro
+            return;
+        }
+    if (numDown_ >= kMaxDownKeys) // pile pleine (ne devrait pas arriver) : on oublie la plus ancienne
+    {
+        for (int i = 1; i < numDown_; ++i) down_[static_cast<std::size_t> (i - 1)] = down_[static_cast<std::size_t> (i)];
+        --numDown_;
+    }
+    down_[static_cast<std::size_t> (numDown_++)] = { channel, key, 0, {} };
+}
+
+void SamplerVoices::markUp (int channel, int key) noexcept
+{
+    int w = 0;
+    for (int i = 0; i < numDown_; ++i)
+        if (! (down_[static_cast<std::size_t> (i)].channel == channel && down_[static_cast<std::size_t> (i)].key == key))
+            down_[static_cast<std::size_t> (w++)] = down_[static_cast<std::size_t> (i)];
+    numDown_ = w;
+}
+
+void SamplerVoices::recordGroups (int channel, int key, const Instrument::Pick* picks, int n) noexcept
+{
+    for (int i = 0; i < numDown_; ++i)
+    {
+        auto& d = down_[static_cast<std::size_t> (i)];
+        if (d.channel != channel || d.key != key) continue;
+        for (int p = 0; p < n; ++p)
+        {
+            const int g = picks[p].zone->groupId;
+            bool known = false;
+            for (int k = 0; k < d.nGroups; ++k) known = known || d.groups[static_cast<std::size_t> (k)] == g;
+            if (! known && d.nGroups < static_cast<int> (d.groups.size())) d.groups[static_cast<std::size_t> (d.nGroups++)] = g;
+        }
+        return;
+    }
+}
+
+// Une AUTRE touche tenue a déclenché une zone de ce Groupe (qu'elle sonne encore ou non : c'est la touche qui compte).
 bool SamplerVoices::otherHeldInGroup (int groupId, int channel, int key) const noexcept
 {
-    for (const auto& v : voices_)
+    for (int i = 0; i < numDown_; ++i)
     {
-        if (! v.active || v.zone == nullptr || v.stolen || v.zone->groupId != groupId) continue;
-        if (v.channel == channel && v.key == key) continue; // la note qu'on est en train de jouer
-        if (keyDown_[static_cast<std::size_t> ((v.channel & 15) * 128 + (v.key & 127))] != 0) return true;
+        const auto& d = down_[static_cast<std::size_t> (i)];
+        if (d.channel == channel && d.key == key) continue;
+        for (int k = 0; k < d.nGroups; ++k)
+            if (d.groups[static_cast<std::size_t> (k)] == groupId) return true;
     }
     return false;
 }
@@ -144,6 +188,7 @@ void SamplerVoices::startNote (int channel, int key, float velocity) noexcept
     Instrument::Pick picks[Instrument::maxPicks];
     const auto held = heldQuery (channel, key);
     const int n = instrument_->selectLayers (key, velocity, /*release*/ false, picks, Instrument::maxPicks, &held);
+    recordGroups (channel, key, picks, n);
     for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone); // avant de démarrer : les nouvelles voix du même coup ne sont pas coupées
     for (int i = 0; i < n; ++i) startVoice (channel, key, velocity, *picks[i].zone, picks[i].gain);
 }
@@ -213,8 +258,8 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
     if (key >= 0 && key < 128)
     {
         heldVelocity_[static_cast<std::size_t> (key)] = shaped;
-        keyDown_[static_cast<std::size_t> ((channel & 15) * 128 + key)] = 1;
     }
+    markDown (channel, key);
 
     if (instrument_->polyphony != PolyphonyMode::Poly)
     {
@@ -304,7 +349,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
 
 void SamplerVoices::noteOff (int channel, int key) noexcept
 {
-    if (key >= 0 && key < 128) keyDown_[static_cast<std::size_t> ((channel & 15) * 128 + key)] = 0;
+    markUp (channel, key);
     if (instrument_ != nullptr && instrument_->polyphony != PolyphonyMode::Poly)
     {
         // Mono/legato : la touche relâchée sort de la pile ; s'il en reste une tenue et que c'était celle qui sonnait, on y revient.
@@ -479,5 +524,38 @@ void SamplerVoices::render (float* left, float* right, int numFrames, float gain
                 streamer_->release (static_cast<int> (&v - voices_.data()));
                 v.streaming = false;
             }
+}
+
+void SamplerVoices::previewZone (int sourceIndex) noexcept
+{
+    if (instrument_ == nullptr) return;
+    stopPreview(); // une écoute à la fois
+    for (const auto& z : instrument_->zones)
+    {
+        if (z.sourceIndex != sourceIndex || z.sample == nullptr) continue;
+        // vélocité : le milieu de la plage de la zone (on entend ce que la zone joue à sa vélocité « typique »)
+        const float velocity = static_cast<float> (z.velLow + z.velHigh) / 254.0f;
+        startVoice (kPreviewChannel, z.rootNote, std::clamp (velocity, 0.0f, 1.0f), z, 1.0f);
+        return;
+    }
+}
+
+void SamplerVoices::releasePreview() noexcept
+{
+    for (auto& v : voices_)
+    {
+        if (! v.active || v.releasing || v.stolen || v.channel != kPreviewChannel || v.zone == nullptr) continue;
+        if (v.zone->mode == PlayMode::Loop)
+        {
+            v.releasing = true;
+            v.env.noteOff (v.zone->env, sampleRate_);
+        }
+    }
+}
+
+void SamplerVoices::stopPreview() noexcept
+{
+    for (auto& v : voices_)
+        if (v.active && ! v.stolen && v.channel == kPreviewChannel) steal (v);
 }
 } // namespace neptune::core

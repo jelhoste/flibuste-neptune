@@ -28,6 +28,13 @@ public:
 
     void noteOn (int channel, int key, float velocity) noexcept;
     void noteOff (int channel, int key) noexcept;
+
+    // Écoute d'une zone (bouton de lecture de la liste) : démarre une voix de CETTE zone à sa note racine, sans passer par la
+    // sélection des couches ni le choke. Le canal est hors de la plage MIDI : aucune confusion avec les notes de l'hôte.
+    static constexpr int kPreviewChannel = 1000;
+    void previewZone (int sourceIndex) noexcept; // sourceIndex : indice de la zone dans la DESCRIPTION (Zone::sourceIndex)
+    void releasePreview() noexcept; // Note Off de l'écoute (les boucles se relâchent ; un one-shot va au bout)
+    void stopPreview() noexcept;    // coupe l'écoute en fondu
     void allSoundOff() noexcept;
 
     // Ajoute le rendu dans `left`/`right` (right peut être nul : mélange mono). Gain interpolé linéairement
@@ -90,8 +97,16 @@ private:
     static constexpr int kMaxHeldKeys = 16;
     std::array<HeldKey, kMaxHeldKeys> held_ {};      // touches tenues (modes mono/legato), la plus récente en dernier
     int numHeld_ = 0;
-    std::array<std::uint8_t, 16 * 128> keyDown_ {}; // touches physiquement tenues (canal x touche)
+    // Touches physiquement tenues, avec les Groupes des zones qu'elles ont déclenchées (conditions « Premier » / « Legato » :
+    // indépendantes des voix, qui peuvent être coupées par le mode mono ou avoir fini leur échantillon).
+    struct DownKey { int channel = 0, key = 0; int nGroups = 0; std::array<int, 4> groups {}; };
+    static constexpr int kMaxDownKeys = 64;
+    std::array<DownKey, kMaxDownKeys> down_ {};
+    int numDown_ = 0;
     struct QueryContext { const SamplerVoices* self; int channel, key; } queryContext_ {};
+    void markDown (int channel, int key) noexcept;
+    void markUp (int channel, int key) noexcept;
+    void recordGroups (int channel, int key, const Instrument::Pick* picks, int n) noexcept;
     std::uint64_t counter_ = 0;
     std::array<float, 128> heldVelocity_ {}; // vélocité du dernier Note On par touche (zones déclenchées au relâchement)
 };

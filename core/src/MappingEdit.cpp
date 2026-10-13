@@ -8,14 +8,37 @@
 
 namespace neptune::core::mapping
 {
-bool View::accepts (const ZoneDescription& z) const noexcept
+View viewOf (const ZoneDescription& z) noexcept
 {
-    switch (kind)
+    View v;
+    v.group = z.group;
+    if (z.onRelease) v.category = View::Category::Release;
+    else if (z.trigger == TriggerCondition::First) v.category = View::Category::First;
+    else if (z.trigger == TriggerCondition::Legato) v.category = View::Category::Legato;
+    return v;
+}
+
+bool View::accepts (const ZoneDescription& z) const noexcept { return viewOf (z) == *this; }
+
+std::vector<View> views (const InstrumentDescription& d)
+{
+    std::set<std::pair<std::string, int>> present;
+    present.insert ({ std::string(), static_cast<int> (View::Category::Attack) });
+    for (const auto& z : d.zones)
     {
-        case Kind::Release: return z.onRelease;
-        case Kind::Group: return ! z.onRelease && z.group == group;
-        default: return ! z.onRelease && z.group.empty();
+        const auto v = viewOf (z);
+        present.insert ({ v.group, static_cast<int> (v.category) });
     }
+    // sans Groupe d'abord (ordre : attaque, premier, legato, relâchement), puis chaque Groupe
+    std::vector<View> out;
+    for (const auto& p : present)
+    {
+        View v;
+        v.group = p.first;
+        v.category = static_cast<View::Category> (p.second);
+        out.push_back (v);
+    }
+    return out;
 }
 
 std::vector<Place> places (const InstrumentDescription& d, const View& view)
@@ -50,19 +73,6 @@ std::vector<Place> places (const InstrumentDescription& d, const View& view)
             if (out[j].velLow <= out[i].velHigh && out[i].velLow <= out[j].velHigh)
                 out[i].overlaps = out[j].overlaps = true;
     return out;
-}
-
-std::vector<std::string> groupNames (const InstrumentDescription& d)
-{
-    std::set<std::string> names;
-    for (const auto& z : d.zones)
-        if (! z.onRelease && ! z.group.empty()) names.insert (z.group);
-    return { names.begin(), names.end() };
-}
-
-bool hasReleaseZones (const InstrumentDescription& d)
-{
-    return std::any_of (d.zones.begin(), d.zones.end(), [] (const ZoneDescription& z) { return z.onRelease; });
 }
 
 namespace
