@@ -30,6 +30,7 @@ target_sources(Neptune PRIVATE
   src/MappingMatrix.cpp
   src/VelocityPanel.cpp
   src/PolyphonyPanel.cpp
+  src/ChokePanel.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

@@ -25,6 +25,7 @@ struct Place
     int keyLow = 0, keyHigh = 127, velLow = 1, velHigh = 127;
     std::string group;
     bool onRelease = false;
+    TriggerCondition trigger = TriggerCondition::Always;
     std::vector<int> zones;   // indices dans la description, ordre croissant
     bool overlaps = false;    // recouvre une autre place de la même vue (permis, signalé)
 };

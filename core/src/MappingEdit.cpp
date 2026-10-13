@@ -20,20 +20,20 @@ bool View::accepts (const ZoneDescription& z) const noexcept
 
 std::vector<Place> places (const InstrumentDescription& d, const View& view)
 {
-    using Key = std::tuple<int, int, int, int, std::string, bool>;
+    using Key = std::tuple<int, int, int, int, std::string, bool, int>;
     std::map<Key, std::size_t> index;
     std::vector<Place> out;
     for (std::size_t i = 0; i < d.zones.size(); ++i)
     {
         const auto& z = d.zones[i];
         if (! view.accepts (z)) continue;
-        const Key k { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.group, z.onRelease };
+        const Key k { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.group, z.onRelease, static_cast<int> (z.trigger) };
         auto it = index.find (k);
         if (it == index.end())
         {
             Place p;
             p.keyLow = z.keyLow; p.keyHigh = z.keyHigh; p.velLow = z.velLow; p.velHigh = z.velHigh;
-            p.group = z.group; p.onRelease = z.onRelease;
+            p.group = z.group; p.onRelease = z.onRelease; p.trigger = z.trigger;
             it = index.emplace (k, out.size()).first;
             out.push_back (std::move (p));
         }

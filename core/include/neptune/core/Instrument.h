@@ -35,6 +35,16 @@ enum class RoundRobinMode { Sequential, Random, RandomNoRepeat };
 const char* toString (RoundRobinMode m) noexcept; // "sequential" / "random" / "random_no_repeat"
 bool roundRobinModeFromString (std::string_view s, RoundRobinMode& out);
 
+// Condition de déclenchement d'une zone d'attaque (spec §zone « type de déclenchement » ; le relâchement est `onRelease`) :
+//  Always : à chaque Note On ; First : seulement si aucune autre note du Groupe n'est tenue ; Legato : seulement si une
+//  autre note du Groupe est déjà tenue (transitions liées). Le « Groupe » est celui de la zone (vide = toutes les zones sans Groupe).
+enum class TriggerCondition { Always, First, Legato };
+const char* toString (TriggerCondition) noexcept;
+
+// Groupes de choke : une zone qui se déclenche coupe les voix des zones dont `chokeCutBy` égale son `chokeCuts` (0 = aucun).
+// Un seul numéro N sur les deux champs = groupe symétrique (les zones du groupe se coupent entre elles).
+constexpr int maxChokeGroup = 32;
+
 struct ZoneDescription
 {
     std::string samplePath;        // chemin absolu (la résolution relative/recherche par nom viendra avec les presets, spec §20)
@@ -48,6 +58,9 @@ struct ZoneDescription
     int roundRobin = 0;            // indice dans le jeu round-robin (0 = non précisé)
     std::string group;             // nom de Groupe (micro, articulation...) ; vide = aucun
     bool onRelease = false;        // déclenchée au Note Off (bruits de mécanique, fins de note), pas au Note On
+    TriggerCondition trigger = TriggerCondition::Always; // condition d'une zone d'attaque (ignorée si onRelease)
+    int chokeCuts = 0;             // groupe de choke que le déclenchement de cette zone coupe (0 = aucun)
+    int chokeCutBy = 0;            // groupe de choke par lequel cette zone peut être coupée (0 = aucun)
     // Points de boucle en échantillons ; loopEnd < 0 = jusqu'à la fin du fichier.
     std::int64_t loopStart = 0, loopEnd = -1;
 
@@ -55,7 +68,8 @@ struct ZoneDescription
     {
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
             && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && tuneCents == o.tuneCents && gainDb == o.gainDb
-            && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease;
+            && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
+            && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy;
     }
 };
 
@@ -99,6 +113,7 @@ struct InstrumentDescription
     SameKeyMode sameKey = SameKeyMode::Stack;
     int cutFadeMs = 3;                               // fondu d'une voix volée / coupée (1..maxCutFadeMs)
     int glideMs = 0;                                 // glissando du legato (0..maxGlideMs)
+    bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
     static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
 
     // Copie tout sauf les zones (réglages de chargement, de streaming et de réponse de vélocité).
@@ -108,7 +123,7 @@ struct InstrumentDescription
         unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
-        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs;
+        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept
@@ -118,7 +133,7 @@ struct InstrumentDescription
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
-            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs;
+            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone;
     }
     bool empty() const noexcept { return zones.empty(); }
 };
@@ -154,6 +169,8 @@ struct Zone
     int roundRobin = 0;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;
+    TriggerCondition trigger = TriggerCondition::Always;
+    int chokeCuts = 0, chokeCutBy = 0;
 };
 
 struct Instrument
@@ -182,6 +199,7 @@ struct Instrument
     SameKeyMode sameKey = SameKeyMode::Stack;
     int cutFadeMs = 3;
     int glideMs = 0;
+    bool chokeSameZone = false;
 
     // Vélocité (0..1) après la courbe de l'instrument.
     float shapeVelocity (float velocity) const noexcept { return velocityLinear ? velocity : lookup (velocityLut, velocity); }
@@ -192,7 +210,12 @@ struct Instrument
     // Les couches de la FAMILLE de la première zone qui couvre la note et la vélocité jouent ensemble, avec leur fondu.
     // `velocity` (0..1) est la vélocité déjà passée par shapeVelocity. Rend le nombre de zones écrites dans `out`.
     // Thread audio uniquement (les compteurs round-robin sont modifiés).
-    int selectLayers (int key, float velocity, bool release, Pick* out, int maxOut) const noexcept;
+    // `held` (facultatif) répond aux conditions « Premier » / « Legato » : une autre note du Groupe est-elle tenue ? Sans lui,
+    // « Premier » est toujours vrai et « Legato » toujours faux. Parmi les zones qui couvrent la note, la première dont la
+    // condition est satisfaite fixe la famille.
+    struct HeldQuery { bool (*otherHeld) (const void* context, int groupId) noexcept = nullptr; const void* context = nullptr; };
+    int selectLayers (int key, float velocity, bool release, Pick* out, int maxOut, const HeldQuery* held = nullptr) const noexcept;
+    int placeOf (int zoneIndex) const noexcept { return zoneIndex >= 0 && static_cast<std::size_t> (zoneIndex) < zoneSet_.size() ? zoneSet_[static_cast<std::size_t> (zoneIndex)] : -1; }
 
     // À appeler une fois les zones remplies (construit les jeux round-robin, les fondus, l'index par note).
     void finalize();

@@ -46,6 +46,11 @@ const char* toString (VoiceStealMode m) noexcept
 }
 const char* toString (SameKeyMode m) noexcept { return m == SameKeyMode::Cut ? "cut" : "stack"; }
 
+const char* toString (TriggerCondition t) noexcept
+{
+    switch (t) { case TriggerCondition::First: return "first"; case TriggerCondition::Legato: return "legato"; default: return "always"; }
+}
+
 const char* toString (PlayMode m) noexcept { return m == PlayMode::Loop ? "loop" : "one_shot"; }
 
 bool playModeFromString (std::string_view s, PlayMode& out)
@@ -69,6 +74,9 @@ ZoneDescription sanitised (ZoneDescription z)
     z.gainDb = std::isfinite (z.gainDb) ? std::clamp (z.gainDb, -60.0, 60.0) : 0.0;
     z.roundRobin = std::clamp (z.roundRobin, 0, 100000);
     if (z.group.size() > 128) z.group.resize (128);
+    z.chokeCuts = std::clamp (z.chokeCuts, 0, maxChokeGroup);
+    z.chokeCutBy = std::clamp (z.chokeCutBy, 0, maxChokeGroup);
+    if (z.onRelease) z.trigger = TriggerCondition::Always; // la condition ne concerne que les zones d'attaque
     if (z.loopStart < 0) z.loopStart = 0;
     if (z.loopEnd >= 0 && z.loopEnd <= z.loopStart) z.loopEnd = -1; // incohérent : tout le fichier
     return z;
@@ -155,6 +163,9 @@ std::string toJson (const InstrumentDescription& d)
         if (z.roundRobin != 0) o["round_robin"] = z.roundRobin;
         if (! z.group.empty()) o["group"] = z.group;
         if (z.onRelease) o["on_release"] = true;
+        if (z.trigger != TriggerCondition::Always) o["trigger"] = toString (z.trigger);
+        if (z.chokeCuts != 0) o["choke_cuts"] = z.chokeCuts;
+        if (z.chokeCutBy != 0) o["choke_cut_by"] = z.chokeCutBy;
         zones.push_back (std::move (o));
     }
     nlohmann::json doc;
@@ -166,6 +177,7 @@ std::string toJson (const InstrumentDescription& d)
     if (d.maxVoices != InstrumentDescription::defaultMaxVoices) doc["max_voices"] = d.maxVoices;
     if (d.stealMode != VoiceStealMode::Oldest) doc["voice_steal"] = toString (d.stealMode);
     if (d.sameKey != SameKeyMode::Stack) doc["same_key"] = toString (d.sameKey);
+    if (d.chokeSameZone) doc["choke_same_zone"] = true;
     if (d.cutFadeMs != 3) doc["cut_fade_ms"] = d.cutFadeMs;
     if (d.glideMs != 0) doc["glide_ms"] = d.glideMs;
     if (d.velocityFadeWidth != 0) doc["velocity_fade_width"] = d.velocityFadeWidth;
@@ -221,6 +233,13 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.roundRobin = readInt (o, "round_robin", 0);
     if (const auto it = o.find ("group"); it != o.end() && it->is_string()) z.group = it->get<std::string>();
     if (const auto it = o.find ("on_release"); it != o.end() && it->is_boolean()) z.onRelease = it->get<bool>();
+    if (const auto it = o.find ("trigger"); it != o.end() && it->is_string())
+    {
+        if (it->get<std::string>() == "first") z.trigger = TriggerCondition::First;
+        else if (it->get<std::string>() == "legato") z.trigger = TriggerCondition::Legato;
+    }
+    z.chokeCuts = readInt (o, "choke_cuts", 0);
+    z.chokeCutBy = readInt (o, "choke_cut_by", 0);
     return sanitised (std::move (z));
 }
 } // namespace
@@ -246,6 +265,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     else if (v == "keep_low") d.stealMode = VoiceStealMode::KeepLow;
     else if (v == "keep_high") d.stealMode = VoiceStealMode::KeepHigh;
     if (readString ("same_key") == "cut") d.sameKey = SameKeyMode::Cut;
+    if (const auto m = doc.find ("choke_same_zone"); m != doc.end() && m->is_boolean()) d.chokeSameZone = m->get<bool>();
     d.cutFadeMs = std::clamp (readInt (doc, "cut_fade_ms", 3), 1, InstrumentDescription::maxCutFadeMs);
     d.glideMs = std::clamp (readInt (doc, "glide_ms", 0), 0, InstrumentDescription::maxGlideMs);
     d.velocityFadeWidth = std::clamp (readInt (doc, "velocity_fade_width", 0), 0, InstrumentDescription::maxVelocityFadeWidth);
@@ -292,21 +312,22 @@ void Instrument::finalize()
     familySets_.clear();
     for (auto& k : keyZones_) k.clear();
 
-    using PlaceKey = std::tuple<int, int, int, int, int, bool>;
-    using FamilyKey = std::tuple<int, int, int, bool>;
+    using PlaceKey = std::tuple<int, int, int, int, int, bool, int>;
+    using FamilyKey = std::tuple<int, int, int, bool, int>;
     std::map<PlaceKey, int> setIndex;
     std::map<FamilyKey, int> familyIndex;
     std::vector<LayerKey> keys (zones.size());
     for (std::size_t i = 0; i < zones.size(); ++i)
     {
         const Zone& z = zones[i];
-        keys[i] = { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease };
-        auto it = setIndex.find ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease });
+        keys[i] = { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, static_cast<int> (z.trigger) };
+        const int trig = static_cast<int> (z.trigger);
+        auto it = setIndex.find ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, trig });
         if (it == setIndex.end())
         {
-            it = setIndex.emplace (PlaceKey { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease }, static_cast<int> (rrSets_.size())).first;
+            it = setIndex.emplace (PlaceKey { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, trig }, static_cast<int> (rrSets_.size())).first;
             rrSets_.push_back ({});
-            const FamilyKey fk { z.keyLow, z.keyHigh, z.groupId, z.onRelease };
+            const FamilyKey fk { z.keyLow, z.keyHigh, z.groupId, z.onRelease, trig };
             auto fit = familyIndex.find (fk);
             if (fit == familyIndex.end())
             {
@@ -317,7 +338,7 @@ void Instrument::finalize()
         }
         rrSets_[static_cast<std::size_t> (it->second)].members.push_back (static_cast<int> (i));
         zoneSet_[i] = it->second;
-        zoneFamily_[i] = familyIndex[FamilyKey { z.keyLow, z.keyHigh, z.groupId, z.onRelease }];
+        zoneFamily_[i] = familyIndex[FamilyKey { z.keyLow, z.keyHigh, z.groupId, z.onRelease, trig }];
         for (int k = std::max (0, z.keyLow); k <= std::min (127, z.keyHigh); ++k) keyZones_[static_cast<std::size_t> (k)].push_back (static_cast<int> (i));
     }
     for (auto& set : rrSets_) // ordre des indices round-robin, puis ordre de déclaration
@@ -361,7 +382,7 @@ const Zone* Instrument::select (int key, float velocity, bool release) const noe
     return nullptr;
 }
 
-int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, int maxOut) const noexcept
+int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, int maxOut, const HeldQuery* held) const noexcept
 {
     if (out == nullptr || maxOut <= 0 || key < 0 || key > 127) return 0;
     const float vCont = std::clamp (velocity * 127.0f, 1.0f, 127.0f);
@@ -379,6 +400,12 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
     {
         const Zone& z = zones[static_cast<std::size_t> (zi)];
         if (! z.sample || z.onRelease != release || vInt < z.velLow || vInt > z.velHigh) continue;
+        if (! release && z.trigger != TriggerCondition::Always)
+        {
+            const bool other = held != nullptr && held->otherHeld != nullptr && held->otherHeld (held->context, z.groupId);
+            if (z.trigger == TriggerCondition::First && other) continue;   // une autre note du Groupe est tenue
+            if (z.trigger == TriggerCondition::Legato && ! other) continue; // pas de note tenue : pas de transition liée
+        }
         family = zoneFamily_[static_cast<std::size_t> (zi)];
         break;
     }
@@ -409,9 +436,9 @@ std::vector<bool> loadedZones (const InstrumentDescription& d)
     }
     if (d.mainRoundRobinOnly)
     {
-        using Place = std::tuple<std::string, bool, int, int, int, int>;
+        using Place = std::tuple<std::string, bool, int, int, int, int, int>;
         std::map<Place, int> best;
-        auto place = [] (const ZoneDescription& z) { return Place { z.group, z.onRelease, z.keyLow, z.keyHigh, z.velLow, z.velHigh }; };
+        auto place = [] (const ZoneDescription& z) { return Place { z.group, z.onRelease, z.keyLow, z.keyHigh, z.velLow, z.velHigh, static_cast<int> (z.trigger) }; };
         for (std::size_t i = 0; i < d.zones.size(); ++i)
             if (mask[i])
             {
@@ -464,6 +491,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     inst->sameKey = description.sameKey;
     inst->cutFadeMs = std::clamp (description.cutFadeMs, 1, InstrumentDescription::maxCutFadeMs);
     inst->glideMs = std::clamp (description.glideMs, 0, InstrumentDescription::maxGlideMs);
+    inst->chokeSameZone = description.chokeSameZone;
     std::map<std::string, int> groupIds;
     SampleCache localCache;
     SampleCache& cache = externalCache != nullptr ? *externalCache : localCache;
@@ -533,6 +561,9 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         const auto frames = z.sample->frames;
         z.roundRobin = zd.roundRobin;
         z.onRelease = zd.onRelease;
+        z.trigger = zd.trigger;
+        z.chokeCuts = zd.chokeCuts;
+        z.chokeCutBy = zd.chokeCutBy;
         if (! zd.group.empty())
             z.groupId = groupIds.emplace (zd.group, static_cast<int> (groupIds.size()) + 1).first->second;
         z.loopStart = std::min<std::int64_t> (zd.loopStart, frames - 1);

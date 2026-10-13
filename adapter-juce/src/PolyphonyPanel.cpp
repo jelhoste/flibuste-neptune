@@ -78,6 +78,18 @@ PolyphonyPanel::PolyphonyPanel (const theme::Palette& palette, const i18n::Trans
         addAndMakeVisible (*sl);
     }
 
+    chokeSame_.setButtonText (text ("poly.choke_same"));
+    chokeSame_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+    chokeSame_.onClick = [this]
+    {
+        if (updating_) return;
+        if (onGestureBegin) onGestureBegin();
+        s_.chokeSameZone = chokeSame_.getToggleState();
+        changed();
+        if (onGestureEnd) onGestureEnd();
+    };
+    addAndMakeVisible (chokeSame_);
+
     hint_.setText (text ("poly.hint"), juce::dontSendNotification);
     hint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     hint_.setFont (juce::FontOptions (12.0f));
@@ -85,7 +97,7 @@ PolyphonyPanel::PolyphonyPanel (const theme::Palette& palette, const i18n::Trans
 
     setWantsKeyboardFocus (true);
     refreshControls();
-    setSize (500, 330);
+    setSize (500, 372);
 }
 
 juce::Colour PolyphonyPanel::colour (Token t) const
@@ -105,6 +117,7 @@ void PolyphonyPanel::refreshControls()
     limit_.setValue (s_.maxVoices, juce::dontSendNotification);
     fade_.setValue (s_.cutFadeMs, juce::dontSendNotification);
     glide_.setValue (s_.glideMs, juce::dontSendNotification);
+    chokeSame_.setToggleState (s_.chokeSameZone, juce::dontSendNotification);
     updating_ = false;
     const bool poly = s_.mode == PolyphonyMode::Poly;
     limit_.setEnabled (poly);
@@ -153,6 +166,7 @@ void PolyphonyPanel::resized()
     row (sameKeyLabel_, sameKey_);
     row (fadeLabel_, fade_);
     row (glideLabel_, glide_);
+    chokeSame_.setBounds (r.removeFromTop (30));
     hint_.setBounds (r.removeFromTop (46));
 }
 

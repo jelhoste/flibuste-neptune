@@ -120,7 +120,7 @@ void MappingMatrix::rebuildPlaces()
     {
         int g = 0;
         if (! z.group.empty()) g = groupIds.emplace (z.group, static_cast<int> (groupIds.size()) + 1).first->second;
-        keys.push_back ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, g, z.onRelease });
+        keys.push_back ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, g, z.onRelease, static_cast<int> (z.trigger) });
     }
     fades_ = computeLayerFades (keys, description_.velocityFadeWidth);
 }
@@ -292,6 +292,23 @@ void MappingMatrix::paint (juce::Graphics& g)
             g.drawRect (inner, sel ? 2.0f : 1.0f);
             if (static_cast<int> (i) == hoverPlace_) { g.setColour (colour (Token::Text).withAlpha (0.8f)); g.drawRect (inner.reduced (1.5f), 1.0f); }
 
+            // repères : choke (C n, ou C a>b si avancé) et condition de déclenchement (P : Premier, L : Legato)
+            if (! p.zones.empty() && inner.getWidth() > 22.0f && inner.getHeight() > 12.0f)
+            {
+                const auto& z0 = description_.zones[static_cast<std::size_t> (p.zones.front())];
+                juce::String tag;
+                if (z0.trigger == TriggerCondition::First) tag += "P ";
+                if (z0.trigger == TriggerCondition::Legato) tag += "L ";
+                if (z0.chokeCuts != 0 || z0.chokeCutBy != 0)
+                    tag += z0.chokeCuts == z0.chokeCutBy ? "C" + juce::String (z0.chokeCuts)
+                                                          : "C" + juce::String (z0.chokeCuts) + ">" + juce::String (z0.chokeCutBy);
+                if (tag.isNotEmpty())
+                {
+                    g.setColour (colour (Token::Accent));
+                    g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+                    g.drawText (tag.trim(), inner.reduced (3.0f, 1.0f), juce::Justification::bottomRight, false);
+                }
+            }
             if (inner.getWidth() > 30.0f && inner.getHeight() > 16.0f)
             {
                 g.setColour (colour (Token::Text));

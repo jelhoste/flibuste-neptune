@@ -59,6 +59,7 @@ struct LayerKey
     int keyLow = 0, keyHigh = 127, velLow = 1, velHigh = 127;
     int group = 0;            // identifiant de Groupe (0 = aucun) ; deux Groupes différents ne se fondent jamais
     bool onRelease = false;
+    int variant = 0;          // condition de déclenchement : les couches de conditions différentes ne se fondent jamais
 };
 
 struct LayerFade

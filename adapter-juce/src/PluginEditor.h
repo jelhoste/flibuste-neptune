@@ -5,6 +5,7 @@
 #include "MappingMatrix.h"
 #include "VelocityPanel.h"
 #include "PolyphonyPanel.h"
+#include "ChokePanel.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -51,6 +52,12 @@ private:
     // Vue Mapping (jalon 5) : matrice notes × vélocité plein écran, liste des zones rétractable.
     std::unique_ptr<MappingMatrix> matrix_;
     juce::TextButton listToggleButton_;
+    // Déclenchement et choke des zones sélectionnées
+    juce::Label triggerLabel_, chokeLabel_;
+    juce::ComboBox triggerBox_, chokeBox_;
+    juce::TextButton chokeMoreButton_;
+    void openChokePanel (juce::Component& anchor);
+    juce::Component::SafePointer<ChokePanel> chokePanel_;
     bool listVisible_ = true;
     void setZoneSelection (const std::vector<int>&);
     void openVelocityPanel (juce::Component& anchor);

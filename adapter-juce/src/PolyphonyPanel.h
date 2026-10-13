@@ -18,10 +18,11 @@ public:
         neptune::core::SameKeyMode sameKey = neptune::core::SameKeyMode::Stack;
         int cutFadeMs = 3;
         int glideMs = 0;
+        bool chokeSameZone = false;
         bool operator== (const Settings& o) const noexcept
         {
             return mode == o.mode && maxVoices == o.maxVoices && steal == o.steal && sameKey == o.sameKey
-                && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs;
+                && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone;
         }
     };
 
@@ -49,6 +50,7 @@ private:
     juce::Label modeLabel_, limitLabel_, stealLabel_, sameKeyLabel_, fadeLabel_, glideLabel_, hint_;
     juce::ComboBox mode_, steal_, sameKey_;
     juce::TextButton limitPreset_[3]; // 64, 128, 256
+    juce::ToggleButton chokeSame_;
     juce::Slider limit_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider fade_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider glide_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };

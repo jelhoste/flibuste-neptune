@@ -1,6 +1,7 @@
 #include "PluginEditor.h"
 #include "VelocityPanel.h"
 #include "PolyphonyPanel.h"
+#include "ChokePanel.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 
@@ -138,6 +139,46 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     listToggleButton_.setToggleState (true, juce::dontSendNotification);
     listToggleButton_.onClick = [this] { listVisible_ = listToggleButton_.getToggleState(); updateViewVisibility(); resized(); };
     addAndMakeVisible (listToggleButton_);
+
+    triggerLabel_.setText (text ("trig.label"), juce::dontSendNotification);
+    chokeLabel_.setText (text ("choke.label"), juce::dontSendNotification);
+    for (auto* l : { &triggerLabel_, &chokeLabel_ })
+    {
+        l->setColour (juce::Label::textColourId, colour (Token::TextDim));
+        addAndMakeVisible (*l);
+    }
+    triggerBox_.addItem (text ("trig.attack"), 1);
+    triggerBox_.addItem (text ("trig.release"), 2);
+    triggerBox_.addItem (text ("trig.first"), 3);
+    triggerBox_.addItem (text ("trig.legato"), 4);
+    triggerBox_.onChange = [this]
+    {
+        if (updatingControls_) return;
+        const int id = triggerBox_.getSelectedId();
+        if (id < 1) return;
+        editZone ([id] (neptune::core::ZoneDescription& z)
+        {
+            z.onRelease = id == 2;
+            z.trigger = id == 3 ? neptune::core::TriggerCondition::First : id == 4 ? neptune::core::TriggerCondition::Legato
+                                                                                    : neptune::core::TriggerCondition::Always;
+        });
+    };
+    addAndMakeVisible (triggerBox_);
+    chokeBox_.addItem (text ("choke.none"), 1);
+    for (int g = 1; g <= neptune::core::maxChokeGroup; ++g) chokeBox_.addItem (juce::String (g), g + 1);
+    chokeBox_.setTextWhenNothingSelected (text ("choke.advanced"));
+    chokeBox_.onChange = [this]
+    {
+        if (updatingControls_) return;
+        const int id = chokeBox_.getSelectedId();
+        if (id < 1) return;
+        const int g = id - 1; // réglage simple : le même numéro des deux côtés (groupe symétrique)
+        editZone ([g] (neptune::core::ZoneDescription& z) { z.chokeCuts = g; z.chokeCutBy = g; });
+    };
+    addAndMakeVisible (chokeBox_);
+    chokeMoreButton_.setButtonText ("...");
+    chokeMoreButton_.onClick = [this] { openChokePanel (chokeMoreButton_); };
+    addAndMakeVisible (chokeMoreButton_);
 
     viewButton_.onClick = [this] { showProbe_ = ! showProbe_; updateViewVisibility(); resized(); repaint(); };
     addAndMakeVisible (viewButton_);
@@ -364,7 +405,7 @@ void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
     {
         PolyphonyPanel::Settings s;
         s.mode = d.polyphony; s.maxVoices = d.maxVoices; s.steal = d.stealMode; s.sameKey = d.sameKey;
-        s.cutFadeMs = d.cutFadeMs; s.glideMs = d.glideMs;
+        s.cutFadeMs = d.cutFadeMs; s.glideMs = d.glideMs; s.chokeSameZone = d.chokeSameZone;
         return s;
     };
     auto panel = std::make_unique<PolyphonyPanel> (palette_, tr_, fromDescription (processor_.instrumentDescription()));
@@ -378,11 +419,35 @@ void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
         if (safe == nullptr) return;
         auto desc = safe->processor_.instrumentDescription();
         desc.polyphony = s.mode; desc.maxVoices = s.maxVoices; desc.stealMode = s.steal; desc.sameKey = s.sameKey;
-        desc.cutFadeMs = s.cutFadeMs; desc.glideMs = s.glideMs;
+        desc.cutFadeMs = s.cutFadeMs; desc.glideMs = s.glideMs; desc.chokeSameZone = s.chokeSameZone;
         safe->processor_.uiEditInstrument (std::move (desc), "Polyphony", "polyphony");
     };
     polyphonyPanel_ = panel.get();
     juce::Component::SafePointer<PolyphonyPanel> focus (panel.get());
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+    juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
+}
+
+// Choke avancé (coupe / est coupée par) des zones sélectionnées.
+void NeptuneEditor::openChokePanel (juce::Component& anchor)
+{
+    const auto d = processor_.instrumentDescription();
+    const auto selection = zoneTable_->selectedRows();
+    std::size_t first = 0;
+    if (! selection.empty() && selection.front() >= 0 && selection.front() < static_cast<int> (d.zones.size()))
+        first = static_cast<std::size_t> (selection.front());
+    if (d.zones.empty()) return;
+    auto panel = std::make_unique<ChokePanel> (palette_, tr_, d.zones[first].chokeCuts, d.zones[first].chokeCutBy);
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    panel->onUndo = [safe] { if (safe != nullptr) safe->processor_.uiUndo(); };
+    panel->onRedo = [safe] { if (safe != nullptr) safe->processor_.uiRedo(); };
+    panel->onChange = [safe] (int cuts, int cutBy)
+    {
+        if (safe == nullptr) return;
+        safe->editZone ([cuts, cutBy] (neptune::core::ZoneDescription& z) { z.chokeCuts = cuts; z.chokeCutBy = cutBy; });
+    };
+    chokePanel_ = panel.get();
+    juce::Component::SafePointer<ChokePanel> focus (panel.get());
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
     juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
 }
@@ -457,12 +522,18 @@ void NeptuneEditor::updateSamplerControls()
         rebuildLoadPanel();
     }
     matrix_->setSelection (zoneTable_->selectedRows());
+    if (chokePanel_ != nullptr && ! cachedDescription_.zones.empty())
+    {
+        const auto sel = zoneTable_->selectedRows();
+        const std::size_t f = (! sel.empty() && sel.front() >= 0 && sel.front() < static_cast<int> (cachedDescription_.zones.size())) ? static_cast<std::size_t> (sel.front()) : 0;
+        chokePanel_->setValues (cachedDescription_.zones[f].chokeCuts, cachedDescription_.zones[f].chokeCutBy);
+    }
     if (polyphonyPanel_ != nullptr)
     {
         PolyphonyPanel::Settings ps;
         const auto& cd = cachedDescription_;
         ps.mode = cd.polyphony; ps.maxVoices = cd.maxVoices; ps.steal = cd.stealMode; ps.sameKey = cd.sameKey;
-        ps.cutFadeMs = cd.cutFadeMs; ps.glideMs = cd.glideMs;
+        ps.cutFadeMs = cd.cutFadeMs; ps.glideMs = cd.glideMs; ps.chokeSameZone = cd.chokeSameZone;
         polyphonyPanel_->setValues (ps);
     }
     if (velocityPanel_ != nullptr) // annuler/rétablir pendant que la fenêtre est ouverte : elle suit
@@ -477,6 +548,13 @@ void NeptuneEditor::updateSamplerControls()
 
     updatingControls_ = true;
     if (! rootSlider_.isMouseButtonDown()) rootSlider_.setValue (z.rootNote, juce::dontSendNotification);
+    triggerBox_.setSelectedId (z.onRelease ? 2 : z.trigger == neptune::core::TriggerCondition::First ? 3
+                                                  : z.trigger == neptune::core::TriggerCondition::Legato ? 4 : 1, juce::dontSendNotification);
+    if (z.chokeCuts == z.chokeCutBy) chokeBox_.setSelectedId (z.chokeCuts + 1, juce::dontSendNotification);
+    else chokeBox_.setSelectedId (0, juce::dontSendNotification); // réglage avancé : le texte « Avancé » s'affiche
+    triggerBox_.setEnabled (! d.zones.empty());
+    chokeBox_.setEnabled (! d.zones.empty());
+    chokeMoreButton_.setEnabled (! d.zones.empty());
     updatingControls_ = false;
 
     statusLabel_.setText (statusText(), juce::dontSendNotification);
@@ -585,6 +663,11 @@ void NeptuneEditor::updateViewVisibility()
     selectionLabel_.setVisible (mapping);
     zoneTable_->setVisible (mapping && listVisible_);
     listToggleButton_.setVisible (mapping);
+    triggerLabel_.setVisible (mapping);
+    triggerBox_.setVisible (mapping);
+    chokeLabel_.setVisible (mapping);
+    chokeBox_.setVisible (mapping);
+    chokeMoreButton_.setVisible (mapping);
     matrix_->setVisible (mapping);
     loadTitle_.setVisible (mapping);
     rrToggle_.setVisible (mapping);
@@ -679,7 +762,12 @@ void NeptuneEditor::resized()
         auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));
         rootSlider_.setBounds (r2.removeFromLeft (150).reduced (2));
-        removeButton_.setBounds (r2.removeFromLeft (190).reduced (2));
+        removeButton_.setBounds (r2.removeFromLeft (150).reduced (2));
+        triggerLabel_.setBounds (r2.removeFromLeft (100));
+        triggerBox_.setBounds (r2.removeFromLeft (130).reduced (2));
+        chokeLabel_.setBounds (r2.removeFromLeft (56));
+        chokeBox_.setBounds (r2.removeFromLeft (100).reduced (2));
+        chokeMoreButton_.setBounds (r2.removeFromLeft (40).reduced (2));
         selectionLabel_.setBounds (r2);
 
         const int top = 168;

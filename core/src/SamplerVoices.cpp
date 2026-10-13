@@ -68,6 +68,7 @@ void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
 void SamplerVoices::allSoundOff() noexcept
 {
     numHeld_ = 0;
+    keyDown_.fill (0);
     for (auto& v : voices_) discard (v);
 }
 
@@ -102,10 +103,48 @@ SamplerVoices::Voice* SamplerVoices::allocate() noexcept
     return best;
 }
 
+bool SamplerVoices::otherHeldInGroup (int groupId, int channel, int key) const noexcept
+{
+    for (const auto& v : voices_)
+    {
+        if (! v.active || v.zone == nullptr || v.stolen || v.zone->groupId != groupId) continue;
+        if (v.channel == channel && v.key == key) continue; // la note qu'on est en train de jouer
+        if (keyDown_[static_cast<std::size_t> ((v.channel & 15) * 128 + (v.key & 127))] != 0) return true;
+    }
+    return false;
+}
+
+Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key) noexcept
+{
+    queryContext_ = { this, channel, key };
+    return { [] (const void* c, int group) noexcept
+             {
+                 const auto* q = static_cast<const QueryContext*> (c);
+                 return q->self->otherHeldInGroup (group, q->channel, q->key);
+             },
+             &queryContext_ };
+}
+
+// Une zone qui se déclenche coupe les voix des zones dont `chokeCutBy` est son `chokeCuts`. Les voix de la même place
+// (alternatives round-robin comprises) ne sont coupées que si l'instrument le demande.
+void SamplerVoices::chokeFor (const Zone& zone) noexcept
+{
+    if (zone.chokeCuts == 0 || instrument_ == nullptr) return;
+    const int newPlace = instrument_->placeOf (static_cast<int> (&zone - instrument_->zones.data()));
+    for (auto& v : voices_)
+    {
+        if (! v.active || v.stolen || v.zone == nullptr || v.zone->chokeCutBy != zone.chokeCuts) continue;
+        if (! instrument_->chokeSameZone && newPlace >= 0 && instrument_->placeOf (v.zoneIndex) == newPlace) continue;
+        steal (v);
+    }
+}
+
 void SamplerVoices::startNote (int channel, int key, float velocity) noexcept
 {
     Instrument::Pick picks[Instrument::maxPicks];
-    const int n = instrument_->selectLayers (key, velocity, /*release*/ false, picks, Instrument::maxPicks);
+    const auto held = heldQuery (channel, key);
+    const int n = instrument_->selectLayers (key, velocity, /*release*/ false, picks, Instrument::maxPicks, &held);
+    for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone); // avant de démarrer : les nouvelles voix du même coup ne sont pas coupées
     for (int i = 0; i < n; ++i) startVoice (channel, key, velocity, *picks[i].zone, picks[i].gain);
 }
 
@@ -171,7 +210,11 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
     if (instrument_ == nullptr) return;
     // Courbe de réponse de l'instrument : avant le choix des couches et le volume.
     const float shaped = std::clamp (instrument_->shapeVelocity (velocity), 0.0f, 1.0f);
-    if (key >= 0 && key < 128) heldVelocity_[static_cast<std::size_t> (key)] = shaped;
+    if (key >= 0 && key < 128)
+    {
+        heldVelocity_[static_cast<std::size_t> (key)] = shaped;
+        keyDown_[static_cast<std::size_t> ((channel & 15) * 128 + key)] = 1;
+    }
 
     if (instrument_->polyphony != PolyphonyMode::Poly)
     {
@@ -261,6 +304,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
 
 void SamplerVoices::noteOff (int channel, int key) noexcept
 {
+    if (key >= 0 && key < 128) keyDown_[static_cast<std::size_t> ((channel & 15) * 128 + key)] = 0;
     if (instrument_ != nullptr && instrument_->polyphony != PolyphonyMode::Poly)
     {
         // Mono/legato : la touche relâchée sort de la pile ; s'il en reste une tenue et que c'était celle qui sonnait, on y revient.
@@ -307,6 +351,7 @@ void SamplerVoices::releaseZonesFor (int channel, int key) noexcept
     const float v = vel > 0.0f ? vel : 0.5f;
     Instrument::Pick picks[Instrument::maxPicks];
     const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks);
+    for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone);
     for (int i = 0; i < n; ++i) startVoice (channel, key, v, *picks[i].zone, picks[i].gain);
 }
 

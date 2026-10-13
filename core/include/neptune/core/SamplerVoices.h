@@ -68,6 +68,9 @@ private:
     Voice* chooseVictim (int newKey, bool& dropNew) noexcept;
     void startNote (int channel, int key, float velocity) noexcept; // choisit les couches et démarre les voix
     void releaseZonesFor (int channel, int key) noexcept; // zones déclenchées au relâchement
+    void chokeFor (const Zone& zone) noexcept;           // coupe les voix que cette zone choke (avant de démarrer les siennes)
+    bool otherHeldInGroup (int groupId, int channel, int key) const noexcept; // conditions « Premier » / « Legato »
+    Instrument::HeldQuery heldQuery (int channel, int key) noexcept;
     void pushHeld (int channel, int key, float velocity) noexcept;
     void removeHeld (int channel, int key) noexcept;
     void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
@@ -87,6 +90,8 @@ private:
     static constexpr int kMaxHeldKeys = 16;
     std::array<HeldKey, kMaxHeldKeys> held_ {};      // touches tenues (modes mono/legato), la plus récente en dernier
     int numHeld_ = 0;
+    std::array<std::uint8_t, 16 * 128> keyDown_ {}; // touches physiquement tenues (canal x touche)
+    struct QueryContext { const SamplerVoices* self; int channel, key; } queryContext_ {};
     std::uint64_t counter_ = 0;
     std::array<float, 128> heldVelocity_ {}; // vélocité du dernier Note On par touche (zones déclenchées au relâchement)
 };
