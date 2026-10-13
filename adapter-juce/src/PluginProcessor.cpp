@@ -450,7 +450,11 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         const auto msg = metadata.getMessage();
         if (msg.isNoteOn())
             ++hostProbe_.midiNoteOns;
-        if (msg.isNoteOn())
+        if (msg.isAllSoundOff())
+            engine_.panic();
+        else if (msg.isAllNotesOff())
+            engine_.releaseAll();
+        else if (msg.isNoteOn())
             engine_.noteOn (msg.getChannel() - 1, msg.getNoteNumber(), msg.getFloatVelocity());
         else if (msg.isNoteOff())
             engine_.noteOff (msg.getChannel() - 1, msg.getNoteNumber());

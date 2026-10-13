@@ -100,6 +100,9 @@ public:
     void noteOff (const EnvelopeRuntime& env, double sampleRate) noexcept;
     // Valeur du prochain échantillon (puis avance d'un échantillon).
     float next (const EnvelopeRuntime& env, double sampleRate) noexcept;
+    // Avance de `frames` échantillons d'un coup (enveloppes lues à cadence réduite, ex. modulation de filtre toutes les 16 frames).
+    // Aux changements de segment le reste de pas est perdu (erreur < `frames` échantillons). Lire ensuite value().
+    void advance (const EnvelopeRuntime& env, double sampleRate, double frames) noexcept { step (env, sampleRate, frames); }
 
     bool finished() const noexcept { return stage_ == Stage::Done; }
     bool releasing() const noexcept { return stage_ == Stage::Release; }
@@ -107,6 +110,7 @@ public:
 
 private:
     enum class Stage { Delay, Attack, Hold, Decay, Sustain, Release, Done };
+    void step (const EnvelopeRuntime& env, double sampleRate, double frames) noexcept;
     void enterFirstStage (const EnvelopeRuntime& env) noexcept;
     void enterAfterHold (const EnvelopeRuntime& env) noexcept;
 

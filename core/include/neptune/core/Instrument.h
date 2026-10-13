@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "neptune/core/Envelope.h"
+#include "neptune/core/Filter.h"
 #include "neptune/core/SampleData.h"
 #include "neptune/core/VelocityResponse.h"
 
@@ -59,6 +60,9 @@ struct ZoneDescription
     std::string group;             // nom de Groupe (micro, articulation...) ; vide = aucun
     bool onRelease = false;        // déclenchée au Note Off (bruits de mécanique, fins de note), pas au Note On
     TriggerCondition trigger = TriggerCondition::Always; // condition d'une zone d'attaque (ignorée si onRelease)
+    // Filtres par voie : faux = la zone hérite des filtres de l'instrument (InstrumentDescription::defaultFilters) ; vrai = les siens.
+    bool filterOverride = false;
+    FilterBlock filters;
     int chokeCuts = 0;             // groupe de choke que le déclenchement de cette zone coupe (0 = aucun)
     int chokeCutBy = 0;            // groupe de choke par lequel cette zone peut être coupée (0 = aucun)
     // Points de boucle en échantillons ; loopEnd < 0 = jusqu'à la fin du fichier.
@@ -69,7 +73,8 @@ struct ZoneDescription
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
             && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && tuneCents == o.tuneCents && gainDb == o.gainDb
             && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
-            && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy;
+            && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
+            && filterOverride == o.filterOverride && filters == o.filters;
     }
 };
 
@@ -113,6 +118,9 @@ struct InstrumentDescription
     SameKeyMode sameKey = SameKeyMode::Stack;
     int cutFadeMs = 3;                               // fondu d'une voix volée / coupée (1..maxCutFadeMs)
     int glideMs = 0;                                 // glissando du legato (0..maxGlideMs)
+    // Filtres par défaut de l'instrument, hérités par les zones qui ne les surchargent pas. Leur coupure et leur résonance sont
+    // les PARAMÈTRES automatisables (SamplerParams : filterCutoff/filterResonance) : les valeurs stockées ici sont ignorées.
+    FilterBlock defaultFilters;
     bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
     static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
 
@@ -123,7 +131,7 @@ struct InstrumentDescription
         unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
-        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone;
+        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept
@@ -133,7 +141,8 @@ struct InstrumentDescription
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
-            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone;
+            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
+            && defaultFilters == o.defaultFilters;
     }
     bool empty() const noexcept { return zones.empty(); }
 };
@@ -156,6 +165,17 @@ InstrumentDescription instrumentFromJson (std::string_view text);
 
 // ---- Instrument prêt à jouer ----
 
+// Filtres résolus d'une zone (partagés entre toutes les zones qui héritent du même réglage : un seul exemplaire des tables).
+struct FilterRuntimeBlock
+{
+    std::array<FilterSettings, 2> settings;
+    std::array<EnvelopeRuntime, 2> env;
+    std::array<bool, 2> fromParams { false, false }; // coupure/résonance lues dans les paramètres automatisables (héritage)
+    bool parallel = false;
+    float balance = 0.5f;
+    bool anyOn = false;
+};
+
 struct Zone
 {
     std::shared_ptr<const SampleData> sample;
@@ -171,6 +191,7 @@ struct Zone
     bool onRelease = false;
     TriggerCondition trigger = TriggerCondition::Always;
     int chokeCuts = 0, chokeCutBy = 0;
+    std::shared_ptr<const FilterRuntimeBlock> filters; // nul : aucun filtre
     int sourceIndex = -1; // indice de la zone dans la description (écoute depuis la liste) ; -1 = construite à la main
 };
 

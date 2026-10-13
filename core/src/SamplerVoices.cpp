@@ -354,6 +354,9 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->level = v->velocity * zone.gain * layerGain;
     v->targetRatio = v->baseRatio;
     v->env.begin (zone.env, sampleRate_);
+    if (zone.filters != nullptr)
+        for (std::size_t i = 0; i < 2; ++i)
+            if (zone.filters->settings[i].on) v->fenv[i].begin (zone.filters->env[i], sampleRate_);
     // Échantillon dont seul le début est en mémoire : le reste est lu sur le disque. Les zones en boucle gardent tout ce
     // qui précède la fin de boucle en mémoire (voir residentFramesNeeded) et n'ont donc jamais besoin du flux.
     if (zone.mode == PlayMode::OneShot && zone.sample->isStreamed() && streamer_ != nullptr)
@@ -399,7 +402,7 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
         if (v.zone->mode == PlayMode::Loop)
         {
             v.releasing = true;
-            v.env.noteOff (v.zone->env, sampleRate_);
+            releaseEnvelopes (v);
         }
         // one-shot : le Note Off est ignoré, le sample est joué en entier
     }
@@ -422,17 +425,38 @@ void SamplerVoices::releaseZonesFor (int channel, int key) noexcept
 
 void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept
 {
-    if (v.zone->sample->isStreamed()) renderVoiceT<true> (v, left, right, numFrames, g0, g1, pitchFactor);
-    else renderVoiceT<false> (v, left, right, numFrames, g0, g1, pitchFactor);
+    // Quatre variantes figées à la compilation : une voix sans filtre garde la boucle la plus courte possible.
+    const bool streamed = v.zone->sample->isStreamed();
+    const bool filtered = v.zone->filters != nullptr && v.zone->filters->anyOn;
+    if (streamed)
+    {
+        if (filtered) renderVoiceT<true, true> (v, left, right, numFrames, g0, g1, pitchFactor);
+        else renderVoiceT<true, false> (v, left, right, numFrames, g0, g1, pitchFactor);
+    }
+    else
+    {
+        if (filtered) renderVoiceT<false, true> (v, left, right, numFrames, g0, g1, pitchFactor);
+        else renderVoiceT<false, false> (v, left, right, numFrames, g0, g1, pitchFactor);
+    }
 }
 
-template <bool Streamed>
+template <bool Streamed, bool Filtered>
 void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept
 {
     const Zone& z = *v.zone;
     const SampleData& s = *z.sample;
     const bool stereo = s.channels >= 2;
     const bool loop = z.mode == PlayMode::Loop;
+    const FilterRuntimeBlock* fr = z.filters.get(); // non nul quand Filtered
+    const bool on0 = fr != nullptr && fr->settings[0].on, on1 = fr != nullptr && fr->settings[1].on;
+    const bool parallelFilters = fr != nullptr && fr->parallel;
+    const float filterBalance = fr != nullptr ? fr->balance : 0.5f;
+    bool envModulated = false; // une enveloppe de filtre qui module vraiment la coupure : coefficients refaits tous les 16 échantillons
+    if constexpr (Filtered)
+    {
+        updateFilterCoefs (v, *fr); // début de bloc : paramètres automatisables, clavier, vélocité
+        for (std::size_t f = 0; f < 2; ++f) envModulated = envModulated || (fr->settings[f].on && fr->settings[f].envDepthOctaves != 0.0);
+    }
     double ratio = v.baseRatio;
     float lastEnv = 0.0f;
     double inc = ratio * pitchFactor;
@@ -491,8 +515,43 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         const std::int64_t i0 = static_cast<std::int64_t> (v.pos);
         const float t = static_cast<float> (v.pos - static_cast<double> (i0));
         const std::int64_t a = wrapIndex (z, i0 - 1), b = wrapIndex (z, i0), c = wrapIndex (z, i0 + 1), d = wrapIndex (z, i0 + 2);
-        const float l = hermite (tap (0, a), tap (0, b), tap (0, c), tap (0, d), t);
-        const float r = stereo ? hermite (tap (1, a), tap (1, b), tap (1, c), tap (1, d), t) : l;
+        float l = hermite (tap (0, a), tap (0, b), tap (0, c), tap (0, d), t);
+        float r = stereo ? hermite (tap (1, a), tap (1, b), tap (1, c), tap (1, d), t) : l;
+
+        if constexpr (Filtered) // filtres par voie : coefficients mis à jour tous les 16 échantillons, enveloppes au rythme de l'échantillon
+        {
+            if (envModulated && (v.fcount++ & 15) == 15)
+            {
+                // enveloppes de filtre à cadence réduite : un pas de 16 échantillons, puis nouveaux coefficients
+                for (std::size_t f = 0; f < 2; ++f)
+                    if (fr->settings[f].on && fr->settings[f].envDepthOctaves != 0.0)
+                    {
+                        v.fenv[f].advance (fr->env[f], sampleRate_, 16.0);
+                        v.fenvValue[f] = v.fenv[f].value();
+                    }
+                updateFilterCoefs (v, *fr);
+            }
+            // 1e-15 : empêche les nombres dénormaux quand le signal tombe à zéro (inaudible : -300 dB)
+            auto chain = [&] (float x, std::size_t ch) noexcept
+            {
+                x += 1e-15f;
+                if (! parallelFilters)
+                {
+                    if (on0) x = processFilter (v.fcoef[0], v.fstate[0][ch], x);
+                    if (on1) x = processFilter (v.fcoef[1], v.fstate[1][ch], x);
+                    return x;
+                }
+                if (on0 && on1)
+                {
+                    const float y0 = processFilter (v.fcoef[0], v.fstate[0][ch], x);
+                    const float y1 = processFilter (v.fcoef[1], v.fstate[1][ch], x);
+                    return y0 + filterBalance * (y1 - y0);
+                }
+                return on0 ? processFilter (v.fcoef[0], v.fstate[0][ch], x) : processFilter (v.fcoef[1], v.fstate[1][ch], x);
+            };
+            l = chain (l, 0);
+            r = stereo ? chain (r, 1) : l; // échantillon mono : un seul canal à filtrer
+        }
 
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
@@ -546,6 +605,49 @@ void SamplerVoices::render (float* left, float* right, int numFrames, float gain
             }
 }
 
+void SamplerVoices::releaseEnvelopes (Voice& v) noexcept
+{
+    v.env.noteOff (v.zone->env, sampleRate_);
+    if (const auto* fr = v.zone->filters.get())
+        for (std::size_t i = 0; i < 2; ++i)
+            if (fr->settings[i].on) v.fenv[i].noteOff (fr->env[i], sampleRate_);
+}
+
+void SamplerVoices::updateFilterCoefs (Voice& v, const FilterRuntimeBlock& fr) const noexcept
+{
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const auto& f = fr.settings[i];
+        if (! f.on) continue;
+        const double base = fr.fromParams[i] ? filterParams_.cutoffHz[i] : f.cutoffHz;
+        const double res = fr.fromParams[i] ? filterParams_.resonance[i] : f.resonance;
+        const double cutoff = modulatedCutoffHz (f, base, v.key, v.velocity, v.fenvValue[i], sampleRate_);
+        v.fcoef[i] = makeFilterCoefs (f, cutoff, res, sampleRate_);
+    }
+}
+
+void SamplerVoices::panic() noexcept
+{
+    cutAll();
+    numHeld_ = 0;
+    numDown_ = 0;
+}
+
+void SamplerVoices::releaseAll() noexcept
+{
+    for (auto& v : voices_)
+    {
+        if (! v.active || v.releasing || v.stolen || v.zone == nullptr || v.channel == kPreviewChannel) continue;
+        if (v.zone->mode == PlayMode::Loop)
+        {
+            v.releasing = true;
+            releaseEnvelopes (v);
+        }
+    }
+    numHeld_ = 0;
+    numDown_ = 0;
+}
+
 void SamplerVoices::previewZone (int sourceIndex) noexcept
 {
     if (instrument_ == nullptr) return;
@@ -568,7 +670,7 @@ void SamplerVoices::releasePreview() noexcept
         if (v.zone->mode == PlayMode::Loop)
         {
             v.releasing = true;
-            v.env.noteOff (v.zone->env, sampleRate_);
+            releaseEnvelopes (v);
         }
     }
 }

@@ -168,10 +168,16 @@ void EnvelopeRunner::noteOff (const EnvelopeRuntime& env, double sampleRate) noe
 float EnvelopeRunner::next (const EnvelopeRuntime& env, double sampleRate) noexcept
 {
     const float out = value_;
+    step (env, sampleRate, 1.0);
+    return out;
+}
+
+void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double frames) noexcept
+{
     switch (stage_)
     {
         case Stage::Delay:
-            pos_ += 1.0;
+            pos_ += frames;
             if (pos_ >= env.delaySec * sampleRate)
             {
                 pos_ = 0.0;
@@ -182,7 +188,7 @@ float EnvelopeRunner::next (const EnvelopeRuntime& env, double sampleRate) noexc
             break;
         case Stage::Attack:
         {
-            pos_ += 1.0;
+            pos_ += frames;
             const double len = env.attackSec * sampleRate;
             if (pos_ >= len)
             {
@@ -195,12 +201,12 @@ float EnvelopeRunner::next (const EnvelopeRuntime& env, double sampleRate) noexc
             break;
         }
         case Stage::Hold:
-            pos_ += 1.0;
+            pos_ += frames;
             if (pos_ >= env.holdSec * sampleRate) enterAfterHold (env);
             break;
         case Stage::Decay:
         {
-            pos_ += 1.0;
+            pos_ += frames;
             const double len = env.decaySec * sampleRate;
             if (pos_ >= len)
             {
@@ -215,7 +221,7 @@ float EnvelopeRunner::next (const EnvelopeRuntime& env, double sampleRate) noexc
             break;
         case Stage::Release:
         {
-            pos_ += 1.0;
+            pos_ += frames;
             if (pos_ >= releaseFrames_)
             {
                 value_ = 0.0f;
@@ -231,6 +237,5 @@ float EnvelopeRunner::next (const EnvelopeRuntime& env, double sampleRate) noexc
         case Stage::Done:
             break;
     }
-    return out;
 }
 } // namespace neptune::core

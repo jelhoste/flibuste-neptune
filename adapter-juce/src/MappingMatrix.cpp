@@ -318,6 +318,7 @@ void MappingMatrix::paint (juce::Graphics& g)
                 juce::String tag;
                 if (z0.trigger == TriggerCondition::First) tag += "P ";
                 if (z0.trigger == TriggerCondition::Legato) tag += "L ";
+                if (z0.filterOverride) tag += "F ";
                 if (z0.chokeCuts != 0 || z0.chokeCutBy != 0)
                     tag += z0.chokeCuts == z0.chokeCutBy ? "C" + juce::String (z0.chokeCuts)
                                                           : "C" + juce::String (z0.chokeCuts) + ">" + juce::String (z0.chokeCutBy);
@@ -706,6 +707,14 @@ bool MappingMatrix::keyPressed (const juce::KeyPress& k)
         return true;
     }
     return false;
+}
+
+void MappingMatrix::clearHeldKeys()
+{
+    latched_.fill (false);
+    pressedKey_ = -1;
+    keyboardDrag_ = false;
+    repaint();
 }
 
 void MappingMatrix::setSoundingZones (const std::vector<int>& zones)

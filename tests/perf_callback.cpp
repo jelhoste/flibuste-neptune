@@ -37,6 +37,7 @@ struct Scenario
     int blockSize;
     int heldNotes;       // notes tenues pendant la mesure (noteOn avant, aucune libération)
     int paramsPerBlock;  // setParameter appelés avant chaque bloc (automation de l'hôte)
+    int filter = 0;      // filtres par voie : 0 aucun, 1 SVF passe-bas 24 dB (+ enveloppe), 2 Ladder 24 dB saturé, 3 deux filtres en série, 4 SVF 24 dB statique
 };
 
 struct Result
@@ -89,6 +90,29 @@ Result run (const Scenario& s)
         }
         auto inst = std::make_shared<neptune::core::Instrument>();
         inst->zones.push_back (neptune::core::makeFullKeyboardZone (std::move (sample), 60, neptune::core::PlayMode::Loop));
+        if (s.filter > 0)
+        {
+            auto rt = std::make_shared<neptune::core::FilterRuntimeBlock>();
+            auto& f0 = rt->settings[0];
+            f0.on = true;
+            f0.cutoffHz = 3000.0;
+            f0.resonance = 0.4;
+            f0.slopeDb = 24;
+            f0.keyTrack = 0.5;
+            f0.envDepthOctaves = s.filter == 4 ? 0.0 : 2.0; // 4 : filtre statique (pas d'enveloppe à calculer)
+            f0.env.attack.ms = 50.0;
+            if (s.filter == 2) { f0.model = neptune::core::FilterModel::Ladder; f0.drive = 0.5; }
+            rt->env[0] = neptune::core::EnvelopeRuntime (f0.env);
+            if (s.filter == 3)
+            {
+                rt->settings[1] = f0;
+                rt->settings[1].mode = neptune::core::FilterMode::HighPass;
+                rt->settings[1].cutoffHz = 120.0;
+                rt->env[1] = neptune::core::EnvelopeRuntime (rt->settings[1].env);
+            }
+            rt->anyOn = true;
+            inst->zones.back().filters = rt;
+        }
         inst->maxVoices = 256; // la mesure à 128 et 256 voix (le défaut d'un instrument reste 64)
         engine.publishInstrument (std::move (inst));
         engine.process (chans.data(), kChannels, s.blockSize); // adopte l'instrument
@@ -166,6 +190,14 @@ int main (int argc, char** argv)
         scenarios.push_back ({ "loaded_" + std::to_string (bs), bs, 64, 64 });
         scenarios.push_back ({ "v128_" + std::to_string (bs), bs, 128, 64 });
         scenarios.push_back ({ "v256_" + std::to_string (bs), bs, 256, 64 });
+        if (bs == 256)
+        {
+            scenarios.push_back ({ "svf24_64v", bs, 64, 64, 1 });
+            scenarios.push_back ({ "svf24_static", bs, 64, 64, 4 });
+            scenarios.push_back ({ "ladder_64v", bs, 64, 64, 2 });
+            scenarios.push_back ({ "2filt_64v", bs, 64, 64, 3 });
+            scenarios.push_back ({ "2filt_256v", bs, 256, 64, 3 });
+        }
     }
 
     std::vector<Result> results;

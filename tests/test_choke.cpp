@@ -374,6 +374,7 @@ TEST_CASE ("the voice monitor snapshot reports what sounds, with zone, key, velo
     std::vector<float> l (256, 0.0f), r (256, 0.0f);
     float* out[2] = { l.data(), r.data() };
     engine.process (out, 2, 256);
+    engine.setVoiceMonitor (true); // le moniteur n'est publié que sur demande
     Engine::VoiceInfo v[Engine::kVoiceSnapshot];
     CHECK (engine.readVoices (v, Engine::kVoiceSnapshot) == 0);
 
@@ -408,4 +409,68 @@ TEST_CASE ("the voice monitor snapshot reports what sounds, with zone, key, velo
     bool releasing = false;
     for (int i = 0; i < m; ++i) releasing = releasing || (v[i].key == 70 && v[i].releasing);
     CHECK (releasing);
+}
+
+TEST_CASE ("panic cuts everything in a fade and forgets held keys; release-all keeps one-shots")
+{
+    Instrument inst;
+    inst.zones = { zoneAt (0.4f, 0, 63), zoneAt (0.2f, 64, 127) };
+    inst.zones[1].mode = PlayMode::Loop;
+    inst.zones[0].rootNote = 60; // à la hauteur d'origine : le one-shot dure vraiment 2 s
+    inst.zones[1].rootNote = 70;
+    inst.zones[0].sourceIndex = 0;
+    Rig r (inst);
+    r.v.noteOn (0, 60, 1.0f);
+    r.v.noteOn (0, 70, 1.0f);
+    r.v.previewZone (0);
+    r.settle (256);
+    CHECK (r.v.activeVoices() >= 2);
+    r.v.panic();
+    r.settle (4096);                       // le fondu de coupure (3 ms) est passé
+    CHECK (r.v.activeVoices() == 0);
+    // les touches tenues sont oubliées : une zone Legato ne se déclenche plus à cause d'une touche fantôme
+    Instrument inst2;
+    inst2.zones = { zoneAt (0.2f, 48, 84, 0, 0, 0, 0, TriggerCondition::Legato), zoneAt (0.5f, 48, 84) };
+    Rig r2 (inst2);
+    r2.v.noteOn (0, 60, 1.0f);
+    r2.v.panic();
+    r2.settle (4096);
+    r2.v.noteOn (0, 64, 1.0f);
+    CHECK_THAT (r2.settle(), WithinAbs (0.5, 1e-5)); // la normale : aucune touche n'est « tenue »
+
+    Rig r3 (inst);
+    r3.v.noteOn (0, 60, 1.0f);             // one-shot : continue
+    r3.v.noteOn (0, 70, 1.0f);             // boucle : se relâche
+    r3.v.releaseAll();
+    r3.settle (24000);                     // 0,5 s : la boucle s'est éteinte, le one-shot (2 s) sonne encore
+    CHECK (r3.v.activeVoices() == 1);
+}
+
+TEST_CASE ("the voice monitor publishes only when asked, and the panic event reaches the engine")
+{
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    auto inst = std::make_shared<Instrument>();
+    inst->zones.push_back (zoneAt (0.5f, 0, 127));
+    inst->zones.back().sourceIndex = 0;
+    inst->finalize();
+    engine.publishInstrument (inst);
+    std::vector<float> l (256, 0.0f), r (256, 0.0f);
+    float* out[2] = { l.data(), r.data() };
+    engine.process (out, 2, 256);
+
+    Engine::VoiceInfo v[Engine::kVoiceSnapshot];
+    CHECK_FALSE (engine.voiceMonitor());
+    engine.noteOn (0, 60, 1.0f);
+    engine.process (out, 2, 256);
+    CHECK (engine.readVoices (v, Engine::kVoiceSnapshot) == 0); // éteint : rien de publié
+    engine.setVoiceMonitor (true);
+    engine.process (out, 2, 256);
+    CHECK (engine.readVoices (v, Engine::kVoiceSnapshot) == 1);
+    engine.setVoiceMonitor (false);
+    CHECK (engine.readVoices (v, Engine::kVoiceSnapshot) == 0);
+
+    CHECK (engine.postUiEvent ({ Engine::UiEvent::Type::Panic, 0, 0, 0.0f }));
+    for (int i = 0; i < 40; ++i) engine.process (out, 2, 256); // ~213 ms : fondu fini
+    CHECK (engine.activeVoices() == 0);
 }

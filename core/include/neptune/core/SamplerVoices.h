@@ -19,6 +19,14 @@ public:
 
     static_assert (kMaxVoices + kFadeSlots == DiskStreamer::kSlots, "un emplacement de streaming par voix");
 
+    // Coupure et résonance des filtres hérités de l'instrument (paramètres automatisables), lues une fois par bloc.
+    struct FilterParams
+    {
+        double cutoffHz[2] = { filterMaxHz, filterMaxHz };
+        double resonance[2] = { 0.0, 0.0 }; // 0..1
+    };
+    void setFilterParams (const FilterParams& p) noexcept { filterParams_ = p; }
+
     void prepare (double sampleRate) noexcept;
     // Streaming disque (facultatif) : les échantillons dont seul le début est en mémoire y sont lus. Nul = jamais de streaming.
     void setStreamer (DiskStreamer* streamer) noexcept { streamer_ = streamer; }
@@ -37,6 +45,11 @@ public:
     void releasePreview() noexcept; // Note Off de l'écoute (les boucles se relâchent ; un one-shot va au bout)
     void stopPreview() noexcept;    // coupe l'écoute en fondu
     void allSoundOff() noexcept;
+    // « Panique » : coupe tout ce qui sonne en fondu (le fondu de coupure de l'instrument), oublie les touches tenues. Sans clic.
+    void panic() noexcept;
+    // MIDI « All Notes Off » : relâche les notes tenues (une boucle se relâche, un one-shot va au bout) et oublie les touches
+    // tenues, sans déclencher de zones de relâchement.
+    void releaseAll() noexcept;
 
     // Ajoute le rendu dans `left`/`right` (right peut être nul : mélange mono). Gain interpolé linéairement
     // de gainStart à gainEnd sur le bloc. masterTuneCents transpose toutes les voix.
@@ -88,11 +101,19 @@ private:
         double targetRatio = 1.0;           // legato : hauteur visée ; baseRatio y glisse sur glideLeft échantillons
         double glideDelta = 0.0;
         int glideLeft = 0;
+        // filtres par voie (voir Filter.h) : un état par filtre et par canal, une enveloppe par filtre
+        std::array<std::array<FilterState, 2>, 2> fstate {};
+        std::array<EnvelopeRunner, 2> fenv {};
+        std::array<FilterCoefs, 2> fcoef {};
+        std::array<float, 2> fenvValue { 0.0f, 0.0f };
+        int fcount = 0;
         bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
         std::uint32_t streamGen = 0;
     };
 
     VoiceInfo describe (const Voice& v) const noexcept;
+    void releaseEnvelopes (Voice& v) noexcept; // Note Off des enveloppes de volume et de filtres
+    void updateFilterCoefs (Voice& v, const FilterRuntimeBlock& fr) const noexcept;
     void steal (Voice& v) noexcept;
     void cutKey (int channel, int key) noexcept;       // même touche : coupe l'ancienne (fondu)
     void cutAll() noexcept;                            // mono : coupe tout ce qui sonne (fondu)
@@ -106,7 +127,7 @@ private:
     void pushHeld (int channel, int key, float velocity) noexcept;
     void removeHeld (int channel, int key) noexcept;
     void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
-    template <bool Streamed>
+    template <bool Streamed, bool Filtered>
     void renderVoiceT (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept;
     void startVoice (int channel, int key, float velocity, const Zone& zone, float layerGain = 1.0f) noexcept;
     void bindZone (Voice& v, const Zone& zone) noexcept;
@@ -118,6 +139,7 @@ private:
     DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;
     double stealFadeSeconds_ = kStealFadeSeconds;
+    FilterParams filterParams_;
     struct HeldKey { int channel = 0, key = 0; float velocity = 0.0f; };
     static constexpr int kMaxHeldKeys = 16;
     std::array<HeldKey, kMaxHeldKeys> held_ {};      // touches tenues (modes mono/legato), la plus récente en dernier

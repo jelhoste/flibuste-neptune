@@ -24,6 +24,8 @@ public:
     void prepare (double sampleRate, int maxBlockSize) noexcept;
     void noteOn (int channel, int key, float velocity) noexcept;
     void noteOff (int channel, int key) noexcept;
+    void panic() noexcept { activeNotes_ = 0; voices_.panic(); }      // MIDI All Sound Off / bouton « tout arrêter »
+    void releaseAll() noexcept { activeNotes_ = 0; voices_.releaseAll(); } // MIDI All Notes Off
     void setParameter (std::uint32_t id, double value) noexcept;
     void process (float* const* out, int numChannels, int numFrames) noexcept;
     // Profil Live/Studio effectif de l'instance ; appelé par l'adaptateur avant chaque bloc (sans coût). Aucun effet audible pour l'instant.
@@ -42,7 +44,7 @@ public:
     // producteur) ; le thread audio les applique au début du bloc suivant. Rend false si la file est pleine.
     struct UiEvent
     {
-        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop } type = Type::NoteOn;
+        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop, Panic, ReleaseAll } type = Type::NoteOn;
         int channel = 0, key = 0;      // NoteOn / NoteOff ; PreviewZone : `key` = indice de zone
         float velocity = 0.0f;
     };
@@ -58,6 +60,9 @@ public:
     using VoiceInfo = SamplerVoices::VoiceInfo;
     static constexpr int kVoiceSnapshot = SamplerVoices::kMaxVoices + SamplerVoices::kFadeSlots;
     int readVoices (VoiceInfo* out, int maxOut) const noexcept;
+    // Le moniteur n'est alimenté que lorsqu'il est demandé (thread de message) : éteint, le thread audio ne publie rien.
+    void setVoiceMonitor (bool on) noexcept { voiceMonitor_.store (on, std::memory_order_relaxed); if (! on) voiceCount_.store (0, std::memory_order_relaxed); }
+    bool voiceMonitor() const noexcept { return voiceMonitor_.load (std::memory_order_relaxed); }
 
     int activeVoices() const noexcept { return voices_.activeVoices(); }
     double sampleRate() const noexcept { return sampleRate_; }
@@ -78,6 +83,7 @@ private:
     std::array<std::atomic<std::uint64_t>, static_cast<std::size_t> (kVoiceSnapshot) * 2u> voiceWords_ {};
     std::atomic<std::uint32_t> voiceSeq_ { 0 };
     std::atomic<int> voiceCount_ { 0 };
+    std::atomic<bool> voiceMonitor_ { false };
     void publishVoices() noexcept;
     static constexpr std::size_t kTraceSize = 64;           // puissance de 2
     std::array<std::atomic<std::uint16_t>, kTraceSize> trace_ {};
@@ -88,6 +94,7 @@ private:
     SamplerVoices voices_;
     const ParameterSet* params_ = nullptr;
     std::size_t gainIndex_ = ParameterSet::npos, tuneSemiIndex_ = ParameterSet::npos, tuneCentsIndex_ = ParameterSet::npos;
+    std::size_t filterIndex_[4] = { ParameterSet::npos, ParameterSet::npos, ParameterSet::npos, ParameterSet::npos }; // coupure 1, résonance 1, coupure 2, résonance 2
     float lastGain_ = 1.0f;
 };
 } // namespace neptune::core

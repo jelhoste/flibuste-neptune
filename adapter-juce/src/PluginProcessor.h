@@ -109,6 +109,8 @@ public:
     }
     // Voix qui sonnent (moniteur) : thread de message.
     int readVoices (neptune::core::Engine::VoiceInfo* out, int maxOut) const { return engine_.readVoices (out, maxOut); }
+    void uiPanic() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::Panic, 0, 0, 0.0f }); }
+    void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
     void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f }); }
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const;

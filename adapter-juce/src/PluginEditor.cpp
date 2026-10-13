@@ -9,6 +9,8 @@ using neptune::core::theme::Token;
 
 namespace
 {
+constexpr int kKnobCell = 118; // largeur d'un potard et de son nom/valeur (7 potards + Annuler/Rétablir tiennent dans 1160 px)
+
 neptune::core::theme::Palette makePalette (const neptune::core::settings::GlobalSettings& st)
 {
     const auto id = neptune::core::theme::themeFromString (st.theme).value_or (neptune::core::theme::ThemeId::Dark);
@@ -30,7 +32,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     {
         using namespace neptune::core;
         const auto& def = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
-        for (const ParamId id : { sampler::gain, sampler::tuneSemitones, sampler::tuneCents })
+        for (const ParamId id : { sampler::gain, sampler::tuneSemitones, sampler::tuneCents, sampler::filter1Cutoff, sampler::filter1Resonance,
+                                   sampler::filter2Cutoff, sampler::filter2Resonance })
             addAndMakeVisible (knobs_.add (new NeptuneKnob (processor_, id, palette_, def.knob,
                                                             [this] (ParamId pid, uistate::Terminal t) { openModal (pid, t); })));
     }
@@ -175,7 +178,23 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addChildComponent (*voicesView_);
     voicesButton_.setButtonText (text ("voices.button"));
     voicesButton_.setClickingTogglesState (true);
-    voicesButton_.onClick = [this] { showVoices_ = voicesButton_.getToggleState(); updateViewVisibility(); resized(); };
+    voicesButton_.onClick = [this]
+    {
+        showVoices_ = voicesButton_.getToggleState();
+        processor_.setVoiceMonitor (showVoices_); // le moteur ne publie les voix que si on les regarde
+        updateViewVisibility();
+        resized();
+    };
+    filtersButton_.setButtonText (text ("filt.button"));
+    filtersButton_.onClick = [this] { openFilterEditor(); };
+    addAndMakeVisible (filtersButton_);
+    panicButton_.setButtonText (text ("panic.button"));
+    panicButton_.onClick = [this]
+    {
+        processor_.uiPanic();
+        matrix_->clearHeldKeys();
+    };
+    addAndMakeVisible (panicButton_);
     addChildComponent (voicesButton_);
 
     triggerLabel_.setText (text ("trig.label"), juce::dontSendNotification);
@@ -466,9 +485,98 @@ void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
     juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
 }
 
+// Éditeur des filtres par voie.
+void NeptuneEditor::openFilterEditor()
+{
+    if (filterEditor_ || wizard_ || modal_) return;
+    filterEditor_ = std::make_unique<FilterEditor> (palette_, tr_);
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    filterEditor_->onGestureBegin = [safe] { if (safe != nullptr) safe->processor_.uiBeginGesture(); };
+    filterEditor_->onGestureEnd = [safe] { if (safe != nullptr) safe->processor_.uiEndGesture(); };
+    filterEditor_->onUndo = [safe] { if (safe != nullptr) safe->processor_.uiUndo(); };
+    filterEditor_->onRedo = [safe] { if (safe != nullptr) safe->processor_.uiRedo(); };
+    filterEditor_->onClose = [safe]
+    {
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeFilterEditor(); });
+    };
+    filterEditor_->onDefaultChanged = [safe] (const neptune::core::FilterBlock& b)
+    {
+        if (safe == nullptr) return;
+        auto d = safe->processor_.instrumentDescription();
+        d.defaultFilters = b;
+        safe->processor_.uiEditInstrument (std::move (d), "Filters", "filter");
+    };
+    filterEditor_->onZonesChanged = [safe] (bool overrideOn, const neptune::core::FilterBlock& b)
+    {
+        if (safe == nullptr) return;
+        auto d = safe->processor_.instrumentDescription();
+        for (const int r : safe->zoneTable_->selectedRows())
+        {
+            if (r < 0 || r >= static_cast<int> (d.zones.size())) continue;
+            auto& z = d.zones[static_cast<std::size_t> (r)];
+            z.filterOverride = overrideOn;
+            if (overrideOn) z.filters = b;
+        }
+        safe->processor_.uiEditInstrument (std::move (d), "Filters", "filter");
+    };
+    filterEditor_->onParam = [safe] (int index, double plain, int phase)
+    {
+        if (safe == nullptr) return;
+        using namespace neptune::core;
+        const ParamId ids[4] = { sampler::filter1Cutoff, sampler::filter1Resonance, sampler::filter2Cutoff, sampler::filter2Resonance };
+        const ParamId id = ids[juce::jlimit (0, 3, index)];
+        if (phase == 0) safe->processor_.uiBeginEdit (id);
+        else if (phase == 2) safe->processor_.uiEndEdit (id);
+        else if (const auto* spec = safe->processor_.parameters().find (id))
+            safe->processor_.uiSetNormalised (id, spec->toNormalized (plain));
+    };
+    addAndMakeVisible (*filterEditor_);
+    filterEditor_->setBounds (getLocalBounds());
+    filterEditor_->toFront (true);
+    updateFilterEditor();
+    filterEditor_->grabKeyboardFocus();
+}
+
+void NeptuneEditor::closeFilterEditor()
+{
+    filterEditor_.reset();
+    grabKeyboardFocus();
+}
+
+void NeptuneEditor::updateFilterEditor()
+{
+    if (! filterEditor_) return;
+    using namespace neptune::core;
+    const auto& ps = processor_.parameters();
+    FilterEditor::DefaultParams p;
+    p.cutoffHz[0] = ps.get (sampler::filter1Cutoff);
+    p.cutoffHz[1] = ps.get (sampler::filter2Cutoff);
+    p.resonance[0] = ps.get (sampler::filter1Resonance) / 100.0;
+    p.resonance[1] = ps.get (sampler::filter2Resonance) / 100.0;
+    const auto& d = cachedDescription_;
+    const auto sel = zoneTable_->selectedRows();
+    int count = 0;
+    bool overrideOn = false;
+    FilterBlock zoneBlock = d.defaultFilters;
+    bool first = true;
+    for (const int r : sel)
+    {
+        if (r < 0 || r >= static_cast<int> (d.zones.size())) continue;
+        const auto& z = d.zones[static_cast<std::size_t> (r)];
+        ++count;
+        if (first) { overrideOn = z.filterOverride; if (z.filterOverride) zoneBlock = z.filters; first = false; }
+    }
+    filterEditor_->setState (d.defaultFilters, p, count, overrideOn, zoneBlock);
+}
+
 // Moniteur des voix : ce qui sonne, plus (quelques instants) ce qui vient de finir ; surbrillance dans la liste et la matrice.
 void NeptuneEditor::updateVoices()
 {
+    if (! showVoices_) // moniteur éteint : rien n'est publié par le moteur, plus de surbrillance
+    {
+        if (! seenVoices_.empty()) { seenVoices_.clear(); zoneTable_->setPlayingRows ({}); matrix_->setSoundingZones ({}); }
+        return;
+    }
     neptune::core::Engine::VoiceInfo info[neptune::core::Engine::kVoiceSnapshot];
     const int n = processor_.readVoices (info, neptune::core::Engine::kVoiceSnapshot);
     const auto now = juce::Time::getMillisecondCounter();
@@ -492,7 +600,6 @@ void NeptuneEditor::updateVoices()
     zoneTable_->setPlayingRows (sounding);
     matrix_->setSoundingZones (sounding);
 
-    if (! showVoices_) return;
     const auto& d = cachedDescription_;
     int held = 0, releasing = 0, fading = 0;
     std::vector<VoicesView::Row> rows;
@@ -770,6 +877,7 @@ void NeptuneEditor::updateViewVisibility()
     envelopeEditor_->setVisible (mapping && ! showVoices_);
     voicesView_->setVisible (mapping && showVoices_);
     voicesButton_.setVisible (mapping);
+    filtersButton_.setVisible (mapping);
     importButton_.setVisible (mapping);
     removeButton_.setVisible (mapping);
     selectionLabel_.setVisible (mapping);
@@ -836,6 +944,7 @@ void NeptuneEditor::timerCallback()
     updateUndoButtons();
     updateSamplerControls();
     updateVoices();
+    updateFilterEditor();
     repaint();
 }
 
@@ -866,6 +975,7 @@ void NeptuneEditor::resized()
     // Vue Mapping : chargement, import, état, mode, note racine en haut ; à gauche la liste des zones (rétractable) et le
     // panneau « Chargé en mémoire » ; au centre la matrice puis l'enveloppe ; les potards en bas.
     viewButton_.setBounds (getWidth() - 32 - 110, 32, 110, 36);
+    panicButton_.setBounds (getWidth() - 32 - 110 - 8 - 150, 32, 150, 36);
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
@@ -873,6 +983,7 @@ void NeptuneEditor::resized()
         modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
         listToggleButton_.setBounds (r.removeFromLeft (150).reduced (2));
         voicesButton_.setBounds (r.removeFromLeft (140).reduced (2));
+        filtersButton_.setBounds (r.removeFromLeft (110).reduced (2));
         statusLabel_.setBounds (r);
         auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));
@@ -913,6 +1024,7 @@ void NeptuneEditor::resized()
         voicesView_->setBounds (envelopeEditor_->getBounds());
     }
     if (wizard_) wizard_->setBounds (getLocalBounds());
+    if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {
@@ -921,8 +1033,8 @@ void NeptuneEditor::resized()
         int x = 32;
         for (auto* k : knobs_)
         {
-            k->setBounds (x + (140 - knobSide) / 2, top + 20, knobSide, knobSide);
-            x += 140;
+            k->setBounds (x + (kKnobCell - knobSide) / 2, top + 20, knobSide, knobSide);
+            x += kKnobCell;
         }
         const int btnY = top + 20 + (knobSide - 44) / 2;
         redoButton_.setBounds (getWidth() - 32 - 110, btnY, 110, 44);
@@ -1038,7 +1150,7 @@ void NeptuneEditor::paint (juce::Graphics& g)
         for (auto* k : knobs_)
         {
             const auto b = k->getBounds();
-            const auto cell = b.withX (b.getCentreX() - 70).withWidth (140);
+            const auto cell = b.withX (b.getCentreX() - kKnobCell / 2).withWidth (kKnobCell);
             g.setColour (colour (Token::TextDim));
             g.drawText (juce::String::fromUTF8 (ps2.find (k->paramId())->name.c_str()), cell.withY (b.getY() - 20).withHeight (18),
                         juce::Justification::centred);

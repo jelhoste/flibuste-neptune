@@ -76,6 +76,7 @@ ZoneDescription sanitised (ZoneDescription z)
     if (z.group.size() > 128) z.group.resize (128);
     z.chokeCuts = std::clamp (z.chokeCuts, 0, maxChokeGroup);
     z.chokeCutBy = std::clamp (z.chokeCutBy, 0, maxChokeGroup);
+    z.filters = sanitised (std::move (z.filters));
     if (z.onRelease) z.trigger = TriggerCondition::Always; // la condition ne concerne que les zones d'attaque
     if (z.loopStart < 0) z.loopStart = 0;
     if (z.loopEnd >= 0 && z.loopEnd <= z.loopStart) z.loopEnd = -1; // incohérent : tout le fichier
@@ -94,6 +95,37 @@ nlohmann::json segmentToJson (const EnvelopeSegment& s, bool withCurve)
         o["shape"] = s.curve.shape;
         o["db"] = s.curve.db;
     }
+    return o;
+}
+
+const char* filterModeName (FilterMode m) { return m == FilterMode::HighPass ? "high_pass" : m == FilterMode::BandPass ? "band_pass" : m == FilterMode::Notch ? "notch" : "low_pass"; }
+
+nlohmann::json envelopeToJson (const EnvelopeDescription& e);
+
+nlohmann::json filterToJson (const FilterSettings& f)
+{
+    nlohmann::json o;
+    o["on"] = f.on;
+    o["model"] = f.model == FilterModel::Ladder ? "ladder" : "svf";
+    o["mode"] = filterModeName (f.mode);
+    o["slope"] = f.slopeDb;
+    o["cutoff_hz"] = f.cutoffHz;
+    o["resonance"] = f.resonance;
+    o["key_track"] = f.keyTrack;
+    o["velocity_octaves"] = f.velocityOctaves;
+    o["env_depth_octaves"] = f.envDepthOctaves;
+    o["drive"] = f.drive;
+    o["envelope"] = envelopeToJson (f.env);
+    return o;
+}
+
+nlohmann::json filterBlockToJson (const FilterBlock& b)
+{
+    nlohmann::json o;
+    o["filter1"] = filterToJson (b.filter[0]);
+    o["filter2"] = filterToJson (b.filter[1]);
+    o["parallel"] = b.parallel;
+    o["balance"] = b.balance;
     return o;
 }
 
@@ -166,6 +198,7 @@ std::string toJson (const InstrumentDescription& d)
         if (z.trigger != TriggerCondition::Always) o["trigger"] = toString (z.trigger);
         if (z.chokeCuts != 0) o["choke_cuts"] = z.chokeCuts;
         if (z.chokeCutBy != 0) o["choke_cut_by"] = z.chokeCutBy;
+        if (z.filterOverride) o["filters"] = filterBlockToJson (z.filters);
         zones.push_back (std::move (o));
     }
     nlohmann::json doc;
@@ -191,6 +224,7 @@ std::string toJson (const InstrumentDescription& d)
         c["points"] = std::move (pts);
         doc["velocity_curve"] = std::move (c);
     }
+    if (! (d.defaultFilters == FilterBlock {})) doc["default_filters"] = filterBlockToJson (d.defaultFilters);
     if (d.streamFromDisk) doc["stream_from_disk"] = true;
     if (d.preloadKB != InstrumentDescription::defaultPreloadKB) doc["preload_kb"] = d.preloadKB;
     doc["zones"] = std::move (zones);
@@ -213,6 +247,39 @@ std::int64_t readI64 (const nlohmann::json& o, const char* k, std::int64_t def)
 {
     const auto it = o.find (k);
     return it != o.end() && it->is_number_integer() ? it->get<std::int64_t>() : def;
+}
+
+FilterSettings filterFromJson (const nlohmann::json& o)
+{
+    FilterSettings f;
+    if (! o.is_object()) return f;
+    if (const auto it = o.find ("on"); it != o.end() && it->is_boolean()) f.on = it->get<bool>();
+    if (const auto it = o.find ("model"); it != o.end() && it->is_string() && it->get<std::string>() == "ladder") f.model = FilterModel::Ladder;
+    if (const auto it = o.find ("mode"); it != o.end() && it->is_string())
+    {
+        const auto m = it->get<std::string>();
+        f.mode = m == "high_pass" ? FilterMode::HighPass : m == "band_pass" ? FilterMode::BandPass : m == "notch" ? FilterMode::Notch : FilterMode::LowPass;
+    }
+    f.slopeDb = readInt (o, "slope", 12);
+    f.cutoffHz = readNum (o, "cutoff_hz", f.cutoffHz);
+    f.resonance = readNum (o, "resonance", 0.0);
+    f.keyTrack = readNum (o, "key_track", 0.0);
+    f.velocityOctaves = readNum (o, "velocity_octaves", 0.0);
+    f.envDepthOctaves = readNum (o, "env_depth_octaves", 0.0);
+    f.drive = readNum (o, "drive", 0.0);
+    f.env = envelopeFromJson (o);
+    return sanitised (std::move (f));
+}
+
+FilterBlock filterBlockFromJson (const nlohmann::json& o)
+{
+    FilterBlock b;
+    if (! o.is_object()) return b;
+    if (const auto it = o.find ("filter1"); it != o.end()) b.filter[0] = filterFromJson (*it);
+    if (const auto it = o.find ("filter2"); it != o.end()) b.filter[1] = filterFromJson (*it);
+    if (const auto it = o.find ("parallel"); it != o.end() && it->is_boolean()) b.parallel = it->get<bool>();
+    b.balance = readNum (o, "balance", 0.5);
+    return sanitised (std::move (b));
 }
 
 ZoneDescription zoneFromJson (const nlohmann::json& o)
@@ -238,6 +305,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
         if (it->get<std::string>() == "first") z.trigger = TriggerCondition::First;
         else if (it->get<std::string>() == "legato") z.trigger = TriggerCondition::Legato;
     }
+    if (const auto it = o.find ("filters"); it != o.end() && it->is_object()) { z.filterOverride = true; z.filters = filterBlockFromJson (*it); }
     z.chokeCuts = readInt (o, "choke_cuts", 0);
     z.chokeCutBy = readInt (o, "choke_cut_by", 0);
     return sanitised (std::move (z));
@@ -279,6 +347,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
                     d.velocityCurve.points.push_back ({ p[0].get<double>(), p[1].get<double>() });
         d.velocityCurve = sanitised (d.velocityCurve);
     }
+    if (const auto m = doc.find ("default_filters"); m != doc.end() && m->is_object()) d.defaultFilters = filterBlockFromJson (*m);
     if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
     d.preloadKB = std::clamp (readInt (doc, "preload_kb", InstrumentDescription::defaultPreloadKB),
                               InstrumentDescription::minPreloadKB, InstrumentDescription::maxPreloadKB);
@@ -505,6 +574,24 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     SampleCache localCache;
     SampleCache& cache = externalCache != nullptr ? *externalCache : localCache;
     const std::vector<bool> mask = loadedZones (description);
+    // Filtres : un seul exemplaire des tables pour toutes les zones qui héritent du réglage d'instrument.
+    auto makeFilters = [] (const FilterBlock& block, bool fromParams) -> std::shared_ptr<const FilterRuntimeBlock>
+    {
+        const FilterBlock b = sanitised (block);
+        if (! b.anyOn()) return nullptr;
+        auto rt = std::make_shared<FilterRuntimeBlock>();
+        for (int i = 0; i < 2; ++i)
+        {
+            rt->settings[static_cast<std::size_t> (i)] = b.filter[static_cast<std::size_t> (i)];
+            rt->env[static_cast<std::size_t> (i)] = EnvelopeRuntime (b.filter[static_cast<std::size_t> (i)].env);
+            rt->fromParams[static_cast<std::size_t> (i)] = fromParams;
+        }
+        rt->parallel = b.parallel;
+        rt->balance = static_cast<float> (b.balance);
+        rt->anyOn = true;
+        return rt;
+    };
+    const auto defaultFilters = makeFilters (description.defaultFilters, true);
     int done = 0;
     const int total = static_cast<int> (std::count (mask.begin(), mask.end(), true));
     // Besoin en mémoire par fichier (streaming) : le maximum des zones qui l'utilisent. -1 = fichier entier.
@@ -571,6 +658,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.roundRobin = zd.roundRobin;
         z.onRelease = zd.onRelease;
         z.sourceIndex = static_cast<int> (zi);
+        z.filters = zd.filterOverride ? makeFilters (zd.filters, false) : defaultFilters;
         z.trigger = zd.trigger;
         z.chokeCuts = zd.chokeCuts;
         z.chokeCutBy = zd.chokeCutBy;

@@ -7,6 +7,7 @@
 #include "PolyphonyPanel.h"
 #include "ChokePanel.h"
 #include "VoicesView.h"
+#include "FilterEditor.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -55,11 +56,17 @@ private:
     juce::TextButton listToggleButton_;
     // Moniteur des voix (débogage) : remplace l'enveloppe dans la zone en bas à droite quand il est affiché
     std::unique_ptr<VoicesView> voicesView_;
-    juce::TextButton voicesButton_;
+    juce::TextButton voicesButton_, panicButton_;
     bool showVoices_ = false;
     struct SeenVoice { neptune::core::Engine::VoiceInfo info; juce::uint32 lastSeen = 0; bool present = false; };
     std::map<std::uint64_t, SeenVoice> seenVoices_;
     void updateVoices();
+    // Éditeur des filtres par voie (superposé, comme l'assistant d'import)
+    std::unique_ptr<FilterEditor> filterEditor_;
+    juce::TextButton filtersButton_;
+    void openFilterEditor();
+    void closeFilterEditor();
+    void updateFilterEditor();
     // Déclenchement et choke des zones sélectionnées
     juce::Label triggerLabel_, chokeLabel_;
     juce::ComboBox triggerBox_, chokeBox_;

@@ -32,6 +32,7 @@ target_sources(Neptune PRIVATE
   src/PolyphonyPanel.cpp
   src/ChokePanel.cpp
   src/VoicesView.cpp
+  src/FilterEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

@@ -29,6 +29,10 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
     gainIndex_ = parameters->indexOf (sampler::gain);
     tuneSemiIndex_ = parameters->indexOf (sampler::tuneSemitones);
     tuneCentsIndex_ = parameters->indexOf (sampler::tuneCents);
+    filterIndex_[0] = parameters->indexOf (sampler::filter1Cutoff);
+    filterIndex_[1] = parameters->indexOf (sampler::filter1Resonance);
+    filterIndex_[2] = parameters->indexOf (sampler::filter2Cutoff);
+    filterIndex_[3] = parameters->indexOf (sampler::filter2Resonance);
 }
 
 void Engine::noteOn (int channel, int key, float velocity) noexcept
@@ -93,6 +97,8 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
             case UiEvent::Type::PreviewZone: voices_.previewZone (e.key); break;
             case UiEvent::Type::PreviewRelease: voices_.releasePreview(); break;
             case UiEvent::Type::PreviewStop: voices_.stopPreview(); break;
+            case UiEvent::Type::Panic: panic(); break;
+            case UiEvent::Type::ReleaseAll: releaseAll(); break;
         }
         uiTail_.store (tail + 1, std::memory_order_release);
     }
@@ -107,6 +113,16 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         if (tuneCentsIndex_ != ParameterSet::npos) cents += params_->getAt (tuneCentsIndex_);
     }
 
+    if (params_ != nullptr) // coupure et résonance des filtres hérités de l'instrument (automatisables)
+    {
+        SamplerVoices::FilterParams fp;
+        if (filterIndex_[0] != ParameterSet::npos) fp.cutoffHz[0] = params_->getAt (filterIndex_[0]);
+        if (filterIndex_[1] != ParameterSet::npos) fp.resonance[0] = params_->getAt (filterIndex_[1]) / 100.0;
+        if (filterIndex_[2] != ParameterSet::npos) fp.cutoffHz[1] = params_->getAt (filterIndex_[2]);
+        if (filterIndex_[3] != ParameterSet::npos) fp.resonance[1] = params_->getAt (filterIndex_[3]) / 100.0;
+        voices_.setFilterParams (fp);
+    }
+
     float* right = (numChannels >= 2 && out[1] != nullptr) ? out[1] : nullptr;
     voices_.render (out[0], right, numFrames, lastGain_, gain, cents);
     lastGain_ = gain;
@@ -115,6 +131,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
 
 void Engine::publishVoices() noexcept
 {
+    if (! voiceMonitor_.load (std::memory_order_relaxed)) return; // moniteur éteint : aucun travail
     const auto seq = voiceSeq_.load (std::memory_order_relaxed);
     voiceSeq_.store (seq + 1, std::memory_order_relaxed);
     std::atomic_thread_fence (std::memory_order_release);
