@@ -87,10 +87,12 @@ float dbOf (float lin) { return lin <= 1e-5f ? -100.0f : 20.0f * std::log10 (lin
 class RoutingPanel : public juce::Component
 {
 public:
-    RoutingPanel (NeptuneProcessor& p, const theme::Palette& palette, const i18n::Translator& tr, bool isBus, int index)
-        : proc_ (p), palette_ (palette), tr_ (tr), isBus_ (isBus), index_ (index)
+    // kind : 0 piste, 1 bus, 2 piste parallèle
+    RoutingPanel (NeptuneProcessor& p, const theme::Palette& palette, const i18n::Translator& tr, int kind, int index)
+        : proc_ (p), palette_ (palette), tr_ (tr), isBus_ (kind == 1), isPar_ (kind == 2), index_ (index)
     {
-        s_ = isBus ? p.busSettings (index) : p.trackSettings (index);
+        const bool isBus = isBus_;
+        s_ = isBus ? p.busSettings (index) : isPar_ ? p.parallelSettings (index).strip : p.trackSettings (index);
         auto text = [this] (const char* k) { return u8 (std::string (tr_.tr (k))); };
         auto label = [this] (juce::Label& l, const juce::String& t)
         {
@@ -98,7 +100,7 @@ public:
             l.setColour (juce::Label::textColourId, colour (Token::Text));
             addAndMakeVisible (l);
         };
-        label (mainLabel_, text ("mix.main_out"));
+        label (mainLabel_, text (isPar_ ? "mix.sum_parent_title" : "mix.main_out"));
         label (directLabel_, text ("mix.direct_out"));
         label (panLabel_, text ("mix.pan_mode"));
         mainBox_.addItem ("Master", 1);
@@ -110,7 +112,8 @@ public:
         mainBox_.setSelectedId (s_.routing.mainDest + 1, juce::dontSendNotification);
         mainBox_.onChange = [this] { s_.routing.mainDest = mainBox_.getSelectedId() - 1; push(); };
         addAndMakeVisible (mainBox_);
-        mainOn_.setButtonText (text ("mix.main_on"));
+        mainBox_.setVisible (! isPar_);
+        mainOn_.setButtonText (text (isPar_ ? "mix.sum_parent" : "mix.main_on"));
         mainOn_.setToggleState (s_.routing.mainEnabled, juce::dontSendNotification);
         mainOn_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
         mainOn_.onClick = [this] { s_.routing.mainEnabled = mainOn_.getToggleState(); push(); };
@@ -149,6 +152,7 @@ public:
             r.tap.onChange = [this, i] { s_.sends[static_cast<std::size_t> (i)].tap = static_cast<mixer::TapPoint> (rows_[static_cast<std::size_t> (i)].tap.getSelectedId() - 1); push(); };
             addAndMakeVisible (r.tap);
             const ParamId lid = isBus_ ? mixer::busParam (index_, mixer::kBusSendLevel + static_cast<ParamId> (i))
+                              : isPar_ ? mixer::parallelParam (index_, mixer::kParSendLevel + static_cast<ParamId> (i))
                                        : probe::trackParam (index_, probe::kSendLevel + static_cast<ParamId> (i));
             r.level = std::make_unique<BoundSlider> (proc_, juce::Slider::LinearHorizontal);
             r.level->setRange (kFaderMinDb, 6.0, 0.1);
@@ -211,7 +215,13 @@ private:
     }
     void push()
     {
-        if (isBus_) proc_.uiEditBus (index_, s_, "Bus routing", "routing");
+        if (isPar_)
+        {
+            auto ps = proc_.parallelSettings (index_);
+            ps.strip = s_;
+            proc_.uiEditParallel (index_, ps, "Parallel routing", "routing");
+        }
+        else if (isBus_) proc_.uiEditBus (index_, s_, "Bus routing", "routing");
         else proc_.uiEditTrack (index_, s_, "Track routing", "routing");
     }
 
@@ -228,6 +238,7 @@ private:
     theme::Palette palette_;
     const i18n::Translator& tr_;
     bool isBus_;
+    bool isPar_ = false;
     int index_;
     mixer::StripSettings s_;
     juce::Label mainLabel_, directLabel_, panLabel_;
@@ -375,12 +386,14 @@ private:
 class MixerView::Strip : public juce::Component
 {
 public:
-    Strip (MixerView& owner, bool isBus, int index)
-        : owner_ (owner), isBus_ (isBus), index_ (index),
+    // kind : 0 piste, 1 bus, 2 piste parallèle
+    Strip (MixerView& owner, int kind, int index)
+        : owner_ (owner), isBus_ (kind == 1), isPar_ (kind == 2), index_ (index),
           pan_ (owner.processor_, juce::Slider::LinearHorizontal), fader_ (owner.processor_, juce::Slider::LinearVertical),
-          mute_ (owner.processor_, "M"), solo_ (owner.processor_, "S"),
-          inserts_ (owner, isBus ? NeptuneProcessor::StripKind::Bus : NeptuneProcessor::StripKind::Track, index)
+          mute_ (owner.processor_, "M"), solo_ (owner.processor_, "S"), parallel_ (owner.processor_, "P"),
+          inserts_ (owner, kind == 1 ? NeptuneProcessor::StripKind::Bus : kind == 2 ? NeptuneProcessor::StripKind::Parallel : NeptuneProcessor::StripKind::Track, index)
     {
+        const bool isBus = isBus_;
         auto& proc = owner.processor_;
         addAndMakeVisible (inserts_);
         name_.setJustificationType (juce::Justification::centred);
@@ -396,7 +409,29 @@ public:
         name_.addMouseListener (this, false);
         addAndMakeVisible (name_);
 
-        if (! isBus)
+        if (isPar_)
+        {
+            // en-tête : la parenté, le repliement des petites-filles et le retrait ; en dessous, le point de captation
+            typeButton_.setEnabled (false);
+            addAndMakeVisible (typeButton_);
+            removeButton_.setButtonText (juce::String::fromUTF8 ("\xc3\x97"));
+            removeButton_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.remove_parallel_tip"))));
+            removeButton_.onClick = [this] { owner_.requestRemoveParallel (index_); };
+            addAndMakeVisible (removeButton_);
+            foldButton_.onClick = [this] { owner_.toggleFold (index_); };
+            addAndMakeVisible (foldButton_);
+            const char* taps[4] = { "mix.tap_pre_insert", "mix.tap_pre_fader", "mix.tap_post_fader", "mix.tap_post_pan" };
+            for (int i = 0; i < 4; ++i) tapBox_.addItem (u8 (std::string (owner.tr_.tr (taps[i]))), i + 1);
+            tapBox_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.capture_tip"))));
+            tapBox_.onChange = [this]
+            {
+                auto ps = owner_.processor_.parallelSettings (index_);
+                ps.tap = static_cast<mixer::TapPoint> (tapBox_.getSelectedId() - 1);
+                owner_.processor_.uiEditParallel (index_, ps, "Parallel capture", "capture");
+            };
+            addAndMakeVisible (tapBox_);
+        }
+        if (! isBus && ! isPar_)
         {
             typeButton_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.type_tip"))));
             typeButton_.onClick = [this] { showTypeMenu(); };
@@ -418,7 +453,7 @@ public:
         routing_.setButtonText (juce::String::fromUTF8 (std::string (owner.tr_.tr ("mix.routing_short")).c_str()));
         routing_.onClick = [this]
         {
-            auto panel = std::make_unique<RoutingPanel> (owner_.processor_, owner_.palette_, owner_.tr_, isBus_, index_);
+            auto panel = std::make_unique<RoutingPanel> (owner_.processor_, owner_.palette_, owner_.tr_, isBus_ ? 1 : isPar_ ? 2 : 0, index_);
             panelRef_ = panel.get();
             juce::CallOutBox::launchAsynchronously (std::move (panel), routing_.getScreenBounds(), nullptr);
         };
@@ -427,10 +462,10 @@ public:
         pan_.setRange (-100.0, 100.0, 1.0);
         fader_.setRange (kFaderMinDb, kFaderMaxDb, 0.1);
         fader_.setSkewFactorFromMidPoint (-24.0);
-        const ParamId pv = isBus ? mixer::busParam (index, mixer::kBusVolume) : probe::trackParam (index, probe::kVolume);
-        const ParamId pp = isBus ? mixer::busParam (index, mixer::kBusPan) : probe::trackParam (index, probe::kPan);
-        const ParamId pm = isBus ? mixer::busParam (index, mixer::kBusMute) : probe::trackParam (index, probe::kMute);
-        const ParamId ps = isBus ? mixer::busParam (index, mixer::kBusSolo) : probe::trackParam (index, probe::kSolo);
+        const ParamId pv = isBus ? mixer::busParam (index, mixer::kBusVolume) : isPar_ ? mixer::parallelParam (index, mixer::kParVolume) : probe::trackParam (index, probe::kVolume);
+        const ParamId pp = isBus ? mixer::busParam (index, mixer::kBusPan) : isPar_ ? mixer::parallelParam (index, mixer::kParPan) : probe::trackParam (index, probe::kPan);
+        const ParamId pm = isBus ? mixer::busParam (index, mixer::kBusMute) : isPar_ ? mixer::parallelParam (index, mixer::kParMute) : probe::trackParam (index, probe::kMute);
+        const ParamId ps = isBus ? mixer::busParam (index, mixer::kBusSolo) : isPar_ ? mixer::parallelParam (index, mixer::kParSolo) : probe::trackParam (index, probe::kSolo);
         pan_.bind (pp, 0.0);
         fader_.bind (pv, 0.0);
         addAndMakeVisible (pan_);
@@ -444,32 +479,52 @@ public:
         solo_.onToggle = [this, &proc] (bool shift)
         {
             const bool turnOn = proc.parameters().get (solo_.id) < 0.5;
-            if (shift && turnOn) owner_.exclusiveSolo (isBus_, index_); // solo exclusif : annule les autres solos
+            if (shift && turnOn) owner_.exclusiveSolo (isBus_ ? 1 : isPar_ ? 2 : 0, index_); // solo exclusif : annule les autres solos
             solo_.setValueFromUi (turnOn);
         };
         mute_.setColour (juce::TextButton::buttonOnColourId, owner.colour (Token::KnobHot));
         solo_.setColour (juce::TextButton::buttonOnColourId, owner.colour (Token::Accent));
         addAndMakeVisible (mute_);
         addAndMakeVisible (solo_);
+        if (! isBus_)
+        {
+            // « P » : crée une piste parallèle à droite de cette bande, dans sa chaîne
+            parallel_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.add_parallel_tip"))));
+            parallel_.onToggle = [this] (bool) { owner_.requestAddParallel (isPar_ ? mixer::numTracks + index_ : index_); };
+            addAndMakeVisible (parallel_);
+        }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (! isBus_ && owner_.onSelectTrack && e.eventComponent != &fader_ && e.eventComponent != &pan_) owner_.onSelectTrack (index_);
+        if (! isBus_ && ! isPar_ && owner_.onSelectTrack && e.eventComponent != &fader_ && e.eventComponent != &pan_) owner_.onSelectTrack (index_);
     }
 
     void refresh (bool selected)
     {
         selected_ = selected;
-        if (! isBus_)
+        if (isPar_)
+        {
+            const auto ps = owner_.processor_.parallelSettings (index_);
+            const juce::String parent = ps.parent < mixer::numTracks ? juce::String (ps.parent + 1) : "P" + juce::String (ps.parent - mixer::numTracks + 1);
+            typeButton_.setButtonText ("P" + juce::String (index_ + 1) + " <" + parent);
+            tapBox_.setSelectedId (static_cast<int> (ps.tap) + 1, juce::dontSendNotification);
+            int kids = 0;
+            for (const int c : owner_.processor_.parallelChildren (mixer::numTracks + index_)) kids += 1 + static_cast<int> (owner_.processor_.parallelChildren (mixer::numTracks + c).size());
+            hasFold_ = owner_.processor_.parallelDepth (index_) >= 1 && ! owner_.processor_.parallelChildren (mixer::numTracks + index_).empty();
+            foldButton_.setButtonText ((owner_.isExpanded (index_) ? juce::String::fromUTF8 ("\xe2\x96\xbe") : juce::String::fromUTF8 ("\xe2\x96\xb8")) + juce::String (kids));
+            foldButton_.setVisible (hasFold_);
+            depth_ = owner_.processor_.parallelDepth (index_);
+        }
+        if (! isBus_ && ! isPar_)
         {
             const bool synth = owner_.processor_.trackType (index_) == TrackType::Synth;
             typeButton_.setButtonText (u8 (std::string (owner_.tr_.tr (synth ? "mix.type_short_synth" : "mix.type_short_sampler"))));
         }
         const auto s = settings();
-        const juce::String fallback = (isBus_ ? "Bus " : "") + juce::String (index_ + 1);
+        const juce::String fallback = (isBus_ ? "Bus " : isPar_ ? "P" : "") + juce::String (index_ + 1);
         name_.setText (s.name.empty() ? fallback : u8 (s.name), juce::dontSendNotification);
-        if (! isBus_) midi_.setSelectedId (s.midiChannel + 1, juce::dontSendNotification);
+        if (! isBus_ && ! isPar_) midi_.setSelectedId (s.midiChannel + 1, juce::dontSendNotification);
         colourIndex_ = s.color;
         repaint();
     }
@@ -499,16 +554,28 @@ public:
         if (! isBus_)
         {
             removeButton_.setBounds (head.removeFromRight (20).reduced (0, 1));
+            if (isPar_ && hasFold_) foldButton_.setBounds (head.removeFromRight (26).reduced (0, 1));
             typeButton_.setBounds (head.reduced (0, 1));
         }
         name_.setBounds (r.removeFromTop (18));
-        if (! isBus_) midi_.setBounds (r.removeFromTop (22).reduced (0, 1));
+        if (isPar_) tapBox_.setBounds (r.removeFromTop (22).reduced (0, 1));
+        else if (! isBus_) midi_.setBounds (r.removeFromTop (22).reduced (0, 1));
         routing_.setBounds (r.removeFromTop (22).reduced (0, 1));
         inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
         pan_.setBounds (r.removeFromTop (20));
         auto bottom = r.removeFromBottom (24);
-        mute_.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).reduced (1));
-        solo_.setBounds (bottom.reduced (1));
+        if (isBus_)
+        {
+            mute_.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).reduced (1));
+            solo_.setBounds (bottom.reduced (1));
+        }
+        else
+        {
+            const int w = bottom.getWidth() / 3;
+            mute_.setBounds (bottom.removeFromLeft (w).reduced (1));
+            solo_.setBounds (bottom.removeFromLeft (w).reduced (1));
+            parallel_.setBounds (bottom.reduced (1));
+        }
         r.removeFromBottom (16); // valeur en dB
         faderArea_ = r;
         fader_.setBounds (r.removeFromLeft (r.getWidth() - 14));
@@ -516,10 +583,15 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.setColour (owner_.colour (selected_ ? Token::Nav1 : Token::BgCard));
+        g.setColour (owner_.colour (selected_ ? Token::Nav1 : (isPar_ ? Token::BgApp : Token::BgCard)));
         g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f);
         g.setColour (owner_.colour (selected_ ? Token::Accent : Token::Border));
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, selected_ ? 2.0f : 1.0f);
+        if (isPar_) // une piste parallèle : bord d'accent à gauche, plus marqué en profondeur
+        {
+            g.setColour (owner_.colour (Token::Accent).withAlpha (depth_ >= 2 ? 0.55f : 1.0f));
+            g.fillRect (0, 6, 3, getHeight() - 12);
+        }
         if (isBus_) // le haut d'une bande de bus : l'étiquette que les pistes remplacent par leur générateur
         {
             g.setColour (owner_.colour (Token::TextDim));
@@ -570,26 +642,40 @@ private:
     }
 
     juce::Rectangle<int> meterArea() const { return { getWidth() - 16, faderArea_.getY(), 12, faderArea_.getHeight() }; }
-    mixer::StripSettings settings() const { return isBus_ ? owner_.processor_.busSettings (index_) : owner_.processor_.trackSettings (index_); }
+    mixer::StripSettings settings() const
+    {
+        if (isPar_) return owner_.processor_.parallelSettings (index_).strip;
+        return isBus_ ? owner_.processor_.busSettings (index_) : owner_.processor_.trackSettings (index_);
+    }
     void commit (mixer::StripSettings s)
     {
-        if (isBus_) owner_.processor_.uiEditBus (index_, std::move (s), "Bus settings", "strip");
+        if (isPar_)
+        {
+            auto ps = owner_.processor_.parallelSettings (index_);
+            ps.strip = std::move (s);
+            owner_.processor_.uiEditParallel (index_, std::move (ps), "Parallel settings", "strip");
+        }
+        else if (isBus_) owner_.processor_.uiEditBus (index_, std::move (s), "Bus settings", "strip");
         else owner_.processor_.uiEditTrack (index_, std::move (s), "Track settings", "strip");
     }
     static juce::String u8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
     MixerView& owner_;
     bool isBus_;
+    bool isPar_ = false;
     int index_;
     bool selected_ = false;
+    bool hasFold_ = false;
+    int depth_ = 0;
     int colourIndex_ = 0;
     float peakL_ = 0.0f, peakR_ = 0.0f;
     juce::Label name_;
     juce::ComboBox midi_;
-    juce::TextButton typeButton_, removeButton_;
+    juce::TextButton typeButton_, removeButton_, foldButton_;
+    juce::ComboBox tapBox_;
     juce::TextButton routing_;
     BoundSlider pan_, fader_;
-    BoundToggle mute_, solo_;
+    BoundToggle mute_, solo_, parallel_;
     juce::Rectangle<int> faderArea_;
     juce::Component::SafePointer<RoutingPanel> panelRef_;
     InsertList inserts_;
@@ -742,12 +828,21 @@ MixerView::MixerView (NeptuneProcessor& p, const theme::Palette& palette, const 
 {
     for (int t = 0; t < mixer::numTracks; ++t)
     {
-        tracks_[static_cast<std::size_t> (t)] = std::make_unique<Strip> (*this, false, t);
-        addAndMakeVisible (*tracks_[static_cast<std::size_t> (t)]);
+        tracks_[static_cast<std::size_t> (t)] = std::make_unique<Strip> (*this, 0, t);
+        trackRow_.addAndMakeVisible (*tracks_[static_cast<std::size_t> (t)]);
     }
+    for (int q = 0; q < mixer::numParallels; ++q)
+    {
+        parallels_[static_cast<std::size_t> (q)] = std::make_unique<Strip> (*this, 2, q);
+        trackRow_.addChildComponent (*parallels_[static_cast<std::size_t> (q)]);
+    }
+    trackViewport_.setViewedComponent (&trackRow_, false);
+    trackViewport_.setScrollBarsShown (false, true);
+    trackViewport_.setScrollBarThickness (12);
+    addAndMakeVisible (trackViewport_);
     for (int b = 0; b < mixer::numBuses; ++b)
     {
-        buses_[static_cast<std::size_t> (b)] = std::make_unique<Strip> (*this, true, b);
+        buses_[static_cast<std::size_t> (b)] = std::make_unique<Strip> (*this, 1, b);
         addAndMakeVisible (*buses_[static_cast<std::size_t> (b)]);
     }
     master_ = std::make_unique<MasterStrip> (*this);
@@ -757,7 +852,7 @@ MixerView::MixerView (NeptuneProcessor& p, const theme::Palette& palette, const 
     {
         if (processor_.uiAddTrack() >= 0) refresh();
     };
-    addAndMakeVisible (addTrack_);
+    trackRow_.addAndMakeVisible (addTrack_);
     tracksTitle_.setText (juce::String::fromUTF8 (std::string (tr.tr ("mix.tracks")).c_str()), juce::dontSendNotification);
     busesTitle_.setText (juce::String::fromUTF8 (std::string (tr.tr ("mix.buses")).c_str()), juce::dontSendNotification);
     for (auto* l : { &tracksTitle_, &busesTitle_ })
@@ -782,27 +877,58 @@ void MixerView::resized()
     layoutTracks();
 }
 
-// Pistes actives packées à gauche, le bouton « + Piste » juste après la dernière ; bus et master à leur place.
+// Parallèles visibles sous un parent : les filles d'une parallèle repliée sont masquées (elles restent actives dans le moteur).
+void MixerView::appendParallels (int parentId, std::vector<int>& out) const
+{
+    for (const int p : processor_.parallelChildren (parentId))
+    {
+        out.push_back (p);
+        if (expanded_[static_cast<std::size_t> (p)]) appendParallels (mixer::numTracks + p, out);
+    }
+}
+
+void MixerView::toggleFold (int p)
+{
+    expanded_[static_cast<std::size_t> (p)] = ! expanded_[static_cast<std::size_t> (p)];
+    refresh();
+}
+
+// Chaque piste suivie de ses pistes parallèles (à sa droite), le bouton « + Piste » à la fin ; bus et master à leur place.
+// La rangée des pistes défile horizontalement si elle dépasse.
 void MixerView::layoutTracks()
 {
     auto r = getLocalBounds();
-    stripHeight_ = juce::jlimit (kMinStripH, kMaxStripH, (getHeight() - 40) / 2); // deux rangées de bandes + leurs titres
+    const int scrollbar = 12;
+    stripHeight_ = juce::jlimit (kMinStripH, kMaxStripH, (getHeight() - 40 - scrollbar) / 2); // deux rangées de bandes + leurs titres
     auto masterArea = r.removeFromRight (kMasterW + 6);
-    master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (stripHeight_ * 2 + 40));
+    master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (stripHeight_ * 2 + 40 + scrollbar));
     const int gap = 1;
     tracksTitle_.setBounds (r.removeFromTop (20));
     {
-        auto area = r.removeFromTop (stripHeight_);
-        int x = area.getX();
+        auto area = r.removeFromTop (stripHeight_ + scrollbar);
+        trackViewport_.setBounds (area);
+        for (auto& s : parallels_) s->setVisible (false);
+        int x = 0;
         for (int t = 0; t < mixer::numTracks; ++t)
         {
             auto& s = *tracks_[static_cast<std::size_t> (t)];
             if (! shownTracks_[static_cast<std::size_t> (t)]) continue;
-            s.setBounds (x, area.getY(), kStripW, stripHeight_);
+            s.setBounds (x, 0, kStripW, stripHeight_);
             x += kStripW + gap;
+            std::vector<int> kids;
+            appendParallels (t, kids);
+            for (const int p : kids)
+            {
+                auto& ps = *parallels_[static_cast<std::size_t> (p)];
+                ps.setBounds (x, 0, kStripW, stripHeight_);
+                ps.setVisible (true);
+                x += kStripW + gap;
+            }
         }
         addTrack_.setVisible (processor_.activeTrackCount() < mixer::numTracks);
-        addTrack_.setBounds (x + 4, area.getY() + 4, kStripW + 20, 36);
+        addTrack_.setBounds (x + 4, 4, kStripW + 20, 36);
+        const int contentW = x + kStripW + 30;
+        trackRow_.setSize (juce::jmax (contentW, area.getWidth() - 2), stripHeight_);
     }
     busesTitle_.setBounds (r.removeFromTop (20));
     {
@@ -830,9 +956,18 @@ void MixerView::refresh()
         s.setVisible (active);
         if (active) s.refresh (t == selected);
     }
+    for (int q = 0; q < mixer::numParallels; ++q)
+    {
+        const bool active = processor_.parallelActive (q);
+        if (! active) expanded_[static_cast<std::size_t> (q)] = false;
+        if (active != shownParallels_[static_cast<std::size_t> (q)]) { shownParallels_[static_cast<std::size_t> (q)] = active; layoutChanged = true; }
+        if (active) parallels_[static_cast<std::size_t> (q)]->refresh (false);
+    }
+    // un parent ou un repliement a pu changer : on recalcule la disposition à chaque rafraîchissement (peu coûteux)
     for (int b = 0; b < mixer::numBuses; ++b) buses_[static_cast<std::size_t> (b)]->refresh (false);
     master_->refresh();
-    if (layoutChanged) layoutTracks();
+    layoutTracks();
+    (void) layoutChanged;
 }
 
 void MixerView::timerCallback()
@@ -850,6 +985,13 @@ void MixerView::timerCallback()
         auto& s = *tracks_[static_cast<std::size_t> (t)];
         s.syncValues();
         s.updateMeter (processor_.trackMeter (t));
+    }
+    for (int q = 0; q < mixer::numParallels; ++q)
+    {
+        auto& s = *parallels_[static_cast<std::size_t> (q)];
+        if (! s.isVisible()) continue;
+        s.syncValues();
+        s.updateMeter (processor_.parallelMeter (q));
     }
     for (int b = 0; b < mixer::numBuses; ++b)
     {
@@ -895,8 +1037,38 @@ void MixerView::requestRemove (int track)
                                   [apply] (int result) { if (result == 1) apply(); });
 }
 
-// Solo exclusif (Maj+clic) : coupe les solos et les mutes des autres bandes du même domaine (pistes ou bus).
-void MixerView::exclusiveSolo (bool isBus, int index)
+// Ajout / retrait de pistes parallèles
+void MixerView::requestAddParallel (int parentId)
+{
+    const int p = processor_.uiAddParallel (parentId);
+    if (p >= 0)
+    {
+        if (parentId >= mixer::numTracks) expanded_[static_cast<std::size_t> (parentId - mixer::numTracks)] = true; // la nouvelle fille se voit
+        refresh();
+    }
+}
+
+void MixerView::requestRemoveParallel (int p)
+{
+    auto apply = [safe = juce::Component::SafePointer<MixerView> (this), p]
+    {
+        if (safe == nullptr) return;
+        safe->processor_.uiRemoveParallel (p);
+        safe->refresh();
+    };
+    const auto s = processor_.parallelSettings (p);
+    bool hasInserts = false;
+    for (int slot = 0; slot < mixer::numInserts; ++slot) hasInserts = hasInserts || ! processor_.insertType (NeptuneProcessor::StripKind::Parallel, p, slot).empty();
+    if (processor_.parallelChildren (mixer::numTracks + p).empty() && ! hasInserts && s.strip.name.empty()) { apply(); return; }
+    auto text = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); };
+    const auto message = juce::String::fromUTF8 (tr_.format ("mix.confirm_remove_parallel", { std::to_string (p + 1) }).c_str());
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("mix.confirm_title"),
+                                                                                message, text ("mix.continue"), text ("mix.cancel"), this),
+                                  [apply] (int result) { if (result == 1) apply(); });
+}
+
+// Solo exclusif (Maj+clic) : coupe les solos et les mutes des autres bandes du même domaine (pistes + parallèles, ou bus).
+void MixerView::exclusiveSolo (int kind, int index)
 {
     auto setParam = [this] (ParamId id, double v)
     {
@@ -906,12 +1078,13 @@ void MixerView::exclusiveSolo (bool isBus, int index)
         processor_.uiSetNormalised (id, spec->toNormalized (v));
         processor_.uiEndEdit (id);
     };
-    if (! isBus)
+    if (kind != 1)
+    {
         for (int t = 0; t < mixer::numTracks; ++t)
-        {
-            if (t == index) continue;
-            setParam (probe::trackParam (t, probe::kSolo), 0.0);
-        }
+            if (! (kind == 0 && t == index)) setParam (probe::trackParam (t, probe::kSolo), 0.0);
+        for (int q = 0; q < mixer::numParallels; ++q)
+            if (! (kind == 2 && q == index)) setParam (mixer::parallelParam (q, mixer::kParSolo), 0.0);
+    }
     else
         for (int b = 0; b < mixer::numBuses; ++b)
         {

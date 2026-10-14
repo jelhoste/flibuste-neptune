@@ -3,6 +3,7 @@
 // patch de synthé et ses réglages de bande, les bus, le master et la piste sélectionnée. Les valeurs automatisables (fader, pan, mute, solo, envois, coupure...) sont des paramètres
 // et vivent dans le jeu de paramètres, pas ici.
 #include <array>
+#include <vector>
 #include <string>
 #include <string_view>
 
@@ -30,6 +31,7 @@ struct TrackState
 struct MixerState
 {
     std::array<TrackState, mixer::numTracks> tracks;
+    std::array<mixer::ParallelSettings, mixer::numParallels> parallels;
     std::array<mixer::StripSettings, mixer::numBuses> buses;
     mixer::MasterSettings master;
     int selectedTrack = 0;
@@ -44,12 +46,22 @@ struct MixerState
     int firstInactive() const noexcept;
     // Remet une piste à l'état d'origine (inactive, Sampler, instrument vide, réglages de bande par défaut).
     void resetTrack (int track);
+    // Pistes parallèles : première libre (-1 si les 32 sont prises) ; enfants directs ; retrait en cascade (rend les indices retirés).
+    int firstInactiveParallel() const noexcept;
+    std::vector<int> parallelChildren (int parentId) const; // indices de pistes parallèles actives dont le parent direct est `parentId`
+    std::vector<int> removeParallel (int p);               // la piste et tous ses descendants, remis à l'état d'origine
+    std::vector<int> removeParallelsOf (int parentId);     // tous les descendants d'un parent (piste retirée)
+    // Profondeur d'une piste parallèle (1 : fille directe d'une piste) ; 0 si orpheline.
+    int parallelDepth (int p) const noexcept;
+    // Détache ce qui n'est plus valable (parent inactif, boucle).
+    void fixParallels();
+
     // La piste sélectionnée est toujours active (la première active si besoin).
     void fixSelection() noexcept;
 
     bool operator== (const MixerState& o) const noexcept
     {
-        return tracks == o.tracks && buses == o.buses && master == o.master && selectedTrack == o.selectedTrack;
+        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && selectedTrack == o.selectedTrack;
     }
 };
 

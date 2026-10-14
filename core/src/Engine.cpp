@@ -49,7 +49,10 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     lastMasterTrim_ = lastMasterFader_ = 1.0f;
     lastMasterPanL_ = lastMasterPanR_ = 1.0f;
     const auto n = static_cast<std::size_t> (maxBlockSize_);
-    raw_.resize (n); inserted_.resize (n); postFader_.resize (n); final_.resize (n); master_.resize (n);
+    raw_.resize (n); inserted_.resize (n); postFader_.resize (n); final_.resize (n); sum0_.resize (n); master_.resize (n);
+    levels_.resize (kParallels);
+    for (auto& l : levels_) l.resize (n);
+    for (auto& p : parallels_) { p.lastFader = 1.0f; p.lastPanL = p.lastPanR = 1.0f; }
     for (auto& b : busIn_) b.resize (n);
     // les inserts déjà posés suivent la nouvelle configuration (prepare n'est jamais concurrent du traitement audio)
     adoptInserts();
@@ -60,6 +63,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     };
     for (auto& t : tracks_) prepareInserts (t.inserts);
     for (auto& b : buses_) prepareInserts (b.inserts);
+    for (auto& p : parallels_) prepareInserts (p.inserts);
     prepareInserts (masterInserts_);
 }
 
@@ -96,6 +100,7 @@ Engine::Inserts* Engine::insertsOf (StripKind kind, int index) noexcept
     {
         case StripKind::Track: return index >= 0 && index < kTracks ? &tracks_[static_cast<std::size_t> (index)].inserts : nullptr;
         case StripKind::Bus: return index >= 0 && index < kBuses ? &buses_[static_cast<std::size_t> (index)].inserts : nullptr;
+        case StripKind::Parallel: return index >= 0 && index < kParallels ? &parallels_[static_cast<std::size_t> (index)].inserts : nullptr;
         default: return &masterInserts_;
     }
 }
@@ -118,6 +123,8 @@ void Engine::collectGarbage()
     }
     for (auto& b : buses_)
         for (auto& s : b.inserts) s.slot.collect();
+    for (auto& p : parallels_)
+        for (auto& s : p.inserts) s.slot.collect();
     for (auto& s : masterInserts_) s.slot.collect();
     insertsDirty_.store (true, std::memory_order_release); // une adoption bloquée par une file pleine est retentée
 }
@@ -128,6 +135,8 @@ void Engine::adoptInserts() noexcept
         for (auto& s : t.inserts) s.slot.adoptPending();
     for (auto& b : buses_)
         for (auto& s : b.inserts) s.slot.adoptPending();
+    for (auto& p : parallels_)
+        for (auto& s : p.inserts) s.slot.adoptPending();
     for (auto& s : masterInserts_) s.slot.adoptPending();
 }
 
@@ -141,6 +150,21 @@ void Engine::setBusSettings (int bus, const mixer::StripSettings& s) noexcept
 {
     if (bus < 0 || bus >= kBuses) return;
     buses_[static_cast<std::size_t> (bus)].config.load (mixer::sanitisedStrip (s, true, bus));
+}
+
+void Engine::setParallel (int p, bool active, int parent, mixer::TapPoint tap) noexcept
+{
+    if (p < 0 || p >= kParallels) return;
+    auto& x = parallels_[static_cast<std::size_t> (p)];
+    x.parent.store (std::clamp (parent, 0, mixer::numTracks + kParallels - 1), std::memory_order_relaxed);
+    x.tap.store (std::clamp (static_cast<int> (tap), 0, 3), std::memory_order_relaxed);
+    x.active.store (active ? 1 : 0, std::memory_order_relaxed);
+}
+
+void Engine::setParallelSettings (int p, const mixer::StripSettings& s) noexcept
+{
+    if (p < 0 || p >= kParallels) return;
+    parallels_[static_cast<std::size_t> (p)].config.load (mixer::sanitisedStrip (s, false, 0));
 }
 
 void Engine::setMasterSettings (const mixer::MasterSettings& m) noexcept
@@ -180,6 +204,16 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
             buses_[static_cast<std::size_t> (b)].inserts[static_cast<std::size_t> (s)].bypass = idx (mixer::busParam (b, mixer::kBusInsertBypass + static_cast<ParamId> (s)));
     }
     for (int s = 0; s < kInserts; ++s) masterInserts_[static_cast<std::size_t> (s)].bypass = idx (mixer::masterInsertBypassId (s));
+    for (int q = 0; q < kParallels; ++q)
+    {
+        auto& x = parallels_[static_cast<std::size_t> (q)];
+        x.idx.volume = idx (mixer::parallelParam (q, mixer::kParVolume));
+        x.idx.pan = idx (mixer::parallelParam (q, mixer::kParPan));
+        x.idx.mute = idx (mixer::parallelParam (q, mixer::kParMute));
+        x.idx.solo = idx (mixer::parallelParam (q, mixer::kParSolo));
+        for (int s = 0; s < mixer::numSends; ++s) x.idx.sendLevel[s] = idx (mixer::parallelParam (q, mixer::kParSendLevel + static_cast<ParamId> (s)));
+        for (int s = 0; s < kInserts; ++s) x.inserts[static_cast<std::size_t> (s)].bypass = idx (mixer::parallelParam (q, mixer::kParInsertBypass + static_cast<ParamId> (s)));
+    }
     masterVolume_ = idx (probe::masterVolume);
     masterPan_ = idx (probe::masterPan);
     masterMute_ = idx (probe::masterMute);
@@ -343,144 +377,248 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     publishVoices();
 }
 
+std::pair<float*, float*> Engine::channelPair (int output) const noexcept
+{
+    const int l = 2 * (output - 1), r = l + 1;
+    if (output < 1 || r >= chunkChannels_) return { nullptr, nullptr };
+    return { chunkOut_[l], chunkOut_[r] };
+}
+
+bool Engine::hasInserts (const Inserts& ins) noexcept
+{
+    for (const auto& s : ins)
+        if (s.slot.current() != nullptr) return true;
+    return false;
+}
+
+// Fait passer `buf` (en place) par les inserts d'un emplacement, dans l'ordre ; faux s'il n'y en a aucun.
+bool Engine::runInserts (Inserts& ins, Stereo& buf) noexcept
+{
+    bool any = false;
+    for (auto& s : ins)
+    {
+        auto* inst = const_cast<InsertInstance*> (s.slot.current()); // le thread audio est seul utilisateur du DSP après la remise
+        if (inst == nullptr) continue;
+        any = true;
+        inst->runner.process (buf.l.data(), buf.r.data(), chunkN_, param (s.bypass, 0.0) >= 0.5);
+    }
+    return any;
+}
+
+// Fader puis pan : `postFader` (point 2) et `fin` (point 3, le signal propre de la bande).
+void Engine::applyFaderPan (const Stereo& in, Stereo& postFader, Stereo& fin, const AtomicStrip& cfg, const ParamIndices& idx, float& lastFader,
+                            float& lastPanL, float& lastPanR, bool muted) noexcept
+{
+    using namespace mixer;
+    const int n = chunkN_;
+    const float fader = muted ? 0.0f : dbToGain (param (idx.volume, 0.0));
+    const float pan = static_cast<float> (param (idx.pan, 0.0) / 100.0);
+    float pl = 1.0f, pr = 1.0f;
+    panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), pan, pl, pr);
+    const float fStep = (fader - lastFader) / static_cast<float> (n);
+    const float plStep = (pl - lastPanL) / static_cast<float> (n);
+    const float prStep = (pr - lastPanR) / static_cast<float> (n);
+    float g = lastFader, gl = lastPanL, gr = lastPanR;
+    for (int i = 0; i < n; ++i)
+    {
+        const auto k = static_cast<std::size_t> (i);
+        const float l = in.l[k] * g, r = in.r[k] * g;
+        postFader.l[k] = l;
+        postFader.r[k] = r;
+        fin.l[k] = l * gl;
+        fin.r[k] = r * gr;
+        g += fStep; gl += plStep; gr += prStep;
+    }
+    lastFader = fader; lastPanL = pl; lastPanR = pr;
+}
+
+// Vu-mètre : crête et RMS du signal qui sort de la bande.
+void Engine::meterOf (const Stereo& out, std::atomic<float>& pkL, std::atomic<float>& pkR, std::atomic<float>& rmsL, std::atomic<float>& rmsR) noexcept
+{
+    const int n = chunkN_;
+    float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
+    for (int i = 0; i < n; ++i)
+    {
+        const float l = out.l[static_cast<std::size_t> (i)], r = out.r[static_cast<std::size_t> (i)];
+        peakL = std::max (peakL, std::abs (l)); peakR = std::max (peakR, std::abs (r));
+        sumL += l * l; sumR += r * r;
+    }
+    pkL.store (peakL, std::memory_order_relaxed);
+    pkR.store (peakR, std::memory_order_relaxed);
+    rmsL.store (std::sqrt (sumL / static_cast<float> (n)), std::memory_order_relaxed);
+    rmsR.store (std::sqrt (sumR / static_cast<float> (n)), std::memory_order_relaxed);
+}
+
+// Envois (un point de captation par envoi), sortie principale (Master ou bus) et sortie directe d'une bande. `out` : ce qui sort de la
+// bande (son signal propre + ses pistes parallèles). Pour une piste parallèle, `sumIntoParent` est vrai : la sortie principale est
+// alors la somme dans le parent, faite par l'appelant.
+void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::array<float, mixer::numSends>& lastSend, const Stereo& pre,
+                         const Stereo& post, const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent) noexcept
+{
+    using namespace mixer;
+    const int n = chunkN_;
+    for (int s = 0; s < numSends; ++s)
+    {
+        const int dest = cfg.sends[static_cast<std::size_t> (s)].destination.load (std::memory_order_relaxed);
+        const bool muted = cfg.sends[static_cast<std::size_t> (s)].mute.load (std::memory_order_relaxed) != 0;
+        const double levelDb = param (idx.sendLevel[s], -100.0);
+        const float target = (dest <= 0 || muted) ? 0.0f : dbToGain (levelDb);
+        float& last = lastSend[static_cast<std::size_t> (s)];
+        if (dest <= 0 || dest > kBuses || (isBus && dest - 1 <= busIndex) || (target == 0.0f && last == 0.0f)) { last = target; continue; }
+        const int tap = cfg.sends[static_cast<std::size_t> (s)].tap.load (std::memory_order_relaxed);
+        const Stereo& src = tap == 0 ? pre : (tap == 1 ? post : (tap == 2 ? postFader : out));
+        float spl = 1.0f, spr = 1.0f;
+        panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), cfg.sends[static_cast<std::size_t> (s)].pan.load (std::memory_order_relaxed), spl, spr);
+        Stereo& bus = busIn_[static_cast<std::size_t> (dest - 1)];
+        const float step = (target - last) / static_cast<float> (n);
+        float g = last;
+        for (int i = 0; i < n; ++i)
+        {
+            bus.l[static_cast<std::size_t> (i)] += src.l[static_cast<std::size_t> (i)] * g * spl;
+            bus.r[static_cast<std::size_t> (i)] += src.r[static_cast<std::size_t> (i)] * g * spr;
+            g += step;
+        }
+        last = target;
+        buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
+    }
+    if (! sumIntoParent && cfg.mainEnabled.load (std::memory_order_relaxed) != 0)
+    {
+        const int dest = cfg.mainDest.load (std::memory_order_relaxed);
+        Stereo* target = &master_;
+        if (dest > 0 && dest <= kBuses && ! (isBus && dest - 1 <= busIndex))
+        {
+            target = &busIn_[static_cast<std::size_t> (dest - 1)];
+            buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
+        }
+        for (int i = 0; i < n; ++i)
+        {
+            target->l[static_cast<std::size_t> (i)] += out.l[static_cast<std::size_t> (i)];
+            target->r[static_cast<std::size_t> (i)] += out.r[static_cast<std::size_t> (i)];
+        }
+    }
+    const int direct = cfg.directOut.load (std::memory_order_relaxed);
+    if (direct > 0)
+    {
+        const auto pair = channelPair (direct);
+        if (pair.first != nullptr && pair.second != nullptr)
+            for (int i = 0; i < n; ++i)
+            {
+                pair.first[i] += out.l[static_cast<std::size_t> (i)];
+                pair.second[i] += out.r[static_cast<std::size_t> (i)];
+            }
+    }
+}
+
+// Une piste parallèle : prend le signal du point de captation du parent, a sa propre bande (inserts, fader, pan, envois, sortie directe),
+// traite ses propres filles, puis se somme dans `parentSum` (fin de chaîne du parent).
+void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo& parentPre, const Stereo& parentPost, const Stereo& parentFader,
+                              const Stereo& parentFin, Stereo& parentSum) noexcept
+{
+    using namespace mixer;
+    if (depth < 1 || depth > kParallels) return;
+    auto& P = parallels_[static_cast<std::size_t> (p)];
+    Level& L = levels_[static_cast<std::size_t> (depth - 1)];
+    const int n = chunkN_;
+    const int tap = P.tap.load (std::memory_order_relaxed);
+    const Stereo& src = tap == 0 ? parentPre : (tap == 1 ? parentPost : (tap == 2 ? parentFader : parentFin));
+    std::copy (src.l.begin(), src.l.begin() + n, L.pre.l.begin());
+    std::copy (src.r.begin(), src.r.begin() + n, L.pre.r.begin());
+
+    Stereo* post = &L.pre;
+    if (hasInserts (P.inserts))
+    {
+        std::copy (L.pre.l.begin(), L.pre.l.begin() + n, L.post.l.begin());
+        std::copy (L.pre.r.begin(), L.pre.r.begin() + n, L.post.r.begin());
+        runInserts (P.inserts, L.post);
+        post = &L.post;
+    }
+
+    // solo « en place » : une bande qui n'est pas en solo mais qui alimente (ou contient) une piste en solo reste active, sans être entendue
+    const int self = numTracks + p;
+    const bool selfSolo = param (P.idx.solo, 0.0) >= 0.5;
+    const bool audible = selfSolo || ancestorSolo;
+    const bool feeding = subtreeSolo_[static_cast<std::size_t> (self)] != 0;
+    const bool muted = param (P.idx.mute, 0.0) >= 0.5 || (anySolo_ && ! audible && ! feeding);
+    const bool gateOwn = anySolo_ && ! audible && feeding;
+    applyFaderPan (*post, L.fader, L.fin, P.config, P.idx, P.lastFader, P.lastPanL, P.lastPanR, muted);
+
+    Stereo* out = &L.fin;
+    const bool hasChildren = firstChild_[static_cast<std::size_t> (self)] >= 0;
+    if (gateOwn || hasChildren)
+    {
+        if (gateOwn) { std::fill (L.sum.l.begin(), L.sum.l.begin() + n, 0.0f); std::fill (L.sum.r.begin(), L.sum.r.begin() + n, 0.0f); }
+        else { std::copy (L.fin.l.begin(), L.fin.l.begin() + n, L.sum.l.begin()); std::copy (L.fin.r.begin(), L.fin.r.begin() + n, L.sum.r.begin()); }
+        for (int child = firstChild_[static_cast<std::size_t> (self)]; child >= 0; child = nextSibling_[static_cast<std::size_t> (child)])
+            processParallel (child, depth + 1, audible, L.pre, *post, L.fader, L.fin, L.sum);
+        out = &L.sum;
+    }
+    meterOf (*out, P.peakL, P.peakR, P.rmsL, P.rmsR);
+
+    const bool toParent = P.config.mainEnabled.load (std::memory_order_relaxed) != 0;
+    routeStrip (P.config, P.idx, P.lastSend, L.pre, *post, L.fader, *out, false, -1, true);
+    if (toParent)
+        for (int i = 0; i < n; ++i)
+        {
+            parentSum.l[static_cast<std::size_t> (i)] += out->l[static_cast<std::size_t> (i)];
+            parentSum.r[static_cast<std::size_t> (i)] += out->r[static_cast<std::size_t> (i)];
+        }
+}
+
 void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
 {
     using namespace mixer;
+    chunkOut_ = out;
+    chunkChannels_ = numChannels;
+    chunkN_ = n;
     auto zero = [n] (Stereo& s) { std::fill (s.l.begin(), s.l.begin() + n, 0.0f); std::fill (s.r.begin(), s.r.begin() + n, 0.0f); };
     zero (master_);
     for (auto& b : busIn_) zero (b);
     for (auto& b : buses_) b.hasInput = false;
 
-    // Solo : deux domaines. Un solo de piste coupe les pistes non solo (pas les bus : le solo doit rester audible) ; un solo
-    // de bus coupe les bus non solo.
+    // --- arbre des pistes parallèles (reconstruit à chaque bloc : 32 entrées). Seules les pistes sont des racines : une boucle ou un
+    // parent inactif rend une parallèle inatteignable, donc jamais traitée.
+    firstChild_.fill (-1);
+    subtreeSolo_.fill (0);
+    subtreeBusy_.fill (0);
+    for (int p = kParallels - 1; p >= 0; --p)
+    {
+        auto& x = parallels_[static_cast<std::size_t> (p)];
+        if (x.active.load (std::memory_order_relaxed) == 0) { x.lastSend.fill (0.0f); continue; }
+        const int parent = x.parent.load (std::memory_order_relaxed);
+        if (parent == numTracks + p) continue;
+        nextSibling_[static_cast<std::size_t> (p)] = firstChild_[static_cast<std::size_t> (parent)];
+        firstChild_[static_cast<std::size_t> (parent)] = p;
+        if (param (x.idx.solo, 0.0) >= 0.5) subtreeSolo_[static_cast<std::size_t> (numTracks + p)] = 1;
+        if (x.peakL.load (std::memory_order_relaxed) != 0.0f || x.peakR.load (std::memory_order_relaxed) != 0.0f) subtreeBusy_[static_cast<std::size_t> (numTracks + p)] = 1;
+    }
+    for (int t = 0; t < kTracks; ++t)
+        if (param (tracks_[static_cast<std::size_t> (t)].idx.solo, 0.0) >= 0.5) subtreeSolo_[static_cast<std::size_t> (t)] = 1;
+    // remonte « solo » et « actif » vers les parents (au plus kParallels passes)
+    for (int pass = 0; pass < kParallels; ++pass)
+    {
+        bool changed = false;
+        for (int p = 0; p < kParallels; ++p)
+        {
+            auto& x = parallels_[static_cast<std::size_t> (p)];
+            if (x.active.load (std::memory_order_relaxed) == 0) continue;
+            const auto self = static_cast<std::size_t> (numTracks + p);
+            const auto parent = static_cast<std::size_t> (x.parent.load (std::memory_order_relaxed));
+            for (auto* flags : { &subtreeSolo_, &subtreeBusy_ })
+                if ((*flags)[self] != 0 && (*flags)[parent] == 0) { (*flags)[parent] = 1; changed = true; }
+        }
+        if (! changed) break;
+    }
+
+    // Solo : deux domaines. Un solo de piste (ou de piste parallèle) coupe les pistes qui n'y mènent pas (pas les bus : le solo
+    // doit rester audible) ; un solo de bus coupe les bus non solo.
     bool trackSolo = false, busSolo = false;
     for (const auto& t : tracks_) trackSolo = trackSolo || param (t.idx.solo, 0.0) >= 0.5;
+    for (int p = 0; p < kParallels; ++p)
+        if (parallels_[static_cast<std::size_t> (p)].active.load (std::memory_order_relaxed) != 0)
+            trackSolo = trackSolo || param (parallels_[static_cast<std::size_t> (p)].idx.solo, 0.0) >= 0.5;
     for (const auto& b : buses_) busSolo = busSolo || param (b.idx.solo, 0.0) >= 0.5;
-
-    auto channelPair = [&] (int output) -> std::pair<float*, float*>
-    {
-        const int l = 2 * (output - 1), r = l + 1;
-        if (output < 1 || r >= numChannels) return { nullptr, nullptr };
-        return { out[l], out[r] };
-    };
-
-    // Mixe une bande (piste ou bus) : fader, pan, sorties. `in` : signal brut ; rend le signal final dans final_.
-    auto stripOutputs = [&] (Stereo& in, std::atomic<float>& pkL, std::atomic<float>& pkR, std::atomic<float>& rmsL, std::atomic<float>& rmsR,
-                             const AtomicStrip& cfg, const ParamIndices& idx, float& lastFader, float& lastPanL, float& lastPanR,
-                             bool muted) noexcept
-    {
-        const float fader = muted ? 0.0f : dbToGain (param (idx.volume, 0.0));
-        const float pan = static_cast<float> (param (idx.pan, 0.0) / 100.0);
-        float pl = 1.0f, pr = 1.0f;
-        panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), pan, pl, pr);
-
-        // point 2 : post-fader / pré-pan ; point 3 : post-pan
-        const float fStep = (fader - lastFader) / static_cast<float> (n);
-        const float plStep = (pl - lastPanL) / static_cast<float> (n);
-        const float prStep = (pr - lastPanR) / static_cast<float> (n);
-        float g = lastFader, gl = lastPanL, gr = lastPanR;
-        for (int i = 0; i < n; ++i)
-        {
-            const float l = in.l[static_cast<std::size_t> (i)] * g, r = in.r[static_cast<std::size_t> (i)] * g;
-            postFader_.l[static_cast<std::size_t> (i)] = l;
-            postFader_.r[static_cast<std::size_t> (i)] = r;
-            final_.l[static_cast<std::size_t> (i)] = l * gl;
-            final_.r[static_cast<std::size_t> (i)] = r * gr;
-            g += fStep; gl += plStep; gr += prStep;
-        }
-        lastFader = fader; lastPanL = pl; lastPanR = pr;
-
-        // vu-mètre : crête et RMS du signal final du bloc
-        float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
-        for (int i = 0; i < n; ++i)
-        {
-            const float l = final_.l[static_cast<std::size_t> (i)], r = final_.r[static_cast<std::size_t> (i)];
-            peakL = std::max (peakL, std::abs (l)); peakR = std::max (peakR, std::abs (r));
-            sumL += l * l; sumR += r * r;
-        }
-        pkL.store (peakL, std::memory_order_relaxed);
-        pkR.store (peakR, std::memory_order_relaxed);
-        rmsL.store (std::sqrt (sumL / static_cast<float> (n)), std::memory_order_relaxed);
-        rmsR.store (std::sqrt (sumR / static_cast<float> (n)), std::memory_order_relaxed);
-        return peakL > 0.0f || peakR > 0.0f;
-    };
-
-    // Fait passer `buf` (en place) par les inserts d'un emplacement, dans l'ordre ; faux s'il n'y en a aucun.
-    auto runInserts = [&] (Inserts& ins, Stereo& buf) noexcept
-    {
-        bool any = false;
-        for (auto& s : ins)
-        {
-            auto* inst = const_cast<InsertInstance*> (s.slot.current()); // le thread audio est seul utilisateur du DSP après la remise
-            if (inst == nullptr) continue;
-            any = true;
-            inst->runner.process (buf.l.data(), buf.r.data(), n, param (s.bypass, 0.0) >= 0.5);
-        }
-        return any;
-    };
-    auto hasInserts = [] (const Inserts& ins) noexcept
-    {
-        for (const auto& s : ins)
-            if (s.slot.current() != nullptr) return true;
-        return false;
-    };
-
-    auto routeStrip = [&] (const AtomicStrip& cfg, const ParamIndices& idx, std::array<float, numSends>& lastSend, Stereo& rawIn,
-                           Stereo& postIns, bool isBus, int busIndex) noexcept
-    {
-        // envois : un point de captation par envoi
-        for (int s = 0; s < numSends; ++s)
-        {
-            const int dest = cfg.sends[static_cast<std::size_t> (s)].destination.load (std::memory_order_relaxed);
-            const bool muted = cfg.sends[static_cast<std::size_t> (s)].mute.load (std::memory_order_relaxed) != 0;
-            const double levelDb = param (idx.sendLevel[s], -100.0);
-            const float target = (dest <= 0 || muted) ? 0.0f : dbToGain (levelDb);
-            float& last = lastSend[static_cast<std::size_t> (s)];
-            if (dest <= 0 || dest > kBuses || (isBus && dest - 1 <= busIndex) || (target == 0.0f && last == 0.0f)) { last = target; continue; }
-            const int tap = cfg.sends[static_cast<std::size_t> (s)].tap.load (std::memory_order_relaxed);
-            const Stereo& src = tap == 0 ? rawIn : (tap == 1 ? postIns : (tap == 2 ? postFader_ : final_));
-            float spl = 1.0f, spr = 1.0f;
-            panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), cfg.sends[static_cast<std::size_t> (s)].pan.load (std::memory_order_relaxed), spl, spr);
-            Stereo& bus = busIn_[static_cast<std::size_t> (dest - 1)];
-            const float step = (target - last) / static_cast<float> (n);
-            float g = last;
-            for (int i = 0; i < n; ++i)
-            {
-                bus.l[static_cast<std::size_t> (i)] += src.l[static_cast<std::size_t> (i)] * g * spl;
-                bus.r[static_cast<std::size_t> (i)] += src.r[static_cast<std::size_t> (i)] * g * spr;
-                g += step;
-            }
-            last = target;
-            buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
-        }
-        // sortie principale (Master ou bus) et sortie directe
-        if (cfg.mainEnabled.load (std::memory_order_relaxed) != 0)
-        {
-            const int dest = cfg.mainDest.load (std::memory_order_relaxed);
-            Stereo* target = &master_;
-            if (dest > 0 && dest <= kBuses && ! (isBus && dest - 1 <= busIndex))
-            {
-                target = &busIn_[static_cast<std::size_t> (dest - 1)];
-                buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
-            }
-            for (int i = 0; i < n; ++i)
-            {
-                target->l[static_cast<std::size_t> (i)] += final_.l[static_cast<std::size_t> (i)];
-                target->r[static_cast<std::size_t> (i)] += final_.r[static_cast<std::size_t> (i)];
-            }
-        }
-        const int direct = cfg.directOut.load (std::memory_order_relaxed);
-        if (direct > 0)
-        {
-            const auto pair = channelPair (direct);
-            if (pair.first != nullptr && pair.second != nullptr)
-                for (int i = 0; i < n; ++i)
-                {
-                    pair.first[i] += final_.l[static_cast<std::size_t> (i)];
-                    pair.second[i] += final_.r[static_cast<std::size_t> (i)];
-                }
-        }
-    };
+    anySolo_ = trackSolo;
+    busSolo_ = busSolo;
 
     // ---- pistes
     for (int ti = 0; ti < kTracks; ++ti)
@@ -489,9 +627,9 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         if (t.active.load (std::memory_order_relaxed) == 0) { t.lastSend.fill (0.0f); continue; }
         const bool synthTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth);
         const bool wasSilent = t.peakL.load (std::memory_order_relaxed) == 0.0f && t.peakR.load (std::memory_order_relaxed) == 0.0f;
-        // piste sans instrument, ou au repos et déjà silencieuse : rien à faire (le cas de presque toutes les pistes)
+        // piste sans instrument, ou au repos et déjà silencieuse (elle et ses pistes parallèles) : rien à faire
         const bool idle = synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
-        if (wasSilent && idle) { t.lastSend.fill (0.0f); continue; }
+        if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0) { t.lastSend.fill (0.0f); continue; }
 
         std::fill (raw_.l.begin(), raw_.l.begin() + n, 0.0f);
         std::fill (raw_.r.begin(), raw_.r.begin() + n, 0.0f);
@@ -537,7 +675,11 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         }
         t.lastGain = gain;
 
-        const bool muted = param (t.idx.mute, 0.0) >= 0.5 || (trackSolo && param (t.idx.solo, 0.0) < 0.5);
+        // solo « en place » : voir processParallel
+        const bool selfSolo = param (t.idx.solo, 0.0) >= 0.5;
+        const bool feeding = subtreeSolo_[static_cast<std::size_t> (ti)] != 0;
+        const bool muted = param (t.idx.mute, 0.0) >= 0.5 || (anySolo_ && ! selfSolo && ! feeding);
+        const bool gateOwn = anySolo_ && ! selfSolo && feeding;
         // inserts : sur une copie, le signal brut reste disponible pour le point de captation « pré-inserts »
         Stereo* afterInserts = &raw_;
         if (hasInserts (t.inserts))
@@ -547,8 +689,21 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             runInserts (t.inserts, inserted_);
             afterInserts = &inserted_;
         }
-        stripOutputs (*afterInserts, t.peakL, t.peakR, t.rmsL, t.rmsR, t.config, t.idx, t.lastFader, t.lastPanL, t.lastPanR, muted);
-        routeStrip (t.config, t.idx, t.lastSend, raw_, *afterInserts, false, -1);
+        applyFaderPan (*afterInserts, postFader_, final_, t.config, t.idx, t.lastFader, t.lastPanL, t.lastPanR, muted);
+
+        // pistes parallèles : somme en fin de chaîne de la piste
+        Stereo* trackOut = &final_;
+        const bool hasChildren = firstChild_[static_cast<std::size_t> (ti)] >= 0;
+        if (gateOwn || hasChildren)
+        {
+            if (gateOwn) { std::fill (sum0_.l.begin(), sum0_.l.begin() + n, 0.0f); std::fill (sum0_.r.begin(), sum0_.r.begin() + n, 0.0f); }
+            else { std::copy (final_.l.begin(), final_.l.begin() + n, sum0_.l.begin()); std::copy (final_.r.begin(), final_.r.begin() + n, sum0_.r.begin()); }
+            for (int child = firstChild_[static_cast<std::size_t> (ti)]; child >= 0; child = nextSibling_[static_cast<std::size_t> (child)])
+                processParallel (child, 1, selfSolo, raw_, *afterInserts, postFader_, final_, sum0_);
+            trackOut = &sum0_;
+        }
+        meterOf (*trackOut, t.peakL, t.peakR, t.rmsL, t.rmsR);
+        routeStrip (t.config, t.idx, t.lastSend, raw_, *afterInserts, postFader_, *trackOut, false, -1, false);
     }
 
     // ---- bus, dans l'ordre : un bus n'alimente que des bus d'indice supérieur
@@ -557,7 +712,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         auto& b = buses_[static_cast<std::size_t> (bi)];
         const bool wasSilent = b.peakL.load (std::memory_order_relaxed) == 0.0f && b.peakR.load (std::memory_order_relaxed) == 0.0f;
         if (! b.hasInput && wasSilent) { b.lastSend.fill (0.0f); continue; }
-        const bool muted = param (b.idx.mute, 0.0) >= 0.5 || (busSolo && param (b.idx.solo, 0.0) < 0.5);
+        const bool muted = param (b.idx.mute, 0.0) >= 0.5 || (busSolo_ && param (b.idx.solo, 0.0) < 0.5);
         Stereo& in = busIn_[static_cast<std::size_t> (bi)];
         Stereo* afterInserts = &in;
         if (hasInserts (b.inserts))
@@ -567,8 +722,9 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             runInserts (b.inserts, inserted_);
             afterInserts = &inserted_;
         }
-        stripOutputs (*afterInserts, b.peakL, b.peakR, b.rmsL, b.rmsR, b.config, b.idx, b.lastFader, b.lastPanL, b.lastPanR, muted);
-        routeStrip (b.config, b.idx, b.lastSend, in, *afterInserts, true, bi);
+        applyFaderPan (*afterInserts, postFader_, final_, b.config, b.idx, b.lastFader, b.lastPanL, b.lastPanR, muted);
+        meterOf (final_, b.peakL, b.peakR, b.rmsL, b.rmsR);
+        routeStrip (b.config, b.idx, b.lastSend, in, *afterInserts, postFader_, final_, true, bi, false);
     }
 
     // ---- master : trim, inserts, fader, pan, mute, réduction mono
@@ -630,6 +786,13 @@ Engine::Meter Engine::busMeter (int b) const noexcept
 {
     if (b < 0 || b >= kBuses) return {};
     const auto& x = buses_[static_cast<std::size_t> (b)];
+    return { x.peakL.load (std::memory_order_relaxed), x.peakR.load (std::memory_order_relaxed), x.rmsL.load (std::memory_order_relaxed), x.rmsR.load (std::memory_order_relaxed) };
+}
+
+Engine::Meter Engine::parallelMeter (int p) const noexcept
+{
+    if (p < 0 || p >= kParallels) return {};
+    const auto& x = parallels_[static_cast<std::size_t> (p)];
     return { x.peakL.load (std::memory_order_relaxed), x.peakR.load (std::memory_order_relaxed), x.rmsL.load (std::memory_order_relaxed), x.rmsR.load (std::memory_order_relaxed) };
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
+#include <vector>
 #include <functional>
 #include <memory>
 #include "PluginProcessor.h"
@@ -33,9 +34,14 @@ private:
     class InsertList;
     int stripHeight_ = 292;
     void timerCallback() override;
-    void exclusiveSolo (bool isBus, int index);
+    void exclusiveSolo (int kind, int index); // kind : 0 piste, 1 bus, 2 piste parallèle (pistes et parallèles forment un domaine)
     void requestTypeChange (int track, neptune::core::TrackType); // confirmation si la piste a du contenu
     void requestRemove (int track);
+    void requestAddParallel (int parentId); // 0..15 piste, 16.. piste parallèle
+    void requestRemoveParallel (int p);
+    void toggleFold (int p);
+    bool isExpanded (int p) const { return expanded_[static_cast<std::size_t> (p)]; }
+    void appendParallels (int parentId, std::vector<int>& out) const; // parallèles visibles, en profondeur d'abord
     void layoutTracks();
     juce::Colour colour (neptune::core::theme::Token t) const;
 
@@ -43,6 +49,11 @@ private:
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     std::array<std::unique_ptr<Strip>, neptune::core::mixer::numTracks> tracks_;
+    std::array<std::unique_ptr<Strip>, neptune::core::mixer::numParallels> parallels_;
+    std::array<bool, neptune::core::mixer::numParallels> expanded_ {};        // repli : les filles d'une parallèle repliée sont masquées
+    std::array<bool, neptune::core::mixer::numParallels> shownParallels_ {};
+    juce::Component trackRow_;      // les bandes de pistes et de pistes parallèles (défile horizontalement)
+    juce::Viewport trackViewport_;
     std::array<std::unique_ptr<Strip>, neptune::core::mixer::numBuses> buses_;
     std::unique_ptr<MasterStrip> master_;
     juce::Label tracksTitle_, busesTitle_;

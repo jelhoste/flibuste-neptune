@@ -162,9 +162,67 @@ void MixerState::resetTrack (int track)
 {
     if (track < 0 || track >= mixer::numTracks) return;
     const MixerState defaults;
+    removeParallelsOf (track); // les pistes parallèles d'une piste retirée disparaissent avec elle
     tracks[static_cast<std::size_t> (track)] = defaults.tracks[static_cast<std::size_t> (track)];
     tracks[static_cast<std::size_t> (track)].active = false;
     fixSelection();
+}
+
+int MixerState::firstInactiveParallel() const noexcept
+{
+    for (std::size_t p = 0; p < parallels.size(); ++p)
+        if (! parallels[p].active) return static_cast<int> (p);
+    return -1;
+}
+
+std::vector<int> MixerState::parallelChildren (int parentId) const
+{
+    std::vector<int> r;
+    for (std::size_t p = 0; p < parallels.size(); ++p)
+        if (parallels[p].active && parallels[p].parent == parentId) r.push_back (static_cast<int> (p));
+    return r;
+}
+
+std::vector<int> MixerState::removeParallelsOf (int parentId)
+{
+    std::vector<int> removed;
+    for (const int child : parallelChildren (parentId))
+    {
+        auto sub = removeParallel (child);
+        removed.insert (removed.end(), sub.begin(), sub.end());
+    }
+    return removed;
+}
+
+std::vector<int> MixerState::removeParallel (int p)
+{
+    std::vector<int> removed;
+    if (p < 0 || p >= mixer::numParallels || ! parallels[static_cast<std::size_t> (p)].active) return removed;
+    removed = removeParallelsOf (mixer::numTracks + p);
+    parallels[static_cast<std::size_t> (p)] = mixer::ParallelSettings {};
+    removed.push_back (p);
+    return removed;
+}
+
+int MixerState::parallelDepth (int p) const noexcept
+{
+    int depth = 0;
+    int cur = p;
+    for (int guard = 0; guard <= mixer::numParallels; ++guard)
+    {
+        if (cur < 0 || cur >= mixer::numParallels || ! parallels[static_cast<std::size_t> (cur)].active) return 0;
+        ++depth;
+        const int parent = parallels[static_cast<std::size_t> (cur)].parent;
+        if (parent < mixer::numTracks) return tracks[static_cast<std::size_t> (parent)].active ? depth : 0;
+        cur = parent - mixer::numTracks;
+    }
+    return 0; // boucle
+}
+
+void MixerState::fixParallels()
+{
+    for (std::size_t p = 0; p < parallels.size(); ++p)
+        if (parallels[p].active && parallelDepth (static_cast<int> (p)) == 0) parallels[p] = mixer::ParallelSettings {};
 }
 
 void MixerState::fixSelection() noexcept
@@ -199,6 +257,24 @@ std::string toJson (const MixerState& m)
         tracks.push_back (std::move (o));
     }
     doc["tracks"] = std::move (tracks);
+    {
+        json parallels = json::array();
+        bool any = false;
+        for (const auto& p : m.parallels)
+        {
+            json o = json::object();
+            if (p.active)
+            {
+                any = true;
+                o = stripToJson (p.strip);
+                o["active"] = true;
+                o["parent"] = p.parent;
+                o["tap"] = static_cast<int> (p.tap);
+            }
+            parallels.push_back (std::move (o));
+        }
+        if (any) doc["parallels"] = std::move (parallels);
+    }
     json buses = json::array();
     for (std::size_t b = 0; b < m.buses.size(); ++b)
         buses.push_back (m.buses[b] == defaults.buses[b] ? json::object() : stripToJson (m.buses[b]));
@@ -239,6 +315,18 @@ MixerState mixerFromJson (std::string_view text)
                 tr.active = t == 0 || ! tr.instrument.empty() || ! (tr.strip == def.strip) || tr.type != TrackType::Sampler;
             }
         }
+    if (const auto it = doc.find ("parallels"); it != doc.end() && it->is_array())
+        for (std::size_t p = 0; p < it->size() && p < m.parallels.size(); ++p)
+        {
+            const auto& o = (*it)[p];
+            if (! o.is_object() || ! boolOf (o, "active", false)) continue;
+            auto& ps = m.parallels[p];
+            ps.active = true;
+            ps.parent = intOf (o, "parent", 0);
+            ps.tap = static_cast<mixer::TapPoint> (intOf (o, "tap", static_cast<int> (ps.tap)));
+            ps.strip = stripFromJson (o, ps.strip, false, static_cast<int> (p));
+            ps = mixer::sanitised (std::move (ps), static_cast<int> (p));
+        }
     if (const auto it = doc.find ("buses"); it != doc.end() && it->is_array())
         for (std::size_t b = 0; b < it->size() && b < m.buses.size(); ++b)
             m.buses[b] = stripFromJson ((*it)[b], m.buses[b], true, static_cast<int> (b));
@@ -250,6 +338,7 @@ MixerState mixerFromJson (std::string_view text)
         insertsFromJson (*mm, m.master.inserts);
         m.master = mixer::sanitised (m.master);
     }
+    m.fixParallels();
     m.fixSelection();
     return m;
 }

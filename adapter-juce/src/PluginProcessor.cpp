@@ -385,12 +385,19 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
     using namespace neptune::core;
     track = juce::jlimit (0, mixer::numTracks - 1, track);
     int selected = 0;
+    std::array<bool, mixer::numParallels> wasActive {};
+    std::vector<int> goneParallels;
     {
         const juce::ScopedLock lock (instrumentLock_);
         if (! mixer_.tracks[static_cast<std::size_t> (track)].active || mixer_.activeCount() <= 1) return false;
+        for (int p = 0; p < mixer::numParallels; ++p) // les pistes parallèles qui disparaissent avec la piste
+            if (mixer_.parallels[static_cast<std::size_t> (p)].active) wasActive[static_cast<std::size_t> (p)] = true;
         mixer_.resetTrack (track); // remet aussi la sélection sur une piste active si c'était celle-ci
         selected = mixer_.selectedTrack;
+        for (int p = 0; p < mixer::numParallels; ++p)
+            if (wasActive[static_cast<std::size_t> (p)] && ! mixer_.parallels[static_cast<std::size_t> (p)].active) goneParallels.push_back (p);
     }
+    for (const int p : goneParallels) dropParallel (p);
     auto clearTrackInserts = [this] (int track)
     {
         for (int s = 0; s < neptune::core::mixer::numInserts; ++s)
@@ -414,6 +421,122 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
     ++revision_;
     notifyStateChanged();
     return true;
+}
+
+// ---- pistes parallèles
+bool NeptuneProcessor::parallelActive (int p) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.parallels[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numParallels - 1, p))].active;
+}
+
+neptune::core::mixer::ParallelSettings NeptuneProcessor::parallelSettings (int p) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.parallels[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numParallels - 1, p))];
+}
+
+int NeptuneProcessor::parallelDepth (int p) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.parallelDepth (p);
+}
+
+std::vector<int> NeptuneProcessor::parallelChildren (int parentId) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.parallelChildren (parentId);
+}
+
+// Arrête une piste parallèle déjà retirée de l'état : plus de traitement, inserts libérés, paramètres remis à leur valeur d'origine.
+void NeptuneProcessor::dropParallel (int p)
+{
+    namespace mx = neptune::core::mixer;
+    engine_.setParallel (p, false, 0, mx::TapPoint::PostPan);
+    for (int s = 0; s < mx::numInserts; ++s)
+    {
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            insertInstances_[static_cast<std::size_t> (insertFlatIndex (StripKind::Parallel, p))][static_cast<std::size_t> (s)] = nullptr;
+        }
+        engine_.setInsert (StripKind::Parallel, p, s, nullptr);
+    }
+    std::vector<neptune::core::ParamId> ids { mx::parallelParam (p, mx::kParVolume), mx::parallelParam (p, mx::kParPan),
+                                              mx::parallelParam (p, mx::kParMute), mx::parallelParam (p, mx::kParSolo) };
+    for (int s = 0; s < mx::numSends; ++s) ids.push_back (mx::parallelParam (p, mx::kParSendLevel + static_cast<neptune::core::ParamId> (s)));
+    for (int s = 0; s < mx::numInserts; ++s) ids.push_back (mx::parallelParam (p, mx::kParInsertBypass + static_cast<neptune::core::ParamId> (s)));
+    for (const auto id : ids)
+    {
+        const auto index = params_.indexOf (id);
+        if (index == neptune::core::ParameterSet::npos) continue;
+        if (params_.get (id) == params_.spec (index).defaultValue) continue;
+        uiResetToDefault (id);
+    }
+}
+
+int NeptuneProcessor::uiAddParallel (int parent)
+{
+    namespace mx = neptune::core::mixer;
+    int p = -1;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        if (parent < 0 || parent >= mx::numTracks + mx::numParallels) return -1;
+        if (parent < mx::numTracks ? ! mixer_.tracks[static_cast<std::size_t> (parent)].active
+                                   : ! mixer_.parallels[static_cast<std::size_t> (parent - mx::numTracks)].active)
+            return -1;
+        p = mixer_.firstInactiveParallel();
+        if (p < 0) return -1;
+        mx::ParallelSettings ps;
+        ps.active = true;
+        ps.parent = parent;
+        mixer_.parallels[static_cast<std::size_t> (p)] = ps;
+    }
+    dropParallel (p);      // valeurs d'origine (au cas où d'anciennes valeurs d'automation traînent), puis activation
+    engine_.setParallelSettings (p, parallelSettings (p).strip);
+    engine_.setParallel (p, true, parent, mx::TapPoint::PostPan);
+    undo_.clear();
+    ++revision_;
+    notifyStateChanged();
+    return p;
+}
+
+int NeptuneProcessor::uiRemoveParallel (int p)
+{
+    namespace mx = neptune::core::mixer;
+    std::vector<int> removed;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        removed = mixer_.removeParallel (p);
+    }
+    for (const int r : removed) dropParallel (r);
+    if (! removed.empty())
+    {
+        undo_.clear();
+        ++revision_;
+        notifyStateChanged();
+    }
+    return static_cast<int> (removed.size());
+}
+
+void NeptuneProcessor::uiEditParallel (int p, neptune::core::mixer::ParallelSettings s, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    p = juce::jlimit (0, mixer::numParallels - 1, p);
+    s = mixer::sanitised (std::move (s), p);
+    const auto previous = parallelSettings (p);
+    if (! previous.active || previous == s) return;
+    s.active = true;
+    undo_.perform (std::make_unique<SnapshotCommand<mixer::ParallelSettings>> (
+        previous, s,
+        [this, p] (const mixer::ParallelSettings& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.parallels[static_cast<std::size_t> (p)] = v; }
+            engine_.setParallelSettings (p, v.strip);
+            engine_.setParallel (p, v.active, v.parent, v.tap);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
 }
 
 // ---- réglages du mixeur
@@ -442,6 +565,8 @@ neptune::core::MixerState NeptuneProcessor::mixerState() const
     for (int t = 0; t < mx::numTracks; ++t) syncInserts (m.tracks[static_cast<std::size_t> (t)].strip.inserts, insertInstances_[static_cast<std::size_t> (t)]);
     for (int b = 0; b < mx::numBuses; ++b) syncInserts (m.buses[static_cast<std::size_t> (b)].inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + b)]);
     syncInserts (m.master.inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + mx::numBuses)]);
+    for (int p = 0; p < mx::numParallels; ++p)
+        syncInserts (m.parallels[static_cast<std::size_t> (p)].strip.inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + mx::numBuses + 1 + p)]);
     return m;
 }
 
@@ -453,6 +578,7 @@ int NeptuneProcessor::insertFlatIndex (StripKind kind, int index) noexcept
     {
         case StripKind::Track: return juce::jlimit (0, mx::numTracks - 1, index);
         case StripKind::Bus: return mx::numTracks + juce::jlimit (0, mx::numBuses - 1, index);
+        case StripKind::Parallel: return mx::numTracks + mx::numBuses + 1 + juce::jlimit (0, mx::numParallels - 1, index);
         default: return mx::numTracks + mx::numBuses;
     }
 }
@@ -473,6 +599,7 @@ neptune::core::ParamId NeptuneProcessor::insertBypassParam (StripKind kind, int 
     {
         case StripKind::Track: return neptune::core::probe::trackParam (index, neptune::core::probe::kInsertBypass + static_cast<neptune::core::ParamId> (slot));
         case StripKind::Bus: return mx::busParam (index, mx::kBusInsertBypass + static_cast<neptune::core::ParamId> (slot));
+        case StripKind::Parallel: return mx::parallelParam (index, mx::kParInsertBypass + static_cast<neptune::core::ParamId> (slot));
         default: return mx::masterInsertBypassId (slot);
     }
 }
@@ -587,6 +714,12 @@ void NeptuneProcessor::pushMixerSettingsToEngine()
         publishSynthPatch (t, ts.synth);
     }
     for (int b = 0; b < neptune::core::mixer::numBuses; ++b) engine_.setBusSettings (b, m.buses[static_cast<std::size_t> (b)]);
+    for (int p = 0; p < neptune::core::mixer::numParallels; ++p)
+    {
+        const auto& ps = m.parallels[static_cast<std::size_t> (p)];
+        engine_.setParallelSettings (p, ps.strip);
+        engine_.setParallel (p, ps.active, ps.parent, ps.tap);
+    }
     engine_.setMasterSettings (m.master);
 }
 
@@ -664,6 +797,7 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
             mixer_.tracks[t] = m->tracks[t];
         }
         mixer_.buses = m->buses;
+        mixer_.parallels = m->parallels;
         mixer_.master = m->master;
         mixer_.selectedTrack = m->selectedTrack;
     }
@@ -694,6 +828,7 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
         for (int t = 0; t < mx::numTracks; ++t) build (StripKind::Track, t, m->tracks[static_cast<std::size_t> (t)].strip.inserts);
         for (int b = 0; b < mx::numBuses; ++b) build (StripKind::Bus, b, m->buses[static_cast<std::size_t> (b)].inserts);
         build (StripKind::Master, 0, m->master.inserts);
+        for (int p = 0; p < mx::numParallels; ++p) build (StripKind::Parallel, p, m->parallels[static_cast<std::size_t> (p)].strip.inserts);
     }
     ++revision_;
     for (std::size_t t = 0; t < m->tracks.size(); ++t)

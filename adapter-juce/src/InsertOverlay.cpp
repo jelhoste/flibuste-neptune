@@ -21,7 +21,9 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                              ? juce::String::fromUTF8 (tr_.format ("insert.where_track", { std::to_string (index + 1) }).c_str())
                              : kind == NeptuneProcessor::StripKind::Bus
                                    ? juce::String::fromUTF8 (tr_.format ("insert.where_bus", { std::to_string (index + 1) }).c_str())
-                                   : text ("insert.where_master");
+                                   : kind == NeptuneProcessor::StripKind::Parallel
+                                         ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
+                                         : text ("insert.where_master");
     title_ = text ("module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 

@@ -217,7 +217,7 @@ public:
             previews_.push_back (std::move (data));
         }
         refilter();
-        setSize (700, 440);
+        setSize (kCols * kTileW + 16, 32 + 6 + kRowsVisible * kTileH + 16);
     }
 
     void resized() override
@@ -227,16 +227,20 @@ public:
         for (auto* b : catButtons_) b->setBounds (top.removeFromLeft (110).reduced (2));
         search_.setBounds (top.reduced (2));
         grid_ = r.withTrimmedTop (6);
+        clampScroll();
     }
 
     void paint (juce::Graphics& g) override
     {
         g.fillAll (colour (Token::BgCard));
-        const int cols = 5, tileW = grid_.getWidth() / cols, tileH = 86;
+        const int cols = kCols, tileW = grid_.getWidth() / cols, tileH = kTileH;
+        g.saveState();
+        g.reduceClipRegion (grid_);
         for (std::size_t n = 0; n < shown_.size(); ++n)
         {
             const int w = shown_[n];
-            const auto tile = juce::Rectangle<int> (grid_.getX() + static_cast<int> (n % cols) * tileW, grid_.getY() + static_cast<int> (n / cols) * tileH, tileW, tileH).reduced (3);
+            const auto tile = juce::Rectangle<int> (grid_.getX() + static_cast<int> (n % cols) * tileW,
+                                                    grid_.getY() + static_cast<int> (n / cols) * tileH - scroll_, tileW, tileH).reduced (3);
             g.setColour (colour (w == current_ ? Token::Nav1 : Token::BgApp));
             g.fillRoundedRectangle (tile.toFloat(), 5.0f);
             g.setColour (colour (w == current_ ? Token::Accent : Token::Border));
@@ -256,22 +260,45 @@ public:
             g.setFont (juce::FontOptions (11.0f));
             g.drawText (juce::String::fromUTF8 (std::string (tr_.tr (waveInfo (w).nameKey)).c_str()), tile.withTrimmedTop (tile.getHeight() - 18), juce::Justification::centred);
         }
+        g.restoreState();
+        // barre de défilement (visible seulement si tout ne tient pas)
+        const int total = contentHeight();
+        if (total > grid_.getHeight())
+        {
+            const float ratio = static_cast<float> (grid_.getHeight()) / static_cast<float> (total);
+            const float barH = juce::jmax (24.0f, ratio * static_cast<float> (grid_.getHeight()));
+            const float y = static_cast<float> (grid_.getY()) + (static_cast<float> (scroll_) / static_cast<float> (total - grid_.getHeight())) * (static_cast<float> (grid_.getHeight()) - barH);
+            g.setColour (colour (Token::TextDim).withAlpha (0.6f));
+            g.fillRoundedRectangle (static_cast<float> (grid_.getRight()) - 6.0f, y, 5.0f, barH, 2.5f);
+        }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        scroll_ -= static_cast<int> (w.deltaY * 220.0f);
+        clampScroll();
+        repaint();
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const int cols = 5, tileW = grid_.getWidth() / cols, tileH = 86;
+        const int cols = kCols, tileW = grid_.getWidth() / cols, tileH = kTileH;
         if (! grid_.contains (e.getPosition())) return;
-        const int col = (e.x - grid_.getX()) / tileW, row = (e.y - grid_.getY()) / tileH;
+        const int col = (e.x - grid_.getX()) / tileW, row = (e.y - grid_.getY() + scroll_) / tileH;
         const auto n = static_cast<std::size_t> (row * cols + col);
         if (n < shown_.size() && onPick_) onPick_ (shown_[n]);
     }
 
 private:
+    static constexpr int kCols = 8, kTileW = 100, kTileH = 78, kRowsVisible = 4;
+
     juce::Colour colour (Token t) const { const auto& c = palette_.color (t); return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a)); }
+    int contentHeight() const { return static_cast<int> ((shown_.size() + kCols - 1) / kCols) * kTileH; }
+    void clampScroll() { scroll_ = juce::jlimit (0, juce::jmax (0, contentHeight() - grid_.getHeight()), scroll_); }
 
     void refilter()
     {
+        scroll_ = 0;
         shown_.clear();
         const auto q = search_.getText().trim().toLowerCase();
         for (int w = 0; w < kNumWaves; ++w)
@@ -294,6 +321,7 @@ private:
     std::vector<std::vector<float>> previews_;
     std::vector<int> shown_;
     int category_ = -1;
+    int scroll_ = 0;
     juce::Rectangle<int> grid_;
 };
 

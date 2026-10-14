@@ -47,7 +47,9 @@ const MigrationTable& registeredMigrations()
         // active si elle a du contenu : voir mixerFromJson), rien à transformer.
         { 5, [] (nlohmann::json&) { return true; } },
         // v6 -> v7 : « inserts » est facultatif dans une bande et dans le master (absent = aucun insert), rien à transformer.
-        { 6, [] (nlohmann::json&) { return true; } } };
+        { 6, [] (nlohmann::json&) { return true; } },
+        // v7 -> v8 : « parallels » est facultatif dans le mixeur (absent = aucune piste parallèle), rien à transformer.
+        { 7, [] (nlohmann::json&) { return true; } } };
     return table;
 }
 

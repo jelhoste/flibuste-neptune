@@ -50,6 +50,20 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
         }
     }
 
+    // Pistes parallèles
+    for (int p = 0; ok && p < numParallels; ++p)
+    {
+        const std::string n = "Parallel " + std::to_string (p + 1) + " ";
+        ok = set.add (level (parallelParam (p, kParVolume), n + "Volume", 0.0), error)
+          && set.add (ParamSpec::continuous (parallelParam (p, kParPan), n + "Pan", Unit::Percent, -100.0, 100.0, 0.0), error)
+          && set.add (ParamSpec::toggle (parallelParam (p, kParMute), n + "Mute"), error)
+          && set.add (ParamSpec::toggle (parallelParam (p, kParSolo), n + "Solo"), error);
+        for (int i = 0; ok && i < numInserts; ++i)
+            ok = set.add (ParamSpec::toggle (parallelParam (p, kParInsertBypass + static_cast<ParamId> (i)), n + "Insert " + std::to_string (i + 1) + " Bypass"), error);
+        for (int i = 0; ok && i < numSends; ++i)
+            ok = set.add (level (parallelParam (p, kParSendLevel + static_cast<ParamId> (i)), n + "Send " + std::to_string (i + 1) + " Level", -100.0), error);
+    }
+
     ok = ok && set.add (ParamSpec::continuous (masterTrim, "Master Trim", Unit::Decibel, -12.0, 12.0, 0.0), error)
             && set.add (ParamSpec::toggle (masterMono, "Master Mono"), error);
     for (int i = 0; ok && i < numInserts; ++i)
@@ -91,6 +105,17 @@ StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
         send.pan = std::isfinite (send.pan) ? std::clamp (send.pan, -1.0, 1.0) : 0.0;
     }
     return s;
+}
+
+ParallelSettings sanitised (ParallelSettings p, int index)
+{
+    p.parent = std::clamp (p.parent, 0, numTracks + numParallels - 1);
+    if (p.parent == numTracks + index) p.parent = 0; // jamais sa propre piste
+    p.tap = static_cast<TapPoint> (std::clamp (static_cast<int> (p.tap), 0, 3));
+    p.strip = sanitisedStrip (std::move (p.strip), false, index);
+    p.strip.midiChannel = 0;
+    // les envois d'une piste parallèle vont vers des bus (aucun cycle : seules les pistes alimentent des bus)
+    return p;
 }
 
 MasterSettings sanitised (MasterSettings m)

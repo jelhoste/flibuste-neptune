@@ -139,6 +139,17 @@ public:
     };
     InsertHandle openInsert (StripKind, int index, int slot); // instance nulle si l'emplacement est vide
 
+    // Pistes parallèles (spec §1) : jusqu'à 32, en arbre. `parent` : 0..15 = piste, 16..47 = piste parallèle (16 + indice).
+    bool parallelActive (int p) const;
+    neptune::core::mixer::ParallelSettings parallelSettings (int p) const;
+    int parallelDepth (int p) const; // 1 : fille directe d'une piste ; 0 si inactive
+    std::vector<int> parallelChildren (int parentId) const;
+    // Crée une piste parallèle sous `parent` ; rend son indice, ou -1 (pool plein, parent invalide). Vide l'historique d'annulation.
+    int uiAddParallel (int parent);
+    // Retire la piste et tous ses descendants ; rend le nombre de pistes retirées. Vide l'historique d'annulation.
+    int uiRemoveParallel (int p);
+    void uiEditParallel (int p, neptune::core::mixer::ParallelSettings, std::string name, std::string mergeKey = {});
+
     // Mixeur : réglages de bande (nom, canal MIDI, routage, envois, mode de pan), bus, master. Annulables.
     neptune::core::MixerState mixerState() const; // copie
     neptune::core::mixer::StripSettings trackSettings (int track) const;
@@ -149,6 +160,7 @@ public:
     void uiEditMaster (neptune::core::mixer::MasterSettings, std::string name, std::string mergeKey = {});
     neptune::core::Engine::Meter trackMeter (int track) const { return engine_.trackMeter (track); }
     neptune::core::Engine::Meter busMeter (int bus) const { return engine_.busMeter (bus); }
+    neptune::core::Engine::Meter parallelMeter (int p) const { return engine_.parallelMeter (p); }
     neptune::core::Engine::Meter masterMeter() const { return engine_.masterMeter(); }
 
     // Jeu depuis l'interface (clavier de la matrice, bouton d'écoute) : thread de message ; appliqué au bloc audio suivant.
@@ -220,7 +232,8 @@ private:
     class InsertHost;
     static int insertFlatIndex (StripKind, int index) noexcept;
     using InsertRow = std::array<std::shared_ptr<neptune::core::InsertInstance>, neptune::core::mixer::numInserts>;
-    std::array<InsertRow, neptune::core::mixer::numTracks + neptune::core::mixer::numBuses + 1> insertInstances_; // protégé par instrumentLock_
+    std::array<InsertRow, neptune::core::mixer::numTracks + neptune::core::mixer::numBuses + 1 + neptune::core::mixer::numParallels> insertInstances_; // protégé par instrumentLock_
+    void dropParallel (int p);                                  // arrête une piste parallèle retirée : moteur, inserts, paramètres
     std::set<std::string> otherTracksPaths (int track) const;
     void setStatus (int track, InstrumentStatus);
     void pushMixerSettingsToEngine();

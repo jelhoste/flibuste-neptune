@@ -23,7 +23,7 @@ namespace neptune::core
 // Palier 1 : N pistes, Sampler ou Synthé (chacune son instrument ou son patch, ses voix, son canal MIDI), 16 bus, un Master ; sorties directes sur
 // jusqu'à 64 paires stéréo. Les voix d'une piste ne sont jamais celles d'une autre ; le thread disque et ses emplacements de
 // streaming sont, eux, partagés (pool).
-enum class StripKind { Track, Bus, Master };
+enum class StripKind { Track, Bus, Master, Parallel };
 
 class Engine
 {
@@ -31,6 +31,7 @@ public:
     static constexpr int kTracks = mixer::numTracks;
     static constexpr int kBuses = mixer::numBuses;
     static constexpr int kInserts = mixer::numInserts;
+    static constexpr int kParallels = mixer::numParallels;
 
     Engine() noexcept;
 
@@ -75,6 +76,10 @@ public:
     // Réglages non automatisables du mixeur (routage, canal MIDI, mode de pan...) : thread de message, pris en compte au bloc suivant.
     void setTrackSettings (int track, const mixer::StripSettings&) noexcept;
     void setBusSettings (int bus, const mixer::StripSettings&) noexcept;
+    // Pistes parallèles : `parent` 0..15 = piste, 16..47 = piste parallèle ; `tap` : point de captation dans la chaîne du parent.
+    // Une piste parallèle dont le parent est inactif ou qui forme une boucle n'est jamais traitée.
+    void setParallel (int p, bool active, int parent, mixer::TapPoint tap) noexcept;
+    void setParallelSettings (int p, const mixer::StripSettings&) noexcept;
     void setMasterSettings (const mixer::MasterSettings&) noexcept;
 
     // Événements venus de l'interface (clavier de la matrice, bouton d'écoute des zones). Thread de message UNIQUEMENT (un seul
@@ -106,6 +111,7 @@ public:
     struct Meter { float peakL = 0.0f, peakR = 0.0f, rmsL = 0.0f, rmsR = 0.0f; };
     Meter trackMeter (int track) const noexcept;
     Meter busMeter (int bus) const noexcept;
+    Meter parallelMeter (int p) const noexcept;
     Meter masterMeter() const noexcept;
 
     int activeVoices() const noexcept;
@@ -165,6 +171,16 @@ private:
         std::array<float, mixer::numSends> lastSend {};
         std::atomic<float> peakL { 0.0f }, peakR { 0.0f }, rmsL { 0.0f }, rmsR { 0.0f };
     };
+    struct Parallel
+    {
+        Inserts inserts;
+        AtomicStrip config;
+        ParamIndices idx;
+        std::atomic<int> active { 0 }, parent { 0 }, tap { 3 };
+        float lastFader = 1.0f, lastPanL = 1.0f, lastPanR = 1.0f;
+        std::array<float, mixer::numSends> lastSend {};
+        std::atomic<float> peakL { 0.0f }, peakR { 0.0f }, rmsL { 0.0f }, rmsR { 0.0f };
+    };
     struct Bus
     {
         Inserts inserts;
@@ -178,7 +194,20 @@ private:
 
     void processChunk (float* const* out, int numChannels, int frames) noexcept;
     void drainUiEvents() noexcept;
+    struct Stereo;
+    struct Level;
     void adoptInserts() noexcept;
+    // --- traitement d'une bande (un bloc de `chunkN_` échantillons)
+    bool runInserts (Inserts&, Stereo&) noexcept;
+    static bool hasInserts (const Inserts&) noexcept;
+    void applyFaderPan (const Stereo& in, Stereo& postFader, Stereo& fin, const AtomicStrip&, const ParamIndices&, float& lastFader,
+                        float& lastPanL, float& lastPanR, bool muted) noexcept;
+    void meterOf (const Stereo& out, std::atomic<float>& pkL, std::atomic<float>& pkR, std::atomic<float>& rmsL, std::atomic<float>& rmsR) noexcept;
+    void routeStrip (const AtomicStrip&, const ParamIndices&, std::array<float, mixer::numSends>& lastSend, const Stereo& pre, const Stereo& post,
+                     const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent) noexcept;
+    void processParallel (int p, int depth, bool ancestorSolo, const Stereo& parentPre, const Stereo& parentPost, const Stereo& parentFader,
+                          const Stereo& parentFin, Stereo& parentSum) noexcept;
+    std::pair<float*, float*> channelPair (int output) const noexcept;
     Inserts* insertsOf (StripKind, int index) noexcept;
     void pushTrace (int track, int key, float shapedVelocity) noexcept;
     void publishVoices() noexcept;
@@ -218,7 +247,18 @@ private:
 
     // tampons de mixage (alloués dans prepare)
     struct Stereo { std::vector<float> l, r; void resize (std::size_t n) { l.assign (n, 0.0f); r.assign (n, 0.0f); } };
-    Stereo raw_, inserted_, postFader_, final_, master_;
+    struct Level { Stereo pre, post, fader, fin, sum; void resize (std::size_t n) { pre.resize (n); post.resize (n); fader.resize (n); fin.resize (n); sum.resize (n); } };
+    Stereo raw_, inserted_, postFader_, final_, sum0_, master_; // niveau 0 : la piste
+    std::vector<Level> levels_;                                 // niveau d >= 1 : levels_[d - 1], pour les pistes parallèles
     std::array<Stereo, kBuses> busIn_;
+    std::array<Parallel, kParallels> parallels_;
+    // contexte du bloc en cours
+    float* const* chunkOut_ = nullptr;
+    int chunkChannels_ = 0, chunkN_ = 0;
+    bool anySolo_ = false;
+    bool busSolo_ = false;
+    std::array<int, mixer::numTracks + mixer::numParallels> firstChild_ {};
+    std::array<int, mixer::numParallels> nextSibling_ {};
+    std::array<unsigned char, mixer::numTracks + mixer::numParallels> subtreeSolo_ {}, subtreeBusy_ {};
 };
 } // namespace neptune::core

@@ -28,6 +28,8 @@ constexpr int numBuses = 16;
 constexpr int numSends = 8;
 constexpr int numOutputs = 64; // sorties stéréo physiques déclarées à l'hôte
 constexpr int numInserts = 8;  // emplacements d'inserts par piste, par bus et sur le Master
+constexpr int numParallels = 32; // pistes parallèles (pool propre, réparties librement dans l'arbre)
+constexpr int parentOfParallelBase = numTracks; // identifiant de parent : 0..15 piste, 16..47 piste parallèle
 
 // ---- identifiants de paramètres (stables : ne jamais renuméroter) ----
 constexpr ParamId masterTrim = 5;   // dB, -12..+12
@@ -38,6 +40,13 @@ constexpr ParamId busBase = 3000;   // bus b -> 3000 + 100.b
 constexpr ParamId busStride = 100;
 enum BusOffset : ParamId { kBusVolume = 0, kBusPan = 1, kBusMute = 2, kBusSolo = 3, kBusInsertBypass = 10, kBusSendLevel = 20 };
 constexpr ParamId busParam (int bus, ParamId offset) { return busBase + busStride * static_cast<ParamId> (bus) + offset; }
+
+// Pistes parallèles (spec §1) : mêmes réglages automatisables qu'une piste (volume, pan, mute, solo, bypass d'inserts, niveaux d'envoi),
+// identifiants `5000 + 100.p + offset`.
+constexpr ParamId parallelBase = 5000;
+constexpr ParamId parallelStride = 100;
+enum ParallelOffset : ParamId { kParVolume = 0, kParPan = 1, kParMute = 2, kParSolo = 3, kParInsertBypass = 10, kParSendLevel = 20 };
+constexpr ParamId parallelParam (int p, ParamId offset) { return parallelBase + parallelStride * static_cast<ParamId> (p) + offset; }
 
 // Paramètres de l'instrument d'une piste. La piste 0 garde les identifiants historiques 100..106 (projets existants) ; les
 // autres pistes les ont dans leur bloc d'identifiants (offsets 30..36).
@@ -122,6 +131,23 @@ struct StripSettings
             && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim;
     }
 };
+
+// Une piste parallèle : prend le signal de la chaîne de son parent direct (piste ou autre piste parallèle) à un des 4 points de
+// captation, a une bande complète (inserts, envois, pan, fader), et se somme en fin de chaîne du parent. Structure en arbre :
+// un parent n'est jamais une piste « latérale » ni un grand-parent, donc aucun cycle possible.
+struct ParallelSettings
+{
+    bool active = false;
+    int parent = 0;                       // 0..numTracks-1 : piste ; numTracks.. : piste parallèle (indice p + numTracks)
+    TapPoint tap = TapPoint::PostPan;     // point de captation dans la chaîne du parent
+    StripSettings strip;                  // nom, couleur, envois, sortie directe, pan, inserts ; « mainEnabled » : se somme au parent
+
+    bool operator== (const ParallelSettings& o) const noexcept
+    {
+        return active == o.active && parent == o.parent && tap == o.tap && strip == o.strip;
+    }
+};
+ParallelSettings sanitised (ParallelSettings p, int index);
 
 struct MasterSettings
 {
