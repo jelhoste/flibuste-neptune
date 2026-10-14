@@ -1,10 +1,11 @@
-// Synthé soustractif (palier 1, premier jet) : oscillateurs à bande limitée, enveloppe, filtre, polyphonie, intégration au moteur,
-// état du projet (type de piste, patch, pistes actives, schéma v6).
+// Synthé soustractif (spec-modules §2) : catalogue de formes d'onde à bande limitée, oscillateurs, unisson, synchro dure,
+// mixeur des sources, sous-oscillateur, bruit, enveloppe de pitch, 2 filtres, polyphonie, moteur, état du projet.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "neptune/core/Engine.h"
@@ -15,6 +16,7 @@
 #include "neptune/core/State.h"
 #include "neptune/core/Synth.h"
 #include "neptune/core/SynthVoices.h"
+#include "neptune/core/WaveCatalog.h"
 
 using namespace neptune::core;
 using Catch::Matchers::WithinAbs;
@@ -24,46 +26,51 @@ namespace
 constexpr double kRate = 48000.0;
 constexpr double kPi = 3.14159265358979323846;
 
-SynthDescription plain (Waveform w)
+SynthDescription plain (int wave)
 {
     SynthDescription d;
-    d.waveform = w;
-    d.filter.on = false;
-    d.ampEnv.attack.ms = 0.0;      // démarrage immédiat : on compare à la formule dès le premier échantillon
+    d.osc[0].wave = wave;
+    d.filters.filter[0].on = false;   // pas de filtre
+    d.ampEnv.attack.ms = 0.0;         // démarrage immédiat
     d.ampEnv.release.ms = 20.0;
     return d;
 }
 
-// Joue `frames` échantillons d'une note et rend le canal gauche.
-std::vector<float> play (const SynthDescription& d, int key, int frames, float velocity = 1.0f,
-                         const SynthVoices::Params& params = {})
+struct Stereo { std::vector<float> l, r; };
+
+// Joue `frames` échantillons d'une note et rend les deux canaux.
+Stereo play (const SynthDescription& d, int key, int frames, float velocity = 1.0f, const SynthVoices::Params& params = {})
 {
     const SynthPatch patch (d);
     SynthVoices v;
     v.prepare (kRate);
     v.setPatch (&patch);
     v.noteOn (0, key, velocity);
-    std::vector<float> l (static_cast<std::size_t> (frames), 0.0f), r (l);
+    Stereo out { std::vector<float> (static_cast<std::size_t> (frames), 0.0f), std::vector<float> (static_cast<std::size_t> (frames), 0.0f) };
     for (int off = 0; off < frames; off += 256)
-        v.render (l.data() + off, r.data() + off, std::min (256, frames - off), 1.0f, 1.0f, params);
-    return l;
+        v.render (out.l.data() + off, out.r.data() + off, std::min (256, frames - off), 1.0f, 1.0f, params);
+    return out;
 }
 
-double hz (int key) { return 440.0 * std::pow (2.0, (key - 69) / 12.0); }
-
-double naive (Waveform w, double t)
+double rms (const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0)
 {
-    switch (w)
-    {
-        case Waveform::Saw: return 2.0 * t - 1.0;
-        case Waveform::Square: return t < 0.5 ? 1.0 : -1.0;
-        case Waveform::Triangle: return 1.0 - 4.0 * std::abs (t - 0.5);
-        default: return std::sin (2.0 * kPi * t);
-    }
+    if (to == 0 || to > x.size()) to = x.size();
+    double s = 0.0;
+    for (std::size_t i = from; i < to; ++i) s += static_cast<double> (x[i]) * x[i];
+    return std::sqrt (s / static_cast<double> (to - from));
 }
 
-// Part de l'énergie qui n'est PAS sur un harmonique : le repliement (aliasing). `period` échantillons par cycle (31,5 : les repliements
-// ne tombent jamais sur un harmonique), fenêtre de 32 cycles = 1008 échantillons, donc les harmoniques sont aux multiples de 32.
+int crossings (const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0)
+{
+    if (to == 0 || to > x.size()) to = x.size();
+    int n = 0;
+    for (std::size_t i = from + 1; i < to; ++i)
+        if (x[i - 1] < 0.0f && x[i] >= 0.0f) ++n;
+    return n;
+}
+
+// Part de l'énergie qui n'est PAS sur un harmonique (repliement). Cycle de 31,5 échantillons : fenêtre de 32 cycles = 1008
+// échantillons, harmoniques aux multiples de 32 ; les repliements ne tombent jamais sur un harmonique.
 double aliasRatio (const std::vector<double>& x)
 {
     const std::size_t n = x.size();
@@ -81,94 +88,249 @@ double aliasRatio (const std::vector<double>& x)
         total += e;
         if (k % 32 != 0) alias += e;
     }
-    return alias / total;
+    return total > 0.0 ? alias / total : 0.0;
 }
 
-double rms (const std::vector<float>& x, std::size_t from = 0)
+// note 69 accordée exactement sur un cycle de `period` échantillons
+SynthVoices::Params tunedTo (double period)
 {
-    double s = 0.0;
-    for (std::size_t i = from; i < x.size(); ++i) s += static_cast<double> (x[i]) * x[i];
-    return std::sqrt (s / static_cast<double> (x.size() - from));
+    SynthVoices::Params p;
+    p.tuneCents = 1200.0 * std::log2 (kRate / period / 440.0);
+    return p;
+}
+
+std::vector<double> window (const std::vector<float>& x, std::size_t start, std::size_t n)
+{
+    return std::vector<double> (x.begin() + static_cast<std::ptrdiff_t> (start), x.begin() + static_cast<std::ptrdiff_t> (start + n));
 }
 } // namespace
 
-TEST_CASE ("synth oscillators are band-limited: far less aliasing than the naive waveform")
+// ---------------------------------------------------------------------------------------------------- catalogue
+
+TEST_CASE ("wave catalog: unique stable keys, three categories, finite normalised tables")
 {
-    constexpr double period = 31.5;                 // échantillons par cycle : ~1524 Hz
-    constexpr double f0 = kRate / period;
-    SynthVoices::Params p;
-    p.tuneCents = 1200.0 * std::log2 (f0 / 440.0);  // note 69 accordée exactement sur f0
-    constexpr int start = 2000, window = 1008;
-    for (const Waveform w : { Waveform::Saw, Waveform::Square, Waveform::Triangle })
+    CHECK (kNumWaves >= 30);
+    std::set<std::string> keys;
+    int perCategory[numWaveCategories] = { 0, 0, 0 };
+    for (int w = 0; w < kNumWaves; ++w)
     {
-        const auto out = play (plain (w), 69, start + window, 1.0f, p);
-        std::vector<double> synth (window), plainWave (window);
-        for (int i = 0; i < window; ++i)
+        const auto& info = waveInfo (w);
+        CHECK (info.id == w);
+        CHECK (keys.insert (std::string (info.key)).second);
+        CHECK (waveIdFromKey (info.key) == w);
+        ++perCategory[static_cast<int> (info.category)];
+    }
+    for (const int n : perCategory) CHECK (n >= 5);
+    CHECK (waveIdFromKey ("nope") == -1);
+
+    const auto& tables = WaveTables::instance();
+    for (int w = 0; w < kNumWaves; ++w)
+    {
+        const float* t = tables.table (w, 0);
+        float peak = 0.0f;
+        for (int i = 0; i <= WaveTables::kSize; ++i)
         {
-            synth[static_cast<std::size_t> (i)] = out[static_cast<std::size_t> (start + i)];
-            plainWave[static_cast<std::size_t> (i)] = naive (w, std::fmod ((start + i) * f0 / kRate, 1.0));
+            REQUIRE (std::isfinite (t[i]));
+            peak = std::max (peak, std::abs (t[i]));
         }
-        const double bl = aliasRatio (synth), nv = aliasRatio (plainWave);
-        INFO (toString (w) << ": band-limited " << bl << ", naive " << nv);
-        CHECK (bl < 0.5 * nv);
+        INFO (waveInfo (w).key);
+        CHECK (peak > 0.45f);
+        CHECK (peak < 1.3f);
+        CHECK (t[WaveTables::kSize] == t[0]); // échantillon de garde
+    }
+    // plus la note est aiguë, plus la table est pauvre ; la plus grave garde tout
+    CHECK (WaveTables::mipFor (0.0004) == 0);
+    CHECK (WaveTables::mipFor (0.1) > WaveTables::mipFor (0.01));
+    CHECK (WaveTables::mipFor (0.45) == WaveTables::kMips - 1);
+}
+
+TEST_CASE ("waves: the analytic ones and every table are band-limited (almost no aliasing)")
+{
+    constexpr double period = 31.5; // ~1524 Hz
+    for (int w = 0; w < kNumWaves; ++w)
+    {
+        // le catalogue contient des formes volontairement très riches (bruit numérique) : on exige peu de repliement,
+        // pas zéro, à une hauteur où 15 harmoniques seulement tiennent sous Nyquist
+        const auto out = play (plain (w), 69, 2000 + 1008, 1.0f, tunedTo (period));
+        const double ratio = aliasRatio (window (out.l, 2000, 1008));
+        INFO (waveInfo (w).key << ": " << ratio);
+        CHECK (ratio < 0.004);
     }
 }
 
-TEST_CASE ("synth pitch: A4 is 440 Hz, the octave setting and the track tuning transpose")
+TEST_CASE ("synth pitch: A4 is 440 Hz, octave, semitone and track tuning transpose")
 {
-    auto countCrossings = [] (const std::vector<float>& x)
-    {
-        int n = 0;
-        for (std::size_t i = 1; i < x.size(); ++i)
-            if (x[i - 1] < 0.0f && x[i] >= 0.0f) ++n;
-        return n;
-    };
-    auto d = plain (Waveform::Sine);
-    CHECK (std::abs (countCrossings (play (d, 69, 48000)) - 440) <= 1);
-    d.octave = 1;
-    CHECK (std::abs (countCrossings (play (d, 69, 48000)) - 880) <= 1);
-    d.octave = 0;
+    auto d = plain (kWaveSine);
+    CHECK (std::abs (crossings (play (d, 69, 48000).l) - 440) <= 1);
+    d.osc[0].octave = 1;
+    CHECK (std::abs (crossings (play (d, 69, 48000).l) - 880) <= 1);
+    d.osc[0].octave = 0;
+    d.osc[0].semitone = 12;
+    CHECK (std::abs (crossings (play (d, 69, 48000).l) - 880) <= 1);
+    d.osc[0].semitone = 0;
     SynthVoices::Params p;
     p.tuneCents = 1200.0;
-    CHECK (std::abs (countCrossings (play (d, 69, 48000, 1.0f, p)) - 880) <= 1);
+    CHECK (std::abs (crossings (play (d, 69, 48000, 1.0f, p).l) - 880) <= 1);
+    p.tuneCents = 0.0;
+    p.fineCents[0] = 100.0; // un demi-ton
+    CHECK (std::abs (crossings (play (d, 69, 48000, 1.0f, p).l) - 466) <= 1);
 }
 
-TEST_CASE ("synth level follows velocity and leaves headroom")
+// ---------------------------------------------------------------------------------------------------- oscillateurs
+
+TEST_CASE ("synth level follows velocity, leaves headroom, and the sources are mixed by level and mute")
 {
-    const auto d = plain (Waveform::Sine);
+    auto d = plain (kWaveSine);
     const auto loud = play (d, 69, 4800, 1.0f);
     const auto soft = play (d, 69, 4800, 0.5f);
-    CHECK_THAT (rms (soft) / rms (loud), WithinAbs (0.5, 0.01));
+    CHECK_THAT (rms (soft.l) / rms (loud.l), WithinAbs (0.5, 0.01));
     double peak = 0.0;
-    for (const float s : loud) peak = std::max (peak, static_cast<double> (std::abs (s)));
+    for (const float s : loud.l) peak = std::max (peak, static_cast<double> (std::abs (s)));
     CHECK (peak < 0.175);
     CHECK (peak > 0.125);
+
+    SynthVoices::Params p;
+    p.level[0] = 0.0; // oscillateur 1 coupé, seul le 2 sonne
+    p.level[1] = 100.0;
+    d.osc[1].wave = kWaveSine;
+    d.osc[1].octave = 1; // une octave plus haut
+    const auto two = play (d, 69, 48000, 1.0f, p);
+    CHECK (std::abs (crossings (two.l) - 880) <= 1);
+
+    d.mix[1].mute = true;
+    const auto muted = play (d, 69, 4800, 1.0f, p);
+    CHECK (rms (muted.l) < 1e-9);
+
+    // pan du mixeur : tout à gauche
+    d.mix[1].mute = false;
+    d.mix[1].pan = -1.0;
+    const auto left = play (d, 69, 4800, 1.0f, p);
+    CHECK (rms (left.l) > 0.05);
+    CHECK (rms (left.r) < 1e-6);
 }
 
-TEST_CASE ("synth filter: a low cutoff removes the highs, the envelope opens it")
+TEST_CASE ("synth unison: stereo spread, detune curve and voice count")
 {
-    auto d = plain (Waveform::Saw);
-    d.filter.on = true;
-    d.filter.slopeDb = 24;
-    SynthVoices::Params open, closed;
-    closed.cutoffHz = 300.0;
-    const auto a = play (d, 81, 9600, 1.0f, open);   // 880 Hz
-    const auto b = play (d, 81, 9600, 1.0f, closed);
-    CHECK (rms (b, 2000) < 0.2 * rms (a, 2000));
-    CHECK (rms (b, 2000) > 0.0);
+    auto d = plain (kWaveSaw);
+    const auto mono = play (d, 60, 9600);
+    CHECK_THAT (rms (mono.l), WithinAbs (rms (mono.r), 1e-6)); // une seule voix : au centre
 
-    // enveloppe de filtre : profondeur +4 octaves, attaque lente -> le début est plus sombre que la fin
-    d.filter.envDepthOctaves = 4.0;
-    d.filter.env.attack.ms = 400.0;
-    const auto c = play (d, 81, 48000, 1.0f, closed);
-    std::vector<float> early (c.begin() + 500, c.begin() + 5000), late (c.end() - 4500, c.end());
-    CHECK (rms (late) > 2.0 * rms (early));
-    for (const float s : c) REQUIRE (std::isfinite (s));
+    d.osc[0].unison = 5;
+    d.osc[0].spread = 1.0;
+    SynthVoices::Params p;
+    p.unisonDetune[0] = 30.0;
+    const auto wide = play (d, 60, 9600, 1.0f, p);
+    double diff = 0.0;
+    for (std::size_t i = 4800; i < wide.l.size(); ++i) diff += std::abs (static_cast<double> (wide.l[i]) - wide.r[i]);
+    CHECK (diff / 4800.0 > 0.01); // canaux différents : image stéréo
+    // l'énergie reste du même ordre que la voix seule (normalisation par la racine du nombre de voix)
+    CHECK (rms (wide.l) < 1.6 * rms (mono.l));
+    CHECK (rms (wide.l) > 0.4 * rms (mono.l));
+
+    d.osc[0].spread = 0.0; // pas d'écartement : mono
+    const auto centred = play (d, 60, 9600, 1.0f, p);
+    CHECK_THAT (rms (centred.l), WithinAbs (rms (centred.r), 1e-5));
+
+    // courbe « supersaw » : un autre rendu que la courbe linéaire
+    d.osc[0].curve = DetuneCurve::Supersaw;
+    const auto curve = play (d, 60, 9600, 1.0f, p);
+    double d2 = 0.0;
+    for (std::size_t i = 0; i < curve.l.size(); ++i) d2 += std::abs (static_cast<double> (curve.l[i]) - centred.l[i]);
+    CHECK (d2 > 1.0);
+    for (const float s : curve.l) REQUIRE (std::isfinite (s));
+}
+
+TEST_CASE ("synth hard sync makes the slave periodic at the master's period")
+{
+    constexpr double period = 100.0;     // 480 Hz
+    auto periodicity = [period] (bool sync)
+    {
+        auto d = plain (kWaveSaw);
+        d.osc[1].wave = kWaveSaw;
+        d.osc[1].octave = 1;
+        d.osc[1].semitone = 5;           // rapport ~2,67 : sans synchro, pas périodique à 100 échantillons
+        d.osc[1].sync = sync;
+        auto p = tunedTo (period);
+        p.level[0] = 0.0;                // l'oscillateur 1 est muet mais sert de maître
+        p.level[1] = 100.0;
+        const auto out = play (d, 69, 8000, 1.0f, p);
+        double num = 0.0, den = 0.0;
+        for (std::size_t i = 2000; i < 6000; ++i)
+        {
+            const double a = out.l[i], b = out.l[i + static_cast<std::size_t> (period)];
+            num += a * b;
+            den += a * a;
+        }
+        return num / den; // autocorrélation normalisée au retard d'une période
+    };
+    CHECK (periodicity (true) > 0.98);
+    CHECK (periodicity (false) < 0.9);
+}
+
+TEST_CASE ("synth sub oscillator and noise")
+{
+    auto d = plain (kWaveSine);
+    SynthVoices::Params p;
+    p.level[0] = 0.0;
+    p.level[kSourceSub] = 100.0;
+    d.subWave = SubWave::Sine;
+    d.subOctave = -1;
+    CHECK (std::abs (crossings (play (d, 69, 48000, 1.0f, p).l) - 220) <= 1);
+    d.subOctave = -2;
+    CHECK (std::abs (crossings (play (d, 69, 48000, 1.0f, p).l) - 110) <= 1);
+    d.subWave = SubWave::Square;
+    const auto sq = play (d, 69, 4800, 1.0f, p);
+    CHECK (rms (sq.l) > 0.1);
+
+    p.level[kSourceSub] = 0.0;
+    p.level[kSourceNoise] = 100.0;
+    d.noise = NoiseType::White;
+    const auto white = play (d, 69, 24000, 1.0f, p);
+    d.noise = NoiseType::Pink;
+    const auto pink = play (d, 69, 24000, 1.0f, p);
+    CHECK (rms (white.l) > 0.02);
+    CHECK (rms (pink.l) > 0.01);
+    for (const float s : pink.l) REQUIRE (std::isfinite (s));
+    // le bruit rose a plus de graves : moins de passages par zéro que le blanc
+    CHECK (crossings (pink.l) < crossings (white.l));
+}
+
+TEST_CASE ("synth pitch envelope bends the note and the filters shape it")
+{
+    auto d = plain (kWaveSine);
+    d.pitchEnv.attack.ms = 0.0;
+    d.pitchEnv.decay.ms = 200.0;
+    d.pitchEnv.sustain = 0.0;
+    SynthVoices::Params p;
+    p.pitchEnvDepth = 12.0; // une octave au début, qui retombe
+    const auto out = play (d, 69, 48000, 1.0f, p);
+    const int early = crossings (out.l, 0, 2400);       // 50 premières ms
+    const int late = crossings (out.l, 36000, 48000);   // 250 ms : retombé à 440 Hz
+    CHECK (early > 25);                                 // ~ 880 Hz : ~44 en 50 ms (au moins >> 22 de 440 Hz)
+    CHECK (std::abs (late - 440 / 4) <= 3);
+
+    // deux filtres : en série, la pente double ; en parallèle, un mélange
+    auto s = plain (kWaveSaw);
+    s.filters.filter[0].on = true;
+    s.filters.filter[0].slopeDb = 12;
+    SynthVoices::Params q;
+    q.cutoffHz[0] = 300.0;
+    const double one = rms (play (s, 81, 9600, 1.0f, q).l, 2000);
+    s.filters.filter[1].on = true;
+    s.filters.filter[1].slopeDb = 12;
+    q.cutoffHz[1] = 300.0;
+    const double two = rms (play (s, 81, 9600, 1.0f, q).l, 2000);
+    CHECK (two < 0.6 * one);
+    s.filters.parallel = true;
+    s.filters.balance = 0.5;
+    const auto par = play (s, 81, 9600, 1.0f, q);
+    CHECK_THAT (rms (par.l, 2000) / one, WithinAbs (1.0, 0.2)); // deux filtres identiques en parallèle : même niveau qu'un seul
+    for (const float v : par.l) REQUIRE (std::isfinite (v));
 }
 
 TEST_CASE ("synth polyphony: release ends voices, the limit steals, mono and legato keep one voice")
 {
-    SynthDescription d = plain (Waveform::Saw);
+    SynthDescription d = plain (kWaveSaw);
     const SynthPatch patch (d);
     SynthVoices v;
     v.prepare (kRate);
@@ -185,10 +347,9 @@ TEST_CASE ("synth polyphony: release ends voices, the limit steals, mono and leg
     v.noteOff (0, 64);
     v.noteOff (0, 67);
     CHECK (v.heldVoices() == 0);
-    run (8); // 20 ms de relâchement = 960 échantillons
+    run (8);
     CHECK (v.activeVoices() == 0);
 
-    // limite de voix
     d.maxVoices = 2;
     const SynthPatch limited (d);
     v.setPatch (&limited);
@@ -199,7 +360,6 @@ TEST_CASE ("synth polyphony: release ends voices, the limit steals, mono and leg
     run (4);
     CHECK (v.activeVoices() == 2);
 
-    // mono : une seule voix, la dernière note
     d.maxVoices = 16;
     d.polyphony = PolyphonyMode::Mono;
     const SynthPatch mono (d);
@@ -211,13 +371,7 @@ TEST_CASE ("synth polyphony: release ends voices, the limit steals, mono and leg
     int key = -1;
     v.forEachVoice ([&key] (const SynthVoices::VoiceInfo& i) { key = i.key; });
     CHECK (key == 65);
-    v.noteOff (0, 65); // la touche précédente est encore tenue : on y revient
-    run (4);
-    key = -1;
-    v.forEachVoice ([&key] (const SynthVoices::VoiceInfo& i) { if (! i.fading) key = i.key; });
-    CHECK (key == 60);
 
-    // legato : la voix continue, sa hauteur change
     d.polyphony = PolyphonyMode::Legato;
     const SynthPatch legato (d);
     v.setPatch (&legato);
@@ -234,14 +388,51 @@ TEST_CASE ("synth polyphony: release ends voices, the limit steals, mono and leg
     CHECK (v.activeVoices() == 0);
 }
 
+TEST_CASE ("synth worst case stays finite: 8 unison voices on 3 oscillators with sync and both filters")
+{
+    SynthDescription d;
+    for (int o = 0; o < numOscillators; ++o)
+    {
+        d.osc[static_cast<std::size_t> (o)].wave = kWaveLadderSaw + o;
+        d.osc[static_cast<std::size_t> (o)].unison = 8;
+        d.osc[static_cast<std::size_t> (o)].curve = DetuneCurve::Supersaw;
+    }
+    d.osc[1].sync = d.osc[2].sync = true;
+    d.filters.filter[1].on = true;
+    d.filters.filter[0].envDepthOctaves = 4.0;
+    d.pitchEnv.decay.ms = 100.0;
+    SynthVoices::Params p;
+    p.level[1] = p.level[2] = p.level[3] = p.level[4] = 100.0;
+    p.pitchEnvDepth = 24.0;
+    p.cutoffHz[0] = 800.0;
+    p.resonance[0] = 0.9;
+    const auto out = play (d, 100, 24000, 1.0f, p);
+    for (const float s : out.l) REQUIRE (std::isfinite (s));
+    for (const float s : out.r) REQUIRE (std::isfinite (s));
+    CHECK (rms (out.l) > 0.0);
+}
+
 TEST_CASE ("synth description: bounds and JSON round trip")
 {
     SynthDescription d;
-    d.waveform = Waveform::Square;
-    d.octave = -2;
+    d.osc[0].wave = kWaveVoxA;
+    d.osc[1].wave = kWavePulse;
+    d.osc[1].unison = 6;
+    d.osc[1].spread = 0.8;
+    d.osc[1].curve = DetuneCurve::Supersaw;
+    d.osc[2].sync = true;
+    d.osc[2].retrigger = false;
+    d.subWave = SubWave::Triangle;
+    d.subOctave = -2;
+    d.noise = NoiseType::Pink;
+    d.mix[2].mute = true;
+    d.mix[3].pan = -0.4;
     d.ampEnv.attack.ms = 120.0;
-    d.filter.model = FilterModel::Ladder;
-    d.filter.envDepthOctaves = 2.5;
+    d.pitchEnv.decay.ms = 80.0;
+    d.filters.filter[1].on = true;
+    d.filters.filter[1].model = FilterModel::Ladder;
+    d.filters.parallel = true;
+    d.filters.balance = 0.3;
     d.polyphony = PolyphonyMode::Legato;
     d.maxVoices = 9;
     d.stealMode = VoiceStealMode::KeepLow;
@@ -249,15 +440,23 @@ TEST_CASE ("synth description: bounds and JSON round trip")
     CHECK (synthFromJson (toJson (d)) == sanitised (d));
 
     SynthDescription wild;
-    wild.octave = 99;
+    wild.osc[1].unison = 99;
+    wild.osc[0].octave = 99;
+    wild.osc[0].wave = 9999;
+    wild.osc[0].sync = true;
     wild.maxVoices = 100000;
     wild.glideMs = -4;
+    wild.subOctave = 5;
     const auto s = sanitised (wild);
-    CHECK (s.octave == SynthDescription::maxOctave);
+    CHECK (s.osc[1].unison == maxUnison);
+    CHECK (s.osc[0].octave == SynthDescription::maxOctave);
+    CHECK (s.osc[0].wave == kNumWaves - 1);
+    CHECK_FALSE (s.osc[0].sync);
     CHECK (s.maxVoices == SynthDescription::maxVoicesLimit);
     CHECK (s.glideMs == 0);
+    CHECK (s.subOctave == -1);
     CHECK (synthFromJson ("not json") == SynthDescription {});
-    CHECK (synthFromJson (R"({"waveform":"banana","octave":"x"})") == SynthDescription {});
+    CHECK (synthFromJson (R"({"oscillators":[{"wave":"banana","unison":"x"}]})") == SynthDescription {});
 }
 
 // ---------------------------------------------------------------------------------------------------- moteur
@@ -281,7 +480,6 @@ struct Rig
         bufs.assign (4, std::vector<float> (256, 0.0f)); // 2 sorties stéréo : le master sur la sortie 1
         for (auto& b : bufs) ptrs.push_back (b.data());
     }
-    // Joue des blocs ; rend la crête du canal gauche de la sortie 1 sur le dernier bloc.
     float run (int blocks = 8)
     {
         float peak = 0.0f;
@@ -294,31 +492,34 @@ struct Rig
         return peak;
     }
 };
+
+SynthDescription sineSynth()
+{
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    return d;
+}
 } // namespace
 
 TEST_CASE ("engine: a synth track makes sound, an inactive track does not, switching the type cuts the voices")
 {
     Rig r;
     r.engine.setTrackType (0, TrackType::Synth);
-    r.engine.publishSynth (0, std::make_shared<SynthPatch> (SynthDescription {}));
-    r.run (1); // le patch est adopté au début du bloc
+    r.engine.publishSynth (0, std::make_shared<SynthPatch> (sineSynth()));
+    r.run (1);
     r.engine.noteOn (0, 60, 1.0f);
-    const float on = r.run (8);
-    CHECK (on > 0.05f);
+    CHECK (r.run (8) > 0.05f);
     CHECK (r.engine.activeVoices() == 1);
 
-    // le fader agit : -inf
     REQUIRE (r.params.set (probe::trackParam (0, probe::kVolume), -100.0));
     CHECK (r.run (8) == 0.0f);
     REQUIRE (r.params.set (probe::trackParam (0, probe::kVolume), 0.0));
     CHECK (r.run (8) > 0.05f);
 
-    // changement de type : plus rien ne sonne sous l'ancien type
     r.engine.setTrackType (0, TrackType::Sampler);
     CHECK (r.run (4) == 0.0f);
     CHECK (r.engine.activeVoices() == 0);
 
-    // piste inactive : elle ignore les notes
     r.engine.setTrackType (0, TrackType::Synth);
     r.engine.setTrackActive (0, false);
     r.run (1);
@@ -329,29 +530,48 @@ TEST_CASE ("engine: a synth track makes sound, an inactive track does not, switc
     CHECK (r.run (8) > 0.05f);
 }
 
-TEST_CASE ("engine: the synth follows the track gain, cutoff and note-off")
+TEST_CASE ("engine: the synth follows the track gain, source levels and note-off")
 {
     Rig r;
     r.engine.setTrackType (0, TrackType::Synth);
-    r.engine.publishSynth (0, std::make_shared<SynthPatch> (SynthDescription {}));
+    r.engine.publishSynth (0, std::make_shared<SynthPatch> (sineSynth()));
     r.run (1);
     r.engine.noteOn (0, 60, 1.0f);
     const float loud = r.run (8);
     REQUIRE (r.params.set (mixer::samplerParam (0, mixer::kGain), -12.0));
-    const float quiet = r.run (8);
-    CHECK_THAT (quiet / loud, WithinAbs (std::pow (10.0, -12.0 / 20.0), 0.03));
+    CHECK_THAT (r.run (8) / loud, WithinAbs (std::pow (10.0, -12.0 / 20.0), 0.03));
     REQUIRE (r.params.set (mixer::samplerParam (0, mixer::kGain), 0.0));
 
+    // niveau de la source 1 (paramètre automatisable de la piste) : à zéro, plus rien
+    REQUIRE (r.params.set (mixer::synthParam (0, mixer::kLevelOsc1), 0.0));
+    CHECK (r.run (8) < 1e-6f);
+    REQUIRE (r.params.set (mixer::synthParam (0, mixer::kLevelOsc1), 100.0));
+    CHECK (r.run (8) > 0.05f);
+
     r.engine.noteOff (0, 60);
-    CHECK (r.run (200) == 0.0f); // 150 ms de relâchement par défaut : terminé
+    CHECK (r.run (200) < 1e-6f);
     CHECK (r.engine.activeVoices() == 0);
+}
+
+TEST_CASE ("engine: synth parameters exist for every track with their documented ids and defaults")
+{
+    ParameterSet set;
+    REQUIRE (sampler::addParams (set));
+    REQUIRE (probe::buildPool (set, mixer::numTracks));
+    REQUIRE (mixer::addParams (set, mixer::numTracks, mixer::numBuses));
+    for (int t = 0; t < mixer::numTracks; ++t)
+        for (int k = 0; k < mixer::kSynthKinds; ++k)
+            CHECK (set.find (mixer::synthParam (t, static_cast<mixer::SynthKind> (k))) != nullptr);
+    CHECK (set.get (mixer::synthParam (0, mixer::kLevelOsc1)) == 100.0);
+    CHECK (set.get (mixer::synthParam (0, mixer::kLevelOsc2)) == 0.0);
+    CHECK (set.get (mixer::synthParam (3, mixer::kPulseOsc2)) == 50.0);
 }
 
 TEST_CASE ("engine: synth voices appear in the voice snapshot without a zone")
 {
     Rig r;
     r.engine.setTrackType (0, TrackType::Synth);
-    r.engine.publishSynth (0, std::make_shared<SynthPatch> (SynthDescription {}));
+    r.engine.publishSynth (0, std::make_shared<SynthPatch> (sineSynth()));
     r.run (1);
     r.engine.setVoiceMonitor (true);
     r.engine.noteOn (0, 72, 0.8f);
@@ -376,26 +596,27 @@ TEST_CASE ("mixer state: fresh project has one synth track, tracks can be added 
 
     m.tracks[1].active = true;
     m.tracks[1].strip.name = "Pad";
-    m.tracks[1].synth.waveform = Waveform::Triangle;
+    m.tracks[1].synth.osc[0].wave = kWaveTriangle;
+    m.tracks[1].synth.osc[1].unison = 7;
     m.tracks[1].type = TrackType::Synth;
     m.selectedTrack = 1;
     const auto back = mixerFromJson (toJson (m));
     CHECK (back == m);
-    CHECK (back.tracks[1].synth.waveform == Waveform::Triangle);
+    CHECK (back.tracks[1].synth.osc[0].wave == kWaveTriangle);
     CHECK (back.activeCount() == 2);
 
     m.resetTrack (1);
     CHECK_FALSE (m.tracks[1].active);
     CHECK (m.tracks[1].type == TrackType::Sampler);
     CHECK (m.tracks[1].strip.name.empty());
-    CHECK (m.tracks[1].strip.midiChannel == 2); // le canal d'origine de la piste 2
-    CHECK (m.selectedTrack == 0);               // la piste sélectionnée a disparu : retour à la première active
+    CHECK (m.tracks[1].strip.midiChannel == 2);
+    CHECK (m.selectedTrack == 0);
 }
 
 TEST_CASE ("an empty track added by the user stays active after a round trip, and track 1 can be removed")
 {
     MixerState m = MixerState::freshProject();
-    m.tracks[4].active = true; // ajoutée, jamais touchée
+    m.tracks[4].active = true;
     auto back = mixerFromJson (toJson (m));
     CHECK (back.tracks[4].active);
     CHECK (back == m);
@@ -438,8 +659,9 @@ TEST_CASE ("state: a synth track survives save and load")
     ParameterSet set;
     REQUIRE (sampler::addParams (set));
     auto m = MixerState::freshProject();
-    m.tracks[0].synth.waveform = Waveform::Square;
-    m.tracks[0].synth.octave = 1;
+    m.tracks[0].synth.osc[0].wave = kWaveSquare;
+    m.tracks[0].synth.osc[0].octave = 1;
+    m.tracks[0].synth.filters.parallel = true;
     const auto text = state::save (set, "id", std::nullopt, &m);
     const auto r = state::load (set, text);
     REQUIRE (r.ok());

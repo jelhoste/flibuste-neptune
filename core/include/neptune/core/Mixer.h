@@ -49,6 +49,21 @@ constexpr ParamId samplerParam (int track, SamplerKind kind)
     return track == 0 ? legacy[kind] : probe::trackParam (track, 30 + static_cast<ParamId> (kind));
 }
 
+// Paramètres automatisables du synthé d'une piste (déclarés pour les 16 pistes, utilisés quand la piste est un Synthé) :
+// identifiants `1000 + 100.t + 40 + kind` (blocs libres des pistes), y compris pour la piste 1. Le gain, l'accordage et les coupures /
+// résonances des 2 filtres sont ceux de l'instrument (samplerParam).
+enum SynthKind : int
+{
+    kLevelOsc1 = 0, kLevelOsc2, kLevelOsc3, kLevelSub, kLevelNoise,   // %, 0..100
+    kFineOsc1, kFineOsc2, kFineOsc3,                                  // cents, +-100
+    kPulseOsc1, kPulseOsc2, kPulseOsc3,                               // %, 2..98 (largeur d'impulsion)
+    kDetuneOsc1, kDetuneOsc2, kDetuneOsc3,                            // cents, 0..100 (détune d'unisson, voix extrêmes)
+    kPitchEnvDepth,                                                   // demi-tons, +-48
+    kSynthKinds
+};
+constexpr ParamId synthParamBase = 40;
+constexpr ParamId synthParam (int track, SynthKind kind) { return probe::trackParam (track, synthParamBase + static_cast<ParamId> (kind)); }
+
 // Ajoute au jeu : les paramètres d'instrument des pistes 1..n-1, ceux du master (trim, mono) et ceux des bus.
 // (Les paramètres de piste volume/pan/mute/solo/envois viennent de probe::buildPool ; ceux de la piste 0, de sampler::addParams.)
 bool addParams (ParameterSet& set, int tracks, int buses, std::string* error = nullptr);

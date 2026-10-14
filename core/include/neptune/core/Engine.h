@@ -137,7 +137,8 @@ private:
         std::size_t volume = N, pan = N, mute = N, solo = N;
         std::size_t sendLevel[mixer::numSends];
         std::size_t sampler[mixer::kSamplerKinds];
-        ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; }
+        std::size_t synth[mixer::kSynthKinds];
+        ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; }
     };
     // Un emplacement d'insert : l'instance (remise au thread audio) et l'index de son paramètre de bypass (celui de l'hôte).
     struct InsertSlot

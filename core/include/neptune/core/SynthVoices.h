@@ -1,6 +1,8 @@
 #pragma once
-// Voix du synthé soustractif (palier 1, premier jet) : oscillateur à bande limitée (PolyBLEP / PolyBLAMP), enveloppe de volume,
-// filtre avec son enveloppe, polyphonie (poly / mono / legato, vol de voix). Aucune allocation côté audio.
+// Voix du synthé soustractif (spec-modules §2) : 3 oscillateurs (unisson stéréo, synchro dure), sous-oscillateur, bruit, mixeur,
+// 2 filtres stéréo avec leurs enveloppes, enveloppe de volume et de pitch, polyphonie (poly / mono / legato, vol de voix).
+// Oscillateurs à bande limitée (PolyBLEP / PolyBLAMP / tables d'onde par octave). Aucune allocation côté audio.
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -16,14 +18,19 @@ public:
     static constexpr int kMaxVoices = SynthDescription::maxVoicesLimit; // voix tenues
     static constexpr int kFadeSlots = 16;                               // voix volées qui s'éteignent
     static constexpr double kStealFadeSeconds = 0.005;
-    static constexpr double kVoiceHeadroom = 0.15;                      // une voix à pleine vélocité : sinus -16,5 dBFS, dent de scie ~-15 dBFS (marge pour les accords)
+    static constexpr double kVoiceHeadroom = 0.15;                      // marge par voix (une dent de scie à pleine vélocité : ~-15 dBFS)
 
     // Valeurs automatisables de la piste, lues une fois par bloc.
     struct Params
     {
-        double cutoffHz = filterMaxHz;
-        double resonance = 0.0;  // 0..1
-        double tuneCents = 0.0;  // accordage de la piste (demi-tons et cents)
+        double cutoffHz[2] = { filterMaxHz, filterMaxHz };
+        double resonance[2] = { 0.0, 0.0 };  // 0..1
+        double tuneCents = 0.0;              // accordage de la piste (demi-tons et cents)
+        double level[numSources] = { 100.0, 0.0, 0.0, 0.0, 0.0 }; // %
+        double fineCents[numOscillators] = { 0.0, 0.0, 0.0 };
+        double pulse[numOscillators] = { 50.0, 50.0, 50.0 };      // % (largeur d'impulsion)
+        double unisonDetune[numOscillators] = { 20.0, 20.0, 20.0 }; // cents, voix extrêmes
+        double pitchEnvDepth = 0.0;          // demi-tons à pleine enveloppe
     };
 
     void prepare (double sampleRate) noexcept;
@@ -36,7 +43,7 @@ public:
     void releaseAll() noexcept;  // MIDI All Notes Off : relâche les notes tenues
     void allSoundOff() noexcept; // coupe net (changement de type de piste, préparation)
 
-    // Ajoute le rendu dans `left` et `right` (nuls permis pour `right`). Le gain est interpolé de gainStart à gainEnd.
+    // Ajoute le rendu dans `left` et `right` (`right` peut être nul : mélange mono). Le gain est interpolé de gainStart à gainEnd.
     void render (float* left, float* right, int numFrames, float gainStart, float gainEnd, const Params& params) noexcept;
 
     struct VoiceInfo
@@ -62,15 +69,20 @@ private:
         bool active = false, releasing = false, stolen = false;
         int channel = 0, key = 0;
         std::uint64_t order = 0;
-        double phase = 0.0;
+        std::array<std::array<double, maxUnison>, numOscillators> phase {};
+        std::array<double, maxUnison> masterLast {}; // dernière phase de l'oscillateur 1 du bloc précédent (détection des tours)
+        double subPhase = 0.0;
+        std::uint32_t rng = 1;
+        float pink[3] = { 0.0f, 0.0f, 0.0f };
         double note = 60.0;        // hauteur courante, en demi-tons MIDI (glisse vers targetNote)
         double targetNote = 60.0;
         double glideStep = 0.0;    // demi-tons par bloc de contrôle (0 : pas de glissando)
         float velocity = 1.0f;
-        EnvelopeRunner env, fenv;
-        FilterState fstate;
-        FilterCoefs fcoef;
-        float fenvValue = 0.0f;
+        EnvelopeRunner env, penv;
+        std::array<EnvelopeRunner, 2> fenv;
+        std::array<std::array<FilterState, 2>, 2> fstate {}; // [filtre][canal]
+        std::array<FilterCoefs, 2> fcoef;
+        std::array<float, 2> fenvValue { 0.0f, 0.0f };
         float fade = 1.0f, fadeStep = 0.0f;
         float level = 0.0f;
     };
@@ -83,6 +95,7 @@ private:
     Voice* allocate() noexcept;
     Voice* chooseVictim (int newKey, bool& dropNew) noexcept;
     void startNote (int channel, int key, float velocity) noexcept;
+    void initPhases (Voice& v) noexcept;
     void pushHeld (int channel, int key, float velocity) noexcept;
     void removeHeld (int channel, int key) noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, const Params& p) noexcept;

@@ -29,6 +29,27 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
           && set.add (ParamSpec::continuous (samplerParam (t, kFilter2Resonance), p + "Filter 2 Reso", Unit::Percent, 0.0, 100.0, 0.0), error);
     }
 
+    // Synthé : 15 paramètres par piste
+    {
+        static const char* const sourceNames[5] = { "Osc 1 Level", "Osc 2 Level", "Osc 3 Level", "Sub Level", "Noise Level" };
+        for (int t = 0; ok && t < tracks; ++t)
+        {
+            const std::string p = "Track " + std::to_string (t + 1) + " ";
+            for (int k = 0; ok && k < kSynthKinds; ++k)
+            {
+                const auto id = synthParam (t, static_cast<SynthKind> (k));
+                ParamSpec spec;
+                const std::string o = std::to_string (k % 3 + 1);
+                if (k <= kLevelNoise) spec = ParamSpec::continuous (id, p + sourceNames[k], Unit::Percent, 0.0, 100.0, k == kLevelOsc1 ? 100.0 : 0.0);
+                else if (k <= kFineOsc3) spec = ParamSpec::continuous (id, p + "Osc " + o + " Fine", Unit::Cents, -100.0, 100.0, 0.0);
+                else if (k <= kPulseOsc3) spec = ParamSpec::continuous (id, p + "Osc " + o + " Pulse Width", Unit::Percent, 2.0, 98.0, 50.0);
+                else if (k <= kDetuneOsc3) spec = ParamSpec::continuous (id, p + "Osc " + o + " Unison Detune", Unit::Cents, 0.0, 100.0, 20.0);
+                else spec = ParamSpec::continuous (id, p + "Pitch Env Depth", Unit::Semitones, -48.0, 48.0, 0.0);
+                ok = set.add (std::move (spec), error);
+            }
+        }
+    }
+
     ok = ok && set.add (ParamSpec::continuous (masterTrim, "Master Trim", Unit::Decibel, -12.0, 12.0, 0.0), error)
             && set.add (ParamSpec::toggle (masterMono, "Master Mono"), error);
     for (int i = 0; ok && i < numInserts; ++i)

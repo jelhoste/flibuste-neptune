@@ -254,7 +254,11 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     mixerView_->onOpenInsert = [this] (NeptuneProcessor::StripKind kind, int index, int slot) { openInsert (kind, index, slot); };
     addChildComponent (*mixerView_);
 
-    synthView_ = std::make_unique<SynthView> (palette_, tr_);
+    {
+        using namespace neptune::core;
+        const auto& themeDef = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
+        synthView_ = std::make_unique<SynthView> (processor_, palette_, tr_, themeDef.knob);
+    }
     synthView_->onChange = [this] (const neptune::core::SynthDescription& d) { processor_.uiEditSynth (d, "Synth", "synth"); };
     synthView_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
     synthView_->onGestureEnd = [this] { processor_.uiEndGesture(); };
@@ -974,12 +978,12 @@ void NeptuneEditor::updateViewVisibility()
     preloadLabel_.setVisible (sampler);
     preloadBox_.setVisible (sampler);
     groupsViewport_.setVisible (sampler);
-    // gain, accordage, coupure et résonance valent pour les deux types ; le second filtre n'existe que dans le Sampler
+    // gain et accordage valent pour les deux types ; les filtres du synthé se règlent dans sa page « Filtres »
     int k = 0;
     for (auto* knob : knobs_)
     {
-        const bool secondFilter = k >= static_cast<int> (neptune::core::mixer::kFilter2Cutoff);
-        knob->setVisible (mapping && ! (synth && secondFilter));
+        const bool filterKnob = k >= static_cast<int> (neptune::core::mixer::kFilter1Cutoff);
+        knob->setVisible (mapping && ! (synth && filterKnob));
         ++k;
     }
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
@@ -1026,6 +1030,7 @@ void NeptuneEditor::rebindKnobs()
     const int track = processor_.selectedTrack();
     if (track == knobTrack_) return;
     knobTrack_ = track;
+    synthView_->setTrack (track);
     synthView_->releaseKeys(); // touches tenues à l'écran : relâchées sur la piste où elles ont démarré
     zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
     int k = 0;

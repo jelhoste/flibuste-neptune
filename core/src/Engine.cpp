@@ -166,6 +166,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         for (int s = 0; s < kInserts; ++s)
             tracks_[static_cast<std::size_t> (t)].inserts[static_cast<std::size_t> (s)].bypass = idx (probe::trackParam (t, probe::kInsertBypass + static_cast<ParamId> (s)));
         for (int k = 0; k < mixer::kSamplerKinds; ++k) p.sampler[k] = idx (mixer::samplerParam (t, static_cast<mixer::SamplerKind> (k)));
+        for (int k = 0; k < mixer::kSynthKinds; ++k) p.synth[k] = idx (mixer::synthParam (t, static_cast<mixer::SynthKind> (k)));
     }
     for (int b = 0; b < kBuses; ++b)
     {
@@ -512,9 +513,21 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         if (synthTrack)
         {
             SynthVoices::Params sp;
-            sp.cutoffHz = fp.cutoffHz[0];
-            sp.resonance = fp.resonance[0];
+            for (int f = 0; f < 2; ++f) { sp.cutoffHz[f] = fp.cutoffHz[f]; sp.resonance[f] = fp.resonance[f]; }
             sp.tuneCents = cents;
+            if (params_ != nullptr)
+            {
+                const auto& sy = t.idx.synth;
+                auto get = [this, &sy] (mixer::SynthKind k, double fallback) { return param (sy[static_cast<std::size_t> (k)], fallback); };
+                for (int o = 0; o < numSources; ++o) sp.level[o] = get (static_cast<mixer::SynthKind> (mixer::kLevelOsc1 + o), sp.level[o]);
+                for (int o = 0; o < numOscillators; ++o)
+                {
+                    sp.fineCents[o] = get (static_cast<mixer::SynthKind> (mixer::kFineOsc1 + o), 0.0);
+                    sp.pulse[o] = get (static_cast<mixer::SynthKind> (mixer::kPulseOsc1 + o), 50.0);
+                    sp.unisonDetune[o] = get (static_cast<mixer::SynthKind> (mixer::kDetuneOsc1 + o), 20.0);
+                }
+                sp.pitchEnvDepth = get (mixer::kPitchEnvDepth, 0.0);
+            }
             t.synth.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, sp);
         }
         else

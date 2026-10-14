@@ -39,7 +39,7 @@ struct Scenario
     int heldNotes;       // notes tenues pendant la mesure (noteOn avant, aucune libération)
     int paramsPerBlock;  // setParameter appelés avant chaque bloc (automation de l'hôte)
     int filter = 0;      // filtres par voie : 0 aucun, 1 SVF passe-bas 24 dB (+ enveloppe), 2 Ladder 24 dB saturé, 3 deux filtres en série, 4 SVF 24 dB statique
-    int synth = 0;       // 0 : piste Sampler ; 1 : piste Synthé, dent de scie + SVF 24 dB statique ; 2 : idem avec enveloppe de filtre
+    int synth = 0;       // 0 : piste Sampler ; 1 : piste Synthé, dent de scie + SVF 24 dB statique ; 2 : idem avec enveloppe de filtre ; 3 : unisson 8 voix + 2 filtres
 };
 
 struct Result
@@ -80,9 +80,16 @@ Result run (const Scenario& s)
     {
         neptune::core::SynthDescription d;
         d.maxVoices = neptune::core::SynthDescription::maxVoicesLimit;
-        d.filter.cutoffHz = 3000.0;
-        d.filter.envDepthOctaves = s.synth == 2 ? 2.0 : 0.0;
-        d.filter.env.attack.ms = 50.0;
+        d.filters.filter[0].cutoffHz = 3000.0;
+        d.filters.filter[0].envDepthOctaves = s.synth == 2 ? 2.0 : 0.0;
+        d.filters.filter[0].env.attack.ms = 50.0;
+        if (s.synth == 3)
+        {
+            d.osc[0].unison = 8;
+            d.osc[0].curve = neptune::core::DetuneCurve::Supersaw;
+            d.filters.filter[1].on = true;
+            d.filters.filter[1].envDepthOctaves = 2.0;
+        }
         engine.setTrackType (0, neptune::core::TrackType::Synth);
         engine.publishSynth (0, std::make_shared<neptune::core::SynthPatch> (d));
         engine.process (chans.data(), kChannels, s.blockSize); // adopte le patch
@@ -213,6 +220,8 @@ int main (int argc, char** argv)
             scenarios.push_back ({ "synth_16v", bs, 16, 64, 0, 1 });
             scenarios.push_back ({ "synth_64v", bs, 64, 64, 0, 1 });
             scenarios.push_back ({ "synth_64v_env", bs, 64, 64, 0, 2 });
+            scenarios.push_back ({ "synth_uni8_16v", bs, 16, 64, 0, 3 });
+            scenarios.push_back ({ "synth_uni8_64v", bs, 64, 64, 0, 3 });
         }
     }
 

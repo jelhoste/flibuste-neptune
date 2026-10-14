@@ -282,7 +282,7 @@ struct Rig
         for (auto& b : bufs) ptrs.push_back (b.data());
         engine.setTrackType (0, TrackType::Synth);
         SynthDescription d;
-        d.waveform = Waveform::Sine;
+        d.osc[0].wave = kWaveSine;
         engine.publishSynth (0, std::make_shared<SynthPatch> (d));
         run (1);
         engine.noteOn (0, 69, 1.0f);

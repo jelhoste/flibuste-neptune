@@ -305,6 +305,7 @@ void NeptuneProcessor::resetTrackParameters (int track, bool includeMixer)
     using namespace neptune::core;
     std::vector<ParamId> ids;
     for (int k = 0; k < mixer::kSamplerKinds; ++k) ids.push_back (mixer::samplerParam (track, static_cast<mixer::SamplerKind> (k)));
+    for (int k = 0; k < mixer::kSynthKinds; ++k) ids.push_back (mixer::synthParam (track, static_cast<mixer::SynthKind> (k)));
     if (includeMixer)
     {
         for (const auto off : { probe::kVolume, probe::kPan, probe::kMute, probe::kSolo }) ids.push_back (probe::trackParam (track, off));
