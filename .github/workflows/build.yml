@@ -59,7 +59,7 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP : Neptune et Moussaillon)
+      - name: Build (plugins CLAP, Neptune et Moussaillon)
         run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
