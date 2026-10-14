@@ -141,8 +141,8 @@ TEST_CASE ("synth level follows velocity and leaves headroom")
     CHECK_THAT (rms (soft) / rms (loud), WithinAbs (0.5, 0.01));
     double peak = 0.0;
     for (const float s : loud) peak = std::max (peak, static_cast<double> (std::abs (s)));
-    CHECK (peak < 0.35);
-    CHECK (peak > 0.25);
+    CHECK (peak < 0.175);
+    CHECK (peak > 0.125);
 }
 
 TEST_CASE ("synth filter: a low cutoff removes the highs, the envelope opens it")

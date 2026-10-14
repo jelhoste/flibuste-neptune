@@ -16,7 +16,7 @@ public:
     static constexpr int kMaxVoices = SynthDescription::maxVoicesLimit; // voix tenues
     static constexpr int kFadeSlots = 16;                               // voix volées qui s'éteignent
     static constexpr double kStealFadeSeconds = 0.005;
-    static constexpr double kVoiceHeadroom = 0.3;                       // une dent de scie à pleine vélocité : -10,5 dBFS
+    static constexpr double kVoiceHeadroom = 0.15;                      // une voix à pleine vélocité : sinus -16,5 dBFS, dent de scie ~-15 dBFS (marge pour les accords)
 
     // Valeurs automatisables de la piste, lues une fois par bloc.
     struct Params

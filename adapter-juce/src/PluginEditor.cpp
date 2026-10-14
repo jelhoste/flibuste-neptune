@@ -1149,7 +1149,7 @@ void NeptuneEditor::resized()
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {
-        const int knobSide = static_cast<int> (neptune::core::ui::effectiveHitSize (64.0, neptune::core::ui::KnobConfig {}));
+        const int knobSide = static_cast<int> (neptune::core::ui::effectiveHitSize (48.0, neptune::core::ui::KnobConfig {}));
         const int top = getHeight() - 270;
         int x = 32;
         for (auto* k : knobs_)
