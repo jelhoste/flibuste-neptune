@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugin CLAP)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP
+      - name: Build (plugins CLAP : Neptune et Moussaillon)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -76,6 +76,9 @@ jobs:
           chmod +x "$CV"
           CLAP=$(find build/adapter-juce/Neptune_artefacts -name 'Neptune.clap' -print -quit)
           "$CV" validate "$CLAP"
+          MOUS=$(find build/adapter-juce/Moussaillon_artefacts -name 'Moussaillon.clap' -print -quit)
+          test -n "$MOUS" || { echo "Moussaillon.clap introuvable"; exit 1; }
+          "$CV" validate "$MOUS"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -99,6 +102,30 @@ jobs:
         with:
           name: Neptune-${{ matrix.name }}
           path: dist/*
+          if-no-files-found: error
+
+      # Le plugin séparé (l'Utilitaire de la suite), archivé à part.
+      - name: Archive Moussaillon.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Moussaillon_artefacts -name 'Moussaillon.clap' -print -quit)
+          test -n "$CLAP" || { echo "Moussaillon.clap introuvable"; exit 1; }
+          mkdir -p dist-mous/stage
+          cp -R "$CLAP" dist-mous/stage/
+          cd dist-mous/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Moussaillon-${{ matrix.name }}.zip" Moussaillon.clap
+          else
+            tar -czf "../Moussaillon-${{ matrix.name }}.tar.gz" Moussaillon.clap
+          fi
+          cd ../..
+          rm -rf dist-mous/stage
+          ls -la dist-mous
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Moussaillon-${{ matrix.name }}
+          path: dist-mous/*
           if-no-files-found: error
 
   release:

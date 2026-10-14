@@ -217,6 +217,23 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - Toutes les valeurs sont sauvegardées (pas seulement celles ≠ défaut) : changer un défaut plus tard ne modifie pas un preset existant. Un paramètre absent du fichier revient à son défaut au chargement.
 - À faire quand les samples existeront (palier 1/6) : chemins de samples (relatif au preset, absolu, recherche par nom, relocalisation — spec §20), export ZIP portable, presse-papier = sous-arbre JSON, extensions `.neptunepreset` / `.neptunecache`.
 
+## Inserts et premier plugin stock : l'Utilitaire (2026-10-14, à valider dans Reaper)
+
+- **Architecture** (cœur portable, sans JUCE) : `StockModule.h` (un module = DSP + déclaration de ses paramètres propres, identifiants >= 100), `ModuleRunner` (ce que tous les modules ont en commun : trim d'entrée / de sortie, mix, bypass, lissage ; possède le `ParameterSet` du module), `InsertInstance` (un module posé sur un emplacement), registre `availableModules()` / `createInsert()`. `UtilityModule.h` : l'Utilitaire (voir spec §8). Deux adaptateurs : l'insert de Neptune (`Engine`, `NeptuneProcessor`) et le plugin CLAP séparé (`MoussaillonPlugin`). L'interface (`UtilityEditor`, `NeptuneKnob`, `KnobModal`) ne connaît que `ParamHost` (jeu de paramètres + gestes d'édition).
+- **Moteur** : 8 emplacements par piste, par bus et sur le Master. Ordre : instrument -> inserts -> fader -> pan ; bus : somme -> inserts -> fader ; master : somme -> trim -> inserts -> fader -> pan -> mono. Les points de captation des envois 0 (pré-inserts) et 1 (post-inserts / pré-fader) sont maintenant distincts. Le bypass d'un emplacement est un **paramètre de l'hôte** (pistes : `kInsertBypass` existant ; bus : `3000 + 100.b + 10..17` ; master : ids 7..14). Remise au thread audio par `HandoffSlot`. Les modules ne sont traités que s'ils sont présents ; un module contourné et fondu terminé n'est plus calculé.
+- **Paramètres des inserts : NON exposés à l'hôte** (seulement le bypass). Ils sont enregistrés dans le projet (schéma **v7**, `inserts` dans chaque bande et dans le master), annulables (même historique), mais pas automatisables. À reprendre avec la réflexion sur l'automation (voir `spec-modules.md` §7).
+- **Interface** : dans chaque bande (pistes, bus, master) 4 lignes d'inserts visibles sur 8 (molette ou flèche pour les 4 suivantes) ; vide = « + » (menu des modules), rempli = clic pour éditer, clic droit : ouvrir / bypass / retirer. L'éditeur s'ouvre en fenêtre superposée (titre, bypass de l'emplacement, fermer). Les bandes s'adaptent à la hauteur disponible (300 à 360 px) ; fenêtre par défaut 1160 x 960. Ajouter ou retirer un insert vide l'historique d'annulation.
+- **Plugin séparé** : cible `Moussaillon` (CLAP `com.tournedosrossini.moussaillon`, nom provisoire ; en-tête « MOUSSAILLON / UTILITY · FLIBUSTE SUITE » en orange comme la maquette de Neptune), état JSON `moussaillon-state`, thème / langue / contraste lus dans le même `settings.json` que Neptune. Compilé, validé par `clap-validator` et archivé par la CI (`Moussaillon-<OS>`).
+- **Non fait** : copier-coller de module entre emplacements, déplacement par glisser-déposer des inserts, presets / A/B, aide en ligne, redimensionnement par la poignée de coin NOVA (la fenêtre est redimensionnable par l'hôte), goniomètre, latence PDC (aucun module n'en a pour l'instant).
+- **Points à confirmer** : loi du pan double (puissance constante, indépendante de la loi choisie pour le pan simple) ; Mid = (L+R)/2 ; plage des trims ±24 dB.
+
+## Plugins stock : décisions du 2026-10-14
+
+- Les plugins stock sont **intégrés à Neptune ET publiés comme plugins CLAP indépendants** (JUCE, pas DPF), voir `spec-modules.md` §7. Premier lot : l'Utilitaire, dans les deux formes (insert + petit CLAP « NOVA Utility »), pour valider le principe. Les autres plugins plus tard, un à la fois.
+- Références : l'archive `nova-ui-series` de l'utilisateur (maquettes HTML + fichiers de paramètres ; extraite sous `~/dl-nova-ui/`). Seuls le shaper, le chorus et le delay ont un fichier de paramètres ; le compresseur et l'égaliseur n'ont que la maquette et l'aide.
+- **À réfléchir plus tard** : quels paramètres d'inserts exposer à l'automation (voir `spec-modules.md` §7).
+- **Convolution** : le DSP de l'utilisateur (DPF, `LowLatConv`) est jugé bon ; à porter dans le cœur portable (sans DPF), pas à réécrire. Source à consulter avant de décider de la bibliothèque FFT.
+
 ## Questions encore ouvertes
 
 - Identifiant CLAP définitif (`com.tournedosrossini.neptune` est provisoire : quel domaine ?).

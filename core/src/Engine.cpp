@@ -46,11 +46,21 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
         t.lastPanL = t.lastPanR = 1.0f;
     }
     for (auto& b : buses_) { b.lastFader = 1.0f; b.lastPanL = b.lastPanR = 1.0f; }
-    lastMasterGain_ = 1.0f;
+    lastMasterTrim_ = lastMasterFader_ = 1.0f;
     lastMasterPanL_ = lastMasterPanR_ = 1.0f;
     const auto n = static_cast<std::size_t> (maxBlockSize_);
-    raw_.resize (n); postFader_.resize (n); final_.resize (n); master_.resize (n);
+    raw_.resize (n); inserted_.resize (n); postFader_.resize (n); final_.resize (n); master_.resize (n);
     for (auto& b : busIn_) b.resize (n);
+    // les inserts déjà posés suivent la nouvelle configuration (prepare n'est jamais concurrent du traitement audio)
+    adoptInserts();
+    auto prepareInserts = [this] (Inserts& ins)
+    {
+        for (auto& s : ins)
+            if (auto* inst = const_cast<InsertInstance*> (s.slot.current())) inst->runner.prepare (sampleRate_, maxBlockSize_);
+    };
+    for (auto& t : tracks_) prepareInserts (t.inserts);
+    for (auto& b : buses_) prepareInserts (b.inserts);
+    prepareInserts (masterInserts_);
 }
 
 void Engine::publishInstrument (int track, std::shared_ptr<const Instrument> instrument)
@@ -78,6 +88,47 @@ void Engine::setTrackActive (int track, bool active) noexcept
 {
     if (track < 0 || track >= kTracks) return;
     tracks_[static_cast<std::size_t> (track)].active.store (active ? 1 : 0, std::memory_order_relaxed);
+}
+
+Engine::Inserts* Engine::insertsOf (StripKind kind, int index) noexcept
+{
+    switch (kind)
+    {
+        case StripKind::Track: return index >= 0 && index < kTracks ? &tracks_[static_cast<std::size_t> (index)].inserts : nullptr;
+        case StripKind::Bus: return index >= 0 && index < kBuses ? &buses_[static_cast<std::size_t> (index)].inserts : nullptr;
+        default: return &masterInserts_;
+    }
+}
+
+void Engine::setInsert (StripKind kind, int index, int slot, std::shared_ptr<const InsertInstance> insert)
+{
+    auto* ins = insertsOf (kind, index);
+    if (ins == nullptr || slot < 0 || slot >= kInserts) return;
+    (*ins)[static_cast<std::size_t> (slot)].slot.publish (std::move (insert));
+    insertsDirty_.store (true, std::memory_order_release);
+}
+
+void Engine::collectGarbage()
+{
+    for (auto& t : tracks_)
+    {
+        t.slot.collect();
+        t.synthSlot.collect();
+        for (auto& s : t.inserts) s.slot.collect();
+    }
+    for (auto& b : buses_)
+        for (auto& s : b.inserts) s.slot.collect();
+    for (auto& s : masterInserts_) s.slot.collect();
+    insertsDirty_.store (true, std::memory_order_release); // une adoption bloquée par une file pleine est retentée
+}
+
+void Engine::adoptInserts() noexcept
+{
+    for (auto& t : tracks_)
+        for (auto& s : t.inserts) s.slot.adoptPending();
+    for (auto& b : buses_)
+        for (auto& s : b.inserts) s.slot.adoptPending();
+    for (auto& s : masterInserts_) s.slot.adoptPending();
 }
 
 void Engine::setTrackSettings (int track, const mixer::StripSettings& s) noexcept
@@ -112,6 +163,8 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         p.mute = idx (probe::trackParam (t, probe::kMute));
         p.solo = idx (probe::trackParam (t, probe::kSolo));
         for (int s = 0; s < mixer::numSends; ++s) p.sendLevel[s] = idx (probe::trackParam (t, probe::kSendLevel + static_cast<ParamId> (s)));
+        for (int s = 0; s < kInserts; ++s)
+            tracks_[static_cast<std::size_t> (t)].inserts[static_cast<std::size_t> (s)].bypass = idx (probe::trackParam (t, probe::kInsertBypass + static_cast<ParamId> (s)));
         for (int k = 0; k < mixer::kSamplerKinds; ++k) p.sampler[k] = idx (mixer::samplerParam (t, static_cast<mixer::SamplerKind> (k)));
     }
     for (int b = 0; b < kBuses; ++b)
@@ -122,7 +175,10 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         p.mute = idx (mixer::busParam (b, mixer::kBusMute));
         p.solo = idx (mixer::busParam (b, mixer::kBusSolo));
         for (int s = 0; s < mixer::numSends; ++s) p.sendLevel[s] = idx (mixer::busParam (b, mixer::kBusSendLevel + static_cast<ParamId> (s)));
+        for (int s = 0; s < kInserts; ++s)
+            buses_[static_cast<std::size_t> (b)].inserts[static_cast<std::size_t> (s)].bypass = idx (mixer::busParam (b, mixer::kBusInsertBypass + static_cast<ParamId> (s)));
     }
+    for (int s = 0; s < kInserts; ++s) masterInserts_[static_cast<std::size_t> (s)].bypass = idx (mixer::masterInsertBypassId (s));
     masterVolume_ = idx (probe::masterVolume);
     masterPan_ = idx (probe::masterPan);
     masterMute_ = idx (probe::masterMute);
@@ -268,6 +324,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         }
         t.appliedActive = active;
     }
+    if (insertsDirty_.exchange (false, std::memory_order_acq_rel)) adoptInserts();
     drainUiEvents();
     if (numChannels < 1 || out[0] == nullptr || numFrames <= 0) return;
 
@@ -347,8 +404,28 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         return peakL > 0.0f || peakR > 0.0f;
     };
 
+    // Fait passer `buf` (en place) par les inserts d'un emplacement, dans l'ordre ; faux s'il n'y en a aucun.
+    auto runInserts = [&] (Inserts& ins, Stereo& buf) noexcept
+    {
+        bool any = false;
+        for (auto& s : ins)
+        {
+            auto* inst = const_cast<InsertInstance*> (s.slot.current()); // le thread audio est seul utilisateur du DSP après la remise
+            if (inst == nullptr) continue;
+            any = true;
+            inst->runner.process (buf.l.data(), buf.r.data(), n, param (s.bypass, 0.0) >= 0.5);
+        }
+        return any;
+    };
+    auto hasInserts = [] (const Inserts& ins) noexcept
+    {
+        for (const auto& s : ins)
+            if (s.slot.current() != nullptr) return true;
+        return false;
+    };
+
     auto routeStrip = [&] (const AtomicStrip& cfg, const ParamIndices& idx, std::array<float, numSends>& lastSend, Stereo& rawIn,
-                           bool isBus, int busIndex) noexcept
+                           Stereo& postIns, bool isBus, int busIndex) noexcept
     {
         // envois : un point de captation par envoi
         for (int s = 0; s < numSends; ++s)
@@ -360,7 +437,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             float& last = lastSend[static_cast<std::size_t> (s)];
             if (dest <= 0 || dest > kBuses || (isBus && dest - 1 <= busIndex) || (target == 0.0f && last == 0.0f)) { last = target; continue; }
             const int tap = cfg.sends[static_cast<std::size_t> (s)].tap.load (std::memory_order_relaxed);
-            const Stereo& src = tap <= 1 ? rawIn : (tap == 2 ? postFader_ : final_);
+            const Stereo& src = tap == 0 ? rawIn : (tap == 1 ? postIns : (tap == 2 ? postFader_ : final_));
             float spl = 1.0f, spr = 1.0f;
             panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), cfg.sends[static_cast<std::size_t> (s)].pan.load (std::memory_order_relaxed), spl, spr);
             Stereo& bus = busIn_[static_cast<std::size_t> (dest - 1)];
@@ -448,8 +525,17 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         t.lastGain = gain;
 
         const bool muted = param (t.idx.mute, 0.0) >= 0.5 || (trackSolo && param (t.idx.solo, 0.0) < 0.5);
-        stripOutputs (raw_, t.peakL, t.peakR, t.rmsL, t.rmsR, t.config, t.idx, t.lastFader, t.lastPanL, t.lastPanR, muted);
-        routeStrip (t.config, t.idx, t.lastSend, raw_, false, -1);
+        // inserts : sur une copie, le signal brut reste disponible pour le point de captation « pré-inserts »
+        Stereo* afterInserts = &raw_;
+        if (hasInserts (t.inserts))
+        {
+            std::copy (raw_.l.begin(), raw_.l.begin() + n, inserted_.l.begin());
+            std::copy (raw_.r.begin(), raw_.r.begin() + n, inserted_.r.begin());
+            runInserts (t.inserts, inserted_);
+            afterInserts = &inserted_;
+        }
+        stripOutputs (*afterInserts, t.peakL, t.peakR, t.rmsL, t.rmsR, t.config, t.idx, t.lastFader, t.lastPanL, t.lastPanR, muted);
+        routeStrip (t.config, t.idx, t.lastSend, raw_, *afterInserts, false, -1);
     }
 
     // ---- bus, dans l'ordre : un bus n'alimente que des bus d'indice supérieur
@@ -460,27 +546,49 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         if (! b.hasInput && wasSilent) { b.lastSend.fill (0.0f); continue; }
         const bool muted = param (b.idx.mute, 0.0) >= 0.5 || (busSolo && param (b.idx.solo, 0.0) < 0.5);
         Stereo& in = busIn_[static_cast<std::size_t> (bi)];
-        stripOutputs (in, b.peakL, b.peakR, b.rmsL, b.rmsR, b.config, b.idx, b.lastFader, b.lastPanL, b.lastPanR, muted);
-        routeStrip (b.config, b.idx, b.lastSend, in, true, bi);
+        Stereo* afterInserts = &in;
+        if (hasInserts (b.inserts))
+        {
+            std::copy (in.l.begin(), in.l.begin() + n, inserted_.l.begin());
+            std::copy (in.r.begin(), in.r.begin() + n, inserted_.r.begin());
+            runInserts (b.inserts, inserted_);
+            afterInserts = &inserted_;
+        }
+        stripOutputs (*afterInserts, b.peakL, b.peakR, b.rmsL, b.rmsR, b.config, b.idx, b.lastFader, b.lastPanL, b.lastPanR, muted);
+        routeStrip (b.config, b.idx, b.lastSend, in, *afterInserts, true, bi);
     }
 
-    // ---- master : trim, fader, pan, mute, réduction mono
+    // ---- master : trim, inserts, fader, pan, mute, réduction mono
     {
-        const float trimGain = dbToGain (std::clamp (param (masterTrim_, 0.0), -12.0, 12.0), -1000.0); // le trim ne coupe jamais
+        const float trimTarget = dbToGain (std::clamp (param (masterTrim_, 0.0), -12.0, 12.0), -1000.0); // le trim ne coupe jamais
         const bool muted = param (masterMute_, 0.0) >= 0.5;
-        const float fader = muted ? 0.0f : dbToGain (param (masterVolume_, 0.0));
-        const float target = fader * trimGain;
+        const float faderTarget = muted ? 0.0f : dbToGain (param (masterVolume_, 0.0));
         float pl = 1.0f, pr = 1.0f;
         panGains (static_cast<PanMode> (masterPanMode_.load (std::memory_order_relaxed)), static_cast<float> (param (masterPan_, 0.0) / 100.0), pl, pr);
         const bool mono = param (masterMono_, 0.0) >= 0.5;
-        const float gStep = (target - lastMasterGain_) / static_cast<float> (n);
-        const float plStep = (pl - lastMasterPanL_) / static_cast<float> (n);
-        const float prStep = (pr - lastMasterPanR_) / static_cast<float> (n);
-        float g = lastMasterGain_, gl = lastMasterPanL_, gr = lastMasterPanR_;
+        const float invN = 1.0f / static_cast<float> (n);
+        const float tStep = (trimTarget - lastMasterTrim_) * invN;
+        const float fStep = (faderTarget - lastMasterFader_) * invN;
+        const float plStep = (pl - lastMasterPanL_) * invN;
+        const float prStep = (pr - lastMasterPanR_) * invN;
+        float gt = lastMasterTrim_, gf = lastMasterFader_, gl = lastMasterPanL_, gr = lastMasterPanR_;
+        // le trim d'entrée vient AVANT les inserts du Master
+        const bool withInserts = hasInserts (masterInserts_);
+        if (withInserts)
+        {
+            for (int i = 0; i < n; ++i, gt += tStep)
+            {
+                master_.l[static_cast<std::size_t> (i)] *= gt;
+                master_.r[static_cast<std::size_t> (i)] *= gt;
+            }
+            gt = trimTarget;
+            runInserts (masterInserts_, master_);
+        }
         const auto pair = channelPair (masterOutput_.load (std::memory_order_relaxed));
         float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
         for (int i = 0; i < n; ++i)
         {
+            const float g = (withInserts ? 1.0f : gt) * gf;
             float l = master_.l[static_cast<std::size_t> (i)] * g * gl;
             float r = master_.r[static_cast<std::size_t> (i)] * g * gr;
             if (mono) l = r = 0.5f * (l + r);
@@ -488,9 +596,9 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             sumL += l * l; sumR += r * r;
             if (pair.first != nullptr) pair.first[i] += l;
             if (pair.second != nullptr) pair.second[i] += r;
-            g += gStep; gl += plStep; gr += prStep;
+            gt += tStep; gf += fStep; gl += plStep; gr += prStep;
         }
-        lastMasterGain_ = target; lastMasterPanL_ = pl; lastMasterPanR_ = pr;
+        lastMasterTrim_ = trimTarget; lastMasterFader_ = faderTarget; lastMasterPanL_ = pl; lastMasterPanR_ = pr;
         masterPeakL_.store (peakL, std::memory_order_relaxed);
         masterPeakR_.store (peakR, std::memory_order_relaxed);
         masterRmsL_.store (std::sqrt (sumL / static_cast<float> (n)), std::memory_order_relaxed);

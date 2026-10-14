@@ -354,6 +354,18 @@ int NeptuneProcessor::uiAddTrack()
         t.active = true;
         t.type = TrackType::Synth;
     }
+    auto clearTrackInserts = [this] (int track)
+    {
+        for (int s = 0; s < neptune::core::mixer::numInserts; ++s)
+        {
+            {
+                const juce::ScopedLock lock (instrumentLock_);
+                insertInstances_[static_cast<std::size_t> (track)][static_cast<std::size_t> (s)] = nullptr;
+            }
+            engine_.setInsert (StripKind::Track, track, s, nullptr);
+        }
+    };
+    clearTrackInserts (index);
     resetTrackParameters (index, true);
     engine_.setTrackSettings (index, trackSettings (index));
     engine_.setTrackType (index, TrackType::Synth);
@@ -378,6 +390,18 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
         mixer_.resetTrack (track); // remet aussi la sélection sur une piste active si c'était celle-ci
         selected = mixer_.selectedTrack;
     }
+    auto clearTrackInserts = [this] (int track)
+    {
+        for (int s = 0; s < neptune::core::mixer::numInserts; ++s)
+        {
+            {
+                const juce::ScopedLock lock (instrumentLock_);
+                insertInstances_[static_cast<std::size_t> (track)][static_cast<std::size_t> (s)] = nullptr;
+            }
+            engine_.setInsert (StripKind::Track, track, s, nullptr);
+        }
+    };
+    clearTrackInserts (track);
     engine_.setTrackActive (track, false);
     engine_.setTrackType (track, TrackType::Sampler);
     engine_.setTrackSettings (track, trackSettings (track));
@@ -392,10 +416,139 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
 }
 
 // ---- réglages du mixeur
+namespace
+{
+// Recopie le type et les valeurs des modules vivants dans l'état à sauvegarder.
+void syncInserts (std::array<neptune::core::mixer::InsertState, neptune::core::mixer::numInserts>& out,
+                  const std::array<std::shared_ptr<neptune::core::InsertInstance>, neptune::core::mixer::numInserts>& live)
+{
+    for (std::size_t s = 0; s < out.size(); ++s)
+    {
+        out[s] = {};
+        if (live[s] == nullptr) continue;
+        out[s].type = live[s]->type;
+        const auto& ps = live[s]->runner.params();
+        for (std::size_t i = 0; i < ps.size(); ++i) out[s].values[ps.spec (i).id] = ps.getAt (i);
+    }
+}
+} // namespace
+
 neptune::core::MixerState NeptuneProcessor::mixerState() const
 {
     const juce::ScopedLock lock (instrumentLock_);
-    return mixer_;
+    auto m = mixer_;
+    namespace mx = neptune::core::mixer;
+    for (int t = 0; t < mx::numTracks; ++t) syncInserts (m.tracks[static_cast<std::size_t> (t)].strip.inserts, insertInstances_[static_cast<std::size_t> (t)]);
+    for (int b = 0; b < mx::numBuses; ++b) syncInserts (m.buses[static_cast<std::size_t> (b)].inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + b)]);
+    syncInserts (m.master.inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + mx::numBuses)]);
+    return m;
+}
+
+// ---- inserts
+int NeptuneProcessor::insertFlatIndex (StripKind kind, int index) noexcept
+{
+    namespace mx = neptune::core::mixer;
+    switch (kind)
+    {
+        case StripKind::Track: return juce::jlimit (0, mx::numTracks - 1, index);
+        case StripKind::Bus: return mx::numTracks + juce::jlimit (0, mx::numBuses - 1, index);
+        default: return mx::numTracks + mx::numBuses;
+    }
+}
+
+std::string NeptuneProcessor::insertType (StripKind kind, int index, int slot) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    const auto& inst = insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))]
+                                       [static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numInserts - 1, slot))];
+    return inst != nullptr ? inst->type : std::string();
+}
+
+neptune::core::ParamId NeptuneProcessor::insertBypassParam (StripKind kind, int index, int slot) const
+{
+    namespace mx = neptune::core::mixer;
+    slot = juce::jlimit (0, mx::numInserts - 1, slot);
+    switch (kind)
+    {
+        case StripKind::Track: return neptune::core::probe::trackParam (index, neptune::core::probe::kInsertBypass + static_cast<neptune::core::ParamId> (slot));
+        case StripKind::Bus: return mx::busParam (index, mx::kBusInsertBypass + static_cast<neptune::core::ParamId> (slot));
+        default: return mx::masterInsertBypassId (slot);
+    }
+}
+
+bool NeptuneProcessor::insertBypassed (StripKind kind, int index, int slot) const
+{
+    return params_.get (insertBypassParam (kind, index, slot)) >= 0.5;
+}
+
+void NeptuneProcessor::uiSetInsert (StripKind kind, int index, int slot, const std::string& type)
+{
+    namespace mx = neptune::core::mixer;
+    slot = juce::jlimit (0, mx::numInserts - 1, slot);
+    std::shared_ptr<neptune::core::InsertInstance> inst;
+    if (! type.empty())
+    {
+        inst = neptune::core::createInsert (type, engine_.sampleRate(), engine_.maxBlockSize());
+        if (inst == nullptr) return;
+    }
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))][static_cast<std::size_t> (slot)] = inst;
+    }
+    engine_.setInsert (kind, index, slot, inst);
+    uiResetToDefault (insertBypassParam (kind, index, slot)); // un nouvel insert n'est pas contourné
+    undo_.clear(); // l'historique pouvait pointer vers les paramètres de l'ancien module
+    ++revision_;
+    notifyStateChanged();
+}
+
+// Adaptateur : les gestes d'édition d'un module passent par l'historique d'annulation du plugin.
+class NeptuneProcessor::InsertHost : public ParamHost
+{
+public:
+    InsertHost (NeptuneProcessor& owner, std::shared_ptr<neptune::core::InsertInstance> inst) : owner_ (owner), inst_ (std::move (inst)) {}
+
+    neptune::core::ParameterSet& parameters() override { return inst_->runner.params(); }
+    void uiBeginEdit (neptune::core::ParamId) override { owner_.undo_.beginGesture(); }
+    void uiSetNormalised (neptune::core::ParamId id, double n) override
+    {
+        auto& ps = parameters();
+        const auto index = ps.indexOf (id);
+        if (index == neptune::core::ParameterSet::npos) return;
+        owner_.undo_.setParameter (ps, id, ps.spec (index).fromNormalized (n));
+        ++owner_.revision_;
+        owner_.notifyStateChanged();
+    }
+    void uiEndEdit (neptune::core::ParamId) override { owner_.undo_.endGesture(); }
+    void uiResetToDefault (neptune::core::ParamId id) override
+    {
+        auto& ps = parameters();
+        const auto index = ps.indexOf (id);
+        if (index == neptune::core::ParameterSet::npos) return;
+        uiBeginEdit (id);
+        uiSetNormalised (id, ps.spec (index).toNormalized (ps.spec (index).defaultValue));
+        uiEndEdit (id);
+    }
+    bool uiUndo() override { return owner_.uiUndo(); }
+    bool uiRedo() override { return owner_.uiRedo(); }
+    neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return owner_.modalSize (t); }
+    void setModalSize (neptune::core::uistate::Terminal t, neptune::core::uistate::Size s) override { owner_.setModalSize (t, s); }
+
+private:
+    NeptuneProcessor& owner_;
+    std::shared_ptr<neptune::core::InsertInstance> inst_;
+};
+
+NeptuneProcessor::InsertHandle NeptuneProcessor::openInsert (StripKind kind, int index, int slot)
+{
+    InsertHandle h;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        h.instance = insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))]
+                                     [static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numInserts - 1, slot))];
+    }
+    if (h.instance != nullptr) h.host = std::make_unique<InsertHost> (*this, h.instance);
+    return h;
 }
 
 neptune::core::mixer::StripSettings NeptuneProcessor::trackSettings (int track) const
@@ -515,6 +668,32 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
     }
     selectedTrack_.store (m->selectedTrack);
     pushMixerSettingsToEngine();
+    undo_.clear(); // l'historique pointait vers les modules et les instruments remplacés
+    {
+        namespace mx = neptune::core::mixer;
+        auto build = [this] (StripKind kind, int index, const std::array<mx::InsertState, mx::numInserts>& states)
+        {
+            for (int s = 0; s < mx::numInserts; ++s)
+            {
+                std::shared_ptr<neptune::core::InsertInstance> inst;
+                const auto& st = states[static_cast<std::size_t> (s)];
+                if (! st.empty())
+                {
+                    inst = neptune::core::createInsert (st.type, engine_.sampleRate(), engine_.maxBlockSize());
+                    if (inst != nullptr)
+                        for (const auto& [id, v] : st.values) inst->runner.params().set (id, v);
+                }
+                {
+                    const juce::ScopedLock lock (instrumentLock_);
+                    insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))][static_cast<std::size_t> (s)] = inst;
+                }
+                engine_.setInsert (kind, index, s, inst);
+            }
+        };
+        for (int t = 0; t < mx::numTracks; ++t) build (StripKind::Track, t, m->tracks[static_cast<std::size_t> (t)].strip.inserts);
+        for (int b = 0; b < mx::numBuses; ++b) build (StripKind::Bus, b, m->buses[static_cast<std::size_t> (b)].inserts);
+        build (StripKind::Master, 0, m->master.inserts);
+    }
     ++revision_;
     for (std::size_t t = 0; t < m->tracks.size(); ++t)
         if (changed[t]) loader_->request (static_cast<int> (t), m->tracks[t].instrument, false);

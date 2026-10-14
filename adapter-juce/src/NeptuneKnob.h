@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
-#include "PluginProcessor.h"
+#include "ParamHost.h"
 #include "neptune/core/KnobInteraction.h"
 #include "neptune/core/Theme.h"
 #include "neptune/core/UiState.h"
@@ -13,7 +13,7 @@ class NeptuneKnob : public juce::Component, private juce::Timer
 public:
     using OpenModal = std::function<void (neptune::core::ParamId, neptune::core::uistate::Terminal)>;
 
-    NeptuneKnob (NeptuneProcessor&, neptune::core::ParamId, const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle, OpenModal);
+    NeptuneKnob (ParamHost&, neptune::core::ParamId, const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle, OpenModal);
     ~NeptuneKnob() override { stopTimer(); }
 
     neptune::core::ParamId paramId() const { return id_; }
@@ -37,7 +37,7 @@ private:
         return lastWasTouch_ ? neptune::core::uistate::Terminal::Touch : neptune::core::uistate::Terminal::Pointer;
     }
 
-    NeptuneProcessor& processor_;
+    ParamHost& processor_;
     neptune::core::ParamId id_;
     std::size_t index_;
     neptune::core::theme::Palette palette_;

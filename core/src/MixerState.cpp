@@ -1,6 +1,8 @@
 #include "neptune/core/MixerState.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 
 #include <nlohmann/json.hpp>
 
@@ -9,6 +11,54 @@ namespace neptune::core
 namespace
 {
 using nlohmann::json;
+
+json insertsToJson (const std::array<mixer::InsertState, mixer::numInserts>& inserts)
+{
+    json arr = json::array();
+    for (const auto& in : inserts)
+    {
+        json o = json::object();
+        if (! in.empty())
+        {
+            o["type"] = in.type;
+            json values = json::object();
+            for (const auto& [id, v] : in.values) values[std::to_string (id)] = v;
+            o["values"] = std::move (values);
+        }
+        arr.push_back (std::move (o));
+    }
+    return arr;
+}
+
+bool anyInsert (const std::array<mixer::InsertState, mixer::numInserts>& inserts)
+{
+    for (const auto& in : inserts)
+        if (! in.empty()) return true;
+    return false;
+}
+
+void insertsFromJson (const json& o, std::array<mixer::InsertState, mixer::numInserts>& out)
+{
+    const auto it = o.find ("inserts");
+    if (it == o.end() || ! it->is_array()) return;
+    for (std::size_t i = 0; i < it->size() && i < out.size(); ++i)
+    {
+        const auto& e = (*it)[i];
+        if (! e.is_object()) continue;
+        const auto t = e.find ("type");
+        if (t == e.end() || ! t->is_string() || t->get<std::string>().empty() || t->get<std::string>().size() > 32) continue;
+        mixer::InsertState st;
+        st.type = t->get<std::string>();
+        if (const auto v = e.find ("values"); v != e.end() && v->is_object())
+            for (const auto& [key, val] : v->items())
+            {
+                if (! val.is_number() || ! std::isfinite (val.get<double>())) continue;
+                const long long id = std::strtoll (key.c_str(), nullptr, 10);
+                if (id > 0 && id < 1000000) st.values[static_cast<ParamId> (id)] = val.get<double>();
+            }
+        out[i] = std::move (st);
+    }
+}
 
 json stripToJson (const mixer::StripSettings& s)
 {
@@ -34,6 +84,7 @@ json stripToJson (const mixer::StripSettings& s)
         sends.push_back (std::move (e));
     }
     o["sends"] = std::move (sends);
+    if (anyInsert (s.inserts)) o["inserts"] = insertsToJson (s.inserts);
     return o;
 }
 
@@ -74,6 +125,7 @@ mixer::StripSettings stripFromJson (const json& o, mixer::StripSettings s, bool 
             if (const auto p = e.find ("pan"); p != e.end() && p->is_number()) x.pan = p->get<double>();
             x.mute = boolOf (e, "mute", x.mute);
         }
+    insertsFromJson (o, s.inserts);
     return mixer::sanitisedStrip (std::move (s), isBus, index);
 }
 } // namespace
@@ -154,6 +206,7 @@ std::string toJson (const MixerState& m)
     json master;
     master["output"] = m.master.output;
     if (m.master.panMode != mixer::PanMode::Balance) master["pan_mode"] = "true";
+    if (anyInsert (m.master.inserts)) master["inserts"] = insertsToJson (m.master.inserts);
     doc["master"] = std::move (master);
     return doc.dump();
 }
@@ -194,6 +247,7 @@ MixerState mixerFromJson (std::string_view text)
         m.master.output = intOf (*mm, "output", m.master.output);
         if (const auto p = mm->find ("pan_mode"); p != mm->end() && p->is_string() && p->get<std::string>() == "true")
             m.master.panMode = mixer::PanMode::True;
+        insertsFromJson (*mm, m.master.inserts);
         m.master = mixer::sanitised (m.master);
     }
     m.fixSelection();

@@ -2,7 +2,7 @@
 // Mixeur (palier 1, jalon 9) : modèle des pistes, bus et master, identifiants de paramètres et lois de pan.
 //
 // Chemin du signal d'une piste (ordre réel de traitement, voir spec §1) : instrument -> [trim = gain de l'instrument] ->
-// (inserts : emplacements réservés, aucun module pour l'instant) -> fader -> pan -> sorties. Les 4 points de captation d'un
+// (inserts : 8 emplacements, voir StockModule.h) -> fader -> pan -> sorties. Les 4 points de captation d'un
 // envoi sont donc : 0 pré-inserts, 1 post-inserts / pré-fader (identiques tant qu'il n'y a pas d'inserts), 2 post-fader /
 // pré-pan, 3 post-pan (défaut).
 //
@@ -14,6 +14,7 @@
 // d'indice SUPÉRIEUR au sien ; toute autre cible est ignorée par le moteur.
 #include <array>
 #include <cmath>
+#include <map>
 #include <string>
 
 #include "neptune/core/Parameter.h"
@@ -26,13 +27,16 @@ constexpr int numTracks = 16;
 constexpr int numBuses = 16;
 constexpr int numSends = 8;
 constexpr int numOutputs = 64; // sorties stéréo physiques déclarées à l'hôte
+constexpr int numInserts = 8;  // emplacements d'inserts par piste, par bus et sur le Master
 
 // ---- identifiants de paramètres (stables : ne jamais renuméroter) ----
 constexpr ParamId masterTrim = 5;   // dB, -12..+12
 constexpr ParamId masterMono = 6;   // bascule : réduction mono
+constexpr ParamId masterInsertBypass = 7; // 7..14 : bypass des 8 inserts du master
+constexpr ParamId masterInsertBypassId (int slot) { return masterInsertBypass + static_cast<ParamId> (slot); }
 constexpr ParamId busBase = 3000;   // bus b -> 3000 + 100.b
 constexpr ParamId busStride = 100;
-enum BusOffset : ParamId { kBusVolume = 0, kBusPan = 1, kBusMute = 2, kBusSolo = 3, kBusSendLevel = 20 };
+enum BusOffset : ParamId { kBusVolume = 0, kBusPan = 1, kBusMute = 2, kBusSolo = 3, kBusInsertBypass = 10, kBusSendLevel = 20 };
 constexpr ParamId busParam (int bus, ParamId offset) { return busBase + busStride * static_cast<ParamId> (bus) + offset; }
 
 // Paramètres de l'instrument d'une piste. La piste 0 garde les identifiants historiques 100..106 (projets existants) ; les
@@ -52,6 +56,16 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error = n
 // ---- réglages non automatisables (sauvegardés dans le projet) ----
 enum class TapPoint : int { PreInsert = 0, PostInsertPreFader = 1, PostFaderPrePan = 2, PostPan = 3 };
 enum class PanMode : int { Balance = 0, True = 1 };
+
+// Un module posé sur un emplacement d'insert : son type ("" = vide) et les valeurs de ses paramètres (id local -> valeur).
+// Les valeurs des modules vivants sont recopiées ici par l'adaptateur au moment de sauvegarder.
+struct InsertState
+{
+    std::string type;
+    std::map<ParamId, double> values;
+    bool empty() const noexcept { return type.empty(); }
+    bool operator== (const InsertState& o) const noexcept { return type == o.type && values == o.values; }
+};
 
 struct SendSettings
 {
@@ -84,12 +98,13 @@ struct StripSettings
     Routing routing;
     PanMode panMode = PanMode::Balance;
     std::array<SendSettings, numSends> sends;
+    std::array<InsertState, numInserts> inserts;
     bool slim = false;
 
     bool operator== (const StripSettings& o) const noexcept
     {
         return name == o.name && color == o.color && midiChannel == o.midiChannel && routing == o.routing
-            && panMode == o.panMode && sends == o.sends && slim == o.slim;
+            && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim;
     }
 };
 
@@ -97,7 +112,8 @@ struct MasterSettings
 {
     int output = 1;                      // sortie physique du master (1..numOutputs)
     PanMode panMode = PanMode::Balance;
-    bool operator== (const MasterSettings& o) const noexcept { return output == o.output && panMode == o.panMode; }
+    std::array<InsertState, numInserts> inserts;
+    bool operator== (const MasterSettings& o) const noexcept { return output == o.output && panMode == o.panMode && inserts == o.inserts; }
 };
 
 // Bornes les réglages (indices, cycles interdits : un bus ne route que vers un bus d'indice supérieur).

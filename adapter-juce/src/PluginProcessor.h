@@ -12,10 +12,12 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <set>
 #include <string>
 #include "HostProbe.h"
+#include "ParamHost.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/Mixer.h"
+#include "neptune/core/StockModule.h"
 #include "neptune/core/MixerState.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
@@ -26,7 +28,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 // Fine couche d'adaptation : traduit JUCE/CLAP <-> cœur. Aucune logique métier ici.
 class NeptuneProcessor : public juce::AudioProcessor,
-                         public clap_juce_extensions::clap_juce_audio_processor_capabilities
+                         public clap_juce_extensions::clap_juce_audio_processor_capabilities,
+                         public ParamHost
 {
 public:
     NeptuneProcessor();
@@ -54,7 +57,7 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    neptune::core::ParameterSet& parameters() { return params_; }
+    neptune::core::ParameterSet& parameters() override { return params_; }
     int probeTracks() const { return probeTracks_; }
     HostProbe& hostProbe() { return hostProbe_; }
 
@@ -72,12 +75,12 @@ public:
     void notifyStateChanged(); // thread message : le verrou fait partie de l'état du projet
 
     // Édition depuis l'interface (thread message). Chaque geste prévient l'hôte (automation) ET alimente l'annulation.
-    void uiBeginEdit (neptune::core::ParamId);
-    void uiSetNormalised (neptune::core::ParamId, double normalised);
-    void uiEndEdit (neptune::core::ParamId);
-    void uiResetToDefault (neptune::core::ParamId);
-    bool uiUndo();
-    bool uiRedo();
+    void uiBeginEdit (neptune::core::ParamId) override;
+    void uiSetNormalised (neptune::core::ParamId, double normalised) override;
+    void uiEndEdit (neptune::core::ParamId) override;
+    void uiResetToDefault (neptune::core::ParamId) override;
+    bool uiUndo() override;
+    bool uiRedo() override;
     const neptune::core::UndoManager& undoManager() const { return undo_; }
 
     // Instrument du Sampler (palier 1). La description (chemins + réglages de zone) est sauvegardée dans le projet ;
@@ -120,6 +123,21 @@ public:
     int uiAddTrack();
     // Retire une piste (remise à l'état d'origine). Faux s'il n'en reste qu'une. Vide l'historique d'annulation.
     bool uiRemoveTrack (int track);
+
+    // Inserts (modules stock) : 8 emplacements par piste, par bus et sur le Master. La source de vérité est la table des instances
+    // vivantes ; leurs valeurs sont recopiées dans l'état à la sauvegarde. Le bypass d'un emplacement est un paramètre de l'hôte.
+    using StripKind = neptune::core::StripKind;
+    std::string insertType (StripKind, int index, int slot) const; // "" : emplacement vide
+    neptune::core::ParamId insertBypassParam (StripKind, int index, int slot) const;
+    bool insertBypassed (StripKind, int index, int slot) const;
+    // Pose (ou retire, type vide) un module. Remet le bypass à zéro et vide l'historique d'annulation.
+    void uiSetInsert (StripKind, int index, int slot, const std::string& type);
+    struct InsertHandle
+    {
+        std::shared_ptr<neptune::core::InsertInstance> instance; // garde le module vivant (vu-mètres, paramètres)
+        std::unique_ptr<ParamHost> host;                          // édition annulable des paramètres du module
+    };
+    InsertHandle openInsert (StripKind, int index, int slot); // instance nulle si l'emplacement est vide
 
     // Mixeur : réglages de bande (nom, canal MIDI, routage, envois, mode de pan), bus, master. Annulables.
     neptune::core::MixerState mixerState() const; // copie
@@ -165,8 +183,8 @@ public:
     std::uint32_t instrumentRevision() const noexcept { return revision_.load(); }
 
     // Taille mémorisée de la modale des potards (par type de terminal), enregistrée dans ui_state.json.
-    neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const { return uiState_.modalSize (t); }
-    void setModalSize (neptune::core::uistate::Terminal, neptune::core::uistate::Size);
+    neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return uiState_.modalSize (t); }
+    void setModalSize (neptune::core::uistate::Terminal, neptune::core::uistate::Size) override;
     // Dernier gabarit de nom utilisé à l'import (JSON), mémorisé dans ui_state.json.
     std::string lastImportTemplate() const { return uiState_.lastImportTemplate; }
     void setLastImportTemplate (const std::string&);
@@ -199,6 +217,10 @@ private:
     void autosaveNow();
     class InstrumentLoader;
     void adoptMixerFromState (const std::optional<neptune::core::MixerState>&);
+    class InsertHost;
+    static int insertFlatIndex (StripKind, int index) noexcept;
+    using InsertRow = std::array<std::shared_ptr<neptune::core::InsertInstance>, neptune::core::mixer::numInserts>;
+    std::array<InsertRow, neptune::core::mixer::numTracks + neptune::core::mixer::numBuses + 1> insertInstances_; // protégé par instrumentLock_
     std::set<std::string> otherTracksPaths (int track) const;
     void setStatus (int track, InstrumentStatus);
     void pushMixerSettingsToEngine();

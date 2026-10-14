@@ -20,6 +20,8 @@ public:
     ~MixerView() override;
 
     std::function<void (int track)> onSelectTrack;
+    // L'utilisateur veut éditer un insert (clic sur un emplacement rempli, ou module qu'il vient de poser).
+    std::function<void (NeptuneProcessor::StripKind, int index, int slot)> onOpenInsert;
 
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -28,6 +30,8 @@ public:
 private:
     class Strip;
     class MasterStrip;
+    class InsertList;
+    int stripHeight_ = 292;
     void timerCallback() override;
     void exclusiveSolo (bool isBus, int index);
     void requestTypeChange (int track, neptune::core::TrackType); // confirmation si la piste a du contenu

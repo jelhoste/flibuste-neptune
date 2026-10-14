@@ -216,7 +216,12 @@ Chaque piste, bus, et le Master ont un sélecteur : "Master" (comportement par d
 
 ## 7. Plugins stock — fonctionnalités communes
 
-Usage strictement interne (inserts du sampleur uniquement, pas de distribution comme plugins CLAP indépendants — décision prise pour rester concentré sur l'essentiel du projet).
+**Décision du 2026-10-14 (remplace « usage strictement interne »)** : dans Neptune les plugins stock sont **100 % intégrés** (inserts des pistes, des bus et du Master, sans passer par un hôte CLAP), **et** ils sortent aussi comme une **suite de plugins CLAP indépendants** (JUCE, même cœur DSP, même interface). Conséquences de conception :
+- le DSP et la description des paramètres de chaque plugin vivent dans le cœur portable (sans JUCE, sans dépendance à Neptune) ; deux adaptateurs minces : « emplacement d'insert » et « plugin CLAP séparé » ;
+- l'interface JUCE d'un plugin ne connaît qu'une source de paramètres abstraite, pour fonctionner dans les deux cas ;
+- les maquettes HTML de la série NOVA (`nova-ui-series`) font référence pour l'interface et le comportement ; les fichiers `NOVA_<Plugin>_params_*.md` font référence pour les paramètres (idéalement convertis en tables C++ par un script, source unique).
+
+**Point à réfléchir plus tard (noté le 2026-10-14) : exposition des paramètres d'inserts à l'automation de l'hôte.** Exposer tous les paramètres de tous les inserts (33 bandes d'insertion x 8 emplacements, un égaliseur à 32 bandes...) rendrait la liste de paramètres de Neptune énorme (Reaper ralentit au-delà de quelques milliers). Pistes : n'exposer par insert que bypass / mix / sortie, plus N paramètres assignables par l'utilisateur ; ou autoriser l'automation seulement pour certains plugins ou certains paramètres. À trancher avant le second plugin stock ; ne bloque pas l'Utilitaire. Dans la version CLAP indépendante, tous les paramètres restent exposés.
 
 ### Communes à tous les plugins stock
 - Copier-coller (réutilise le presse-papier de module générique, section 1)
@@ -236,14 +241,20 @@ Usage strictement interne (inserts du sampleur uniquement, pas de distribution c
 
 ## 8. Plugin stock — Utilitaire
 
-- Tranche de console minimale : volume, pan
-- Mode stéréo ou double mono (tous les contrôles suivent ce mode)
-- Inverseur de phase
-- Délai d'ajustement en échantillons ou millisecondes (alignement temporel manuel, ex. entre deux micros)
-- **Largeur stéréo** (mid-side, resserrer/élargir l'image stéréo)
+Premier plugin stock livré (2026-10-14), dans les deux formes : insert de Neptune (« Utilitaire ») et plugin CLAP indépendant (nom provisoire « Moussaillon »).
+
+- Tranche de console minimale : volume, pan (simple : balance ou pan vrai ; **double** : un pan par canal d'entrée, L et R, puissance constante)
+- Mode **stéréo ou double mono** (tous les contrôles suivent ce mode : en double mono, volume, phase, délai et DC sont propres à chaque canal ; échange, largeur, mono, pan et conversions M/S sont grisés)
+- **Conversions M/S** : Stéréo > Stéréo (défaut), Stéréo > M/S (sortie : L = Mid, R = Side, encodage en dernier), M/S > Stéréo (entrée : L = Mid, R = Side, décodage en premier). Mid = (L+R)/2, Side = (L-R)/2 : un signal mono garde son niveau.
+- Inverseur de phase (L et R séparément)
+- Délai d'ajustement 0 à 100 ms (affiché aussi en échantillons ; **non compensé par l'hôte**, c'est un décalage voulu)
+- **Largeur stéréo** (mid-side, 0 à 200 %)
 - **Inversion/échange L-R**
-- **Suppression de DC offset** (filtre retirant un décalage continu parasite)
-- **Bouton somme mono** (vérification de compatibilité mono, même logique que sur le Master)
+- **Suppression de DC offset** (passe-haut ~5 Hz)
+- **Bouton somme mono**
+- Communs à tous les plugins stock : trim d'entrée et de sortie (±24 dB), mix dry/wet, bypass
+- Affichage : vu-mètres d'entrée et de sortie (crête), **corrélateur** (-1 à +1, fenêtre de 300 ms)
+- Chaîne réelle : trim d'entrée -> décodage M/S -> phase -> échange -> délai -> DC -> largeur -> mono -> pan -> volume -> encodage M/S -> trim de sortie -> mix. Sans latence.
 
 ---
 

@@ -31,6 +31,8 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
 
     ok = ok && set.add (ParamSpec::continuous (masterTrim, "Master Trim", Unit::Decibel, -12.0, 12.0, 0.0), error)
             && set.add (ParamSpec::toggle (masterMono, "Master Mono"), error);
+    for (int i = 0; ok && i < numInserts; ++i)
+        ok = set.add (ParamSpec::toggle (masterInsertBypassId (i), "Master Insert " + std::to_string (i + 1) + " Bypass"), error);
 
     for (int b = 0; ok && b < buses; ++b)
     {
@@ -39,6 +41,8 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
           && set.add (ParamSpec::continuous (busParam (b, kBusPan), p + "Pan", Unit::Percent, -100.0, 100.0, 0.0), error)
           && set.add (ParamSpec::toggle (busParam (b, kBusMute), p + "Mute"), error)
           && set.add (ParamSpec::toggle (busParam (b, kBusSolo), p + "Solo"), error);
+        for (int i = 0; ok && i < numInserts; ++i)
+            ok = set.add (ParamSpec::toggle (busParam (b, kBusInsertBypass + static_cast<ParamId> (i)), p + "Insert " + std::to_string (i + 1) + " Bypass"), error);
         for (int i = 0; ok && i < numSends; ++i)
             ok = set.add (level (busParam (b, kBusSendLevel + static_cast<ParamId> (i)), p + "Send " + std::to_string (i + 1) + " Level", -100.0), error);
     }
@@ -55,6 +59,8 @@ StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
     // pas de cycle : un bus ne route que vers un bus d'indice supérieur (les bus sont numérotés 1..numBuses ici)
     if (isBus && s.routing.mainDest != 0 && s.routing.mainDest <= index + 1) s.routing.mainDest = 0;
     s.panMode = s.panMode == PanMode::True ? PanMode::True : PanMode::Balance;
+    for (auto& in : s.inserts)
+        if (in.type.size() > 32) in = InsertState {};
     for (auto& send : s.sends)
     {
         send.destination = std::clamp (send.destination, 0, numBuses);

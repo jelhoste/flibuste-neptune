@@ -16,7 +16,7 @@ namespace neptune::core::state
 {
 // Version de schéma écrite par cette version du plugin. À incrémenter à chaque changement de structure,
 // avec une migration (voir StateMigration.h) de la version précédente vers la nouvelle.
-constexpr int currentSchemaVersion = 6; // v2 : "profile_lock" ; v3 : "instrument" (Sampler) ; v4 : enveloppe dans les zones (release_ms -> envelope) ; v5 : "mixer" (pistes, bus, master) ; v6 : type de piste, patch de synthé, pistes actives
+constexpr int currentSchemaVersion = 7; // v2 : "profile_lock" ; v3 : "instrument" (Sampler) ; v4 : enveloppe dans les zones (release_ms -> envelope) ; v5 : "mixer" (pistes, bus, master) ; v6 : type de piste, patch de synthé, pistes actives ; v7 : inserts (modules stock) des pistes, bus et master
 
 enum class Status
 {

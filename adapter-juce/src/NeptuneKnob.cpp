@@ -22,7 +22,7 @@ void strokeArc (juce::Graphics& g, float cx, float cy, float radius, float from,
 }
 } // namespace
 
-NeptuneKnob::NeptuneKnob (NeptuneProcessor& p, neptune::core::ParamId id, const neptune::core::theme::Palette& palette,
+NeptuneKnob::NeptuneKnob (ParamHost& p, neptune::core::ParamId id, const neptune::core::theme::Palette& palette,
                           neptune::core::theme::KnobStyle style, OpenModal openModal)
     : processor_ (p), id_ (id), index_ (p.parameters().indexOf (id)), palette_ (palette), style_ (style), openModal_ (std::move (openModal))
 {
@@ -173,24 +173,26 @@ void NeptuneKnob::paint (juce::Graphics& g)
     }
     else
     {
-        // Anneau LED avec dégradé d'intensité (nova-knob-styles.js : drawLED)
+        // Anneau LED avec dégradé d'intensité (nova-knob-styles.js : drawLED). Le halo (jusqu'à 12,5 px de large) doit tenir dans
+        // le composant : sinon il est coupé net et dessine un carré aux angles tronqués (visible depuis le potard réduit à 48 px).
+        const float r = S * 0.36f;
         g.setColour (colour (Token::KnobFace));
-        g.fillEllipse (cx - radius * 0.72f, cy - radius * 0.72f, radius * 1.44f, radius * 1.44f);
+        g.fillEllipse (cx - r * 0.72f, cy - r * 0.72f, r * 1.44f, r * 1.44f);
 
         g.setColour (colour (Token::KnobTrack).withAlpha (0.8f));
-        strokeArc (g, cx, cy, radius, kA0, kA1, 5.0f, false);
+        strokeArc (g, cx, cy, r, kA0, kA1, 5.0f, false);
 
         const auto c1 = colour (Token::Accent).interpolatedWith (colour (Token::KnobHot), n);
         const auto c2 = colour (Token::Accent2).interpolatedWith (colour (Token::KnobHot2), n);
         for (int i = 3; i >= 1; --i)
         {
             g.setColour (c1.withAlpha (0.07f * static_cast<float> (i)));
-            strokeArc (g, cx, cy, radius, kA0, angle, 5.0f + static_cast<float> (i) * 3.0f, true);
+            strokeArc (g, cx, cy, r, kA0, angle, 5.0f + static_cast<float> (i) * 2.5f, true);
         }
-        g.setGradientFill (juce::ColourGradient (c1, cx - radius, cy, c2, cx + radius, cy, false));
-        strokeArc (g, cx, cy, radius, kA0, angle, 5.0f, true);
+        g.setGradientFill (juce::ColourGradient (c1, cx - r, cy, c2, cx + r, cy, false));
+        strokeArc (g, cx, cy, r, kA0, angle, 5.0f, true);
 
-        const float ix = cx + std::cos (angle) * (radius - 1.0f), iy = cy + std::sin (angle) * (radius - 1.0f);
+        const float ix = cx + std::cos (angle) * (r - 1.0f), iy = cy + std::sin (angle) * (r - 1.0f);
         g.setColour (colour (Token::KnobDot));
         g.fillEllipse (ix - 2.6f, iy - 2.6f, 5.2f, 5.2f);
     }

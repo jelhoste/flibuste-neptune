@@ -8,7 +8,8 @@ using neptune::core::theme::Token;
 namespace
 {
 constexpr int kStripW = 58;
-constexpr int kStripH = 292;
+constexpr int kMinStripH = 300, kMaxStripH = 360;
+constexpr int kInsertRowH = 16, kVisibleInserts = 4;
 constexpr int kMasterW = 112;
 constexpr double kFaderMinDb = -100.0, kFaderMaxDb = 6.0;
 
@@ -235,6 +236,140 @@ private:
     std::array<Row, mixer::numSends> rows_;
 };
 
+// ------------------------------------------------------------------------------------------------ inserts
+
+// Les 8 emplacements d'inserts d'une bande : 4 lignes visibles, les 4 suivantes par la molette ou la flèche. Vide : « + ».
+class MixerView::InsertList : public juce::Component
+{
+public:
+    InsertList (MixerView& owner, NeptuneProcessor::StripKind kind, int index) : owner_ (owner), kind_ (kind), index_ (index) {}
+
+    static int heightNeeded() { return kInsertRowH * kVisibleInserts + 2; }
+
+    void refresh()
+    {
+        bool changed = false;
+        for (int s = 0; s < mixer::numInserts; ++s)
+        {
+            const auto type = owner_.processor_.insertType (kind_, index_, s);
+            const bool by = ! type.empty() && owner_.processor_.insertBypassed (kind_, index_, s);
+            if (type != types_[static_cast<std::size_t> (s)] || by != bypassed_[static_cast<std::size_t> (s)]) changed = true;
+            types_[static_cast<std::size_t> (s)] = type;
+            bypassed_[static_cast<std::size_t> (s)] = by;
+        }
+        if (changed) repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setFont (juce::FontOptions (10.0f));
+        for (int row = 0; row < kVisibleInserts; ++row)
+        {
+            const int slot = page_ * kVisibleInserts + row;
+            const auto r = rowRect (row);
+            const bool used = ! types_[static_cast<std::size_t> (slot)].empty();
+            g.setColour (owner_.colour (used ? Token::BgApp : Token::BgCard));
+            g.fillRect (r);
+            g.setColour (owner_.colour (Token::Border));
+            g.drawRect (r);
+            g.setColour (owner_.colour (used ? (bypassed_[static_cast<std::size_t> (slot)] ? Token::TextDim2 : Token::Accent) : Token::TextDim));
+            g.drawText (used ? name (types_[static_cast<std::size_t> (slot)]) : juce::String ("+"), r.reduced (2, 0), juce::Justification::centred);
+        }
+        // pagination : 1-4 / 5-8
+        g.setColour (owner_.colour (Token::TextDim));
+        const auto a = arrowRect();
+        juce::Path tri;
+        if (page_ == 0) tri.addTriangle ((float) a.getX() + 1, (float) a.getY() + 4, (float) a.getRight() - 1, (float) a.getY() + 4, a.getCentreX(), (float) a.getBottom() - 4);
+        else tri.addTriangle ((float) a.getX() + 1, (float) a.getBottom() - 4, (float) a.getRight() - 1, (float) a.getBottom() - 4, a.getCentreX(), (float) a.getY() + 4);
+        g.fillPath (tri);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (arrowRect().contains (e.getPosition())) { page_ = 1 - page_; repaint(); return; }
+        const int row = e.y / kInsertRowH;
+        if (row < 0 || row >= kVisibleInserts) return;
+        const int slot = page_ * kVisibleInserts + row;
+        const bool used = ! types_[static_cast<std::size_t> (slot)].empty();
+        if (e.mods.isPopupMenu() && used) { showMenu (slot); return; }
+        if (used) { if (owner_.onOpenInsert) owner_.onOpenInsert (kind_, index_, slot); }
+        else showMenu (slot);
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        const int next = w.deltaY < 0 ? 1 : 0;
+        if (w.deltaY != 0.0f && next != page_) { page_ = next; repaint(); }
+    }
+
+private:
+    juce::Rectangle<int> rowRect (int row) const { return { 0, row * kInsertRowH, getWidth() - 12, kInsertRowH }; }
+    juce::Rectangle<int> arrowRect() const { return { getWidth() - 12, 0, 12, kInsertRowH * kVisibleInserts }; }
+
+    juce::String name (const std::string& type) const
+    {
+        for (const auto& m : availableModules())
+            if (m.typeId == type) return u8 (std::string (owner_.tr_.tr (m.nameKey)));
+        return u8 (type);
+    }
+
+    void showMenu (int slot)
+    {
+        const bool used = ! types_[static_cast<std::size_t> (slot)].empty();
+        juce::PopupMenu menu;
+        const auto& modules = availableModules();
+        if (! used)
+        {
+            for (std::size_t i = 0; i < modules.size(); ++i)
+                menu.addItem (static_cast<int> (i) + 1, u8 (std::string (owner_.tr_.tr (modules[i].nameKey))));
+        }
+        else
+        {
+            menu.addItem (1, u8 (std::string (owner_.tr_.tr ("insert.open"))));
+            menu.addItem (2, u8 (std::string (owner_.tr_.tr ("insert.bypass"))), true, bypassed_[static_cast<std::size_t> (slot)]);
+            menu.addItem (3, u8 (std::string (owner_.tr_.tr ("insert.remove"))));
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+                            [safe = juce::Component::SafePointer<InsertList> (this), slot, used] (int choice)
+                            {
+                                if (safe == nullptr || choice == 0) return;
+                                auto& proc = safe->owner_.processor_;
+                                const auto kind = safe->kind_;
+                                const int index = safe->index_;
+                                if (! used)
+                                {
+                                    const auto& mods = availableModules();
+                                    if (choice < 1 || choice > static_cast<int> (mods.size())) return;
+                                    proc.uiSetInsert (kind, index, slot, std::string (mods[static_cast<std::size_t> (choice - 1)].typeId));
+                                    safe->refresh();
+                                    if (safe->owner_.onOpenInsert) safe->owner_.onOpenInsert (kind, index, slot);
+                                }
+                                else if (choice == 1) { if (safe->owner_.onOpenInsert) safe->owner_.onOpenInsert (kind, index, slot); }
+                                else if (choice == 2)
+                                {
+                                    const auto id = proc.insertBypassParam (kind, index, slot);
+                                    const auto* spec = proc.parameters().find (id);
+                                    if (spec == nullptr) return;
+                                    proc.uiBeginEdit (id);
+                                    proc.uiSetNormalised (id, spec->toNormalized (proc.parameters().get (id) < 0.5 ? 1.0 : 0.0));
+                                    proc.uiEndEdit (id);
+                                }
+                                else if (choice == 3)
+                                {
+                                    proc.uiSetInsert (kind, index, slot, std::string());
+                                    safe->refresh();
+                                }
+                            });
+    }
+
+    MixerView& owner_;
+    NeptuneProcessor::StripKind kind_;
+    int index_;
+    int page_ = 0;
+    std::array<std::string, mixer::numInserts> types_;
+    std::array<bool, mixer::numInserts> bypassed_ {};
+};
+
 // ------------------------------------------------------------------------------------------------ une bande
 
 class MixerView::Strip : public juce::Component
@@ -243,9 +378,11 @@ public:
     Strip (MixerView& owner, bool isBus, int index)
         : owner_ (owner), isBus_ (isBus), index_ (index),
           pan_ (owner.processor_, juce::Slider::LinearHorizontal), fader_ (owner.processor_, juce::Slider::LinearVertical),
-          mute_ (owner.processor_, "M"), solo_ (owner.processor_, "S")
+          mute_ (owner.processor_, "M"), solo_ (owner.processor_, "S"),
+          inserts_ (owner, isBus ? NeptuneProcessor::StripKind::Bus : NeptuneProcessor::StripKind::Track, index)
     {
         auto& proc = owner.processor_;
+        addAndMakeVisible (inserts_);
         name_.setJustificationType (juce::Justification::centred);
         name_.setFont (juce::FontOptions (11.0f));
         name_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
@@ -343,6 +480,7 @@ public:
         fader_.sync();
         mute_.sync();
         solo_.sync();
+        inserts_.refresh();
         if (panelRef_ != nullptr) panelRef_->refreshLevels();
     }
 
@@ -366,6 +504,7 @@ public:
         name_.setBounds (r.removeFromTop (18));
         if (! isBus_) midi_.setBounds (r.removeFromTop (22).reduced (0, 1));
         routing_.setBounds (r.removeFromTop (22).reduced (0, 1));
+        inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
         pan_.setBounds (r.removeFromTop (20));
         auto bottom = r.removeFromBottom (24);
         mute_.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).reduced (1));
@@ -453,6 +592,7 @@ private:
     BoundToggle mute_, solo_;
     juce::Rectangle<int> faderArea_;
     juce::Component::SafePointer<RoutingPanel> panelRef_;
+    InsertList inserts_;
 
     friend class MixerView;
 };
@@ -464,8 +604,10 @@ class MixerView::MasterStrip : public juce::Component
 public:
     explicit MasterStrip (MixerView& owner)
         : owner_ (owner), pan_ (owner.processor_, juce::Slider::LinearHorizontal), trim_ (owner.processor_, juce::Slider::LinearHorizontal),
-          fader_ (owner.processor_, juce::Slider::LinearVertical), mute_ (owner.processor_, "M"), mono_ (owner.processor_, "Mono")
+          fader_ (owner.processor_, juce::Slider::LinearVertical), mute_ (owner.processor_, "M"), mono_ (owner.processor_, "Mono"),
+          inserts_ (owner, NeptuneProcessor::StripKind::Master, 0)
     {
+        addAndMakeVisible (inserts_);
         title_.setText ("Master", juce::dontSendNotification);
         title_.setJustificationType (juce::Justification::centred);
         title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
@@ -521,6 +663,7 @@ public:
     void syncValues()
     {
         pan_.sync(); trim_.sync(); fader_.sync(); mute_.sync(); mono_.sync();
+        inserts_.refresh();
     }
 
     void updateMeter (const Engine::Meter& m)
@@ -539,6 +682,7 @@ public:
         title_.setBounds (r.removeFromTop (20));
         output_.setBounds (r.removeFromTop (24).reduced (0, 1));
         panMode_.setBounds (r.removeFromTop (24).reduced (0, 1));
+        inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
         auto line = r.removeFromTop (18);
         trimLabel_.setBounds (line);
         trim_.setBounds (r.removeFromTop (18));
@@ -588,6 +732,7 @@ private:
     BoundToggle mute_, mono_;
     juce::Rectangle<int> faderArea_;
     float peakL_ = 0.0f, peakR_ = 0.0f, rmsL_ = 0.0f, rmsR_ = 0.0f;
+    InsertList inserts_;
 };
 
 // ------------------------------------------------------------------------------------------------ la vue
@@ -641,18 +786,19 @@ void MixerView::resized()
 void MixerView::layoutTracks()
 {
     auto r = getLocalBounds();
+    stripHeight_ = juce::jlimit (kMinStripH, kMaxStripH, (getHeight() - 40) / 2); // deux rangées de bandes + leurs titres
     auto masterArea = r.removeFromRight (kMasterW + 6);
-    master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (kStripH * 2 + 40));
+    master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (stripHeight_ * 2 + 40));
     const int gap = 1;
     tracksTitle_.setBounds (r.removeFromTop (20));
     {
-        auto area = r.removeFromTop (kStripH);
+        auto area = r.removeFromTop (stripHeight_);
         int x = area.getX();
         for (int t = 0; t < mixer::numTracks; ++t)
         {
             auto& s = *tracks_[static_cast<std::size_t> (t)];
             if (! shownTracks_[static_cast<std::size_t> (t)]) continue;
-            s.setBounds (x, area.getY(), kStripW, kStripH);
+            s.setBounds (x, area.getY(), kStripW, stripHeight_);
             x += kStripW + gap;
         }
         addTrack_.setVisible (processor_.activeTrackCount() < mixer::numTracks);
@@ -660,11 +806,11 @@ void MixerView::layoutTracks()
     }
     busesTitle_.setBounds (r.removeFromTop (20));
     {
-        auto area = r.removeFromTop (kStripH);
+        auto area = r.removeFromTop (stripHeight_);
         int x = area.getX();
         for (auto& s : buses_)
         {
-            s->setBounds (x, area.getY(), kStripW, kStripH);
+            s->setBounds (x, area.getY(), kStripW, stripHeight_);
             x += kStripW + gap;
         }
     }

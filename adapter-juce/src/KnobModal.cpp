@@ -2,7 +2,7 @@
 
 using neptune::core::theme::Token;
 
-KnobModal::KnobModal (NeptuneProcessor& p, neptune::core::ParamId id, neptune::core::uistate::Terminal terminal,
+KnobModal::KnobModal (ParamHost& p, neptune::core::ParamId id, neptune::core::uistate::Terminal terminal,
                       const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
                       std::function<void()> onClose)
     : processor_ (p), id_ (id), index_ (p.parameters().indexOf (id)), terminal_ (terminal), palette_ (palette), onClose_ (std::move (onClose))

@@ -251,6 +251,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
     mixerView_ = std::make_unique<MixerView> (processor_, palette_, tr_);
     mixerView_->onSelectTrack = [this] (int t) { processor_.selectTrack (t); };
+    mixerView_->onOpenInsert = [this] (NeptuneProcessor::StripKind kind, int index, int slot) { openInsert (kind, index, slot); };
     addChildComponent (*mixerView_);
 
     synthView_ = std::make_unique<SynthView> (palette_, tr_);
@@ -326,7 +327,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
     updateViewVisibility();
     setResizable (true, true);
-    setSize (1160, 920);
+    setSize (1160, 960);
 }
 
 void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate::Terminal terminal)
@@ -341,6 +342,31 @@ void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate
     addAndMakeVisible (*modal_);
     modal_->setBounds (getLocalBounds());
     modal_->toFront (true);
+}
+
+// Éditeur d'un insert, superposé à toute la fenêtre.
+void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int slot)
+{
+    if (insertOverlay_ || modal_ || wizard_ || filterEditor_) return;
+    using namespace neptune::core;
+    const auto& def = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
+    auto overlay = std::make_unique<InsertOverlay> (processor_, kind, index, slot, palette_, tr_, def.knob,
+                                                    [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+                                                    {
+                                                        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeInsert(); });
+                                                    });
+    if (! overlay->valid()) return;
+    insertOverlay_ = std::move (overlay);
+    addAndMakeVisible (*insertOverlay_);
+    insertOverlay_->setBounds (getLocalBounds());
+    insertOverlay_->toFront (true);
+    insertOverlay_->grabKeyboardFocus();
+}
+
+void NeptuneEditor::closeInsert()
+{
+    insertOverlay_.reset();
+    grabKeyboardFocus();
 }
 
 void NeptuneEditor::closeModal()
@@ -1146,6 +1172,7 @@ void NeptuneEditor::resized()
     }
     if (wizard_) wizard_->setBounds (getLocalBounds());
     if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
+    if (insertOverlay_) insertOverlay_->setBounds (getLocalBounds());
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {

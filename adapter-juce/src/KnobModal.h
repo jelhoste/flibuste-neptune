@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
-#include "PluginProcessor.h"
+#include "ParamHost.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
 #include "neptune/core/UiState.h"
@@ -12,7 +12,7 @@
 class KnobModal : public juce::Component, private juce::Timer
 {
 public:
-    KnobModal (NeptuneProcessor&, neptune::core::ParamId, neptune::core::uistate::Terminal, const neptune::core::theme::Palette&,
+    KnobModal (ParamHost&, neptune::core::ParamId, neptune::core::uistate::Terminal, const neptune::core::theme::Palette&,
                const neptune::core::i18n::Translator&, std::function<void()> onClose);
     ~KnobModal() override { stopTimer(); }
 
@@ -45,7 +45,7 @@ private:
     juce::Colour colour (neptune::core::theme::Token t) const;
     void centrePanel();
 
-    NeptuneProcessor& processor_;
+    ParamHost& processor_;
     neptune::core::ParamId id_;
     std::size_t index_;
     neptune::core::uistate::Terminal terminal_;

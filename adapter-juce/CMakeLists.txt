@@ -35,6 +35,8 @@ target_sources(Neptune PRIVATE
   src/FilterEditor.cpp
   src/MixerView.cpp
   src/SynthView.cpp
+  src/UtilityEditor.cpp
+  src/InsertOverlay.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 
@@ -46,6 +48,47 @@ target_compile_definitions(Neptune PUBLIC
   NEPTUNE_PROBE_OUTPUTS=${NEPTUNE_PROBE_OUTPUTS})
 
 target_link_libraries(Neptune
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- Moussaillon (nom provisoire) : l'Utilitaire de la suite, plugin CLAP indépendant ---------------------------------------
+# Même DSP (neptune_core : StockModule / UtilityModule) et même interface (UtilityEditor, NeptuneKnob, KnobModal) que l'insert
+# de Neptune ; seul l'adaptateur change (MoussaillonPlugin : l'hôte porte le plugin).
+set(MOUSSAILLON_CLAP_ID "com.tournedosrossini.moussaillon" CACHE STRING "Identifiant CLAP de l'Utilitaire")
+
+juce_add_plugin(Moussaillon
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Moussaillon"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Mous
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Moussaillon
+  CLAP_ID       "${MOUSSAILLON_CLAP_ID}"
+  CLAP_FEATURES audio-effect utility stereo)
+
+target_sources(Moussaillon PRIVATE
+  src/MoussaillonPlugin.cpp
+  src/UtilityEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Moussaillon PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Moussaillon
   PRIVATE
     neptune_core
     juce::juce_audio_utils

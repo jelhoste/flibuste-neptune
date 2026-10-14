@@ -10,6 +10,7 @@
 #include "FilterEditor.h"
 #include "MixerView.h"
 #include "SynthView.h"
+#include "InsertOverlay.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -88,6 +89,9 @@ private:
     std::unique_ptr<MixerView> mixerView_;
     // Vue Synthé : remplace la vue Mapping quand la piste sélectionnée est un synthé.
     std::unique_ptr<SynthView> synthView_;
+    std::unique_ptr<InsertOverlay> insertOverlay_;
+    void openInsert (NeptuneProcessor::StripKind, int index, int slot);
+    void closeInsert();
     bool synthShown_ = false;
     std::array<int, 128> synthKeyTrack_ {}; // piste sur laquelle chaque touche du clavier à l'écran a démarré
     bool selectedIsSynth() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Synth; }

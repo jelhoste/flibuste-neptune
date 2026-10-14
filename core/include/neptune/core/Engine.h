@@ -13,6 +13,7 @@
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
 #include "neptune/core/SamplerVoices.h"
+#include "neptune/core/StockModule.h"
 #include "neptune/core/Synth.h"
 #include "neptune/core/SynthVoices.h"
 
@@ -22,11 +23,14 @@ namespace neptune::core
 // Palier 1 : N pistes, Sampler ou Synthé (chacune son instrument ou son patch, ses voix, son canal MIDI), 16 bus, un Master ; sorties directes sur
 // jusqu'à 64 paires stéréo. Les voix d'une piste ne sont jamais celles d'une autre ; le thread disque et ses emplacements de
 // streaming sont, eux, partagés (pool).
+enum class StripKind { Track, Bus, Master };
+
 class Engine
 {
 public:
     static constexpr int kTracks = mixer::numTracks;
     static constexpr int kBuses = mixer::numBuses;
+    static constexpr int kInserts = mixer::numInserts;
 
     Engine() noexcept;
 
@@ -53,7 +57,13 @@ public:
     // Démarre le thread disque (et ses tampons) la première fois qu'un instrument en streaming est publié.
     void publishInstrument (int track, std::shared_ptr<const Instrument> instrument);
     void publishInstrument (std::shared_ptr<const Instrument> instrument) { publishInstrument (0, std::move (instrument)); }
-    void collectGarbage() { for (auto& t : tracks_) { t.slot.collect(); t.synthSlot.collect(); } } // thread de message, régulièrement
+    void collectGarbage(); // thread de message, régulièrement : détruit ce que le thread audio a rendu
+
+    // Insert d'un emplacement (piste, bus ou Master ; `index` ignoré pour le Master ; `slot` 0..7) : thread de message.
+    // Le module doit être préparé (createInsert avec sampleRate() / maxBlockSize()). Nul : l'emplacement devient vide.
+    // L'audio l'adopte au début du bloc suivant ; le thread audio en devient le seul utilisateur du DSP.
+    void setInsert (StripKind kind, int index, int slot, std::shared_ptr<const InsertInstance> insert);
+    int maxBlockSize() const noexcept { return maxBlockSize_; }
 
     // Type de génération d'une piste (Sampler / Synthé) et patch du synthé : thread de message, pris en compte au bloc suivant.
     // Un changement de type coupe net les voix de la piste.
@@ -129,8 +139,17 @@ private:
         std::size_t sampler[mixer::kSamplerKinds];
         ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; }
     };
+    // Un emplacement d'insert : l'instance (remise au thread audio) et l'index de son paramètre de bypass (celui de l'hôte).
+    struct InsertSlot
+    {
+        HandoffSlot<InsertInstance> slot;
+        std::size_t bypass = ParameterSet::npos;
+    };
+    using Inserts = std::array<InsertSlot, mixer::numInserts>;
+
     struct Track
     {
+        Inserts inserts;
         InstrumentSlot slot;
         SamplerVoices voices;
         HandoffSlot<SynthPatch> synthSlot;
@@ -147,6 +166,7 @@ private:
     };
     struct Bus
     {
+        Inserts inserts;
         AtomicStrip config;
         ParamIndices idx;
         float lastFader = 1.0f, lastPanL = 1.0f, lastPanR = 1.0f;
@@ -157,6 +177,8 @@ private:
 
     void processChunk (float* const* out, int numChannels, int frames) noexcept;
     void drainUiEvents() noexcept;
+    void adoptInserts() noexcept;
+    Inserts* insertsOf (StripKind, int index) noexcept;
     void pushTrace (int track, int key, float shapedVelocity) noexcept;
     void publishVoices() noexcept;
     double param (std::size_t index, double fallback) const noexcept
@@ -188,12 +210,14 @@ private:
     const ParameterSet* params_ = nullptr;
     std::size_t masterVolume_ = ParameterSet::npos, masterPan_ = ParameterSet::npos, masterMute_ = ParameterSet::npos,
                 masterTrim_ = ParameterSet::npos, masterMono_ = ParameterSet::npos;
-    float lastMasterGain_ = 1.0f, lastMasterPanL_ = 1.0f, lastMasterPanR_ = 1.0f;
+    Inserts masterInserts_;
+    std::atomic<bool> insertsDirty_ { false }; // un insert a été publié : le thread audio les adopte au prochain bloc
+    float lastMasterTrim_ = 1.0f, lastMasterFader_ = 1.0f, lastMasterPanL_ = 1.0f, lastMasterPanR_ = 1.0f;
     std::atomic<float> masterPeakL_ { 0.0f }, masterPeakR_ { 0.0f }, masterRmsL_ { 0.0f }, masterRmsR_ { 0.0f };
 
     // tampons de mixage (alloués dans prepare)
     struct Stereo { std::vector<float> l, r; void resize (std::size_t n) { l.assign (n, 0.0f); r.assign (n, 0.0f); } };
-    Stereo raw_, postFader_, final_, master_;
+    Stereo raw_, inserted_, postFader_, final_, master_;
     std::array<Stereo, kBuses> busIn_;
 };
 } // namespace neptune::core

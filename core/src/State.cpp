@@ -45,7 +45,9 @@ const MigrationTable& registeredMigrations()
           } },
         // v5 -> v6 : « type », « synth » et « active » sont facultatifs dans une piste (absent = Sampler, patch par défaut,
         // active si elle a du contenu : voir mixerFromJson), rien à transformer.
-        { 5, [] (nlohmann::json&) { return true; } } };
+        { 5, [] (nlohmann::json&) { return true; } },
+        // v6 -> v7 : « inserts » est facultatif dans une bande et dans le master (absent = aucun insert), rien à transformer.
+        { 6, [] (nlohmann::json&) { return true; } } };
     return table;
 }
 

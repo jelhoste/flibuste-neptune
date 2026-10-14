@@ -72,5 +72,5 @@ TEST_CASE ("schema v1 projects still load, unreadable lock means unlocked")
     const auto bad = state::load (set, R"({"format":"neptune-state","schema_version":2,"profile_lock":"turbo","parameters":{}})");
     CHECK (bad.ok());
     CHECK_FALSE (bad.profileLock.has_value());
-    CHECK (state::load (set, R"({"format":"neptune-state","schema_version":7,"parameters":{}})").status == state::Status::TooNew);
+    CHECK (state::load (set, R"({"format":"neptune-state","schema_version":8,"parameters":{}})").status == state::Status::TooNew);
 }
