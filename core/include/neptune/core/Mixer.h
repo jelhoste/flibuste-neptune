@@ -141,10 +141,13 @@ struct ParallelSettings
     int parent = 0;                       // 0..numTracks-1 : piste ; numTracks.. : piste parallèle (indice p + numTracks)
     TapPoint tap = TapPoint::PostPan;     // point de captation dans la chaîne du parent
     StripSettings strip;                  // nom, couleur, envois, sortie directe, pan, inserts ; « mainEnabled » : se somme au parent
+    // Le fader du parent commande aussi celui de cette piste : son signal est multiplié par le gain de fader du parent. N'a d'effet que
+    // pour une captation AVANT le fader (points 0 et 1) : après le fader, le signal contient déjà le volume du parent.
+    bool followParentVolume = false;
 
     bool operator== (const ParallelSettings& o) const noexcept
     {
-        return active == o.active && parent == o.parent && tap == o.tap && strip == o.strip;
+        return active == o.active && parent == o.parent && tap == o.tap && strip == o.strip && followParentVolume == o.followParentVolume;
     }
 };
 ParallelSettings sanitised (ParallelSettings p, int index);

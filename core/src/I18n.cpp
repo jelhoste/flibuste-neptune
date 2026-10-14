@@ -368,6 +368,8 @@ const Entry kEntries[] = {
     { "mix.confirm_remove_parallel", { "Remove parallel track {0} and its own parallel tracks? Their inserts and settings are lost.",
                                        "Supprimer la piste parallèle {0} et ses propres pistes parallèles ? Leurs inserts et réglages sont perdus." } },
     { "insert.where_parallel", { "Parallel {0}", "Parallèle {0}" } },
+    { "mix.follow_parent", { "The parent's fader also controls this track (pre-fader capture only)",
+                             "Le fader du parent commande aussi cette piste (captation avant fader seulement)" } },
     { "panic.button", { "All Notes Off", "Tout arrêter" } },
     { "voices.button", { "Active voices", "Voix actives" } },
     { "voices.col_sample", { "Sample", "Échantillon" } },

@@ -31,7 +31,7 @@ Le moteur ne produit que du silence. Le plugin charge, expose des paramètres «
 ```
 core/            moteur C++ portable, SANS JUCE (Engine, Parameter, ProbePool, State, Settings, Autosave, FileUtil, Undo, Theme, I18n, Profile, KnobInteraction, UiState, SampleLoader, Instrument, SamplerVoices, SamplerParams, Envelope, EnvelopeLayout, ZoneImport)
 adapter-juce/    fine couche JUCE/CLAP : NeptuneParameter, PluginProcessor, PluginEditor
-tests/           Catch2 : tests du cœur (291 au 2026-10-14) + `neptune_perf_callback` (voir docs/performance.md)
+tests/           Catch2 : tests du cœur (292 au 2026-10-14) + `neptune_perf_callback` (voir docs/performance.md)
 cmake/           Dependencies.cmake : toutes les dépendances, versions figées
 design/          maquette HTML (neptune_ui.html) + briques de style NOVA copiées telles quelles
 docs/            brief, roadmap, spec, ce fichier
@@ -224,7 +224,9 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Moteur** : un parent traite son instrument, ses inserts, son fader et son pan, puis ses parallèles (récursif, tampons par profondeur jusqu'à 32) captent leur point, passent par leurs inserts / fader / pan, et se somment dans le signal propre du parent **avant** ses envois, sa sortie directe et sa sortie principale. Le vu-mètre d'une piste montre le total (elle + ses parallèles). Une piste silencieuse n'est ignorée que si ses parallèles le sont aussi (queues d'inserts préservées). Pistes et parallèles forment le même domaine de solo ; le solo d'une piste garde ses parallèles audibles.
 - **Paramètres hôte** (`mixer::parallelParam`, ids `5000 + 100.p + offset`) : volume, pan, mute, solo, 8 bypass d'inserts, 8 niveaux d'envoi (26 par parallèle, 832 au total).
 - **Interface** : bouton « P » sur chaque piste et chaque parallèle (à côté de M et S) : crée une parallèle juste à droite. La bande parallèle est visuellement distincte (fond de l'application, bord d'accent à gauche), son en-tête indique sa parenté (« P2 <1 »), un menu règle le point de captation, « × » la supprime avec ses descendants (confirmation si elle a du contenu). **Repliement** : les filles d'une parallèle sont masquées par défaut (bouton ▸n / ▾n), elles restent actives dans le moteur. La rangée des pistes défile horizontalement. Retirer une piste retire ses parallèles. Ajouter, retirer ou modifier le parent d'une parallèle vide l'historique d'annulation.
-- **Non fait** : point de sommation réglable (spec : « configurable »), réaffectation d'une parallèle à un autre parent, copier-coller d'une parallèle, déplacement par glisser-déposer, repliement mémorisé dans le projet.
+- **Suivi du volume du parent** (décidé le 2026-10-14) : option par parallèle (fenêtre « Routage ») : le gain de fader du parent s'applique aussi à la parallèle (fondu sur le bloc ; le mute du parent la coupe aussi). **Effet seulement pour une captation avant le fader** (points 0 et 1) : après le fader, le signal contient déjà le volume du parent. Les petites-filles suivent le fader de leur parent direct.
+- **Décisions** : point de sommation fixe en fin de chaîne (à revoir seulement si le besoin apparaît) ; **le parent d'une parallèle ne change jamais après sa création**.
+- **Non fait** : copier-coller d'une parallèle, déplacement par glisser-déposer, repliement mémorisé dans le projet.
 - **Point à valider** : profondeur maximale = 32 (le pool) ; le total d'une piste (vu-mètre) inclut ses parallèles.
 
 ## Synthé soustractif complet (2026-10-14, à valider dans Reaper)

@@ -78,7 +78,8 @@ public:
     void setBusSettings (int bus, const mixer::StripSettings&) noexcept;
     // Pistes parallèles : `parent` 0..15 = piste, 16..47 = piste parallèle ; `tap` : point de captation dans la chaîne du parent.
     // Une piste parallèle dont le parent est inactif ou qui forme une boucle n'est jamais traitée.
-    void setParallel (int p, bool active, int parent, mixer::TapPoint tap) noexcept;
+    // `followParentVolume` : le gain de fader du parent s'applique aussi à cette piste (captation avant fader seulement).
+    void setParallel (int p, bool active, int parent, mixer::TapPoint tap, bool followParentVolume = false) noexcept;
     void setParallelSettings (int p, const mixer::StripSettings&) noexcept;
     void setMasterSettings (const mixer::MasterSettings&) noexcept;
 
@@ -176,7 +177,7 @@ private:
         Inserts inserts;
         AtomicStrip config;
         ParamIndices idx;
-        std::atomic<int> active { 0 }, parent { 0 }, tap { 3 };
+        std::atomic<int> active { 0 }, parent { 0 }, tap { 3 }, follow { 0 };
         float lastFader = 1.0f, lastPanL = 1.0f, lastPanR = 1.0f;
         std::array<float, mixer::numSends> lastSend {};
         std::atomic<float> peakL { 0.0f }, peakR { 0.0f }, rmsL { 0.0f }, rmsR { 0.0f };
@@ -206,7 +207,7 @@ private:
     void routeStrip (const AtomicStrip&, const ParamIndices&, std::array<float, mixer::numSends>& lastSend, const Stereo& pre, const Stereo& post,
                      const Stereo& postFader, const Stereo& out, bool isBus, int busIndex, bool sumIntoParent) noexcept;
     void processParallel (int p, int depth, bool ancestorSolo, const Stereo& parentPre, const Stereo& parentPost, const Stereo& parentFader,
-                          const Stereo& parentFin, Stereo& parentSum) noexcept;
+                          const Stereo& parentFin, Stereo& parentSum, float parentGainFrom, float parentGainTo) noexcept;
     std::pair<float*, float*> channelPair (int output) const noexcept;
     Inserts* insertsOf (StripKind, int index) noexcept;
     void pushTrace (int track, int key, float shapedVelocity) noexcept;

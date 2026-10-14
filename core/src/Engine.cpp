@@ -152,12 +152,13 @@ void Engine::setBusSettings (int bus, const mixer::StripSettings& s) noexcept
     buses_[static_cast<std::size_t> (bus)].config.load (mixer::sanitisedStrip (s, true, bus));
 }
 
-void Engine::setParallel (int p, bool active, int parent, mixer::TapPoint tap) noexcept
+void Engine::setParallel (int p, bool active, int parent, mixer::TapPoint tap, bool followParentVolume) noexcept
 {
     if (p < 0 || p >= kParallels) return;
     auto& x = parallels_[static_cast<std::size_t> (p)];
     x.parent.store (std::clamp (parent, 0, mixer::numTracks + kParallels - 1), std::memory_order_relaxed);
     x.tap.store (std::clamp (static_cast<int> (tap), 0, 3), std::memory_order_relaxed);
+    x.follow.store (followParentVolume ? 1 : 0, std::memory_order_relaxed);
     x.active.store (active ? 1 : 0, std::memory_order_relaxed);
 }
 
@@ -512,7 +513,7 @@ void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::a
 // Une piste parallèle : prend le signal du point de captation du parent, a sa propre bande (inserts, fader, pan, envois, sortie directe),
 // traite ses propres filles, puis se somme dans `parentSum` (fin de chaîne du parent).
 void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo& parentPre, const Stereo& parentPost, const Stereo& parentFader,
-                              const Stereo& parentFin, Stereo& parentSum) noexcept
+                              const Stereo& parentFin, Stereo& parentSum, float parentGainFrom, float parentGainTo) noexcept
 {
     using namespace mixer;
     if (depth < 1 || depth > kParallels) return;
@@ -521,8 +522,22 @@ void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo&
     const int n = chunkN_;
     const int tap = P.tap.load (std::memory_order_relaxed);
     const Stereo& src = tap == 0 ? parentPre : (tap == 1 ? parentPost : (tap == 2 ? parentFader : parentFin));
-    std::copy (src.l.begin(), src.l.begin() + n, L.pre.l.begin());
-    std::copy (src.r.begin(), src.r.begin() + n, L.pre.r.begin());
+    if (P.follow.load (std::memory_order_relaxed) != 0 && tap < 2)
+    {
+        // le fader du parent commande aussi cette piste : on applique son gain (fondu sur le bloc) au signal capté avant le fader
+        const float step = (parentGainTo - parentGainFrom) / static_cast<float> (n);
+        float g = parentGainFrom;
+        for (int i = 0; i < n; ++i, g += step)
+        {
+            L.pre.l[static_cast<std::size_t> (i)] = src.l[static_cast<std::size_t> (i)] * g;
+            L.pre.r[static_cast<std::size_t> (i)] = src.r[static_cast<std::size_t> (i)] * g;
+        }
+    }
+    else
+    {
+        std::copy (src.l.begin(), src.l.begin() + n, L.pre.l.begin());
+        std::copy (src.r.begin(), src.r.begin() + n, L.pre.r.begin());
+    }
 
     Stereo* post = &L.pre;
     if (hasInserts (P.inserts))
@@ -540,7 +555,9 @@ void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo&
     const bool feeding = subtreeSolo_[static_cast<std::size_t> (self)] != 0;
     const bool muted = param (P.idx.mute, 0.0) >= 0.5 || (anySolo_ && ! audible && ! feeding);
     const bool gateOwn = anySolo_ && ! audible && feeding;
+    const float gainFrom = P.lastFader;
     applyFaderPan (*post, L.fader, L.fin, P.config, P.idx, P.lastFader, P.lastPanL, P.lastPanR, muted);
+    const float gainTo = P.lastFader;
 
     Stereo* out = &L.fin;
     const bool hasChildren = firstChild_[static_cast<std::size_t> (self)] >= 0;
@@ -549,7 +566,7 @@ void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo&
         if (gateOwn) { std::fill (L.sum.l.begin(), L.sum.l.begin() + n, 0.0f); std::fill (L.sum.r.begin(), L.sum.r.begin() + n, 0.0f); }
         else { std::copy (L.fin.l.begin(), L.fin.l.begin() + n, L.sum.l.begin()); std::copy (L.fin.r.begin(), L.fin.r.begin() + n, L.sum.r.begin()); }
         for (int child = firstChild_[static_cast<std::size_t> (self)]; child >= 0; child = nextSibling_[static_cast<std::size_t> (child)])
-            processParallel (child, depth + 1, audible, L.pre, *post, L.fader, L.fin, L.sum);
+            processParallel (child, depth + 1, audible, L.pre, *post, L.fader, L.fin, L.sum, gainFrom, gainTo);
         out = &L.sum;
     }
     meterOf (*out, P.peakL, P.peakR, P.rmsL, P.rmsR);
@@ -689,7 +706,9 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             runInserts (t.inserts, inserted_);
             afterInserts = &inserted_;
         }
+        const float faderFrom = t.lastFader;
         applyFaderPan (*afterInserts, postFader_, final_, t.config, t.idx, t.lastFader, t.lastPanL, t.lastPanR, muted);
+        const float faderTo = t.lastFader;
 
         // pistes parallèles : somme en fin de chaîne de la piste
         Stereo* trackOut = &final_;
@@ -699,7 +718,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             if (gateOwn) { std::fill (sum0_.l.begin(), sum0_.l.begin() + n, 0.0f); std::fill (sum0_.r.begin(), sum0_.r.begin() + n, 0.0f); }
             else { std::copy (final_.l.begin(), final_.l.begin() + n, sum0_.l.begin()); std::copy (final_.r.begin(), final_.r.begin() + n, sum0_.r.begin()); }
             for (int child = firstChild_[static_cast<std::size_t> (ti)]; child >= 0; child = nextSibling_[static_cast<std::size_t> (child)])
-                processParallel (child, 1, selfSolo, raw_, *afterInserts, postFader_, final_, sum0_);
+                processParallel (child, 1, selfSolo, raw_, *afterInserts, postFader_, final_, sum0_, faderFrom, faderTo);
             trackOut = &sum0_;
         }
         meterOf (*trackOut, t.peakL, t.peakR, t.rmsL, t.rmsR);

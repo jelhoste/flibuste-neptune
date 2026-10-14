@@ -532,7 +532,7 @@ void NeptuneProcessor::uiEditParallel (int p, neptune::core::mixer::ParallelSett
         {
             { const juce::ScopedLock lock (instrumentLock_); mixer_.parallels[static_cast<std::size_t> (p)] = v; }
             engine_.setParallelSettings (p, v.strip);
-            engine_.setParallel (p, v.active, v.parent, v.tap);
+            engine_.setParallel (p, v.active, v.parent, v.tap, v.followParentVolume);
             ++revision_;
             notifyStateChanged();
         },
@@ -718,7 +718,7 @@ void NeptuneProcessor::pushMixerSettingsToEngine()
     {
         const auto& ps = m.parallels[static_cast<std::size_t> (p)];
         engine_.setParallelSettings (p, ps.strip);
-        engine_.setParallel (p, ps.active, ps.parent, ps.tap);
+        engine_.setParallel (p, ps.active, ps.parent, ps.tap, ps.followParentVolume);
     }
     engine_.setMasterSettings (m.master);
 }

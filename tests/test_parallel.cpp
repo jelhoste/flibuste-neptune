@@ -162,6 +162,29 @@ TEST_CASE ("parallel: solo in place keeps the parent feeding it but silent")
     CHECK_THAT (r.run() / alone, WithinAbs (1.5, 0.05));
 }
 
+TEST_CASE ("parallel: following the parent's volume (pre-fader capture only)")
+{
+    Rig r;
+    const float alone = r.run();
+    r.set (probe::trackParam (0, probe::kVolume), -6.0206);   // le parent à demi-amplitude
+    // captation avant fader, sans suivi : la parallèle reste à pleine amplitude -> 0,5 + 1,0
+    r.engine.setParallel (0, true, 0, mixer::TapPoint::PostInsertPreFader, false);
+    CHECK_THAT (r.run() / alone, WithinAbs (1.5, 0.06));
+    // avec suivi : 0,5 + 0,5
+    r.engine.setParallel (0, true, 0, mixer::TapPoint::PostInsertPreFader, true);
+    CHECK_THAT (r.run() / alone, WithinAbs (1.0, 0.06));
+    // captation après fader : le volume du parent est déjà dans le signal, le suivi n'ajoute rien
+    r.engine.setParallel (0, true, 0, mixer::TapPoint::PostFaderPrePan, true);
+    CHECK_THAT (r.run() / alone, WithinAbs (1.0, 0.06));
+    // le mute du parent coupe aussi la parallèle qui le suit
+    r.set (probe::trackParam (0, probe::kVolume), 0.0);
+    r.engine.setParallel (0, true, 0, mixer::TapPoint::PostInsertPreFader, true);
+    r.set (probe::trackParam (0, probe::kMute), 1.0);
+    CHECK (r.run() < 1e-5f);
+    r.engine.setParallel (0, true, 0, mixer::TapPoint::PostInsertPreFader, false);
+    CHECK_THAT (r.run() / alone, WithinAbs (1.0, 0.06)); // sans suivi, la parallèle sonne seule
+}
+
 TEST_CASE ("parallel: orphans and loops are never processed")
 {
     Rig r;
@@ -202,6 +225,7 @@ TEST_CASE ("mixer state: parallel tracks survive JSON, depth and cascade removal
     m.parallels[0].tap = mixer::TapPoint::PostFaderPrePan;
     m.parallels[0].strip.name = "Room";
     m.parallels[0].strip.inserts[1].type = "utility";
+    m.parallels[0].followParentVolume = true;
     m.parallels[1].active = true;
     m.parallels[1].parent = mixer::numTracks + 0;
     m.parallels[2].active = true;
@@ -213,6 +237,7 @@ TEST_CASE ("mixer state: parallel tracks survive JSON, depth and cascade removal
     const auto back = mixerFromJson (toJson (m));
     CHECK (back == m);
     CHECK (back.parallels[0].strip.name == "Room");
+    CHECK (back.parallels[0].followParentVolume);
     CHECK (back.parallels[1].parent == mixer::numTracks);
 
     // retirer une parallèle retire ses descendants

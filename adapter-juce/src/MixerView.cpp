@@ -92,7 +92,8 @@ public:
         : proc_ (p), palette_ (palette), tr_ (tr), isBus_ (kind == 1), isPar_ (kind == 2), index_ (index)
     {
         const bool isBus = isBus_;
-        s_ = isBus ? p.busSettings (index) : isPar_ ? p.parallelSettings (index).strip : p.trackSettings (index);
+        if (isPar_) par_ = p.parallelSettings (index);
+        s_ = isBus ? p.busSettings (index) : isPar_ ? par_.strip : p.trackSettings (index);
         auto text = [this] (const char* k) { return u8 (std::string (tr_.tr (k))); };
         auto label = [this] (juce::Label& l, const juce::String& t)
         {
@@ -128,6 +129,19 @@ public:
         panBox_.setSelectedId (s_.panMode == mixer::PanMode::True ? 2 : 1, juce::dontSendNotification);
         panBox_.onChange = [this] { s_.panMode = panBox_.getSelectedId() == 2 ? mixer::PanMode::True : mixer::PanMode::Balance; push(); };
         addAndMakeVisible (panBox_);
+        if (isPar_)
+        {
+            follow_.setButtonText (text ("mix.follow_parent"));
+            follow_.setToggleState (par_.followParentVolume, juce::dontSendNotification);
+            follow_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+            follow_.onClick = [this]
+            {
+                par_.strip = s_;
+                par_.followParentVolume = follow_.getToggleState();
+                proc_.uiEditParallel (index_, par_, "Parallel follow volume", "follow");
+            };
+            addAndMakeVisible (follow_);
+        }
 
         for (int i = 0; i < mixer::numSends; ++i)
         {
@@ -173,7 +187,7 @@ public:
             r.mute.onClick = [this, i] { s_.sends[static_cast<std::size_t> (i)].mute = rows_[static_cast<std::size_t> (i)].mute.getToggleState(); push(); };
             addAndMakeVisible (r.mute);
         }
-        setSize (620, 400);
+        setSize (620, isPar_ ? 432 : 400);
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (colour (Token::BgCard)); }
@@ -192,6 +206,7 @@ public:
         mainOn_.setBounds (extra.reduced (2));
         row (directLabel_, directBox_);
         row (panLabel_, panBox_);
+        if (isPar_) follow_.setBounds (r.removeFromTop (30));
         r.removeFromTop (8);
         for (auto& row2 : rows_)
         {
@@ -217,9 +232,9 @@ private:
     {
         if (isPar_)
         {
-            auto ps = proc_.parallelSettings (index_);
-            ps.strip = s_;
-            proc_.uiEditParallel (index_, ps, "Parallel routing", "routing");
+            par_ = proc_.parallelSettings (index_); // garde la captation et le suivi tels qu'ils sont ailleurs
+            par_.strip = s_;
+            proc_.uiEditParallel (index_, par_, "Parallel routing", "routing");
         }
         else if (isBus_) proc_.uiEditBus (index_, s_, "Bus routing", "routing");
         else proc_.uiEditTrack (index_, s_, "Track routing", "routing");
@@ -241,6 +256,8 @@ private:
     bool isPar_ = false;
     int index_;
     mixer::StripSettings s_;
+    mixer::ParallelSettings par_;
+    juce::ToggleButton follow_;
     juce::Label mainLabel_, directLabel_, panLabel_;
     juce::ComboBox mainBox_, directBox_, panBox_;
     juce::ToggleButton mainOn_;

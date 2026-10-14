@@ -270,6 +270,7 @@ std::string toJson (const MixerState& m)
                 o["active"] = true;
                 o["parent"] = p.parent;
                 o["tap"] = static_cast<int> (p.tap);
+                if (p.followParentVolume) o["follow_parent_volume"] = true;
             }
             parallels.push_back (std::move (o));
         }
@@ -324,6 +325,7 @@ MixerState mixerFromJson (std::string_view text)
             ps.active = true;
             ps.parent = intOf (o, "parent", 0);
             ps.tap = static_cast<mixer::TapPoint> (intOf (o, "tap", static_cast<int> (ps.tap)));
+            ps.followParentVolume = boolOf (o, "follow_parent_volume", false);
             ps.strip = stripFromJson (o, ps.strip, false, static_cast<int> (p));
             ps = mixer::sanitised (std::move (ps), static_cast<int> (p));
         }
