@@ -38,6 +38,8 @@ target_sources(Neptune PRIVATE
   src/PresetBar.cpp
   src/PresetManager.cpp
   src/MidiFilterEditor.cpp
+  src/FmView.cpp
+  src/FmSysexIO.cpp
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
   src/NeptuneKnob.cpp
@@ -136,6 +138,52 @@ target_compile_definitions(AnalogSynth PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(AnalogSynth
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- FM6Op (nom provisoire) : le module FM de type DX7 de Neptune, plugin CLAP instrument indépendant ---------------------------
+# Même moteur (neptune_core : msfa via FmEngine / FmVoices / FmSynth) et même vue (FmView) que le type de piste FM ; presets
+# partagés avec Neptune et AnalogSynth ; import / export sysex DX7.
+set(FM6OP_CLAP_ID "com.tournedosrossini.fm6op" CACHE STRING "Identifiant CLAP du synthé FM indépendant")
+
+juce_add_plugin(FM6Op
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "FM6Op"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Fm6o
+  IS_SYNTH                    TRUE
+  NEEDS_MIDI_INPUT            TRUE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        FM6Op
+  CLAP_ID       "${FM6OP_CLAP_ID}"
+  CLAP_FEATURES instrument synthesizer stereo)
+
+target_sources(FM6Op PRIVATE
+  src/FmPlugin.cpp
+  src/FmView.cpp
+  src/FmSysexIO.cpp
+  src/PresetBar.cpp
+  src/PresetManager.cpp
+  src/SynthView.cpp
+  src/EnvelopeEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(FM6Op PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(FM6Op
   PRIVATE
     neptune_core
     juce::juce_audio_utils

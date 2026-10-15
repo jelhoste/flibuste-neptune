@@ -98,6 +98,17 @@ public:
                         std::string* error = nullptr) override;
     bool saveConfig (const neptune::core::preset::LibraryConfig&) override;
     const neptune::core::preset::LibraryConfig& presetConfig() const override { return library_->config(); }
+    bool acceptsPreset (const neptune::core::preset::Preset& p) const override
+    {
+        return p.module.empty() || p.module == neptune::core::analogsynth::moduleId;
+    }
+    std::vector<std::string> presetKeys() const override
+    {
+        std::vector<std::string> keys;
+        for (const auto& k : neptune::core::analogsynth::keyedParams()) keys.push_back (k.key);
+        keys.push_back (neptune::core::analogsynth::glideKey);
+        return keys;
+    }
 
     neptune::core::analogsynth::AnalogSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }

@@ -434,7 +434,8 @@ private:
         const auto all = c_.p.library().allPresets();
         rows_.clear();
         for (const auto* p : preset::filter (all, query()))
-            rows_.push_back ({ p->id, p->name, p->type, p->rating, p->locked, p->factory });
+            if (c_.p.acceptsPreset (*p))
+                rows_.push_back ({ p->id, p->name, p->type, p->rating, p->locked, p->factory });
         list_.updateContent();
         int sel = -1;
         for (std::size_t i = 0; i < rows_.size(); ++i)
@@ -1276,11 +1277,11 @@ public:
     {
         c.label (intro_, c.text ("config.intro"));
         addAndMakeVisible (intro_);
-        for (const auto& k : analogsynth::keyedParams())
+        for (const auto& key : c.p.presetKeys())
         {
             auto* t = toggles_.add (new juce::ToggleButton());
-            c.toggle (*t, U (k.key));
-            keys_.push_back (k.key);
+            c.toggle (*t, U (key));
+            keys_.push_back (key);
             content_.addAndMakeVisible (t);
         }
         viewport_.setViewedComponent (&content_, false);
@@ -1336,7 +1337,8 @@ public:
 private:
     void apply (bool defaults)
     {
-        auto cfg = defaults ? analogsynth::defaultConfig() : c_.p.presetConfig();
+        auto cfg = defaults ? preset::LibraryConfig {} : c_.p.presetConfig();
+        if (defaults) for (const auto& key : keys_) if (key == "output.volume" || key == "output.pan" || key == analogsynth::glideKey) cfg.parameterCaptureDefaults[key] = preset::Capture::Free;
         if (! defaults)
         {
             cfg.parameterCaptureDefaults.clear();

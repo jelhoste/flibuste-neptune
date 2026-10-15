@@ -22,9 +22,9 @@
 
 namespace neptune::core
 {
-// Type de génération d'une piste (spec §1). FM et Entrée audio viendront plus tard.
-enum class TrackType { Sampler = 0, Synth = 1 };
-const char* toString (TrackType) noexcept;                         // "sampler" / "synth"
+// Type de génération d'une piste (spec §1). L'Entrée audio viendra plus tard.
+enum class TrackType { Sampler = 0, Synth = 1, Fm = 2 };
+const char* toString (TrackType) noexcept;                         // "sampler" / "synth" / "fm"
 bool trackTypeFromString (std::string_view, TrackType& out);
 
 enum class DetuneCurve { Linear, Supersaw };    // répartition du détune entre les voix d'unisson

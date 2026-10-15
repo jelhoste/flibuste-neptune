@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon et AnalogSynth)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth et FM6Op)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -82,6 +82,9 @@ jobs:
           ANAL=$(find build/adapter-juce/AnalogSynth_artefacts -name 'AnalogSynth.clap' -print -quit)
           test -n "$ANAL" || { echo "AnalogSynth.clap introuvable"; exit 1; }
           "$CV" validate "$ANAL"
+          FM6=$(find build/adapter-juce/FM6Op_artefacts -name 'FM6Op.clap' -print -quit)
+          test -n "$FM6" || { echo "FM6Op.clap introuvable"; exit 1; }
+          "$CV" validate "$FM6"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -153,6 +156,30 @@ jobs:
         with:
           name: AnalogSynth-${{ matrix.name }}
           path: dist-anal/*
+          if-no-files-found: error
+
+      # Le synthé FM séparé, archivé à part.
+      - name: Archive FM6Op.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/FM6Op_artefacts -name 'FM6Op.clap' -print -quit)
+          test -n "$CLAP" || { echo "FM6Op.clap introuvable"; exit 1; }
+          mkdir -p dist-fm/stage
+          cp -R "$CLAP" dist-fm/stage/
+          cd dist-fm/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../FM6Op-${{ matrix.name }}.zip" FM6Op.clap
+          else
+            tar -czf "../FM6Op-${{ matrix.name }}.tar.gz" FM6Op.clap
+          fi
+          cd ../..
+          rm -rf dist-fm/stage
+          ls -la dist-fm
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: FM6Op-${{ matrix.name }}
+          path: dist-fm/*
           if-no-files-found: error
 
   release:

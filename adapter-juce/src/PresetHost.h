@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 #include "neptune/core/Preset.h"
 #include "neptune/core/PresetLibrary.h"
 
@@ -28,4 +29,9 @@ public:
     virtual bool saveConfig (const neptune::core::preset::LibraryConfig&) = 0;
     virtual const neptune::core::preset::LibraryConfig& presetConfig() const = 0;
     virtual bool presetsAvailable() const { return true; } // faux : pas de synthé à régler (ex. piste Sampler de Neptune)
+    // Ce preset peut-il être appliqué ici ? (les presets d'AnalogSynth et du FM partagent la même bibliothèque : chacun ne montre
+    // et ne charge que les siens.)
+    virtual bool acceptsPreset (const neptune::core::preset::Preset&) const { return true; }
+    // Clés des paramètres que ce module capture (onglet Réglages du gestionnaire).
+    virtual std::vector<std::string> presetKeys() const { return {}; }
 };

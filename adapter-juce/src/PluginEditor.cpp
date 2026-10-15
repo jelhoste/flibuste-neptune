@@ -217,6 +217,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         processor_.uiPanic();
         matrix_->clearHeldKeys();
         synthView_->releaseKeys();
+        fmView_->releaseKeys();
     };
     addAndMakeVisible (panicButton_);
     addChildComponent (voicesButton_);
@@ -295,6 +296,38 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         processor_.uiNoteOffTrack (synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))], key);
     };
     addChildComponent (*synthView_);
+
+    {
+        using namespace neptune::core;
+        const auto& themeDef = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
+        fmView_ = std::make_unique<FmView> (processor_, palette_, tr_, themeDef.knob);
+    }
+    fmView_->onChange = [this] (const neptune::core::fm::FmDescription& d) { processor_.uiEditFm (d, "FM", "fm"); };
+    fmView_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
+    fmView_->onGestureEnd = [this] { processor_.uiEndGesture(); };
+    fmView_->onNoteOn = [this] (int key, float velocity)
+    {
+        const int track = processor_.selectedTrack();
+        synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))] = track;
+        processor_.uiNoteOnTrack (track, key, velocity);
+    };
+    fmView_->onNoteOff = [this] (int key)
+    {
+        processor_.uiNoteOffTrack (synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))], key);
+    };
+    sysexIO_ = std::make_unique<FmSysexIO> (*this, processor_, tr_);
+    fmView_->onImportSysex = [this]
+    {
+        sysexIO_->importFile ([this] (const neptune::core::fm::Patch& patch)
+                              {
+                                  auto d = processor_.fmDescription();
+                                  d.patch = patch;
+                                  processor_.uiEditFm (d, "Import DX7 voice");
+                              });
+    };
+    fmView_->onExportVoice = [this] { sysexIO_->exportVoice (processor_.fmDescription().patch); };
+    fmView_->onExportBank = [this] { sysexIO_->exportBank(); };
+    addChildComponent (*fmView_);
 
     presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
     presetBar_->onOpenManager = [this] (bool saveAs) { openPresetManager (saveAs); };
@@ -1036,11 +1069,14 @@ void NeptuneEditor::updateViewVisibility()
     // Synthé (le patch d'une piste Synthé, à la place du Mapping) et Sonde (diagnostic de l'hôte).
     const bool mapping = ! showProbe_ && ! showMixer_;
     const bool synth = mapping && selectedIsSynth();
-    const bool sampler = mapping && ! synth;
+    const bool fmMode = mapping && selectedIsFm();
+    const bool sampler = mapping && ! synth && ! fmMode;
     synthShown_ = synth;
+    fmShown_ = fmMode;
     mixerView_->setVisible (showMixer_);
     synthView_->setVisible (synth);
-    presetBar_->setVisible (synth);
+    fmView_->setVisible (fmMode);
+    presetBar_->setVisible (synth || fmMode);
     trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (sampler);
     modeButton_.setVisible (sampler);
@@ -1074,7 +1110,7 @@ void NeptuneEditor::updateViewVisibility()
     for (auto* knob : knobs_)
     {
         const bool filterKnob = k >= static_cast<int> (neptune::core::mixer::kFilter1Cutoff);
-        knob->setVisible (mapping && ! (synth && filterKnob));
+        knob->setVisible (mapping && ! ((synth || fmMode) && filterKnob));
         ++k;
     }
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
@@ -1122,6 +1158,8 @@ void NeptuneEditor::rebindKnobs()
     if (track == knobTrack_) return;
     knobTrack_ = track;
     synthView_->setTrack (track);
+    fmView_->setTrack (track);
+    fmView_->releaseKeys();
     synthView_->releaseKeys(); // touches tenues à l'écran : relâchées sur la piste où elles ont démarré
     zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
     int k = 0;
@@ -1180,12 +1218,15 @@ void NeptuneEditor::timerCallback()
         if (t == processor_.selectedTrack()) matrix_->notePlayed (k, v); // curseur de la matrice (piste sélectionnée)
     updateTrackBox();
     rebindKnobs();
-    if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())) { updateViewVisibility(); resized(); } // type de la piste changé
+    if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())
+        || fmShown_ != (! showProbe_ && ! showMixer_ && selectedIsFm())) { updateViewVisibility(); resized(); } // type de la piste changé
     updateSynthView();
+    if (fmView_->isVisible()) fmView_->setDescription (processor_.fmDescription());
     if (presetBar_->isVisible() && presetBar_->needsRefresh()) presetBar_->refresh();
     {
         const int tr = processor_.selectedTrack();
         synthView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1)); // notes MIDI reçues
+        fmView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1));
     }
     updateRecoveryBanner();
     updateProfileControls();
@@ -1248,6 +1289,7 @@ void NeptuneEditor::resized()
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
+    fmView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
     {
         auto r = juce::Rectangle<int> (32, 80, lw_ - 64, 36);

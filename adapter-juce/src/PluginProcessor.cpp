@@ -272,7 +272,7 @@ bool NeptuneProcessor::trackHasContent (int track) const
 {
     const juce::ScopedLock lock (instrumentLock_);
     const auto& t = mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))];
-    return ! t.instrument.empty() || ! (t.synth == neptune::core::SynthDescription {});
+    return ! t.instrument.empty() || ! (t.synth == neptune::core::SynthDescription {}) || ! (t.fm == neptune::core::fm::FmDescription {});
 }
 
 neptune::core::SynthDescription NeptuneProcessor::synthDescription (int track) const
@@ -300,10 +300,37 @@ void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::stri
         std::move (name), std::move (mergeKey)));
 }
 
+neptune::core::fm::FmDescription NeptuneProcessor::fmDescription (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].fm;
+}
+
+void NeptuneProcessor::uiEditFm (neptune::core::fm::FmDescription d, std::string name, std::string mergeKey, bool presetChange)
+{
+    using namespace neptune::core;
+    juce::ignoreUnused (presetChange); // une note FM garde le patch avec lequel elle a démarré : rien à figer
+    const int track = selectedTrack();
+    d = fm::sanitised (std::move (d));
+    const auto previous = fmDescription (track);
+    if (previous == d) return;
+    undo_.perform (std::make_unique<SnapshotCommand<fm::FmDescription>> (
+        previous, d,
+        [this, track] (const fm::FmDescription& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.tracks[static_cast<std::size_t> (track)].fm = v; }
+            publishFmDescription (track, v);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
 void NeptuneProcessor::resetTrackParameters (int track, bool includeMixer)
 {
     using namespace neptune::core;
     std::vector<ParamId> ids;
+    for (int k = 0; k < mixer::kFmKinds; ++k) ids.push_back (mixer::fmParam (track, static_cast<mixer::FmKind> (k)));
     for (int k = 0; k < mixer::kSamplerKinds; ++k) ids.push_back (mixer::samplerParam (track, static_cast<mixer::SamplerKind> (k)));
     for (int k = 0; k < mixer::kSynthKinds; ++k) ids.push_back (mixer::synthParam (track, static_cast<mixer::SynthKind> (k)));
     if (includeMixer)
@@ -332,9 +359,12 @@ void NeptuneProcessor::uiSetTrackType (int track, neptune::core::TrackType type)
         t.type = type;
         t.instrument = InstrumentDescription {};
         t.synth = SynthDescription {};
+        t.fm = fm::FmDescription {};
+        t.synthPresetId.clear();
     }
     engine_.setTrackType (track, type);
     publishSynthPatch (track, SynthDescription {});
+    publishFmDescription (track, fm::FmDescription {});
     loader_->request (track, InstrumentDescription {}, false); // libère les samples de l'ancien instrument
     resetTrackParameters (track, false);
     undo_.clear(); // l'historique parlait de l'ancienne configuration de cette piste
@@ -372,6 +402,7 @@ int NeptuneProcessor::uiAddTrack()
     engine_.setTrackType (index, TrackType::Synth);
     engine_.setTrackActive (index, true);
     publishSynthPatch (index, SynthDescription {});
+    publishFmDescription (index, fm::FmDescription {});
     loader_->request (index, InstrumentDescription {}, false);
     undo_.clear();
     selectTrack (index);
@@ -414,6 +445,7 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
     engine_.setTrackType (track, TrackType::Sampler);
     engine_.setTrackSettings (track, trackSettings (track));
     publishSynthPatch (track, SynthDescription {});
+    publishFmDescription (track, fm::FmDescription {});
     loader_->request (track, InstrumentDescription {}, false);
     resetTrackParameters (track, true);
     undo_.clear();
@@ -697,6 +729,11 @@ neptune::core::mixer::MasterSettings NeptuneProcessor::masterSettings() const
     return mixer_.master;
 }
 
+void NeptuneProcessor::publishFmDescription (int track, const neptune::core::fm::FmDescription& d)
+{
+    engine_.publishFm (track, std::make_shared<const neptune::core::fm::FmDescription> (neptune::core::fm::sanitised (d)));
+}
+
 void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthDescription& d, bool freezeRunningVoices)
 {
     auto patch = std::make_shared<neptune::core::SynthPatch> (d);
@@ -727,26 +764,72 @@ const neptune::core::preset::Preset* NeptuneProcessor::currentPreset() const
     return id.empty() ? nullptr : presetLibrary_->find (id);
 }
 
+bool NeptuneProcessor::acceptsPreset (const neptune::core::preset::Preset& p) const
+{
+    using namespace neptune::core;
+    if (p.module.empty()) return true;
+    const auto t = trackType (selectedTrack());
+    if (t == TrackType::Fm) return p.module == fm::moduleId;
+    if (t == TrackType::Synth) return p.module == analogsynth::moduleId;
+    return false;
+}
+
+std::vector<std::string> NeptuneProcessor::presetKeys() const
+{
+    using namespace neptune::core;
+    std::vector<std::string> keys;
+    if (trackType (selectedTrack()) == TrackType::Fm)
+        for (const auto& k : fm::keyedParams()) keys.push_back (k.key);
+    else
+    {
+        for (const auto& k : analogsynth::keyedParams()) keys.push_back (k.key);
+        keys.push_back (analogsynth::glideKey);
+    }
+    return keys;
+}
+
 bool NeptuneProcessor::loadPreset (const std::string& id)
 {
     using namespace neptune::core;
     const int track = selectedTrack();
-    if (trackType (track) != TrackType::Synth) return false;
+    const auto type = trackType (track);
+    if (type != TrackType::Synth && type != TrackType::Fm) return false;
     const auto* p = presetLibrary_->find (id);
-    if (p == nullptr || (! p->module.empty() && p->module != analogsynth::moduleId)) return false;
+    if (p == nullptr || ! acceptsPreset (*p)) return false;
     const auto& cfg = presetLibrary_->config();
 
     undo_.beginTransaction ("Preset");
-    // le patch d'abord (capture par voix : l'audio fige les notes en cours avec les valeurs d'avant), puis les valeurs
-    uiEditSynth (analogsynth::presetDescription (*p, synthDescription (track), cfg), "Preset", {}, true);
-    for (const auto& [key, value] : p->parameters)
+    std::vector<std::pair<ParamId, double>> values; // identifiants de la piste, valeurs à écrire
+    if (type == TrackType::Fm)
     {
-        const ParamId base = analogsynth::paramIdForKey (key);
-        if (base == 0 || value.isText || preset::captureOf (key, *p, cfg) == preset::Capture::Free) continue;
-        const ParamId pid = analogsynth::idForTrack (base, track);
+        uiEditFm (fm::presetDescription (*p, fmDescription (track), cfg), "Preset", {}, true);
+        // macros : celles du preset, sinon leur défaut (un patch importé ne porte pas de macros)
+        for (const auto& k : fm::keyedParams())
+        {
+            if (preset::captureOf (k.key, *p, cfg) == preset::Capture::Free) continue;
+            const ParamId pid = fm::idForTrack (k.id, track);
+            const auto index = params_.indexOf (pid);
+            if (index == ParameterSet::npos) continue;
+            const auto it = p->parameters.find (k.key);
+            values.emplace_back (pid, it != p->parameters.end() && ! it->second.isText ? it->second.number : params_.spec (index).defaultValue);
+        }
+    }
+    else
+    {
+        // le patch d'abord (capture par voix : l'audio fige les notes en cours avec les valeurs d'avant), puis les valeurs
+        uiEditSynth (analogsynth::presetDescription (*p, synthDescription (track), cfg), "Preset", {}, true);
+        for (const auto& [key, value] : p->parameters)
+        {
+            const ParamId base = analogsynth::paramIdForKey (key);
+            if (base == 0 || value.isText || preset::captureOf (key, *p, cfg) == preset::Capture::Free) continue;
+            values.emplace_back (analogsynth::idForTrack (base, track), value.number);
+        }
+    }
+    for (const auto& [pid, raw] : values)
+    {
         const auto index = params_.indexOf (pid);
         if (index == ParameterSet::npos) continue;
-        const double v = params_.spec (index).clamp (value.number);
+        const double v = params_.spec (index).clamp (raw);
         if (params_.getAt (index) == v) continue;
         undo_.setParameter (params_, pid, v);
         auto* hostParam = getParameters()[static_cast<int> (index)];
@@ -762,17 +845,20 @@ bool NeptuneProcessor::loadPreset (const std::string& id)
 
 bool NeptuneProcessor::stepPreset (int direction)
 {
-    const auto next = presetLibrary_->stepFrom (currentPresetId(), direction, [] (const neptune::core::preset::Preset& p)
-                                                { return p.module.empty() || p.module == neptune::core::analogsynth::moduleId; });
+    const auto next = presetLibrary_->stepFrom (currentPresetId(), direction,
+                                                [this] (const neptune::core::preset::Preset& p) { return acceptsPreset (p); });
     return ! next.empty() && loadPreset (next);
 }
 
 bool NeptuneProcessor::isModified() const
 {
+    using namespace neptune::core;
     const auto* p = currentPreset();
     if (p == nullptr) return false;
     const int track = selectedTrack();
-    return neptune::core::analogsynth::differsFromPreset (*p, params_, synthDescription (track), presetLibrary_->config(), track);
+    if (trackType (track) == TrackType::Fm)
+        return fm::differsFromPreset (*p, params_, fmDescription (track), presetLibrary_->config(), track);
+    return analogsynth::differsFromPreset (*p, params_, synthDescription (track), presetLibrary_->config(), track);
 }
 
 bool NeptuneProcessor::canSaveCurrent() const
@@ -783,12 +869,14 @@ bool NeptuneProcessor::canSaveCurrent() const
 
 bool NeptuneProcessor::overwritePreset (const std::string& id, std::string* error)
 {
+    using namespace neptune::core;
     const auto* base = presetLibrary_->find (id);
     if (base == nullptr || base->factory) { if (error) *error = "factory preset is read-only"; return false; }
     if (base->locked) { if (error) *error = "preset is locked"; return false; }
     const int track = selectedTrack();
-    auto p = neptune::core::analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), base->name, base->type,
-                                                        base, track);
+    preset::Preset p = trackType (track) == TrackType::Fm
+        ? fm::capturePreset (params_, fmDescription (track), presetLibrary_->config(), base->name, base->type, base, track)
+        : analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), base->name, base->type, base, track);
     const bool ok = presetLibrary_->save (std::move (p), error);
     if (ok) ++presetRevision_;
     return ok;
@@ -805,8 +893,14 @@ bool NeptuneProcessor::saveCurrentAs (const std::string& name, const std::string
 {
     using namespace neptune::core;
     const int track = selectedTrack();
-    if (trackType (track) != TrackType::Synth) { if (error) *error = "not a synth track"; return false; }
-    auto p = analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), name, type, nullptr, track);
+    const auto tt = trackType (track);
+    if (tt != TrackType::Synth && tt != TrackType::Fm) { if (error) *error = "not a synth or FM track"; return false; }
+    auto capture = [&] (const preset::Preset* base, const std::string& n, const std::string& ty)
+    {
+        return tt == TrackType::Fm ? fm::capturePreset (params_, fmDescription (track), presetLibrary_->config(), n, ty, base, track)
+                                   : analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), n, ty, base, track);
+    };
+    auto p = capture (nullptr, name, type);
     if (const auto* cur = currentPreset())
     {
         p.characteristics = cur->characteristics;
@@ -815,7 +909,7 @@ bool NeptuneProcessor::saveCurrentAs (const std::string& name, const std::string
         p.captureOverrides = cur->captureOverrides;
         if (p.type.empty()) p.type = cur->type;
         p.derivedFrom = cur->factory ? cur->id : cur->derivedFrom;
-        p = analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), name, p.type, &p, track);
+        p = capture (&p, name, p.type);
     }
     preset::Preset stored;
     if (! presetLibrary_->importPreset (std::move (p), &stored, error)) return false;
@@ -841,6 +935,7 @@ void NeptuneProcessor::pushMixerSettingsToEngine()
         engine_.setTrackType (t, ts.type);
         engine_.setTrackActive (t, ts.active);
         publishSynthPatch (t, ts.synth);
+        publishFmDescription (t, ts.fm);
     }
     for (int b = 0; b < neptune::core::mixer::numBuses; ++b) engine_.setBusSettings (b, m.buses[static_cast<std::size_t> (b)]);
     for (int p = 0; p < neptune::core::mixer::numParallels; ++p)
@@ -1003,7 +1098,7 @@ NeptuneProcessor::NeptuneProcessor()
     {
         // Presets de synthé : la même bibliothèque qu'AnalogSynth (dossier choisi dans les réglages, sinon <config>/AnalogSynth).
         auto root = settings_.presetsDir.empty() ? configDir / "AnalogSynth" : std::filesystem::u8path (settings_.presetsDir);
-        presetLibrary_ = std::make_unique<neptune::core::preset::Library> (std::move (root), neptune::core::analogsynth::factoryPresets());
+        presetLibrary_ = std::make_unique<neptune::core::preset::Library> (std::move (root), [] { auto all = neptune::core::analogsynth::factoryPresets(); for (auto& f : neptune::core::fm::factoryPresets()) all.push_back (std::move (f)); return all; }());
         presetLibrary_->open (&warnings);
         if (presetLibrary_->config().parameterCaptureDefaults.empty()) presetLibrary_->setConfig (neptune::core::analogsynth::defaultConfig());
     }

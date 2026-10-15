@@ -231,26 +231,8 @@ bool AnalogSynthProcessor::loadPreset (const std::string& id)
 
 bool AnalogSynthProcessor::stepPreset (int direction)
 {
-    if (direction == 0) return false;
-    const auto& banks = library_->banks();
-    if (const auto slot = preset::Navigator::locate (banks, currentPresetId_))
-    {
-        if (const auto next = preset::Navigator::step (banks, *slot, direction))
-        {
-            const auto id = preset::Navigator::presetAt (banks, *next);
-            return ! id.empty() && loadPreset (id);
-        }
-        return false;
-    }
-    // preset hors banques (ou aucun) : on parcourt la liste complète, triée par nom
-    const auto all = preset::filter (library_->allPresets(), {});
-    if (all.empty()) return false;
-    int index = -1;
-    for (std::size_t i = 0; i < all.size(); ++i)
-        if (all[i]->id == currentPresetId_) index = static_cast<int> (i);
-    const int count = static_cast<int> (all.size());
-    const int next = index < 0 ? (direction > 0 ? 0 : count - 1) : (index + (direction > 0 ? 1 : -1) + count) % count;
-    return loadPreset (all[static_cast<std::size_t> (next)]->id);
+    const auto next = library_->stepFrom (currentPresetId_, direction, [this] (const preset::Preset& p) { return acceptsPreset (p); });
+    return ! next.empty() && loadPreset (next);
 }
 
 bool AnalogSynthProcessor::isModified() const

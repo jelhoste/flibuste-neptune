@@ -514,6 +514,8 @@ Risque technique faible : le vrai travail (contrôles, liaison aux paramètres, 
 
 ## 17. Module FM (4e type de génération de piste)
 
+**État au 2026-10-16** : implémenté (moteur msfa, patch DX7 et sysex voix / lot, algorithmes, voix poly / mono / legato, unisson, macros, vue complète, presets, plugin séparé « FM6Op »). Reste à faire : le bloc sysex « function parameters », la comparaison A/B et les favoris du gestionnaire (hors périmètre du gestionnaire actuel). Détail dans `docs/passage-de-relais.md`.
+
 ### Contexte et licence
 Architecture inspirée du Yamaha DX7 (nom de marque non réutilisable dans le produit — nommage générique à définir, ex. "FM 6-Op"). **Compatibilité sysex avec les patches DX7 existants visée** : format technique de fait, pas une marque, comparable à supporter WAV ou MIDI standard — légitime à cibler.
 

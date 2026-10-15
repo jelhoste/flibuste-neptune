@@ -74,6 +74,22 @@ enum SynthKind : int
 constexpr ParamId synthParamBase = 40;
 constexpr ParamId synthParam (int track, SynthKind kind) { return probe::trackParam (track, synthParamBase + static_cast<ParamId> (kind)); }
 
+// Paramètres automatisables d'une piste FM (module FM de type DX7) : identifiants `1000 + 100.t + 60 + kind`. Le gain et l'accordage
+// sont ceux de l'instrument (samplerParam).
+enum FmKind : int
+{
+    kFmBrightness = 0,                       // %, -100..100 : niveau des modulateurs (±12 dB)
+    kFmEnvSpeed,                             // %, -100..100 : vitesse des enveloppes (prise au début de chaque note)
+    kFmFeedbackDrive,                        // %, 0..100 : feedback ajouté
+    kFmLevelOp1, kFmLevelOp2, kFmLevelOp3, kFmLevelOp4, kFmLevelOp5, kFmLevelOp6, // pas DX7, -99..+99 (OP1..OP6)
+    kFmUnisonDetune,                         // cents, 0..100
+    kFmUnisonSpread,                         // %, 0..100
+    kFmKinds
+};
+constexpr ParamId fmParamBase = 60;
+constexpr ParamId fmParam (int track, FmKind kind) { return probe::trackParam (track, fmParamBase + static_cast<ParamId> (kind)); }
+bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
+
 // Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.
 bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 

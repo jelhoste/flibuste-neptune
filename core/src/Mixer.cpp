@@ -22,6 +22,19 @@ bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, st
     return true;
 }
 
+bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
+{
+    auto id = [track] (FmKind k) { return fmParam (track, k); };
+    bool ok = set.add (ParamSpec::continuous (id (kFmBrightness), prefix + "FM Brightness", Unit::Percent, -100.0, 100.0, 0.0), error)
+           && set.add (ParamSpec::continuous (id (kFmEnvSpeed), prefix + "FM Envelope Speed", Unit::Percent, -100.0, 100.0, 0.0), error)
+           && set.add (ParamSpec::continuous (id (kFmFeedbackDrive), prefix + "FM Feedback Drive", Unit::Percent, 0.0, 100.0, 0.0), error);
+    for (int op = 0; ok && op < 6; ++op)
+        ok = set.add (ParamSpec::continuous (id (static_cast<FmKind> (kFmLevelOp1 + op)), prefix + "FM Op " + std::to_string (op + 1) + " Level",
+                                             Unit::None, -99.0, 99.0, 0.0), error);
+    return ok && set.add (ParamSpec::continuous (id (kFmUnisonDetune), prefix + "FM Unison Detune", Unit::Cents, 0.0, 100.0, 15.0), error)
+              && set.add (ParamSpec::continuous (id (kFmUnisonSpread), prefix + "FM Unison Spread", Unit::Percent, 0.0, 100.0, 60.0), error);
+}
+
 bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
 {
     auto level = [] (ParamId id, std::string name, double def)
@@ -49,6 +62,7 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
 
     // Synthé : 15 paramètres par piste
     for (int t = 0; ok && t < tracks; ++t) ok = addSynthParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
+    for (int t = 0; ok && t < tracks; ++t) ok = addFmParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
 
     // Pistes parallèles
     for (int p = 0; ok && p < numParallels; ++p)

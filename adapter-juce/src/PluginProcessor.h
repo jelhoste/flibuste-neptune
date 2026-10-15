@@ -15,6 +15,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "ParamHost.h"
 #include "PresetHost.h"
 #include "neptune/core/AnalogSynth.h"
+#include "neptune/core/FmPreset.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
@@ -117,6 +118,10 @@ public:
     bool trackHasContent (int track) const; // instrument chargé ou patch modifié : un changement de type le perdrait (confirmation)
     neptune::core::SynthDescription synthDescription() const { return synthDescription (selectedTrack()); }
     neptune::core::SynthDescription synthDescription (int track) const; // copie
+    // Module FM (type de piste FM) : description de la piste, édition annulable, remplacement par un patch importé.
+    neptune::core::fm::FmDescription fmDescription() const { return fmDescription (selectedTrack()); }
+    neptune::core::fm::FmDescription fmDescription (int track) const;
+    void uiEditFm (neptune::core::fm::FmDescription, std::string name, std::string mergeKey = {}, bool presetChange = false);
     // Édition du patch de la piste sélectionnée : annulable, fusionnée par geste.
     // `presetChange` : changement de preset (les notes en cours gardent l'ancien son : capture par voix).
     void uiEditSynth (neptune::core::SynthDescription, std::string name, std::string mergeKey = {}, bool presetChange = false);
@@ -137,7 +142,13 @@ public:
                         std::string* error = nullptr) override;
     bool saveConfig (const neptune::core::preset::LibraryConfig&) override;
     const neptune::core::preset::LibraryConfig& presetConfig() const override { return presetLibrary_->config(); }
-    bool presetsAvailable() const override { return trackType (selectedTrack()) == neptune::core::TrackType::Synth; }
+    bool presetsAvailable() const override
+    {
+        const auto t = trackType (selectedTrack());
+        return t == neptune::core::TrackType::Synth || t == neptune::core::TrackType::Fm;
+    }
+    bool acceptsPreset (const neptune::core::preset::Preset& p) const override;
+    std::vector<std::string> presetKeys() const override;
     // Change le type de la piste : la configuration d'instrument est perdue (spec §1), les réglages de bande sont conservés.
     // Vide l'historique d'annulation.
     void uiSetTrackType (int track, neptune::core::TrackType);
@@ -264,6 +275,7 @@ private:
     void setStatus (int track, InstrumentStatus);
     void pushMixerSettingsToEngine();
     void publishSynthPatch (int track, const neptune::core::SynthDescription&, bool freezeRunningVoices = false);
+    void publishFmDescription (int track, const neptune::core::fm::FmDescription&);
     void setTrackPresetId (int track, const std::string& id);
     std::unique_ptr<neptune::core::preset::Library> presetLibrary_;
     std::atomic<std::uint32_t> presetRevision_ { 1 };

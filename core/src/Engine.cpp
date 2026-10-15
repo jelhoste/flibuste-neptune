@@ -34,6 +34,7 @@ Engine::Engine() noexcept
 
 void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
 {
+    fm::initTables (sampleRate); // tables globales de msfa (module FM)
     sampleRate_ = sampleRate;
     maxBlockSize_ = std::max (1, maxBlockSize);
     activeNotes_ = 0;
@@ -41,6 +42,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     {
         t.voices.prepare (sampleRate);
         t.synth.prepare (sampleRate);
+        t.fm.prepare (sampleRate);
         t.lastGain = 1.0f;
         t.lastFader = 1.0f;
         t.lastPanL = t.lastPanR = 1.0f;
@@ -82,7 +84,9 @@ void Engine::publishInstrument (int track, std::shared_ptr<const Instrument> ins
 void Engine::setTrackType (int track, TrackType type) noexcept
 {
     if (track < 0 || track >= kTracks) return;
-    tracks_[static_cast<std::size_t> (track)].type.store (static_cast<int> (type), std::memory_order_relaxed);
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    if (type == TrackType::Fm) t.fm.reserve(); // les notes sont allouées avant que l'audio ne voie le type FM
+    t.type.store (static_cast<int> (type), std::memory_order_relaxed);
 }
 
 void Engine::publishSynth (int track, std::shared_ptr<const SynthPatch> patch)
@@ -92,6 +96,12 @@ void Engine::publishSynth (int track, std::shared_ptr<const SynthPatch> patch)
     t.synthKeeper.add (patch);
     t.synthSlot.publish (std::move (patch));
     pruneSynthKeeper (t);
+}
+
+void Engine::publishFm (int track, std::shared_ptr<const fm::FmDescription> description)
+{
+    if (track < 0 || track >= kTracks) return;
+    tracks_[static_cast<std::size_t> (track)].fmSlot.publish (std::move (description));
 }
 
 void Engine::pruneSynthKeeper (Track& t)
@@ -132,6 +142,7 @@ void Engine::collectGarbage()
     {
         t.slot.collect();
         t.synthSlot.collect();
+        t.fmSlot.collect();
         t.filterSlot.collect();
         pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
@@ -221,6 +232,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
             tracks_[static_cast<std::size_t> (t)].inserts[static_cast<std::size_t> (s)].bypass = idx (probe::trackParam (t, probe::kInsertBypass + static_cast<ParamId> (s)));
         for (int k = 0; k < mixer::kSamplerKinds; ++k) p.sampler[k] = idx (mixer::samplerParam (t, static_cast<mixer::SamplerKind> (k)));
         for (int k = 0; k < mixer::kSynthKinds; ++k) p.synth[k] = idx (mixer::synthParam (t, static_cast<mixer::SynthKind> (k)));
+        for (int k = 0; k < mixer::kFmKinds; ++k) p.fm[k] = idx (mixer::fmParam (t, static_cast<mixer::FmKind> (k)));
     }
     for (int b = 0; b < kBuses; ++b)
     {
@@ -271,6 +283,12 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     enforceGlobalVoiceLimit();
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
     ++activeNotes_;
+    if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Fm))
+    {
+        t.fm.noteOn (channel, key, velocity);
+        if (key >= 0 && key < 128) pushTrace (track, key, velocity);
+        return;
+    }
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
     {
         t.synth.noteOn (channel, key, velocity);
@@ -289,28 +307,30 @@ void Engine::enforceGlobalVoiceLimit() noexcept
     for (int guard = 0; guard < 32; ++guard)
     {
         int total = 0;
-        for (const auto& t : tracks_) total += t.voices.soundingVoices() + t.synth.soundingVoices();
+        for (const auto& t : tracks_) total += t.voices.soundingVoices() + t.synth.soundingVoices() + t.fm.soundingVoices();
         if (total < limit) return;
 
         int bestTrack = -1;
-        bool bestSynth = false, bestRel = false;
+        int bestKind = 0; // 0 sampler, 1 synthé, 2 FM
+        bool bestRel = false;
         float bestLevel = 0.0f;
         std::uint64_t bestOrder = 0;
-        auto consider = [&] (int track, bool synth, bool rel, float level, std::uint64_t order)
+        auto consider = [&] (int track, int kind, bool rel, float level, std::uint64_t order)
         {
             const bool better = bestTrack < 0 || (rel != bestRel ? rel : (level != bestLevel ? level < bestLevel : order < bestOrder));
-            if (better) { bestTrack = track; bestSynth = synth; bestRel = rel; bestLevel = level; bestOrder = order; }
+            if (better) { bestTrack = track; bestKind = kind; bestRel = rel; bestLevel = level; bestOrder = order; }
         };
         for (int i = 0; i < kTracks; ++i)
         {
             const auto& t = tracks_[static_cast<std::size_t> (i)];
             bool rel; float level; std::uint64_t order;
-            if (t.voices.weakestVoice (rel, level, order)) consider (i, false, rel, level, order);
-            if (t.synth.weakestVoice (rel, level, order)) consider (i, true, rel, level, order);
+            if (t.voices.weakestVoice (rel, level, order)) consider (i, 0, rel, level, order);
+            if (t.synth.weakestVoice (rel, level, order)) consider (i, 1, rel, level, order);
+            if (t.fm.weakestVoice (rel, level, order)) consider (i, 2, rel, level, order);
         }
         if (bestTrack < 0) return;
         auto& t = tracks_[static_cast<std::size_t> (bestTrack)];
-        if (bestSynth) t.synth.stealWeakest(); else t.voices.stealWeakest();
+        if (bestKind == 2) t.fm.stealWeakest(); else if (bestKind == 1) t.synth.stealWeakest(); else t.voices.stealWeakest();
     }
 }
 
@@ -320,7 +340,9 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
     activeNotes_ = std::max (0, activeNotes_ - 1);
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
-    if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth)) t.synth.noteOff (channel, key);
+    const int type = t.type.load (std::memory_order_relaxed);
+    if (type == static_cast<int> (TrackType::Fm)) t.fm.noteOff (channel, key);
+    else if (type == static_cast<int> (TrackType::Synth)) t.synth.noteOff (channel, key);
     else t.voices.noteOff (channel, key);
 }
 
@@ -364,13 +386,13 @@ void Engine::noteOff (int channel, int key) noexcept
 void Engine::panic() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
+    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.fm.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
 }
 
 void Engine::releaseAll() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
+    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.fm.releaseAll(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
 }
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
@@ -378,7 +400,7 @@ void Engine::setParameter (std::uint32_t, double) noexcept {}
 int Engine::activeVoices() const noexcept
 {
     int n = 0;
-    for (const auto& t : tracks_) n += t.voices.activeVoices() + t.synth.activeVoices();
+    for (const auto& t : tracks_) n += t.voices.activeVoices() + t.synth.activeVoices() + t.fm.activeVoices();
     return n;
 }
 
@@ -434,6 +456,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     {
         if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());
         if (t.synthSlot.adoptPending()) t.synth.setPatch (t.synthSlot.current());
+        if (t.fmSlot.adoptPending()) t.fm.setDescription (t.fmSlot.current());
         if (t.filterSlot.adoptPending()) t.filter = t.filterSlot.current();
         // changement de type ou désactivation : les voix de la piste s'arrêtent net (rien ne doit sonner sous l'ancien type)
         const int type = t.type.load (std::memory_order_relaxed), active = t.active.load (std::memory_order_relaxed);
@@ -441,6 +464,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         {
             t.voices.allSoundOff();
             t.synth.allSoundOff();
+            t.fm.allSoundOff();
             t.held[0].store (0, std::memory_order_relaxed);
             t.held[1].store (0, std::memory_order_relaxed);
             t.appliedType = type;
@@ -731,9 +755,11 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         auto& t = tracks_[static_cast<std::size_t> (ti)];
         if (t.active.load (std::memory_order_relaxed) == 0) { t.lastSend.fill (0.0f); continue; }
         const bool synthTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth);
+        const bool fmTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Fm);
         const bool wasSilent = t.peakL.load (std::memory_order_relaxed) == 0.0f && t.peakR.load (std::memory_order_relaxed) == 0.0f;
         // piste sans instrument, ou au repos et déjà silencieuse (elle et ses pistes parallèles) : rien à faire
-        const bool idle = synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
+        const bool idle = fmTrack ? t.fm.activeVoices() == 0
+                        : synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
         if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0) { t.lastSend.fill (0.0f); continue; }
 
         std::fill (raw_.l.begin(), raw_.l.begin() + n, 0.0f);
@@ -753,7 +779,25 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             if (s[kFilter2Cutoff] != ParameterSet::npos) fp.cutoffHz[1] = params_->getAt (s[kFilter2Cutoff]);
             if (s[kFilter2Resonance] != ParameterSet::npos) fp.resonance[1] = params_->getAt (s[kFilter2Resonance]) / 100.0;
         }
-        if (synthTrack)
+        if (fmTrack)
+        {
+            fm::FmLive live;
+            live.tuneCents = static_cast<float> (cents);
+            if (params_ != nullptr)
+            {
+                const auto& fx = t.idx.fm;
+                auto get = [this, &fx] (mixer::FmKind k, double fallback) { return param (fx[static_cast<std::size_t> (k)], fallback); };
+                live.brightness = static_cast<float> (get (mixer::kFmBrightness, 0.0) / 100.0);
+                live.envSpeed = static_cast<float> (get (mixer::kFmEnvSpeed, 0.0) / 100.0);
+                live.feedbackDrive = static_cast<float> (get (mixer::kFmFeedbackDrive, 0.0) / 100.0);
+                for (int op = 0; op < fm::kOperators; ++op)
+                    live.opLevel[static_cast<std::size_t> (op)] = static_cast<float> (get (static_cast<mixer::FmKind> (mixer::kFmLevelOp1 + op), 0.0));
+                live.unisonDetuneCents = static_cast<float> (get (mixer::kFmUnisonDetune, 15.0));
+                live.unisonSpread = static_cast<float> (get (mixer::kFmUnisonSpread, 60.0) / 100.0);
+            }
+            t.fm.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, live);
+        }
+        else if (synthTrack)
         {
             SynthVoices::Params sp;
             for (int f = 0; f < 2; ++f) { sp.cutoffHz[f] = fp.cutoffHz[f]; sp.resonance[f] = fp.resonance[f]; }
@@ -941,7 +985,16 @@ void Engine::publishVoices() noexcept
             ++n;
         };
         auto& tr = tracks_[static_cast<std::size_t> (ti)];
-        if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
+        if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Fm))
+            tr.fm.forEachVoice ([&pack] (const fm::FmVoices::VoiceInfo& s)
+            {
+                VoiceInfo v;
+                v.sourceIndex = -1; // pas de zone
+                v.key = s.key; v.channel = s.channel; v.velocity = s.velocity;
+                v.releasing = s.releasing; v.fading = s.fading; v.level = s.level; v.order = s.order;
+                pack (v);
+            });
+        else if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
             tr.synth.forEachVoice ([&pack] (const SynthVoices::VoiceInfo& s)
             {
                 VoiceInfo v;

@@ -10,6 +10,8 @@
 #include "FilterEditor.h"
 #include "MixerView.h"
 #include "MidiFilterEditor.h"
+#include "FmSysexIO.h"
+#include "FmView.h"
 #include "PresetBar.h"
 #include "PresetManager.h"
 #include "ScaledRoot.h"
@@ -108,7 +110,11 @@ private:
     std::unique_ptr<InsertOverlay> insertOverlay_;
     void openInsert (NeptuneProcessor::StripKind, int index, int slot);
     void closeInsert();
-    bool synthShown_ = false;
+    bool synthShown_ = false, fmShown_ = false;
+    // Vue FM : remplace la vue Mapping quand la piste sélectionnée est de type FM.
+    std::unique_ptr<FmView> fmView_;
+    std::unique_ptr<FmSysexIO> sysexIO_;
+    bool selectedIsFm() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Fm; }
     std::array<int, 128> synthKeyTrack_ {}; // piste sur laquelle chaque touche du clavier à l'écran a démarré
     bool selectedIsSynth() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Synth; }
     void updateSynthView();
