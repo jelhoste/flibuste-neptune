@@ -24,6 +24,10 @@ public:
     // L'utilisateur veut éditer un insert (clic sur un emplacement rempli, ou module qu'il vient de poser).
     std::function<void (NeptuneProcessor::StripKind, int index, int slot)> onOpenInsert;
 
+    // Taille de conception : en dessous, tout le mixeur est réduit proportionnellement (au lieu de déborder sur le master et le bas).
+    static constexpr int designWidth = 900, designHeight = 660;
+    void placeScaled (juce::Rectangle<int> area);
+
     void resized() override;
     void paint (juce::Graphics&) override;
     void refresh(); // noms, canaux, routage, sélection : à rappeler quand l'état du mixeur change

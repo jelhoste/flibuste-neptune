@@ -36,9 +36,11 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
 
-    static constexpr int numKeys = 36; // 3 octaves à partir d'un do
+    static constexpr float whiteKeyWidth = 26.0f; // largeur fixe d'une touche blanche : agrandir la fenêtre ajoute des touches
+    static constexpr int minWhiteKeys = 7;
 
 private:
+    int endKey() const;          // première touche hors de la zone visible (selon la largeur)
     int keyAt (juce::Point<int>) const;
     juce::Rectangle<float> keyRect (int key) const;
     bool isBlack (int key) const noexcept;

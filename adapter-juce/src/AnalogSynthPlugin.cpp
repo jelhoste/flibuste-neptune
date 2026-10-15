@@ -554,7 +554,7 @@ void AnalogSynthEditor::timerCallback()
     }
     undoButton_.setEnabled (processor_.undoManager().canUndo());
     redoButton_.setEnabled (processor_.undoManager().canRedo());
-    const int voices = processor_.engine().activeVoices();
+    const int voices = processor_.engine().voiceCount();
     if (voices != lastVoices_)
     {
         lastVoices_ = voices;

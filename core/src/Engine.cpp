@@ -375,6 +375,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         for (int c = 0; c < channels; ++c) shifted[static_cast<std::size_t> (c)] = out[c] != nullptr ? out[c] + offset : nullptr;
         processChunk (shifted.data(), channels, frames);
     }
+    totalVoices_.store (activeVoices(), std::memory_order_relaxed);
     publishVoices();
 }
 

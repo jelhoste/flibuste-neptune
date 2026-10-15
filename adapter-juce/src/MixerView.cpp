@@ -905,6 +905,15 @@ juce::Colour MixerView::colour (Token t) const
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
 }
 
+void MixerView::placeScaled (juce::Rectangle<int> area)
+{
+    const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / designHeight);
+    const float scale = juce::jmax (0.4f, s);
+    setTransform (juce::AffineTransform::scale (scale));
+    setBounds (area.getX(), area.getY(), juce::roundToInt (static_cast<float> (area.getWidth()) / scale),
+               juce::roundToInt (static_cast<float> (area.getHeight()) / scale));
+}
+
 void MixerView::resized()
 {
     layoutTracks();

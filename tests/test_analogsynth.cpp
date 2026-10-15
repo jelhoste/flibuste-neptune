@@ -83,6 +83,7 @@ TEST_CASE ("analogsynth plays a note, releases and goes silent", "[analogsynth]"
     CHECK (r.finite());
     CHECK (r.peak() > 0.05f);
     CHECK (e.activeVoices() == 1);
+    CHECK (e.voiceCount() == 1); // le compteur publié pour l'interface
 
     e.noteOff (0, 69);
     for (int i = 0; i < 400; ++i)
@@ -91,6 +92,7 @@ TEST_CASE ("analogsynth plays a note, releases and goes silent", "[analogsynth]"
         e.process (l.data(), rr.data(), 128);
     }
     CHECK (e.activeVoices() == 0);
+    CHECK (e.voiceCount() == 0);
 }
 
 TEST_CASE ("analogsynth volume and pan apply to the output", "[analogsynth]")

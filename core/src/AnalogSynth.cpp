@@ -361,6 +361,7 @@ void AnalogSynthEngine::process (float* left, float* right, int n) noexcept
     lastFader_ = fader;
     lastPanL_ = pl;
     lastPanR_ = pr;
+    voiceCount_.store (voices_.activeVoices(), std::memory_order_relaxed);
     peakL_.store (peakL, std::memory_order_relaxed);
     peakR_.store (peakR, std::memory_order_relaxed);
 }

@@ -43,6 +43,9 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addAndMakeVisible (loadButton_);
     statusLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
     addAndMakeVisible (statusLabel_);
+    voiceCountLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    voiceCountLabel_.setFont (juce::FontOptions (13.0f));
+    addAndMakeVisible (voiceCountLabel_);
 
     importButton_.setButtonText (text ("sampler.import"));
     importButton_.onClick = [this] { startImport(); };
@@ -1092,6 +1095,15 @@ void NeptuneEditor::timerCallback()
     updateUndoButtons();
     updateSamplerControls();
     updateVoices();
+    {
+        // compteur de voix actives, toutes pistes confondues (Sampler et Synthé)
+        const int voices = processor_.totalActiveVoices();
+        if (voices != lastVoiceCount_)
+        {
+            lastVoiceCount_ = voices;
+            voiceCountLabel_.setText (text ("analog.voices") + " " + juce::String (voices), juce::dontSendNotification);
+        }
+    }
     updateFilterEditor();
     repaint();
 }
@@ -1127,7 +1139,8 @@ void NeptuneEditor::resized()
     mixerButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
     panicButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
     trackBox_.setBounds (190, 32, 220, 36);
-    mixerView_->setBounds (32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 80 - 150));
+    mixerView_->placeScaled ({ 32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 80 - 150) });
+    voiceCountLabel_.setBounds (416, 32, 190, 36);
     synthView_->placeScaled ({ 32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 270 - 12 - 80) });
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);

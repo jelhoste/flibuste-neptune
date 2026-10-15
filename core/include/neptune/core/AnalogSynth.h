@@ -84,7 +84,8 @@ public:
     // Écrase `left` et `right` avec le rendu (volume et pan appliqués). Aucune allocation.
     void process (float* left, float* right, int numFrames) noexcept;
 
-    int activeVoices() const noexcept { return voices_.activeVoices(); }
+    int activeVoices() const noexcept { return voices_.activeVoices(); }          // thread audio / tests
+    int voiceCount() const noexcept { return voiceCount_.load (std::memory_order_relaxed); } // interface : publié à chaque bloc
     float peakLeft() const noexcept { return peakL_.load (std::memory_order_relaxed); }
     float peakRight() const noexcept { return peakR_.load (std::memory_order_relaxed); }
 
@@ -105,6 +106,7 @@ private:
     SynthVoices voices_;
     float lastGain_ = 1.0f, lastFader_ = 1.0f, lastPanL_ = 1.0f, lastPanR_ = 1.0f;
     std::atomic<float> peakL_ { 0.0f }, peakR_ { 0.0f };
+    std::atomic<int> voiceCount_ { 0 };
 
     static constexpr std::size_t kQueue = 256;
     std::array<Event, kQueue> queue_ {};

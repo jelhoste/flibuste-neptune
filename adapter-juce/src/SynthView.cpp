@@ -29,11 +29,22 @@ void SynthKeyboard::shiftOctave (int octaves)
     repaint();
 }
 
+int SynthKeyboard::endKey() const
+{
+    const int maxWhites = juce::jmax (minWhiteKeys, static_cast<int> (static_cast<float> (getWidth()) / whiteKeyWidth));
+    int whites = 0, k = firstKey_;
+    for (; k < 128; ++k)
+    {
+        if (isBlack (k)) continue;
+        if (whites == maxWhites) break;
+        ++whites;
+    }
+    return k;
+}
+
 juce::Rectangle<float> SynthKeyboard::keyRect (int key) const
 {
-    int whites = 0;
-    for (int k = firstKey_; k < firstKey_ + numKeys; ++k) whites += isBlack (k) ? 0 : 1;
-    const float w = static_cast<float> (getWidth()) / static_cast<float> (whites);
+    const float w = whiteKeyWidth;
     int index = 0; // rang de la touche blanche (ou de la blanche qui précède une noire)
     for (int k = firstKey_; k < key; ++k) index += isBlack (k) ? 0 : 1;
     const float h = static_cast<float> (getHeight());
@@ -44,9 +55,10 @@ juce::Rectangle<float> SynthKeyboard::keyRect (int key) const
 int SynthKeyboard::keyAt (juce::Point<int> p) const
 {
     const auto pf = p.toFloat();
-    for (int k = firstKey_; k < firstKey_ + numKeys; ++k) // noires d'abord : elles sont au-dessus
+    const int end = endKey();
+    for (int k = firstKey_; k < end; ++k) // noires d'abord : elles sont au-dessus
         if (isBlack (k) && keyRect (k).contains (pf)) return k;
-    for (int k = firstKey_; k < firstKey_ + numKeys; ++k)
+    for (int k = firstKey_; k < end; ++k)
         if (! isBlack (k) && keyRect (k).contains (pf)) return k;
     return -1;
 }
@@ -54,8 +66,9 @@ int SynthKeyboard::keyAt (juce::Point<int> p) const
 void SynthKeyboard::paint (juce::Graphics& g)
 {
     const auto accent = colour (Token::Accent);
+    const int end = endKey();
     for (int pass = 0; pass < 2; ++pass)
-        for (int k = firstKey_; k < firstKey_ + numKeys; ++k)
+        for (int k = firstKey_; k < end; ++k)
         {
             const bool black = isBlack (k);
             if (black != (pass == 1)) continue;

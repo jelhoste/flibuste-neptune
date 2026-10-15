@@ -53,6 +53,8 @@ private:
     juce::Label statusLabel_, rootLabel_;
     juce::Slider rootSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     std::unique_ptr<EnvelopeEditor> envelopeEditor_;
+    juce::Label voiceCountLabel_;
+    int lastVoiceCount_ = -1;
     juce::TextButton viewButton_; // bascule entre la vue Mapping et la vue Sonde (texte de diagnostic de l'hôte)
     // Vue Mapping (jalon 5) : matrice notes × vélocité plein écran, liste des zones rétractable.
     std::unique_ptr<MappingMatrix> matrix_;

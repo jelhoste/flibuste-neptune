@@ -116,6 +116,8 @@ public:
     Meter masterMeter() const noexcept;
 
     int activeVoices() const noexcept;
+    // Nombre de voix actives de toutes les pistes, publié par le thread audio à chaque bloc (lisible depuis l'interface sans verrou).
+    int totalActiveVoices() const noexcept { return totalVoices_.load (std::memory_order_relaxed); }
     int activeVoices (int track) const noexcept
     {
         const auto& t = tracks_[static_cast<std::size_t> (track)];
@@ -229,6 +231,7 @@ private:
     std::array<std::atomic<std::uint64_t>, static_cast<std::size_t> (kVoiceSnapshot) * 2u> voiceWords_ {};
     std::atomic<std::uint32_t> voiceSeq_ { 0 };
     std::atomic<int> voiceCount_ { 0 };
+    std::atomic<int> totalVoices_ { 0 };
     std::atomic<bool> voiceMonitor_ { false };
     static constexpr std::size_t kTraceSize = 64;           // puissance de 2
     std::array<std::atomic<std::uint32_t>, kTraceSize> trace_ {};

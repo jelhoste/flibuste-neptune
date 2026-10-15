@@ -498,7 +498,7 @@ const Entry kEntries[] = {
                       "Le réglage simple (un seul numéro) règle les deux : les zones du groupe se coupent entre elles. Ici une zone peut couper un groupe sans être coupée par lui." } },
     { "poly.choke_same", { "A choke also cuts the voices of the same zone (round-robin alternates included)",
                            "Un choke coupe aussi les voix de la même zone (alternatives round-robin comprises)" } },
-    { "map.tab", { "Mapping", "Mapping" } },
+    { "map.tab", { "Edit", "Édition" } },
     { "map.list", { "Zone list", "Liste des zones" } },
     { "map.view_main", { "Attack zones", "Zones d'attaque" } },
     { "map.view_first", { "\"First\" zones", "Zones « Premier »" } },
