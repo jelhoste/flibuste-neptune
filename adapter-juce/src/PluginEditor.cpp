@@ -561,7 +561,9 @@ void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
 void NeptuneEditor::openFilterEditor()
 {
     if (filterEditor_ || wizard_ || modal_) return;
-    filterEditor_ = std::make_unique<FilterEditor> (palette_, tr_);
+    filterEditor_ = std::make_unique<FilterEditor> (palette_, tr_,
+                                                    neptune::core::theme::definition (neptune::core::theme::themeFromString (processor_.settings().theme)
+                                                                                          .value_or (neptune::core::theme::ThemeId::Dark)).knob);
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     filterEditor_->onGestureBegin = [safe] { if (safe != nullptr) safe->processor_.uiBeginGesture(); };
     filterEditor_->onGestureEnd = [safe] { if (safe != nullptr) safe->processor_.uiEndGesture(); };
@@ -1207,9 +1209,10 @@ void NeptuneEditor::resized()
             k->setBounds (x + (kKnobCell - knobSide) / 2, top + 20, knobSide, knobSide);
             x += kKnobCell;
         }
-        const int btnY = top + 20 + (knobSide - 44) / 2;
-        redoButton_.setBounds (getWidth() - 32 - 110, btnY, 110, 44);
-        undoButton_.setBounds (getWidth() - 32 - 230, btnY, 110, 44);
+        // annuler / rétablir : en bas de la fenêtre (jamais sur le mixeur ni sur le master), deux fois plus petits qu'avant
+        const int btnY = getHeight() - 28;
+        redoButton_.setBounds (getWidth() - 32 - 64, btnY, 64, 22);
+        undoButton_.setBounds (getWidth() - 32 - 64 - 4 - 64, btnY, 64, 22);
     }
 
     auto profileStrip = getLocalBounds().reduced (32).removeFromBottom (120).removeFromTop (32);

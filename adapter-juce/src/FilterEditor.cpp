@@ -65,9 +65,7 @@ struct FilterEditor::Column
         {
             dial->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
             dial->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
-            dial->setColour (juce::Slider::rotarySliderFillColourId, owner.colour (Token::Accent));
-            dial->setColour (juce::Slider::rotarySliderOutlineColourId, owner.colour (Token::KnobTrack));
-            dial->setColour (juce::Slider::thumbColourId, owner.colour (Token::KnobDot));
+            dial->setLookAndFeel (owner.look_.get());
             dial->setColour (juce::Slider::textBoxTextColourId, owner.colour (Token::Accent));
             dial->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         }
@@ -231,7 +229,8 @@ struct FilterEditor::Column
     EnvelopeEditor env;
 };
 
-FilterEditor::FilterEditor (const theme::Palette& palette, const i18n::Translator& tr) : palette_ (palette), tr_ (tr)
+FilterEditor::FilterEditor (const theme::Palette& palette, const i18n::Translator& tr, theme::KnobStyle knobStyle)
+    : palette_ (palette), tr_ (tr), look_ (std::make_unique<NeptuneSliderLook> (palette, knobStyle))
 {
     setWantsKeyboardFocus (true);
     titleLabel_.setText (text ("filt.title"), juce::dontSendNotification);

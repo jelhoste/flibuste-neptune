@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "NeptuneKnob.h"
 #include <functional>
 #include <memory>
 #include "EnvelopeEditor.h"
@@ -24,7 +25,8 @@ public:
         double resonance[2] = { 0.0, 0.0 }; // 0..1
     };
 
-    FilterEditor (const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
+    FilterEditor (const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&,
+                  neptune::core::theme::KnobStyle = neptune::core::theme::KnobStyle::Led);
     ~FilterEditor() override; // défini dans le .cpp : Column y est complet
 
     // État affiché (rappelé quand l'instrument change : annulation, édition ailleurs) ; ignoré pendant un geste de l'utilisateur.
@@ -53,6 +55,7 @@ private:
 
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
+    std::unique_ptr<NeptuneSliderLook> look_; // avant columns_ : détruit après les curseurs
     neptune::core::FilterBlock defaultBlock_, zoneBlock_;
     DefaultParams params_;
     int selectedZones_ = 0;

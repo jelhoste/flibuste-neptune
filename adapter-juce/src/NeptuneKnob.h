@@ -6,6 +6,24 @@
 #include "neptune/core/Theme.h"
 #include "neptune/core/UiState.h"
 
+// Dessine l'image d'un potard NOVA (styles « led » et « pot ») dans `bounds`, pour la position normalisée `normalised`.
+// Partagé par NeptuneKnob et par le look des curseurs rotatifs (réglages du synthé / des filtres qui ne sont pas des paramètres).
+void paintNeptuneKnob (juce::Graphics&, juce::Rectangle<float> bounds, float normalised, const neptune::core::theme::Palette&,
+                       neptune::core::theme::KnobStyle);
+
+// Look des juce::Slider rotatifs : même image que NeptuneKnob.
+class NeptuneSliderLook : public juce::LookAndFeel_V4
+{
+public:
+    NeptuneSliderLook (const neptune::core::theme::Palette& palette, neptune::core::theme::KnobStyle style) : palette_ (palette), style_ (style) {}
+    void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPosProportional, float rotaryStartAngle,
+                           float rotaryEndAngle, juce::Slider&) override;
+
+private:
+    neptune::core::theme::Palette palette_;
+    neptune::core::theme::KnobStyle style_;
+};
+
 // Potard générique (palier 0). La logique des gestes est dans le cœur (KnobInteraction) ; ce composant ne fait que
 // traduire les événements JUCE, dessiner (styles « led » et « pot » de la maquette) et brancher les actions.
 class NeptuneKnob : public juce::Component, private juce::Timer

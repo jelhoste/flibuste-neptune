@@ -138,18 +138,21 @@ void NeptuneKnob::setParamId (neptune::core::ParamId id)
     repaint();
 }
 
-void NeptuneKnob::paint (juce::Graphics& g)
+void paintNeptuneKnob (juce::Graphics& g, juce::Rectangle<float> b, float n, const neptune::core::theme::Palette& palette,
+                       neptune::core::theme::KnobStyle style)
 {
-    const auto b = getLocalBounds().toFloat();
+    auto colour = [&palette] (Token t)
+    {
+        const auto& c = palette.color (t);
+        return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
+    };
     const float S = std::min (b.getWidth(), b.getHeight());
     const float cx = b.getCentreX(), cy = b.getCentreY();
     const float radius = S * 0.4f;
-    const float n = juce::jlimit (0.0f, 1.0f, index_ == neptune::core::ParameterSet::npos
-                                                  ? 0.0f
-                                                  : static_cast<float> (processor_.parameters().getNormalizedAt (index_)));
+    n = juce::jlimit (0.0f, 1.0f, n);
     const float angle = kA0 + n * (kA1 - kA0);
 
-    if (style_ == neptune::core::theme::KnobStyle::Pot)
+    if (style == neptune::core::theme::KnobStyle::Pot)
     {
         // Potentiomètre physique avec pointeur (nova-knob-styles.js : drawPot)
         juce::ColourGradient grad (colour (Token::KnobPotFace1), cx - 3.0f, cy - 4.0f, colour (Token::KnobPotFace3),
@@ -196,6 +199,24 @@ void NeptuneKnob::paint (juce::Graphics& g)
         g.setColour (colour (Token::KnobDot));
         g.fillEllipse (ix - 2.6f, iy - 2.6f, 5.2f, 5.2f);
     }
+}
+
+void NeptuneSliderLook::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float pos, float, float, juce::Slider& s)
+{
+    const auto area = juce::Rectangle<float> (static_cast<float> (x), static_cast<float> (y), static_cast<float> (width), static_cast<float> (height));
+    paintNeptuneKnob (g, area, pos, palette_, style_);
+    if (s.hasKeyboardFocus (false))
+    {
+        g.setColour (juce::Colour (palette_.color (Token::Accent).r, palette_.color (Token::Accent).g, palette_.color (Token::Accent).b));
+        g.drawEllipse (area.reduced (1.0f), 1.5f);
+    }
+}
+
+void NeptuneKnob::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat();
+    const float n = index_ == neptune::core::ParameterSet::npos ? 0.0f : static_cast<float> (processor_.parameters().getNormalizedAt (index_));
+    paintNeptuneKnob (g, b, n, palette_, style_);
 
     if (hasKeyboardFocus (false))
     {

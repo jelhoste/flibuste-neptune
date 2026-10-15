@@ -130,6 +130,7 @@ private:
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     neptune::core::theme::KnobStyle knobStyle_;
+    std::unique_ptr<NeptuneSliderLook> sliderLook_; // avant x_ : détruit après les curseurs qui l'utilisent
     neptune::core::SynthDescription d_;
     int track_ = 0;
     int page_ = 0;

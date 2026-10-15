@@ -411,6 +411,7 @@ struct SynthView::Extras
 SynthView::SynthView (ParamHost& host, const theme::Palette& palette, const i18n::Translator& tr, theme::KnobStyle knobStyle)
     : host_ (host), palette_ (palette), tr_ (tr), knobStyle_ (knobStyle), x_ (std::make_unique<Extras>()), keyboard_ (palette)
 {
+    sliderLook_ = std::make_unique<NeptuneSliderLook> (palette_, knobStyle_);
     auto& x = *x_;
     auto reg = [this, &x] (int page, juce::Component& c, const char* captionKey = nullptr)
     {
@@ -533,9 +534,7 @@ SynthView::SynthView (ParamHost& host, const theme::Palette& palette, const i18n
         {
             dial->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
             dial->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
-            dial->setColour (juce::Slider::rotarySliderFillColourId, colour (Token::Accent));
-            dial->setColour (juce::Slider::rotarySliderOutlineColourId, colour (Token::KnobTrack));
-            dial->setColour (juce::Slider::thumbColourId, colour (Token::KnobDot));
+            dial->setLookAndFeel (sliderLook_.get());
             dial->setColour (juce::Slider::textBoxTextColourId, colour (Token::Accent));
             dial->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         }
@@ -602,7 +601,12 @@ SynthView::SynthView (ParamHost& host, const theme::Palette& palette, const i18n
     startTimerHz (20);
 }
 
-SynthView::~SynthView() { stopTimer(); }
+SynthView::~SynthView()
+{
+    stopTimer();
+    for (auto& f : { std::ref (x_->fKey), std::ref (x_->fVel), std::ref (x_->fDepth), std::ref (x_->fDrive) })
+        for (auto& d : f.get()) d.setLookAndFeel (nullptr);
+}
 
 void SynthView::placeScaled (juce::Rectangle<int> area)
 {

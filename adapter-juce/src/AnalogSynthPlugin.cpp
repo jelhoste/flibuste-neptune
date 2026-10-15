@@ -425,8 +425,8 @@ void AnalogSynthEditor::resized()
         x += kKnobCell;
     }
     // annuler / rétablir : petits, sur la rangée des potards, à droite
-    redoButton_.setBounds (bottom.getRight() - 84, y + (knobSide - 30) / 2, 84, 30);
-    undoButton_.setBounds (bottom.getRight() - 84 - 6 - 84, y + (knobSide - 30) / 2, 84, 30);
+    redoButton_.setBounds (bottom.getRight() - 64, y + (knobSide - 22) / 2, 64, 22);
+    undoButton_.setBounds (bottom.getRight() - 64 - 4 - 64, y + (knobSide - 22) / 2, 64, 22);
 
     if (modal_) modal_->setBounds (getLocalBounds());
     if (manager_) manager_->setBounds (getLocalBounds());
