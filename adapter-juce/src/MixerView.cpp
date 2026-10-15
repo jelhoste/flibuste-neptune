@@ -50,9 +50,25 @@ struct BoundSlider : juce::Slider
     bool dragging = false, updating = false;
 };
 
-// Bouton à bascule lié à un paramètre 0/1 (mute, solo, mono).
+// Bouton à bascule lié à un paramètre 0/1 (mute, solo, mono, parallèle). Dessiné sans les marges du style par défaut : une lettre
+// tient dans un tiers de bande (le style par défaut tronquait « M », « S » et « P » en « ... »).
 struct BoundToggle : juce::TextButton
 {
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        auto r = getLocalBounds().toFloat().reduced (0.5f);
+        const bool on = getToggleState();
+        auto fill = findColour (on ? buttonOnColourId : buttonColourId);
+        if (down) fill = fill.brighter (0.2f); else if (over) fill = fill.brighter (0.1f);
+        g.setColour (fill);
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (findColour (juce::ComboBox::outlineColourId).withAlpha (0.8f));
+        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+        g.setColour (findColour (on ? textColourOnId : textColourOffId));
+        g.setFont (juce::FontOptions (juce::jmin (12.0f, r.getHeight() * 0.6f), juce::Font::bold));
+        g.drawText (getButtonText(), getLocalBounds(), juce::Justification::centred, false);
+    }
+
     BoundToggle (NeptuneProcessor& p, const juce::String& label) : proc (p)
     {
         setButtonText (label);
