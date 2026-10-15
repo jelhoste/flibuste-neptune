@@ -1,5 +1,8 @@
 // Moteur FM : compilation de msfa (third_party/msfa, Apache 2.0) en un seul fichier, dans l'espace de noms `msfa`, pour qu'aucun
 // symbole global (macro N, modèles min / max, classes Env / Lfo / Sin...) n'apparaisse dans le reste du projet.
+#if defined(_MSC_VER) && ! defined(_USE_MATH_DEFINES)
+ #define _USE_MATH_DEFINES // M_PI et consorts sous MSVC (msfa les utilise)
+#endif
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
