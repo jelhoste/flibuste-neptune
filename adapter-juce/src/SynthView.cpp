@@ -1,4 +1,5 @@
 #include "SynthView.h"
+#include <array>
 #include <cctype>
 
 using namespace neptune::core;
@@ -22,43 +23,65 @@ bool SynthKeyboard::isBlack (int key) const noexcept
 
 void SynthKeyboard::shiftOctave (int octaves)
 {
-    const int next = juce::jlimit (12, 84, firstKey_ + 12 * octaves);
-    if (next == firstKey_) return;
+    const int next = juce::jlimit (24, 96, centreKey_ + 12 * octaves);
+    if (next == centreKey_) return;
     releaseAll();
-    firstKey_ = next;
+    centreKey_ = next;
     repaint();
 }
 
-int SynthKeyboard::endKey() const
+namespace
 {
-    const int maxWhites = juce::jmax (minWhiteKeys, static_cast<int> (static_cast<float> (getWidth()) / whiteKeyWidth));
-    int whites = 0, k = firstKey_;
-    for (; k < 128; ++k)
+// Nombre de touches blanches strictement sous chaque note (0..128) : la position d'une touche est son rang x largeur.
+const std::array<int, 129>& whitesBelow()
+{
+    static const std::array<int, 129> table = []
     {
-        if (isBlack (k)) continue;
-        if (whites == maxWhites) break;
-        ++whites;
-    }
-    return k;
+        std::array<int, 129> t {};
+        int n = 0;
+        for (int k = 0; k < 128; ++k)
+        {
+            t[static_cast<std::size_t> (k)] = n;
+            const int m = k % 12;
+            if (! (m == 1 || m == 3 || m == 6 || m == 8 || m == 10)) ++n;
+        }
+        t[128] = n;
+        return t;
+    }();
+    return table;
 }
+} // namespace
 
 juce::Rectangle<float> SynthKeyboard::keyRect (int key) const
 {
     const float w = whiteKeyWidth;
-    int index = 0; // rang de la touche blanche (ou de la blanche qui précède une noire)
-    for (int k = firstKey_; k < key; ++k) index += isBlack (k) ? 0 : 1;
+    const auto& below = whitesBelow();
+    // la touche du centre est centrée dans le composant
+    const float origin = static_cast<float> (getWidth()) * 0.5f - w * 0.5f - static_cast<float> (below[static_cast<std::size_t> (centreKey_)]) * w;
+    const float x = origin + static_cast<float> (below[static_cast<std::size_t> (key)]) * w;
     const float h = static_cast<float> (getHeight());
-    if (! isBlack (key)) return { static_cast<float> (index) * w, 0.0f, w, h };
-    return { static_cast<float> (index) * w - 0.3f * w, 0.0f, 0.6f * w, 0.6f * h };
+    if (! isBlack (key)) return { x, 0.0f, w, h };
+    return { x - 0.3f * w, 0.0f, 0.6f * w, 0.6f * h };
+}
+
+bool SynthKeyboard::visible (int key) const
+{
+    const auto r = keyRect (key);
+    return r.getRight() > 0.0f && r.getX() < static_cast<float> (getWidth());
+}
+
+bool SynthKeyboard::heldByMidi (int key) const noexcept
+{
+    if (key < 0 || key > 127) return false;
+    return (key < 64 ? heldLo_ >> key : heldHi_ >> (key - 64)) & 1u;
 }
 
 int SynthKeyboard::keyAt (juce::Point<int> p) const
 {
     const auto pf = p.toFloat();
-    const int end = endKey();
-    for (int k = firstKey_; k < end; ++k) // noires d'abord : elles sont au-dessus
+    for (int k = 0; k < 128; ++k) // noires d'abord : elles sont au-dessus
         if (isBlack (k) && keyRect (k).contains (pf)) return k;
-    for (int k = firstKey_; k < end; ++k)
+    for (int k = 0; k < 128; ++k)
         if (! isBlack (k) && keyRect (k).contains (pf)) return k;
     return -1;
 }
@@ -66,21 +89,22 @@ int SynthKeyboard::keyAt (juce::Point<int> p) const
 void SynthKeyboard::paint (juce::Graphics& g)
 {
     const auto accent = colour (Token::Accent);
-    const int end = endKey();
+    const auto midiColour = colour (Token::Accent2);
     for (int pass = 0; pass < 2; ++pass)
-        for (int k = firstKey_; k < end; ++k)
+        for (int k = 0; k < 128; ++k)
         {
             const bool black = isBlack (k);
-            if (black != (pass == 1)) continue;
+            if (black != (pass == 1) || ! visible (k)) continue;
             const auto r = keyRect (k);
             const bool on = down_.count (k) > 0 || latched_.count (k) > 0;
-            g.setColour (on ? accent : (black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xfff2f2f2)));
+            const bool midi = heldByMidi (k);
+            g.setColour (on ? accent : (midi ? midiColour : (black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xfff2f2f2))));
             g.fillRect (r.reduced (0.5f));
             g.setColour (juce::Colour (0xff555555));
             g.drawRect (r, 1.0f);
             if (k % 12 == 0 && ! black) // do : nom de la note (do central = C4 = 60)
             {
-                g.setColour (on ? juce::Colour (0xff000000) : juce::Colour (0xff666666));
+                g.setColour (on || midi ? juce::Colour (0xff000000) : juce::Colour (0xff666666));
                 g.setFont (juce::FontOptions (11.0f));
                 g.drawText ("C" + juce::String (k / 12 - 1), r.withTrimmedBottom (4.0f).toNearestInt(), juce::Justification::centredBottom);
             }
@@ -505,6 +529,16 @@ SynthView::SynthView (ParamHost& host, const theme::Palette& palette, const i18n
         contSlider (x.fVel[fi], -6.0, 6.0, 0.1, " oct", 0.0, [this, fi] (double v) { d_.filters.filter[fi].velocityOctaves = v; });
         contSlider (x.fDepth[fi], -8.0, 8.0, 0.1, " oct", 0.0, [this, fi] (double v) { d_.filters.filter[fi].envDepthOctaves = v; });
         contSlider (x.fDrive[fi], 0.0, 100.0, 1.0, " %", 0.0, [this, fi] (double v) { d_.filters.filter[fi].drive = v / 100.0; });
+        for (auto* dial : { &x.fKey[fi], &x.fVel[fi], &x.fDepth[fi], &x.fDrive[fi] }) // potards plutôt que curseurs
+        {
+            dial->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            dial->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            dial->setColour (juce::Slider::rotarySliderFillColourId, colour (Token::Accent));
+            dial->setColour (juce::Slider::rotarySliderOutlineColourId, colour (Token::KnobTrack));
+            dial->setColour (juce::Slider::thumbColourId, colour (Token::KnobDot));
+            dial->setColour (juce::Slider::textBoxTextColourId, colour (Token::Accent));
+            dial->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        }
         reg (1, x.fOn[fi]);
         reg (1, x.fModel[fi], "filt.model");
         reg (1, x.fMode[fi], "filt.mode");
@@ -775,7 +809,7 @@ void SynthView::resized()
         for (auto* b : tabButtons_) b->setBounds (tabs.removeFromLeft (230).reduced (2));
     }
     r.removeFromTop (4);
-    auto bottom = r.removeFromBottom (170);
+    auto bottom = r.removeFromBottom (136); // clavier : 25 % plus bas qu'avant
     {
         auto line = bottom.removeFromTop (32);
         octDown_.setBounds (line.removeFromLeft (80).reduced (2));
@@ -886,18 +920,17 @@ void SynthView::resized()
             x.fModel[fi].setBounds (combos.removeFromLeft (cw).withTrimmedTop (16).reduced (2, 0));
             x.fMode[fi].setBounds (combos.removeFromLeft (cw).withTrimmedTop (16).reduced (2, 0));
             x.fSlope[fi].setBounds (combos.withTrimmedTop (16).reduced (2, 0));
-            auto mid = a.removeFromTop (88);
+            auto mid = a.removeFromTop (92);
             auto kcell = mid.removeFromLeft (160);
             if (knobIdx + 1 < fk.size() + 1)
             {
                 placeKnob (fk[knobIdx++], kcell.removeFromLeft (80));
                 placeKnob (fk[knobIdx++], kcell);
             }
-            auto s1 = mid.removeFromTop (mid.getHeight() / 2), s2 = mid;
-            x.fKey[fi].setBounds (s1.removeFromLeft (s1.getWidth() / 2).withTrimmedTop (14).reduced (2, 0));
-            x.fVel[fi].setBounds (s1.withTrimmedTop (14).reduced (2, 0));
-            x.fDepth[fi].setBounds (s2.removeFromLeft (s2.getWidth() / 2).withTrimmedTop (14).reduced (2, 0));
-            x.fDrive[fi].setBounds (s2.withTrimmedTop (14).reduced (2, 0));
+            // suivi du clavier, vélocité, profondeur d'enveloppe, drive : quatre potards sur la rangée des coupures
+            const int dw = mid.getWidth() / 4;
+            for (auto* dial : { &x.fKey[fi], &x.fVel[fi], &x.fDepth[fi], &x.fDrive[fi] })
+                dial->setBounds (mid.removeFromLeft (dw).withTrimmedTop (14).reduced (2, 0));
             x.fEnv[fi]->setBounds (a.withTrimmedTop (4));
         }
     }

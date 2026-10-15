@@ -552,6 +552,7 @@ void AnalogSynthEditor::timerCallback()
         lastUndoRevision_ = rev;
         synthView_->setDescription (processor_.synthDescription()); // annuler / rétablir ont pu changer le patch
     }
+    synthView_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1)); // notes MIDI reçues
     undoButton_.setEnabled (processor_.undoManager().canUndo());
     redoButton_.setEnabled (processor_.undoManager().canRedo());
     const int voices = processor_.engine().voiceCount();

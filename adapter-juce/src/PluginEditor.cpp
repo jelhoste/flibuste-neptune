@@ -1090,6 +1090,10 @@ void NeptuneEditor::timerCallback()
     rebindKnobs();
     if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())) { updateViewVisibility(); resized(); } // type de la piste changé
     updateSynthView();
+    {
+        const int tr = processor_.selectedTrack();
+        synthView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1)); // notes MIDI reçues
+    }
     updateRecoveryBanner();
     updateProfileControls();
     updateUndoButtons();

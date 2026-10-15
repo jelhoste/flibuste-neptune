@@ -184,6 +184,7 @@ public:
     int readVoices (neptune::core::Engine::VoiceInfo* out, int maxOut) const { return engine_.readVoices (out, maxOut); }
     void uiPanic() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::Panic, 0, 0, 0.0f, 0 }); }
     void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
+    std::uint64_t heldKeyWord (int track, int word) const noexcept { return engine_.heldKeyWord (track, word); }
     int totalActiveVoices() const noexcept { return engine_.totalActiveVoices(); } // toutes pistes ; lisible depuis l'interface
     void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f, selectedTrack() }); }
     void uiEndGesture() { undo_.endGesture(); }

@@ -117,6 +117,12 @@ public:
 
     int activeVoices() const noexcept;
     // Nombre de voix actives de toutes les pistes, publié par le thread audio à chaque bloc (lisible depuis l'interface sans verrou).
+    // Touches tenues d'une piste (mot 0 : notes 0..63, mot 1 : 64..127), publiées par le thread audio.
+    std::uint64_t heldKeyWord (int track, int word) const noexcept
+    {
+        if (track < 0 || track >= kTracks || word < 0 || word > 1) return 0;
+        return tracks_[static_cast<std::size_t> (track)].held[word].load (std::memory_order_relaxed);
+    }
     int totalActiveVoices() const noexcept { return totalVoices_.load (std::memory_order_relaxed); }
     int activeVoices (int track) const noexcept
     {
@@ -164,6 +170,7 @@ private:
         SamplerVoices voices;
         HandoffSlot<SynthPatch> synthSlot;
         SynthVoices synth;
+        std::atomic<std::uint64_t> held[2] {}; // touches tenues (bits 0..127), pour l'affichage du clavier
         std::atomic<int> type { 0 };   // TrackType
         std::atomic<int> active { 1 };
         int appliedType = 0, appliedActive = 1; // thread audio : ce qui a déjà été pris en compte

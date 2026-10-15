@@ -239,6 +239,7 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     if (track < 0 || track >= kTracks) return;
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (t.active.load (std::memory_order_relaxed) == 0) return;
+    if (key >= 0 && key < 128) t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
     ++activeNotes_;
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
     {
@@ -255,6 +256,7 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
     if (track < 0 || track >= kTracks) return;
     activeNotes_ = std::max (0, activeNotes_ - 1);
     auto& t = tracks_[static_cast<std::size_t> (track)];
+    if (key >= 0 && key < 128) t.held[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth)) t.synth.noteOff (channel, key);
     else t.voices.noteOff (channel, key);
 }
@@ -280,13 +282,13 @@ void Engine::noteOff (int channel, int key) noexcept
 void Engine::panic() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); }
+    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
 }
 
 void Engine::releaseAll() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); }
+    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
 }
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
@@ -356,6 +358,8 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         {
             t.voices.allSoundOff();
             t.synth.allSoundOff();
+            t.held[0].store (0, std::memory_order_relaxed);
+            t.held[1].store (0, std::memory_order_relaxed);
             t.appliedType = type;
         }
         t.appliedActive = active;

@@ -61,6 +61,18 @@ struct FilterEditor::Column
         setup (depth, -8.0, 8.0, 0.1, " oct");
         setup (drive, 0.0, 100.0, 1.0, " %");
 
+        for (auto* dial : { &keyTrack, &velocity, &depth, &drive }) // potards plutôt que curseurs
+        {
+            dial->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            dial->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+            dial->setColour (juce::Slider::rotarySliderFillColourId, owner.colour (Token::Accent));
+            dial->setColour (juce::Slider::rotarySliderOutlineColourId, owner.colour (Token::KnobTrack));
+            dial->setColour (juce::Slider::thumbColourId, owner.colour (Token::KnobDot));
+            dial->setColour (juce::Slider::textBoxTextColourId, owner.colour (Token::Accent));
+            dial->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        }
+        for (auto* l : { &keyLabel, &velLabel, &depthLabel, &driveLabel }) l->setJustificationType (juce::Justification::centred);
+
         auto hook = [this] { return [this] { if (! owner.updating_) apply(); }; };
         on.onClick = hook();
         model.onChange = hook();
@@ -187,10 +199,20 @@ struct FilterEditor::Column
         row (slopeLabel, slope);
         row (cutoffLabel, cutoff);
         row (resLabel, resonance);
-        row (keyLabel, keyTrack);
-        row (velLabel, velocity);
-        row (depthLabel, depth);
-        row (driveLabel, drive);
+        {
+            auto dials = r.removeFromTop (100); // suivi du clavier, vélocité, profondeur d'enveloppe, drive
+            const int cw = dials.getWidth() / 4;
+            auto place = [&dials, cw] (juce::Label& l, juce::Slider& s)
+            {
+                auto cell = dials.removeFromLeft (cw);
+                l.setBounds (cell.removeFromTop (18));
+                s.setBounds (cell.reduced (4, 0));
+            };
+            place (keyLabel, keyTrack);
+            place (velLabel, velocity);
+            place (depthLabel, depth);
+            place (driveLabel, drive);
+        }
         r.removeFromTop (6);
         env.setBounds (r);
     }

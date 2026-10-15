@@ -28,7 +28,9 @@ public:
 
     void setHold (bool on) { hold_ = on; }
     void shiftOctave (int octaves);
-    int firstKey() const noexcept { return firstKey_; }
+    int centreKey() const noexcept { return centreKey_; }
+    // Touches tenues par des notes MIDI reçues (bits 0..63 et 64..127) : affichées en plus des touches enfoncées à l'écran.
+    void setHeldKeys (std::uint64_t lo, std::uint64_t hi) { if (lo != heldLo_ || hi != heldHi_) { heldLo_ = lo; heldHi_ = hi; repaint(); } }
     void releaseAll(); // relâche toutes les touches tenues (bouton « tout arrêter », changement de piste)
 
     void paint (juce::Graphics&) override;
@@ -37,10 +39,12 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
 
     static constexpr float whiteKeyWidth = 26.0f; // largeur fixe d'une touche blanche : agrandir la fenêtre ajoute des touches
-    static constexpr int minWhiteKeys = 7;
+    // Le do central (do 4, note 60) est au milieu ; la fenêtre plus large ajoute des touches de chaque côté.
+    static constexpr int defaultCentreKey = 60;
 
 private:
-    int endKey() const;          // première touche hors de la zone visible (selon la largeur)
+    bool visible (int key) const;
+    bool heldByMidi (int key) const noexcept;
     int keyAt (juce::Point<int>) const;
     juce::Rectangle<float> keyRect (int key) const;
     bool isBlack (int key) const noexcept;
@@ -49,7 +53,8 @@ private:
     juce::Colour colour (neptune::core::theme::Token t) const;
 
     neptune::core::theme::Palette palette_;
-    int firstKey_ = 48;
+    int centreKey_ = defaultCentreKey; // touche blanche placée au milieu
+    std::uint64_t heldLo_ = 0, heldHi_ = 0;
     bool hold_ = false;
     std::map<int, int> sourceKey_;   // doigt / souris -> touche pressée
     std::set<int> latched_;          // touches maintenues
@@ -82,7 +87,7 @@ public:
     ~SynthView() override;
 
     // Taille de conception : en dessous, la vue entière est réduite proportionnellement (au lieu de superposer ses éléments).
-    static constexpr int designWidth = 1100, designHeight = 570;
+    static constexpr int designWidth = 1100, designHeight = 536;
     // Place la vue dans `area` ; si `area` est plus petite que la taille de conception, tout est réduit d'un même facteur.
     void placeScaled (juce::Rectangle<int> area);
 
@@ -94,6 +99,7 @@ public:
     void setDescription (const neptune::core::SynthDescription&); // sans notification ; ignoré pendant un geste
     void setTrack (int track);                                    // rebranche les potards sur les paramètres de cette piste
     void releaseKeys() { keyboard_.releaseAll(); }
+    void setHeldKeys (std::uint64_t lo, std::uint64_t hi) { keyboard_.setHeldKeys (lo, hi); }
 
     void resized() override;
     void paint (juce::Graphics&) override;

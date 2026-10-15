@@ -300,10 +300,10 @@ void AnalogSynthEngine::drain() noexcept
         const Event e = queue_[tail % kQueue];
         switch (e.type)
         {
-            case Event::NoteOn: voices_.noteOn (0, e.key, e.velocity); break;
-            case Event::NoteOff: voices_.noteOff (0, e.key); break;
-            case Event::Panic: voices_.panic(); break;
-            case Event::ReleaseAll: voices_.releaseAll(); break;
+            case Event::NoteOn: noteOn (0, e.key, e.velocity); break;
+            case Event::NoteOff: noteOff (0, e.key); break;
+            case Event::Panic: panic(); break;
+            case Event::ReleaseAll: releaseAll(); break;
         }
         ++tail;
     }

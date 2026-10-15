@@ -77,10 +77,22 @@ public:
     void postReleaseAll() noexcept { post (Event::ReleaseAll, 0, 0.0f); }
 
     // --- thread audio ---
-    void noteOn (int channel, int key, float velocity) noexcept { adoptPatch(); voices_.noteOn (channel, key, velocity); }
-    void noteOff (int channel, int key) noexcept { adoptPatch(); voices_.noteOff (channel, key); }
-    void releaseAll() noexcept { voices_.releaseAll(); }
-    void panic() noexcept { voices_.panic(); }
+    void noteOn (int channel, int key, float velocity) noexcept
+    {
+        adoptPatch();
+        if (key >= 0 && key < 128) held_[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
+        voices_.noteOn (channel, key, velocity);
+    }
+    void noteOff (int channel, int key) noexcept
+    {
+        adoptPatch();
+        if (key >= 0 && key < 128) held_[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
+        voices_.noteOff (channel, key);
+    }
+    void releaseAll() noexcept { clearHeld(); voices_.releaseAll(); }
+    void panic() noexcept { clearHeld(); voices_.panic(); }
+    // Touches tenues (mot 0 : notes 0..63, mot 1 : 64..127), pour l'affichage du clavier.
+    std::uint64_t heldKeyWord (int word) const noexcept { return held_[word & 1].load (std::memory_order_relaxed); }
     // Écrase `left` et `right` avec le rendu (volume et pan appliqués). Aucune allocation.
     void process (float* left, float* right, int numFrames) noexcept;
 
@@ -91,6 +103,7 @@ public:
 
 private:
     struct Event { enum Type : int { NoteOn, NoteOff, Panic, ReleaseAll } type = NoteOn; int key = 0; float velocity = 0.0f; };
+    void clearHeld() noexcept { held_[0].store (0, std::memory_order_relaxed); held_[1].store (0, std::memory_order_relaxed); }
     void adoptPatch() noexcept { if (patchSlot_.adoptPending()) voices_.setPatch (patchSlot_.current()); } // avant toute note
     void post (Event::Type t, int key, float velocity) noexcept;
     void drain() noexcept;
@@ -107,6 +120,7 @@ private:
     float lastGain_ = 1.0f, lastFader_ = 1.0f, lastPanL_ = 1.0f, lastPanR_ = 1.0f;
     std::atomic<float> peakL_ { 0.0f }, peakR_ { 0.0f };
     std::atomic<int> voiceCount_ { 0 };
+    std::atomic<std::uint64_t> held_[2] {};
 
     static constexpr std::size_t kQueue = 256;
     std::array<Event, kQueue> queue_ {};

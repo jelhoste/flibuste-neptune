@@ -85,7 +85,7 @@ private:
     void openPolyphonyPanel (juce::Component& anchor);
     juce::Component::SafePointer<PolyphonyPanel> polyphonyPanel_;
     bool showProbe_ = false;
-    bool showMixer_ = false;
+    bool showMixer_ = true; // on arrive sur le Mixeur
     // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
     juce::TextButton mixerButton_, mappingButton_;
     std::unique_ptr<MixerView> mixerView_;

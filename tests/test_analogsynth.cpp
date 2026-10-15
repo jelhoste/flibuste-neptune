@@ -298,3 +298,19 @@ TEST_CASE ("saving over a preset keeps its identity, metadata and capture except
     CHECK (saved.parameters.at ("filter1.cutoff").number == 2500.0);
     CHECK (saved.parameters.count ("output.pan") == 0);           // toujours libre
 }
+
+TEST_CASE ("analogsynth publishes the held keys for the on-screen keyboard", "[analogsynth]")
+{
+    AnalogSynthEngine e;
+    e.prepare (kRate, 128);
+    e.noteOn (0, 60, 0.8f);
+    e.noteOn (0, 72, 0.8f);
+    e.noteOn (0, 100, 0.8f);
+    CHECK (e.heldKeyWord (0) == (std::uint64_t (1) << 60));
+    CHECK (e.heldKeyWord (1) == ((std::uint64_t (1) << (72 - 64)) | (std::uint64_t (1) << (100 - 64))));
+    e.noteOff (0, 72);
+    CHECK (e.heldKeyWord (1) == (std::uint64_t (1) << (100 - 64)));
+    e.panic();
+    CHECK (e.heldKeyWord (0) == 0);
+    CHECK (e.heldKeyWord (1) == 0);
+}
