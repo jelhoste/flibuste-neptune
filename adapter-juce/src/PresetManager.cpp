@@ -76,11 +76,13 @@ struct FnListModel : juce::ListBoxModel
     std::function<void (int, juce::Graphics&, int, int, bool)> paint;
     std::function<void (int)> selected;
     std::function<void (int)> doubleClicked;
+    std::function<void (int, const juce::MouseEvent&)> clicked;
 
     int getNumRows() override { return count ? count() : 0; }
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool sel) override { if (paint) paint (row, g, w, h, sel); }
     void selectedRowsChanged (int last) override { if (selected) selected (last); }
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override { if (doubleClicked) doubleClicked (row); }
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override { if (clicked) clicked (row, e); }
 };
 
 // Bouton à appui long : un appui bref verrouille (si déverrouillé), un appui long déverrouille. Évite un déverrouillage accidentel.
@@ -218,6 +220,18 @@ struct Ctx
         g.setColour (colour (Token::Border).withAlpha (0.4f));
         g.drawHorizontalLine (h - 1, 0.0f, static_cast<float> (w));
     }
+    void heart (juce::Graphics& g, bool on, juce::Rectangle<float> area) const
+    {
+        const float r = juce::jmin (area.getHeight() * 0.3f, area.getWidth() * 0.4f);
+        const auto c = area.getCentre();
+        juce::Path p;
+        p.startNewSubPath (c.x, c.y + r * 1.0f);
+        p.cubicTo (c.x - r * 2.0f, c.y - r * 0.2f, c.x - r * 0.9f, c.y - r * 1.6f, c.x, c.y - r * 0.5f);
+        p.cubicTo (c.x + r * 0.9f, c.y - r * 1.6f, c.x + r * 2.0f, c.y - r * 0.2f, c.x, c.y + r * 1.0f);
+        p.closeSubPath();
+        if (on) { g.setColour (colour (Token::Accent)); g.fillPath (p); }
+        else { g.setColour (colour (Token::TextDim2).withAlpha (0.7f)); g.strokePath (p, juce::PathStrokeType (1.2f)); }
+    }
     void stars (juce::Graphics& g, int rating, juce::Rectangle<float> area) const
     {
         const float r = juce::jmin (area.getHeight() * 0.42f, area.getWidth() / 7.0f);
@@ -254,6 +268,9 @@ public:
         ratingBox_.setSelectedId (1, juce::dontSendNotification);
         c.toggle (lockedOnly_, c.text ("preset.locked_only"));
         lockedOnly_.onClick = [this] { rebuildRows(); };
+        c.toggle (favOnly_, c.text ("preset.favorites_only"));
+        favOnly_.onClick = [this] { rebuildRows(); };
+        addAndMakeVisible (favOnly_);
         addAndMakeVisible (search_);
         addAndMakeVisible (facets_);
         addAndMakeVisible (lockedOnly_);
@@ -266,6 +283,15 @@ public:
         {
             if (row < 0 || row >= static_cast<int> (rows_.size())) return;
             if (c_.p.loadPreset (rows_[static_cast<std::size_t> (row)].id)) { c_.status (c_.text ("preset.loaded")); c_.loaded(); }
+        };
+        model_.clicked = [this] (int row, const juce::MouseEvent& e)
+        {
+            if (row < 0 || row >= static_cast<int> (rows_.size()) || e.x > 26) return;
+            auto& r = rows_[static_cast<std::size_t> (row)];
+            std::string err;
+            if (! c_.p.library().setFavorite (r.id, ! r.favourite, &err)) { c_.status (U (err)); return; }
+            if (favOnly_.getToggleState()) rebuildRows();
+            else { r.favourite = ! r.favourite; list_.repaint(); }
         };
         list_.setModel (&model_);
         addAndMakeVisible (list_);
@@ -357,6 +383,7 @@ public:
         left.removeFromTop (4);
         auto filters2 = left.removeFromTop (26);
         lockedOnly_.setBounds (filters2.removeFromLeft (110));
+        favOnly_.setBounds (filters2.removeFromLeft (130));
         facets_.setBounds (filters2.reduced (1));
         left.removeFromTop (4);
         list_.setBounds (left);
@@ -415,7 +442,7 @@ public:
     }
 
 private:
-    struct Row { std::string id, name, type; int rating = 0; bool locked = false, factory = false; };
+    struct Row { std::string id, name, type; int rating = 0; bool locked = false, factory = false, favourite = false; };
 
     preset::Query query() const
     {
@@ -434,8 +461,8 @@ private:
         const auto all = c_.p.library().allPresets();
         rows_.clear();
         for (const auto* p : preset::filter (all, query()))
-            if (c_.p.acceptsPreset (*p))
-                rows_.push_back ({ p->id, p->name, p->type, p->rating, p->locked, p->factory });
+            if (c_.p.acceptsPreset (*p) && (! favOnly_.getToggleState() || c_.p.library().isFavorite (p->id)))
+                rows_.push_back ({ p->id, p->name, p->type, p->rating, p->locked, p->factory, c_.p.library().isFavorite (p->id) });
         list_.updateContent();
         int sel = -1;
         for (std::size_t i = 0; i < rows_.size(); ++i)
@@ -454,7 +481,8 @@ private:
         const bool current = r.id == c_.p.currentPresetId();
         g.setColour (c_.colour (current ? Token::Accent : Token::Text));
         g.setFont (juce::FontOptions (13.0f, current ? juce::Font::bold : juce::Font::plain));
-        g.drawText (U (r.name), 8, 0, w - 230, h, juce::Justification::centredLeft, true);
+        c_.heart (g, r.favourite, { 2.0f, 0.0f, 22.0f, static_cast<float> (h) });
+        g.drawText (U (r.name), 28, 0, w - 250, h, juce::Justification::centredLeft, true);
         g.setColour (c_.colour (Token::TextDim));
         g.setFont (juce::FontOptions (11.0f));
         g.drawText (U (r.type), w - 220, 0, 80, h, juce::Justification::centredLeft, true);
@@ -613,7 +641,7 @@ private:
     std::vector<Row> rows_;
     juce::TextEditor search_, facets_, name_, type_, chars_, fields_;
     juce::ComboBox typeBox_, charBox_, ratingBox_, rating_;
-    juce::ToggleButton lockedOnly_, locked_;
+    juce::ToggleButton lockedOnly_, favOnly_, locked_;
     FnListModel model_;
     juce::ListBox list_ { "presets", nullptr };
     juce::Label nameL_, typeL_, charsL_, ratingL_, fieldsL_, originL_, bankL_, programL_, tileL_;

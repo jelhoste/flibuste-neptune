@@ -490,3 +490,37 @@ TEST_CASE ("library: grids persist and report missing presets", "[preset][librar
     CHECK (again.deleteGrid (gridId));
     CHECK (again.grids().empty());
 }
+
+TEST_CASE ("library: favourites are global, survive reopening and ignore bad ids", "[preset][library]")
+{
+    TempDir dir;
+    Preset factoryPreset = sample ("Factory one");
+    factoryPreset.id = "factory-one";
+    {
+        Library lib (dir.path, { factoryPreset });
+        REQUIRE (lib.open());
+        CHECK_FALSE (lib.isFavorite ("factory-one"));
+        REQUIRE (lib.setFavorite ("factory-one", true));
+        CHECK (lib.isFavorite ("factory-one"));
+        CHECK_FALSE (lib.setFavorite ("../evil", true));
+    }
+    {
+        Library lib (dir.path, { factoryPreset });
+        REQUIRE (lib.open());
+        CHECK (lib.isFavorite ("factory-one"));
+        REQUIRE (lib.setFavorite ("factory-one", false));
+        CHECK_FALSE (lib.isFavorite ("factory-one"));
+    }
+    // deux instances ouvertes : la seconde relit le disque avant d'écrire, la première marque n'est pas perdue
+    Library a (dir.path), b (dir.path);
+    REQUIRE (a.open());
+    REQUIRE (b.open());
+    REQUIRE (a.setFavorite ("aaa", true));
+    REQUIRE (b.setFavorite ("bbb", true));
+    CHECK (b.isFavorite ("aaa"));
+    CHECK (b.isFavorite ("bbb"));
+    { std::ofstream (dir.path / "favorites.json") << "{ not json"; }
+    Library c (dir.path);
+    REQUIRE (c.open());
+    CHECK (c.favorites().empty());
+}

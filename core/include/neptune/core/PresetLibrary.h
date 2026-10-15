@@ -6,10 +6,12 @@
 //   <racine>/presets/<id>.flipreset      presets utilisateur
 //   <racine>/banks.json                  manifeste des banques
 //   <racine>/config.json                 configuration globale
+//   <racine>/favorites.json              favoris (ids de presets)
 //   <racine>/grids/<gridId>.json         grilles concert
 //   <racine>/trash/AAAA-MM-JJ_HHhMM_<label>/<id>.flipreset + meta.json (date de suppression, id, nom)
 #include <filesystem>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -57,6 +59,13 @@ public:
     // Change seulement les métadonnées (nom, type, note, verrou, champs...) d'un preset utilisateur, y compris verrouillé.
     bool updateMetadata (const Preset& edited, std::string* error = nullptr);
 
+    // ---- favoris (globaux : un seul fichier `favorites.json` pour tous les plugins de la suite) ----
+    // Une marque par id de preset, y compris factory. Séparée de la note. `setFavorite` relit le fichier avant d'écrire : deux
+    // instances ouvertes en même temps ne s'écrasent pas.
+    bool isFavorite (const std::string& id) const { return favorites_.count (id) != 0; }
+    const std::set<std::string>& favorites() const noexcept { return favorites_; }
+    bool setFavorite (const std::string& id, bool on, std::string* error = nullptr);
+
     // ---- corbeille ----
     bool moveToTrash (const std::string& id, std::string* error = nullptr); // retire aussi l'id des banques
     std::vector<TrashEntry> trash() const;
@@ -93,7 +102,10 @@ private:
 
     std::filesystem::path root_;
     std::vector<Preset> factory_, user_;
+    void loadFavorites();
+
     BankManifest banks_;
+    std::set<std::string> favorites_;
     LibraryConfig config_;
     std::vector<Grid> grids_;
 };

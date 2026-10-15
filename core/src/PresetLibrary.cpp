@@ -84,6 +84,8 @@ bool Library::open (std::vector<std::string>* warnings)
     banks_ = BankManifest {};
     if (fileutil::readAll (root_ / "banks.json", text)) banks_ = banksFromJson (text);
 
+    loadFavorites();
+
     user_.clear();
     for (const auto& e : fs::directory_iterator (root_ / kPresetsDir, ec))
     {
@@ -111,6 +113,31 @@ bool Library::open (std::vector<std::string>* warnings)
         }
     purgeTrash();
     return true;
+}
+
+void Library::loadFavorites()
+{
+    favorites_.clear();
+    std::string text;
+    if (! fileutil::readAll (root_ / "favorites.json", text)) return;
+    const auto j = nlohmann::json::parse (text, nullptr, false);
+    if (! j.is_object()) return;
+    const auto it = j.find ("favorites");
+    if (it == j.end() || ! it->is_array()) return;
+    for (const auto& v : *it)
+        if (v.is_string() && safeId (v.get<std::string>())) favorites_.insert (v.get<std::string>());
+}
+
+bool Library::setFavorite (const std::string& id, bool on, std::string* error)
+{
+    if (! safeId (id)) { if (error) *error = "invalid id"; return false; }
+    loadFavorites(); // l'état du disque fait foi (un autre plugin a pu changer la liste)
+    if (on) favorites_.insert (id);
+    else favorites_.erase (id);
+    nlohmann::json j;
+    j["version"] = schemaVersion;
+    j["favorites"] = nlohmann::json (favorites_);
+    return fileutil::writeAtomic (root_ / "favorites.json", j.dump (2), error);
 }
 
 std::vector<Preset> Library::allPresets() const

@@ -412,6 +412,8 @@ const Entry kEntries[] = {
     { "preset.load_failed", { "This preset cannot be loaded.", "Ce preset ne peut pas être chargé." } },
     { "preset.loaded", { "Preset loaded.", "Preset chargé." } },
     { "preset.lock", { "Locked (Save asks for a new name)", "Verrouillé (Enregistrer demande un nouveau nom)" } },
+    { "preset.favorite", { "Favourite", "Favori" } },
+    { "preset.favorites_only", { "Favourites only", "Favoris seulement" } },
     { "preset.locked_only", { "Locked only", "Verrouillés" } },
     { "preset.manager", { "Presets...", "Presets..." } },
     { "preset.manager_title", { "PRESETS", "PRESETS" } },
