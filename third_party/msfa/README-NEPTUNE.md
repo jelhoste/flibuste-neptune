@@ -20,3 +20,4 @@ de msfa (`N`, `min`, `max`, `Env`...) ne fuit dans le reste du projet.
 - `dx7note.*` : `set_level_offset(op, ...)` et `set_feedback(...)` (macros en direct).
 - `synth.h` : les modèles `min` / `max` de msfa sont remplacés par ceux de la bibliothèque standard (ambiguïté avec `using namespace std`).
 - Les en-têtes sans garde d'inclusion reçoivent `#pragma once` (compilation en un seul fichier).
+- `synth.h` : la barrière mémoire (`SynthMemoryBarrier`, inutilisée) est retirée (`#warning` refusé par MSVC).

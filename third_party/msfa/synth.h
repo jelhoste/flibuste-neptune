@@ -25,21 +25,7 @@
 #define LG_N 6
 #define N (1 << LG_N)
 
-#if defined(__APPLE__)
-#include <libkern/OSAtomic.h>
-#define SynthMemoryBarrier() OSMemoryBarrier()
-#elif defined(__GNUC__)
-#if (__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 1)
-#define SynthMemoryBarrier() __sync_synchronize()
-#endif
-#endif
-
-// #undef SynthMemoryBarrier()
-
-#ifndef SynthMemoryBarrier
-#warning Memory barrier is not enabled
-#define SynthMemoryBarrier()
-#endif
+// Neptune : la barrière mémoire de msfa (SynthMemoryBarrier, inutilisée ici) est retirée : son `#warning` ne compile pas sous MSVC.
 
 // Neptune : msfa définissait ses propres min / max ; on prend ceux de la bibliothèque standard (sinon ambigus avec « using namespace std »).
 #include <algorithm>
