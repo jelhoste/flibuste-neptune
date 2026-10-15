@@ -46,6 +46,9 @@ preset::LibraryConfig defaultConfig();
 // on y remet les valeurs courantes des paramètres (`withLiveParams`) : c'est le travail de AnalogSynthEngine::description() et de
 // l'adaptateur de Neptune ; les fonctions d'état et de preset ci-dessous prennent une description déjà à jour.
 std::vector<std::pair<ParamId, double>> envelopeParamValues (const SynthDescription&, int track = 0);
+// Vrai si les paramètres portent déjà (aux arrondis de la description près) les valeurs de la description : on n'y touche alors pas
+// (un état relu puis réenregistré doit rester identique octet pour octet).
+bool envelopeParamsMatch (const SynthDescription&, const ParameterSet&, int track = 0);
 void seedEnvelopeParams (const SynthDescription&, ParameterSet&, int track = 0);
 SynthDescription withLiveParams (SynthDescription, const ParameterSet&, int track = 0);
 

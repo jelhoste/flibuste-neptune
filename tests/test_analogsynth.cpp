@@ -550,3 +550,21 @@ TEST_CASE ("the release time automated on the track is used at note off", "[anal
     for (int i = 0; i < 30; ++i) e.process (l.data(), r.data(), 128); // ~80 ms
     CHECK (e.activeVoices() == 0);
 }
+
+TEST_CASE ("state saved, reloaded and saved again is identical even with awkward parameter values", "[analogsynth][envparams]")
+{
+    AnalogSynthEngine e;
+    e.params().set (mixer::synthEnvParam (0, mixer::kSynthGlide), 123.456);       // la description garde des millisecondes entières
+    e.params().set (mixer::synthEnvParam (0, mixer::kAmpRelease), 0.2);           // sous le minimum de relâchement de la description
+    e.params().set (mixer::synthEnvParam (0, mixer::kFilter1Decay), 777.7777);
+    e.params().set (mixer::synthEnvParam (0, mixer::kFilterBalance), 33.3333);
+    const auto first = stateToJson (e.params(), e.description(), "");
+
+    AnalogSynthEngine f;
+    SynthDescription d;
+    std::string id;
+    REQUIRE (stateFromJson (first, f.params(), d, id));
+    f.setDescription (d, false);
+    const auto second = stateToJson (f.params(), f.description(), "");
+    CHECK (first == second);
+}

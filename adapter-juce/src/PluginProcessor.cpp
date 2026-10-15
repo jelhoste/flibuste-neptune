@@ -748,6 +748,7 @@ void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthD
     engine_.publishSynth (track, std::move (patch));
     // Les paramètres d'enveloppe, de glissando et d'équilibre suivent la description (après la publication : les notes figées par
     // la capture par voix gardent les valeurs d'avant). L'hôte est prévenu pour que ses boutons et son automation suivent.
+    if (neptune::core::analogsynth::envelopeParamsMatch (d, params_, track)) return; // déjà cohérent : on n'y touche pas
     for (const auto& [pid, raw] : neptune::core::analogsynth::envelopeParamValues (d, track))
     {
         const auto index = params_.indexOf (pid);

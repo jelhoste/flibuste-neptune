@@ -101,8 +101,14 @@ std::vector<std::pair<ParamId, double>> envelopeParamValues (const SynthDescript
     return out;
 }
 
+bool envelopeParamsMatch (const SynthDescription& d, const ParameterSet& set, int track)
+{
+    return withLiveParams (d, set, track) == sanitised (d);
+}
+
 void seedEnvelopeParams (const SynthDescription& d, ParameterSet& set, int track)
 {
+    if (envelopeParamsMatch (d, set, track)) return;
     for (const auto& [id, v] : envelopeParamValues (d, track)) set.set (id, v);
 }
 
