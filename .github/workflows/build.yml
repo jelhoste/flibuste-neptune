@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune et Moussaillon)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon et AnalogSynth)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -79,6 +79,9 @@ jobs:
           MOUS=$(find build/adapter-juce/Moussaillon_artefacts -name 'Moussaillon.clap' -print -quit)
           test -n "$MOUS" || { echo "Moussaillon.clap introuvable"; exit 1; }
           "$CV" validate "$MOUS"
+          ANAL=$(find build/adapter-juce/AnalogSynth_artefacts -name 'AnalogSynth.clap' -print -quit)
+          test -n "$ANAL" || { echo "AnalogSynth.clap introuvable"; exit 1; }
+          "$CV" validate "$ANAL"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -126,6 +129,30 @@ jobs:
         with:
           name: Moussaillon-${{ matrix.name }}
           path: dist-mous/*
+          if-no-files-found: error
+
+      # Le synthé séparé, archivé à part.
+      - name: Archive AnalogSynth.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/AnalogSynth_artefacts -name 'AnalogSynth.clap' -print -quit)
+          test -n "$CLAP" || { echo "AnalogSynth.clap introuvable"; exit 1; }
+          mkdir -p dist-anal/stage
+          cp -R "$CLAP" dist-anal/stage/
+          cd dist-anal/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../AnalogSynth-${{ matrix.name }}.zip" AnalogSynth.clap
+          else
+            tar -czf "../AnalogSynth-${{ matrix.name }}.tar.gz" AnalogSynth.clap
+          fi
+          cd ../..
+          rm -rf dist-anal/stage
+          ls -la dist-anal
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AnalogSynth-${{ matrix.name }}
+          path: dist-anal/*
           if-no-files-found: error
 
   release:

@@ -91,6 +91,7 @@ Structure **fixe, non modulaire** (choix assumé pour la robustesse de l'automat
 
 ### Sortie
 - Pas d'étage de sortie séparé : la piste elle-même sert de "master" du synthé (fader/pan/inserts/envois déjà définis au niveau piste).
+- **Version indépendante (décision du 2026-10-15)** : le synthé est aussi publié comme plugin CLAP instrument séparé (« AnalogSynth », nom provisoire), même moteur et même vue ; il a son propre **volume et pan** (pas de mixeur), la même limite de voix que dans Neptune (plafond 64, pas d'extension prévue), et le système de presets de la section 25. Écart avec le texte initial : la spec ne prévoyait de version séparée que pour les plugins stock (section 7).
 
 ---
 
@@ -777,6 +778,19 @@ Si le même instrument est chargé dans plusieurs pistes ou projets simultanéme
 
 ### Indicateur de charge (voix actives / CPU)
 Affichage en direct du nombre de voix actives et de la distance par rapport à la limite globale de voix (section 21) — aide à comprendre une montée de charge CPU en test, complète le métrage déjà prévu ailleurs dans le projet.
+
+---
+
+## 25. Système de presets (décisions du 2026-10-15)
+
+Modèle de données de l'utilisateur (`modele-donnees-presets.md`), commun à toute la gamme (instruments et effets) ; implémenté dans le cœur portable (`Preset.h`, `PresetLibrary.h`) et branché d'abord dans **AnalogSynth**.
+
+- **Fichiers** : un preset = un fichier `.flipreset` (JSON, `schemaVersion`) ; manifeste `banks.json` (banques 0..127 alignées sur MIDI Bank Select, 128 programmes chacune, par identifiants) ; configuration globale `config.json` (défaut capturé / libre par paramètre, comportement pédale, pool de réverbes, corbeille) ; grilles concert ; bundle `.flibank` (zip). Espaces : factory (lecture seule, hors de l'espace 0-127 ; copie explicite pour devenir jouable, `derivedFrom` renseigné), utilisateur (dossier de l'application), corbeille horodatée purgée selon la configuration.
+- **Capture** : `captured` (instantané par voix à l'attaque) et `free` (global, immédiat) ; exception par preset. **Implémenté** : la persistance et l'application des deux statuts ; **à venir** : le figement par voix (les notes en cours gardent l'ancien son au changement de preset) et le statut `bus` (traînes de réverbe).
+- **Extension du modèle** : `module` + `state` portent l'état structuré non plat d'un plugin (le synthé : formes, enveloppes, filtres, unisson) à côté des paramètres plats.
+- **Recherche à facettes** : nom, type, caractéristiques (OR), note, verrou, champs personnalisés (OR entre valeurs d'une même clé, AND entre clés).
+- **Concert** : stepper (suivant / précédent, sautant les emplacements vides, passage à la banque suivante réglable), Bank Select + Program Change MIDI (emplacement vide : le preset actuel reste, aucune interruption), grille de tuiles verrouillable par appui long, réorganisation par poignée, vérification d'intégrité silencieuse avec badge.
+- **Verrou utilisateur** : « Enregistrer » est redirigé vers « Enregistrer sous » pour un preset verrouillé ou factory.
 
 ---
 

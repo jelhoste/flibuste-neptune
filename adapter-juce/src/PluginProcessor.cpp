@@ -13,9 +13,9 @@
  #define NEPTUNE_PROBE_TRACKS 16
 #endif
 
-// Nombre de sorties stéréo déclarées à l'hôte (sonde du point 4 : la cible du projet est jusqu'à 64).
+// Nombre de sorties stéréo déclarées à l'hôte (sonde du point 4 : 32 depuis 2026-10-15).
 #ifndef NEPTUNE_PROBE_OUTPUTS
- #define NEPTUNE_PROBE_OUTPUTS 64
+ #define NEPTUNE_PROBE_OUTPUTS 32
 #endif
 
 namespace

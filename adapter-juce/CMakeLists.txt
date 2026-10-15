@@ -1,8 +1,8 @@
 # Nombre de pistes du pool de paramètres « sonde » (palier 0, point 4). 32 pistes = 676 paramètres.
 set(NEPTUNE_PROBE_TRACKS 16 CACHE STRING "Pistes du mixeur (paramètres exposés à l'hôte)")
 
-# Sorties stéréo déclarées à l'hôte (sonde, point 4 : jusqu'à 64 prévues). Le wrapper plafonne à 128 canaux de sortie.
-set(NEPTUNE_PROBE_OUTPUTS 64 CACHE STRING "Sorties stéréo de la sonde")
+# Sorties stéréo déclarées à l'hôte (décision 2026-10-15 : 32 stéréo = 64 canaux). Le wrapper plafonne à 128 canaux de sortie.
+set(NEPTUNE_PROBE_OUTPUTS 32 CACHE STRING "Sorties stéréo de la sonde")
 
 # Identité provisoire : domaine inversé du CLAP_ID à confirmer.
 set(NEPTUNE_CLAP_ID "com.tournedosrossini.neptune" CACHE STRING "Identifiant CLAP")
@@ -89,6 +89,49 @@ target_compile_definitions(Moussaillon PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(Moussaillon
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- AnalogSynth (nom provisoire) : le synthé soustractif de Neptune, plugin CLAP instrument indépendant --------------------
+# Même moteur (neptune_core : AnalogSynth.h, Synth.h, SynthVoices.h) et même vue (SynthView) que la piste Synthé de Neptune ;
+# en plus, le système de presets (Preset.h, PresetLibrary.h : banques MIDI, grille concert, corbeille) et son gestionnaire.
+set(ANALOGSYNTH_CLAP_ID "com.tournedosrossini.analogsynth" CACHE STRING "Identifiant CLAP du synthé indépendant")
+
+juce_add_plugin(AnalogSynth
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "AnalogSynth"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Anls
+  IS_SYNTH                    TRUE
+  NEEDS_MIDI_INPUT            TRUE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        AnalogSynth
+  CLAP_ID       "${ANALOGSYNTH_CLAP_ID}"
+  CLAP_FEATURES instrument synthesizer stereo)
+
+target_sources(AnalogSynth PRIVATE
+  src/AnalogSynthPlugin.cpp
+  src/PresetManager.cpp
+  src/SynthView.cpp
+  src/EnvelopeEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(AnalogSynth PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(AnalogSynth
   PRIVATE
     neptune_core
     juce::juce_audio_utils

@@ -28,7 +28,7 @@ using Clock = std::chrono::steady_clock;
 namespace
 {
 constexpr double kSampleRate = 48000.0;
-constexpr int kChannels = 128; // 64 sorties stéréo : le jeu fixe du plugin
+constexpr int kChannels = 64; // 32 sorties stéréo : le jeu fixe du plugin
 constexpr int kRepetitions = 21;
 constexpr double kRepetitionSeconds = 0.05; // durée de chaque répétition, en temps de calcul
 

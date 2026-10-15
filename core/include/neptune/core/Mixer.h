@@ -8,7 +8,7 @@
 //
 // Routage (par piste et par bus) :
 //  - sortie principale : le Master (défaut) ou un bus ; activable / désactivable (le « bouton Envoi vers Master » de la spec) ;
-//  - sortie directe : aucune ou une sortie physique 1..64, INDÉPENDANTE de la sortie principale (les deux peuvent être actives) ;
+//  - sortie directe : aucune ou une sortie physique 1..32, INDÉPENDANTE de la sortie principale (les deux peuvent être actives) ;
 //  - 8 envois : bus de destination, point de captation, niveau (paramètre automatisable), pan, mute.
 // Pour qu'aucun cycle ne soit possible par construction, un bus ne peut router (sortie principale ou envoi) que vers un bus
 // d'indice SUPÉRIEUR au sien ; toute autre cible est ignorée par le moteur.
@@ -26,7 +26,7 @@ namespace neptune::core::mixer
 constexpr int numTracks = 16;
 constexpr int numBuses = 16;
 constexpr int numSends = 8;
-constexpr int numOutputs = 64; // sorties stéréo physiques déclarées à l'hôte
+constexpr int numOutputs = 32; // sorties stéréo physiques déclarées à l'hôte
 constexpr int numInserts = 8;  // emplacements d'inserts par piste, par bus et sur le Master
 constexpr int numParallels = 32; // pistes parallèles (pool propre, réparties librement dans l'arbre)
 constexpr int parentOfParallelBase = numTracks; // identifiant de parent : 0..15 piste, 16..47 piste parallèle
@@ -72,6 +72,9 @@ enum SynthKind : int
 };
 constexpr ParamId synthParamBase = 40;
 constexpr ParamId synthParam (int track, SynthKind kind) { return probe::trackParam (track, synthParamBase + static_cast<ParamId> (kind)); }
+
+// Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.
+bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 
 // Ajoute au jeu : les paramètres d'instrument des pistes 1..n-1, ceux du master (trim, mono) et ceux des bus.
 // (Les paramètres de piste volume/pan/mute/solo/envois viennent de probe::buildPool ; ceux de la piste 0, de sampler::addParams.)

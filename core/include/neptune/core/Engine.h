@@ -21,7 +21,7 @@ namespace neptune::core
 {
 // Frontière unique entre le cœur et les adaptateurs (JUCE/CLAP, tests, futur web).
 // Palier 1 : N pistes, Sampler ou Synthé (chacune son instrument ou son patch, ses voix, son canal MIDI), 16 bus, un Master ; sorties directes sur
-// jusqu'à 64 paires stéréo. Les voix d'une piste ne sont jamais celles d'une autre ; le thread disque et ses emplacements de
+// jusqu'à 32 paires stéréo. Les voix d'une piste ne sont jamais celles d'une autre ; le thread disque et ses emplacements de
 // streaming sont, eux, partagés (pool).
 enum class StripKind { Track, Bus, Master, Parallel };
 
