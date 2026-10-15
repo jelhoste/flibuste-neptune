@@ -277,8 +277,10 @@ bool NeptuneProcessor::trackHasContent (int track) const
 
 neptune::core::SynthDescription NeptuneProcessor::synthDescription (int track) const
 {
+    const int t = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
     const juce::ScopedLock lock (instrumentLock_);
-    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].synth;
+    // temps d'enveloppe, glissando et équilibre : les valeurs courantes des paramètres (l'automation les a pu changer)
+    return neptune::core::analogsynth::withLiveParams (mixer_.tracks[static_cast<std::size_t> (t)].synth, params_, t);
 }
 
 void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::string name, std::string mergeKey, bool presetChange)
@@ -594,7 +596,12 @@ neptune::core::MixerState NeptuneProcessor::mixerState() const
     const juce::ScopedLock lock (instrumentLock_);
     auto m = mixer_;
     namespace mx = neptune::core::mixer;
-    for (int t = 0; t < mx::numTracks; ++t) syncInserts (m.tracks[static_cast<std::size_t> (t)].strip.inserts, insertInstances_[static_cast<std::size_t> (t)]);
+    for (int t = 0; t < mx::numTracks; ++t)
+    {
+        auto& tr = m.tracks[static_cast<std::size_t> (t)];
+        syncInserts (tr.strip.inserts, insertInstances_[static_cast<std::size_t> (t)]);
+        tr.synth = neptune::core::analogsynth::withLiveParams (tr.synth, params_, t);
+    }
     for (int b = 0; b < mx::numBuses; ++b) syncInserts (m.buses[static_cast<std::size_t> (b)].inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + b)]);
     syncInserts (m.master.inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + mx::numBuses)]);
     for (int p = 0; p < mx::numParallels; ++p)
@@ -739,6 +746,23 @@ void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthD
     auto patch = std::make_shared<neptune::core::SynthPatch> (d);
     patch->freezeRunningVoices = freezeRunningVoices;
     engine_.publishSynth (track, std::move (patch));
+    // Les paramètres d'enveloppe, de glissando et d'équilibre suivent la description (après la publication : les notes figées par
+    // la capture par voix gardent les valeurs d'avant). L'hôte est prévenu pour que ses boutons et son automation suivent.
+    for (const auto& [pid, raw] : neptune::core::analogsynth::envelopeParamValues (d, track))
+    {
+        const auto index = params_.indexOf (pid);
+        if (index == neptune::core::ParameterSet::npos) continue;
+        const double v = params_.spec (index).clamp (raw);
+        if (params_.getAt (index) == v) continue;
+        params_.set (pid, v);
+        if (! notifyHostOnSeed_ || index >= static_cast<std::size_t> (getParameters().size())) continue; // état en cours de chargement : l'hôte relit tout après
+        if (auto* hostParam = getParameters()[static_cast<int> (index)])
+        {
+            hostParam->beginChangeGesture();
+            hostParam->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+            hostParam->endChangeGesture();
+        }
+    }
 }
 
 // ---- presets de synthé de la piste sélectionnée
@@ -1359,7 +1383,9 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     undo_.clear(); // l'historique d'un autre état ne s'applique plus (il restaurerait un ancien instrument)
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
+    notifyHostOnSeed_ = false; // le rescan ci-dessous prévient l'hôte des valeurs d'enveloppe recopiées depuis les descriptions
     adoptMixerFromState (result.mixer);
+    notifyHostOnSeed_ = true;
     adoptStateIdentity (result.instanceId);
 
     // Les valeurs ont changé hors des événements de paramètres : le wrapper en tire un `params.rescan(VALUES)`

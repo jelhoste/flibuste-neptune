@@ -273,17 +273,39 @@ void SynthVoices::panic() noexcept
     numHeld_ = 0;
 }
 
+EnvelopeTiming SynthVoices::timingOf (const EnvelopeRuntime& e, const Params::EnvParams& p) noexcept
+{
+    auto t = EnvelopeTiming::of (e);
+    if (p.attackMs >= 0.0) t.attackSec = p.attackMs * 0.001;
+    if (p.decayMs >= 0.0) t.decaySec = p.decayMs * 0.001;
+    if (p.sustain >= 0.0) t.sustain = static_cast<float> (std::min (p.sustain, 1.0));
+    if (p.releaseMs >= 0.0) t.releaseSec = p.releaseMs * 0.001;
+    return t;
+}
+
+// Note Off d'une voix : le relâchement est celui des paramètres du moment (ceux d'avant le figement pour une voix figée).
+void SynthVoices::noteOffVoice (Voice& v) noexcept
+{
+    v.releasing = true;
+    const auto& pt = patchOf (v);
+    const Params& p = v.frozen ? v.frozenParams : lastParams_;
+    const auto amp = timingOf (pt.ampEnv, p.ampEnv);
+    v.env.noteOff (pt.ampEnv, sampleRate_, &amp);
+    v.penv.noteOff (pt.pitchEnv, sampleRate_);
+    for (std::size_t f = 0; f < 2; ++f)
+    {
+        const auto ft = timingOf (pt.filterEnv[f], p.filterEnv[f]);
+        v.fenv[f].noteOff (pt.filterEnv[f], sampleRate_, &ft);
+    }
+}
+
 void SynthVoices::releaseAll() noexcept
 {
     if (patch_ != nullptr)
         for (auto& v : voices_)
         {
             if (! v.active || v.releasing || v.stolen) continue;
-            v.releasing = true;
-            const auto& pt = patchOf (v);
-            v.env.noteOff (pt.ampEnv, sampleRate_);
-            v.penv.noteOff (pt.pitchEnv, sampleRate_);
-            for (std::size_t f = 0; f < 2; ++f) v.fenv[f].noteOff (pt.filterEnv[f], sampleRate_);
+            noteOffVoice (v);
         }
     numHeld_ = 0;
 }
@@ -351,7 +373,8 @@ void SynthVoices::removeHeld (int channel, int key) noexcept
 bool SynthVoices::retargetHeld (int newKey) noexcept
 {
     bool any = false;
-    const double glideBlocks = patch_ != nullptr ? patch_->desc.glideMs * 0.001 * sampleRate_ / kControlFrames : 0.0;
+    const double glideMs = lastParams_.glideMs >= 0.0 ? lastParams_.glideMs : (patch_ != nullptr ? patch_->desc.glideMs : 0.0);
+    const double glideBlocks = glideMs * 0.001 * sampleRate_ / kControlFrames;
     for (auto& v : voices_)
     {
         if (! v.active || v.releasing || v.stolen) continue;
@@ -388,9 +411,14 @@ void SynthVoices::startNote (int channel, int key, float velocity) noexcept
     v->note = v->targetNote = key;
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     v->level = v->velocity;
-    v->env.begin (patch_->ampEnv, sampleRate_);
+    const auto amp = timingOf (patch_->ampEnv, lastParams_.ampEnv);
+    v->env.begin (patch_->ampEnv, sampleRate_, &amp);
     v->penv.begin (patch_->pitchEnv, sampleRate_);
-    for (std::size_t f = 0; f < 2; ++f) v->fenv[f].begin (patch_->filterEnv[f], sampleRate_);
+    for (std::size_t f = 0; f < 2; ++f)
+    {
+        const auto ft = timingOf (patch_->filterEnv[f], lastParams_.filterEnv[f]);
+        v->fenv[f].begin (patch_->filterEnv[f], sampleRate_, &ft);
+    }
     v->rng = static_cast<std::uint32_t> (0x9E3779B9u * (static_cast<std::uint32_t> (counter_) + 1u)) | 1u;
     initPhases (*v);
 }
@@ -457,11 +485,7 @@ void SynthVoices::noteOff (int channel, int key) noexcept
     for (auto& v : voices_)
     {
         if (! v.active || v.releasing || v.stolen || v.channel != channel || v.key != key) continue;
-        v.releasing = true;
-        const auto& pt = patchOf (v);
-        v.env.noteOff (pt.ampEnv, sampleRate_);
-        v.penv.noteOff (pt.pitchEnv, sampleRate_);
-        for (std::size_t f = 0; f < 2; ++f) v.fenv[f].noteOff (pt.filterEnv[f], sampleRate_);
+        noteOffVoice (v);
     }
 }
 
@@ -495,7 +519,7 @@ void SynthVoices::renderVoice (Voice& v, float* left, float* right, int numFrame
     // --- ce qui ne change pas pendant le bloc
     std::array<bool, 2> fOn { d.filters.filter[0].on, d.filters.filter[1].on };
     const bool parallel = d.filters.parallel;
-    const auto balance = static_cast<float> (d.filters.balance);
+    const auto balance = static_cast<float> (p.filterBalance >= 0.0 ? std::min (p.filterBalance, 1.0) : d.filters.balance);
     std::array<bool, 2> fEnvModulated { fOn[0] && d.filters.filter[0].envDepthOctaves != 0.0,
                                          fOn[1] && d.filters.filter[1].envDepthOctaves != 0.0 };
     const bool pitchEnvUsed = p.pitchEnvDepth != 0.0;

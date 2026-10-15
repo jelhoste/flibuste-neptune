@@ -33,6 +33,12 @@ public:
         double pulse[numOscillators] = { 50.0, 50.0, 50.0 };      // % (largeur d'impulsion)
         double unisonDetune[numOscillators] = { 20.0, 20.0, 20.0 }; // cents, voix extrêmes
         double pitchEnvDepth = 0.0;          // demi-tons à pleine enveloppe
+        // Temps et sustain d'une enveloppe (paramètres de la piste) ; -1 : ceux du patch. Pris au Note On (attaque, décroissance,
+        // sustain) et au Note Off (relâchement).
+        struct EnvParams { double attackMs = -1.0, decayMs = -1.0, sustain = -1.0 /* 0..1 */, releaseMs = -1.0; };
+        EnvParams ampEnv, filterEnv[2];
+        double glideMs = -1.0;               // -1 : celui du patch
+        double filterBalance = -1.0;         // 0..1, mode parallèle ; -1 : celui du patch
     };
 
     void prepare (double sampleRate) noexcept;
@@ -116,6 +122,8 @@ private:
     void removeHeld (int channel, int key) noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, const Params& p) noexcept;
 
+    static EnvelopeTiming timingOf (const EnvelopeRuntime&, const Params::EnvParams&) noexcept;
+    void noteOffVoice (Voice& v) noexcept;
     void publishGenerations() noexcept;
     const SynthPatch& patchOf (const Voice& v) const noexcept { return v.frozen && v.patch != nullptr ? *v.patch : *patch_; }
 

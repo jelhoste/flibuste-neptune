@@ -248,6 +248,7 @@ public:
 private:
     static BusesProperties makeBuses (int numOutputs);
 
+    bool notifyHostOnSeed_ = true;       // faux pendant le chargement d'un état (publishSynthPatch)
     neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
     neptune::core::InstanceProfile profile_;

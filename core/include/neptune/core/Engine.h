@@ -168,6 +168,7 @@ private:
         std::size_t sendLevel[mixer::numSends];
         std::size_t sampler[mixer::kSamplerKinds];
         std::size_t synth[mixer::kSynthKinds];
+        std::size_t synthEnv[mixer::kSynthEnvKinds];
         std::size_t fm[mixer::kFmKinds];
         ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; for (auto& v : fm) v = N; }
     };

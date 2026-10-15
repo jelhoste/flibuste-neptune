@@ -90,6 +90,24 @@ constexpr ParamId fmParamBase = 60;
 constexpr ParamId fmParam (int track, FmKind kind) { return probe::trackParam (track, fmParamBase + static_cast<ParamId> (kind)); }
 bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 
+// Enveloppes, glissando et équilibre des filtres du synthé : identifiants `1000 + 100.t + 71 + kind` (14 paramètres). Ces valeurs
+// sont la référence du moteur ; la description du synthé (JSON) garde les mêmes valeurs pour l'éditeur et la sauvegarde (voir
+// analogsynth::seedEnvelopeParams / withLiveParams).
+enum SynthEnvKind : int
+{
+    kAmpAttack = 0, kAmpDecay, kAmpSustain, kAmpRelease,        // ms, ms, %, ms
+    kFilter1Attack, kFilter1Decay, kFilter1Sustain, kFilter1Release,
+    kFilter2Attack, kFilter2Decay, kFilter2Sustain, kFilter2Release,
+    kSynthGlide,                                                // ms, 0..2000 (mono et legato)
+    kFilterBalance,                                             // %, 0..100 (mode parallèle : 0 filtre 1, 100 filtre 2)
+    kSynthEnvKinds
+};
+constexpr ParamId synthEnvParamBase = 71;
+constexpr ParamId synthEnvParam (int track, SynthEnvKind kind)
+{
+    return probe::trackParam (track, synthEnvParamBase + static_cast<ParamId> (kind));
+}
+
 // Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.
 bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 

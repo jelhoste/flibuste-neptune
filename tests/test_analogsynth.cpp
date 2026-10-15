@@ -60,7 +60,7 @@ TEST_CASE ("analogsynth parameter set is complete and uses neptune track 0 ids",
     ParameterSet set;
     std::string error;
     REQUIRE (addParams (set, &error));
-    CHECK (set.size() == 2 + 7 + mixer::kSynthKinds);
+    CHECK (set.size() == 2 + 7 + mixer::kSynthKinds + mixer::kSynthEnvKinds);
     for (const auto& k : keyedParams())
         CHECK (set.indexOf (k.id) != ParameterSet::npos);
     CHECK (set.indexOf (mixer::synthParam (0, mixer::kPitchEnvDepth)) != ParameterSet::npos);
@@ -479,4 +479,74 @@ TEST_CASE ("presets apply to any Neptune synth track through idForTrack", "[anal
     CHECK_FALSE (differsFromPreset (p, set, target, cfg, 6));
     set.set (mixer::synthParam (6, mixer::kLevelOsc2), 43.0);
     CHECK (differsFromPreset (p, set, target, cfg, 6));
+}
+
+TEST_CASE ("synth envelope parameters follow the description and survive a state round trip", "[analogsynth][envparams]")
+{
+    AnalogSynthEngine e;
+    e.prepare (kRate, 128);
+    SynthDescription d;
+    d.ampEnv.attack.ms = 40.0;
+    d.ampEnv.decay.ms = 300.0;
+    d.ampEnv.sustain = 0.4;
+    d.ampEnv.release.ms = 700.0;
+    d.filters.filter[1].env.release.ms = 90.0;
+    d.glideMs = 120;
+    d.filters.balance = 0.25;
+    e.setDescription (d, false);
+
+    // les paramètres ont pris les valeurs de la description
+    auto value = [&e] (mixer::SynthEnvKind k) { return e.params().get (mixer::synthEnvParam (0, k)); };
+    CHECK_THAT (value (mixer::kAmpAttack), WithinAbs (40.0, 1e-6));
+    CHECK_THAT (value (mixer::kAmpSustain), WithinAbs (40.0, 1e-6));
+    CHECK_THAT (value (mixer::kFilter2Release), WithinAbs (90.0, 1e-6));
+    CHECK_THAT (value (mixer::kSynthGlide), WithinAbs (120.0, 1e-6));
+    CHECK_THAT (value (mixer::kFilterBalance), WithinAbs (25.0, 1e-6));
+
+    // un changement de paramètre (automation) se retrouve dans la description lue ensuite
+    e.params().set (mixer::synthEnvParam (0, mixer::kAmpRelease), 1500.0);
+    CHECK_THAT (e.description().ampEnv.release.ms, WithinAbs (1500.0, 1e-6));
+
+    // aller-retour de l'état : la description enregistrée porte la valeur courante
+    const auto text = stateToJson (e.params(), e.description(), "");
+    ParameterSet set;
+    REQUIRE (addParams (set));
+    SynthDescription back;
+    std::string id;
+    REQUIRE (stateFromJson (text, set, back, id));
+    CHECK_THAT (back.ampEnv.release.ms, WithinAbs (1500.0, 1e-6));
+    CHECK_THAT (set.get (mixer::synthEnvParam (0, mixer::kAmpRelease)), WithinAbs (1500.0, 1e-6));
+}
+
+TEST_CASE ("an old state without envelope parameters takes them from its description", "[analogsynth][envparams]")
+{
+    SynthDescription d;
+    d.ampEnv.release.ms = 640.0;
+    const auto text = stateToJson (ParameterSet {}, d, ""); // aucun paramètre : comme un état d'avant
+    ParameterSet set;
+    REQUIRE (addParams (set));
+    SynthDescription back;
+    std::string id;
+    REQUIRE (stateFromJson (text, set, back, id));
+    CHECK_THAT (set.get (mixer::synthEnvParam (0, mixer::kAmpRelease)), WithinAbs (640.0, 1e-6));
+}
+
+TEST_CASE ("the release time automated on the track is used at note off", "[analogsynth][envparams]")
+{
+    AnalogSynthEngine e;
+    e.prepare (kRate, 128);
+    SynthDescription d;
+    d.ampEnv.attack.ms = 0.0;
+    d.ampEnv.release.ms = 2000.0; // long dans la description
+    d.filters.filter[0].on = false;
+    e.setDescription (d, false);
+    e.params().set (mixer::synthEnvParam (0, mixer::kAmpRelease), 20.0); // court par automation
+
+    std::vector<float> l (128), r (128);
+    e.noteOn (0, 60, 1.0f);
+    for (int i = 0; i < 20; ++i) e.process (l.data(), r.data(), 128);
+    REQUIRE (e.activeVoices() == 1);
+    e.noteOff (0, 60);
+    for (int i = 0; i < 30; ++i) e.process (l.data(), r.data(), 128); // ~80 ms
+    CHECK (e.activeVoices() == 0);
 }

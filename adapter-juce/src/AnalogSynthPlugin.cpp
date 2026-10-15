@@ -186,7 +186,14 @@ void AnalogSynthProcessor::uiEditSynth (SynthDescription d, std::string name, st
     const auto previous = engine_.description();
     if (previous == d) return;
     undo_.perform (std::make_unique<SnapshotCommand<SynthDescription>> (
-        previous, d, [this] (const SynthDescription& v) { engine_.setDescription (v); updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true)); },
+        previous, d,
+        [this] (const SynthDescription& v)
+        {
+            const auto before = snapshotNormalised();
+            engine_.setDescription (v); // recopie aussi les temps d'enveloppe, le glissando et l'équilibre dans les paramètres
+            notifyHostOfParameterChanges (before);
+            updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+        },
         std::move (name), std::move (mergeKey)));
 }
 
@@ -490,6 +497,17 @@ void AnalogSynthEditor::timerCallback()
     {
         lastUndoRevision_ = rev;
         synthView_->setDescription (processor_.synthDescription()); // annuler / rétablir ont pu changer le patch
+    }
+    // automation des enveloppes, du glissando, de l'équilibre : l'éditeur graphique suit
+    {
+        std::uint32_t sum = 0;
+        for (int k = 0; k < neptune::core::mixer::kSynthEnvKinds; ++k)
+            sum += processor_.engine().params().version (neptune::core::mixer::synthEnvParam (0, static_cast<neptune::core::mixer::SynthEnvKind> (k)));
+        if (sum != lastEnvVersions_)
+        {
+            lastEnvVersions_ = sum;
+            synthView_->setDescription (processor_.synthDescription());
+        }
     }
     synthView_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1)); // notes MIDI reçues
     undoButton_.setEnabled (processor_.undoManager().canUndo());

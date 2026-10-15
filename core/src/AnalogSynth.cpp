@@ -76,6 +76,56 @@ preset::LibraryConfig defaultConfig()
     return c;
 }
 
+// ---------------------------------------------------------------------------------------------------- enveloppes
+
+namespace
+{
+EnvelopeDescription& envOf (SynthDescription& d, int e) { return e == 0 ? d.ampEnv : d.filters.filter[static_cast<std::size_t> (e - 1)].env; }
+const EnvelopeDescription& envOf (const SynthDescription& d, int e) { return e == 0 ? d.ampEnv : d.filters.filter[static_cast<std::size_t> (e - 1)].env; }
+} // namespace
+
+std::vector<std::pair<ParamId, double>> envelopeParamValues (const SynthDescription& d, int track)
+{
+    std::vector<std::pair<ParamId, double>> out;
+    auto id = [track] (int k) { return mixer::synthEnvParam (track, static_cast<mixer::SynthEnvKind> (k)); };
+    for (int e = 0; e < 3; ++e)
+    {
+        const auto& ed = envOf (d, e);
+        out.emplace_back (id (e * 4 + 0), ed.attack.ms);
+        out.emplace_back (id (e * 4 + 1), ed.decay.ms);
+        out.emplace_back (id (e * 4 + 2), ed.sustain * 100.0);
+        out.emplace_back (id (e * 4 + 3), ed.release.ms);
+    }
+    out.emplace_back (id (mixer::kSynthGlide), static_cast<double> (d.glideMs));
+    out.emplace_back (id (mixer::kFilterBalance), d.filters.balance * 100.0);
+    return out;
+}
+
+void seedEnvelopeParams (const SynthDescription& d, ParameterSet& set, int track)
+{
+    for (const auto& [id, v] : envelopeParamValues (d, track)) set.set (id, v);
+}
+
+SynthDescription withLiveParams (SynthDescription d, const ParameterSet& set, int track)
+{
+    auto get = [&set, track] (int k, double fallback)
+    {
+        const auto i = set.indexOf (mixer::synthEnvParam (track, static_cast<mixer::SynthEnvKind> (k)));
+        return i == ParameterSet::npos ? fallback : set.getAt (i);
+    };
+    for (int e = 0; e < 3; ++e)
+    {
+        auto& ed = envOf (d, e);
+        ed.attack.ms = get (e * 4 + 0, ed.attack.ms);
+        ed.decay.ms = get (e * 4 + 1, ed.decay.ms);
+        ed.sustain = get (e * 4 + 2, ed.sustain * 100.0) / 100.0;
+        ed.release.ms = get (e * 4 + 3, ed.release.ms);
+    }
+    d.glideMs = static_cast<int> (std::lround (get (mixer::kSynthGlide, d.glideMs)));
+    d.filters.balance = get (mixer::kFilterBalance, d.filters.balance * 100.0) / 100.0;
+    return sanitised (std::move (d));
+}
+
 // ---------------------------------------------------------------------------------------------------- état
 
 std::string stateToJson (const ParameterSet& set, const SynthDescription& d, const std::string& currentPresetId)
@@ -108,6 +158,7 @@ bool stateFromJson (std::string_view text, ParameterSet& set, SynthDescription& 
         }
     d = SynthDescription();
     if (const auto s = doc.find ("synth"); s != doc.end() && s->is_object()) d = synthFromJson (s->dump());
+    seedEnvelopeParams (d, set); // la description fait foi (les états d'avant ces paramètres n'en portent pas)
     currentPresetId.clear();
     if (const auto p = doc.find ("preset_id"); p != doc.end() && p->is_string() && p->get<std::string>().size() <= 64) currentPresetId = p->get<std::string>();
     return true;
@@ -174,6 +225,7 @@ bool applyPreset (const preset::Preset& p, ParameterSet& set, SynthDescription& 
     if (! p.module.empty() && p.module != moduleId) return false;
     applyPresetValues (p, set, cfg, track);
     d = presetDescription (p, d, cfg);
+    seedEnvelopeParams (d, set, track);
     return true;
 }
 
@@ -291,6 +343,8 @@ AnalogSynthEngine::AnalogSynthEngine()
     ok_ = addParams (params_, &error);
     auto idx = [this] (ParamId id) { return params_.indexOf (id); };
     for (int k = 0; k < mixer::kSynthKinds; ++k) synthIdx_[static_cast<std::size_t> (k)] = idx (mixer::synthParam (0, static_cast<mixer::SynthKind> (k)));
+    for (int k = 0; k < mixer::kSynthEnvKinds; ++k)
+        envIdx_[static_cast<std::size_t> (k)] = idx (mixer::synthEnvParam (0, static_cast<mixer::SynthEnvKind> (k)));
     idxVolume_ = idx (volume);
     idxPan_ = idx (pan);
     idxGain_ = idx (sampler::gain);
@@ -321,6 +375,8 @@ void AnalogSynthEngine::setDescription (const SynthDescription& d, bool newPrese
     patchSlot_.publish (std::move (patch));
     patchSlot_.collect();
     pruneKeeper();
+    // après la publication (capture par voix : les notes figées gardent les valeurs d'avant) : les paramètres suivent la description
+    seedEnvelopeParams (description_, params_);
 }
 
 bool AnalogSynthEngine::loadPreset (const preset::Preset& p, const preset::LibraryConfig& cfg)
@@ -391,6 +447,19 @@ void AnalogSynthEngine::process (float* left, float* right, int n) noexcept
         sp.unisonDetune[o] = get (static_cast<mixer::SynthKind> (mixer::kDetuneOsc1 + o));
     }
     sp.pitchEnvDepth = get (mixer::kPitchEnvDepth);
+    auto env = [this] (mixer::SynthEnvKind k) { return params_.getAt (envIdx_[static_cast<std::size_t> (k)]); };
+    auto fill = [&env] (SynthVoices::Params::EnvParams& e, int base)
+    {
+        e.attackMs = env (static_cast<mixer::SynthEnvKind> (base));
+        e.decayMs = env (static_cast<mixer::SynthEnvKind> (base + 1));
+        e.sustain = env (static_cast<mixer::SynthEnvKind> (base + 2)) / 100.0;
+        e.releaseMs = env (static_cast<mixer::SynthEnvKind> (base + 3));
+    };
+    fill (sp.ampEnv, 0);
+    fill (sp.filterEnv[0], 4);
+    fill (sp.filterEnv[1], 8);
+    sp.glideMs = env (mixer::kSynthGlide);
+    sp.filterBalance = env (mixer::kFilterBalance) / 100.0;
 
     const float gain = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
     voices_.render (left, right, n, lastGain_, gain, sp);

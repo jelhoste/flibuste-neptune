@@ -19,7 +19,24 @@ bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, st
         else spec = ParamSpec::continuous (id, prefix + "Pitch Env Depth", Unit::Semitones, -48.0, 48.0, 0.0);
         if (! set.add (std::move (spec), error)) return false;
     }
-    return true;
+    static const char* const envNames[3] = { "Amp Env ", "Filter 1 Env ", "Filter 2 Env " };
+    static const char* const segNames[4] = { "Attack", "Decay", "Sustain", "Release" };
+    for (int e = 0; e < 3; ++e)
+        for (int s = 0; s < 4; ++s)
+        {
+            const auto id = synthEnvParam (track, static_cast<SynthEnvKind> (e * 4 + s));
+            const std::string name = prefix + envNames[e] + segNames[s];
+            // temps en ms avec une zone de précision sur les valeurs courtes (même cubique que l'éditeur graphique)
+            if (s == 2) { if (! set.add (ParamSpec::continuous (id, name, Unit::Percent, 0.0, 100.0, 100.0), error)) return false; }
+            else
+            {
+                const double def = e == 0 ? (s == 0 ? 5.0 : s == 1 ? 0.0 : 150.0) : (s == 3 ? 50.0 : 0.0);
+                if (! set.add (ParamSpec::continuous (id, name, Unit::Milliseconds, 0.0, 10000.0, def, Curve::Power, 3.0), error)) return false;
+            }
+        }
+    return set.add (ParamSpec::continuous (synthEnvParam (track, kSynthGlide), prefix + "Glide", Unit::Milliseconds, 0.0, 2000.0, 0.0,
+                                           Curve::Power, 2.0), error)
+        && set.add (ParamSpec::continuous (synthEnvParam (track, kFilterBalance), prefix + "Filter Balance", Unit::Percent, 0.0, 100.0, 50.0), error);
 }
 
 bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)

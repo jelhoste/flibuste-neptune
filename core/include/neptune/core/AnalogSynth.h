@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "neptune/core/HandoffSlot.h"
@@ -37,6 +38,16 @@ constexpr const char* glideKey = "synth.glide"; // réglage de la description (n
 
 // Défauts de capture du plugin : volume et pan de sortie, glissando : libres ; tout le reste capturé.
 preset::LibraryConfig defaultConfig();
+
+// ---- enveloppes, glissando, équilibre des filtres : paramètres <-> description ----
+// Le moteur lit ces réglages dans les paramètres de la piste (automatisables) ; la description (éditeur graphique, JSON, presets)
+// porte les mêmes valeurs. Règle : à chaque fois que la description change (édition, preset, chargement d'un état), on
+// recopie ses valeurs dans les paramètres (`envelopeParamValues`) ; à chaque fois qu'on la lit pour l'afficher ou l'enregistrer,
+// on y remet les valeurs courantes des paramètres (`withLiveParams`) : c'est le travail de AnalogSynthEngine::description() et de
+// l'adaptateur de Neptune ; les fonctions d'état et de preset ci-dessous prennent une description déjà à jour.
+std::vector<std::pair<ParamId, double>> envelopeParamValues (const SynthDescription&, int track = 0);
+void seedEnvelopeParams (const SynthDescription&, ParameterSet&, int track = 0);
+SynthDescription withLiveParams (SynthDescription, const ParameterSet&, int track = 0);
 
 // ---- état du plugin (getStateInformation) ----
 std::string stateToJson (const ParameterSet&, const SynthDescription&, const std::string& currentPresetId);
@@ -83,7 +94,8 @@ public:
     // patch et leurs anciennes valeurs (capture par voix) ; faux : retouche du patch, les notes en cours suivent.
     void setDescription (const SynthDescription&, bool newPreset = false);
     int frozenVoices() const noexcept { return voices_.frozenVoices(); }
-    const SynthDescription& description() const noexcept { return description_; }
+    // La description avec les valeurs courantes des paramètres d'enveloppe, de glissando et d'équilibre (voir withLiveParams).
+    SynthDescription description() const { return withLiveParams (description_, params_); }
     // Charge un preset avec capture par voix : le nouveau patch est publié AVANT de changer les valeurs, pour que l'audio fige les
     // notes en cours avec les valeurs d'avant (voir SynthVoices::setPatch). Faux si le preset est d'un autre module.
     bool loadPreset (const preset::Preset&, const preset::LibraryConfig&);
@@ -129,6 +141,7 @@ private:
     ParameterSet params_;
     bool ok_ = true;
     std::array<std::size_t, mixer::kSynthKinds> synthIdx_ {};
+    std::array<std::size_t, mixer::kSynthEnvKinds> envIdx_ {};
     std::size_t idxVolume_ = 0, idxPan_ = 0, idxGain_ = 0, idxSemi_ = 0, idxCents_ = 0;
     std::array<std::size_t, 2> idxCutoff_ {}, idxReso_ {};
 

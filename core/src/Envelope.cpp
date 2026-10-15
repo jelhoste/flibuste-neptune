@@ -134,9 +134,9 @@ EnvelopeRuntime::EnvelopeRuntime (const EnvelopeDescription& desc)
 void EnvelopeRunner::enterAfterHold (const EnvelopeRuntime& env) noexcept
 {
     pos_ = 0.0;
-    if (env.decayOn && env.decaySec > 0.0) { stage_ = Stage::Decay; value_ = 1.0f; return; }
+    if (env.decayOn && t_.decaySec > 0.0) { stage_ = Stage::Decay; value_ = 1.0f; return; }
     stage_ = Stage::Sustain;
-    value_ = env.decayOn ? env.sustain : 1.0f; // decay à 0 ms : saut direct au niveau de sustain
+    value_ = env.decayOn ? t_.sustain : 1.0f; // decay à 0 ms : saut direct au niveau de sustain
     if (value_ <= 0.0f) stage_ = Stage::Done;
 }
 
@@ -144,23 +144,25 @@ void EnvelopeRunner::enterFirstStage (const EnvelopeRuntime& env) noexcept
 {
     pos_ = 0.0;
     if (env.delayOn && env.delaySec > 0.0) { stage_ = Stage::Delay; value_ = 0.0f; return; }
-    if (env.attackOn && env.attackSec > 0.0) { stage_ = Stage::Attack; value_ = 0.0f; return; }
+    if (env.attackOn && t_.attackSec > 0.0) { stage_ = Stage::Attack; value_ = 0.0f; return; }
     if (env.holdOn && env.holdSec > 0.0) { stage_ = Stage::Hold; value_ = 1.0f; return; }
     enterAfterHold (env);
 }
 
-void EnvelopeRunner::begin (const EnvelopeRuntime& env, double) noexcept
+void EnvelopeRunner::begin (const EnvelopeRuntime& env, double, const EnvelopeTiming* timing) noexcept
 {
+    t_ = timing != nullptr ? *timing : EnvelopeTiming::of (env);
     declick_ = false;
     enterFirstStage (env);
 }
 
-void EnvelopeRunner::noteOff (const EnvelopeRuntime& env, double sampleRate) noexcept
+void EnvelopeRunner::noteOff (const EnvelopeRuntime& env, double sampleRate, const EnvelopeTiming* timing) noexcept
 {
     if (stage_ == Stage::Done || stage_ == Stage::Release) return;
+    if (timing != nullptr) t_.releaseSec = timing->releaseSec;
     releaseStart_ = value_;
-    declick_ = ! (env.releaseOn && env.releaseSec > 0.0);
-    releaseFrames_ = std::max (1.0, (declick_ ? kDeclickSeconds : env.releaseSec) * sampleRate);
+    declick_ = ! (env.releaseOn && t_.releaseSec > 0.0);
+    releaseFrames_ = std::max (1.0, (declick_ ? kDeclickSeconds : t_.releaseSec) * sampleRate);
     stage_ = Stage::Release;
     pos_ = 0.0;
 }
@@ -181,7 +183,7 @@ void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double
             if (pos_ >= env.delaySec * sampleRate)
             {
                 pos_ = 0.0;
-                if (env.attackOn && env.attackSec > 0.0) stage_ = Stage::Attack;
+                if (env.attackOn && t_.attackSec > 0.0) stage_ = Stage::Attack;
                 else if (env.holdOn && env.holdSec > 0.0) { stage_ = Stage::Hold; value_ = 1.0f; }
                 else enterAfterHold (env);
             }
@@ -189,7 +191,7 @@ void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double
         case Stage::Attack:
         {
             pos_ += frames;
-            const double len = env.attackSec * sampleRate;
+            const double len = t_.attackSec * sampleRate;
             if (pos_ >= len)
             {
                 value_ = 1.0f;
@@ -207,14 +209,14 @@ void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double
         case Stage::Decay:
         {
             pos_ += frames;
-            const double len = env.decaySec * sampleRate;
+            const double len = t_.decaySec * sampleRate;
             if (pos_ >= len)
             {
-                value_ = env.sustain;
+                value_ = t_.sustain;
                 stage_ = value_ <= 0.0f ? Stage::Done : Stage::Sustain;
             }
             else
-                value_ = 1.0f + (env.sustain - 1.0f) * lookup (env.decayCurve, pos_ / len);
+                value_ = 1.0f + (t_.sustain - 1.0f) * lookup (env.decayCurve, pos_ / len);
             break;
         }
         case Stage::Sustain:

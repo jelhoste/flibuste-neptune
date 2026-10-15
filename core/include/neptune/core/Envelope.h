@@ -91,13 +91,29 @@ struct EnvelopeRuntime
     explicit EnvelopeRuntime (const EnvelopeDescription& d);
 };
 
+// Temps et niveau de sustain à utiliser à la place de ceux des tables (paramètres de piste automatisables). Délai, maintien, courbes
+// et interrupteurs de segment restent ceux de l'enveloppe.
+struct EnvelopeTiming
+{
+    double attackSec = 0.0, decaySec = 0.0, releaseSec = 0.05;
+    float sustain = 1.0f;
+    static EnvelopeTiming of (const EnvelopeRuntime& e) noexcept
+    {
+        EnvelopeTiming t;
+        t.attackSec = e.attackSec; t.decaySec = e.decaySec; t.releaseSec = e.releaseSec; t.sustain = e.sustain;
+        return t;
+    }
+};
+
 class EnvelopeRunner
 {
 public:
-    // Démarre au premier segment actif.
-    void begin (const EnvelopeRuntime& env, double sampleRate) noexcept;
-    // Note Off : relâchement depuis le niveau courant. Sans relâchement actif : fondu de 2 ms (anti-clic).
-    void noteOff (const EnvelopeRuntime& env, double sampleRate) noexcept;
+    // Démarre au premier segment actif. `timing` (facultatif) remplace attaque, décroissance, relâchement et sustain de `env` pour
+    // toute la note (pris au Note On).
+    void begin (const EnvelopeRuntime& env, double sampleRate, const EnvelopeTiming* timing = nullptr) noexcept;
+    // Note Off : relâchement depuis le niveau courant. Sans relâchement actif : fondu de 2 ms (anti-clic). `timing` (facultatif) :
+    // seul son temps de relâchement est repris (la valeur au moment du Note Off).
+    void noteOff (const EnvelopeRuntime& env, double sampleRate, const EnvelopeTiming* timing = nullptr) noexcept;
     // Valeur du prochain échantillon (puis avance d'un échantillon).
     float next (const EnvelopeRuntime& env, double sampleRate) noexcept;
     // Avance de `frames` échantillons d'un coup (enveloppes lues à cadence réduite, ex. modulation de filtre toutes les 16 frames).
@@ -115,6 +131,7 @@ private:
     void enterAfterHold (const EnvelopeRuntime& env) noexcept;
 
     Stage stage_ = Stage::Done;
+    EnvelopeTiming t_;
     double pos_ = 0.0;         // échantillons écoulés dans le segment
     double releaseFrames_ = 1.0;
     float releaseStart_ = 0.0f;

@@ -232,6 +232,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
             tracks_[static_cast<std::size_t> (t)].inserts[static_cast<std::size_t> (s)].bypass = idx (probe::trackParam (t, probe::kInsertBypass + static_cast<ParamId> (s)));
         for (int k = 0; k < mixer::kSamplerKinds; ++k) p.sampler[k] = idx (mixer::samplerParam (t, static_cast<mixer::SamplerKind> (k)));
         for (int k = 0; k < mixer::kSynthKinds; ++k) p.synth[k] = idx (mixer::synthParam (t, static_cast<mixer::SynthKind> (k)));
+        for (int k = 0; k < mixer::kSynthEnvKinds; ++k) p.synthEnv[k] = idx (mixer::synthEnvParam (t, static_cast<mixer::SynthEnvKind> (k)));
         for (int k = 0; k < mixer::kFmKinds; ++k) p.fm[k] = idx (mixer::fmParam (t, static_cast<mixer::FmKind> (k)));
     }
     for (int b = 0; b < kBuses; ++b)
@@ -814,6 +815,22 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
                     sp.unisonDetune[o] = get (static_cast<mixer::SynthKind> (mixer::kDetuneOsc1 + o), 20.0);
                 }
                 sp.pitchEnvDepth = get (mixer::kPitchEnvDepth, 0.0);
+                const auto& se = t.idx.synthEnv;
+                auto env = [this, &se] (mixer::SynthEnvKind k, double fallback) { return param (se[static_cast<std::size_t> (k)], fallback); };
+                auto fill = [&env] (SynthVoices::Params::EnvParams& e, int base)
+                {
+                    e.attackMs = env (static_cast<mixer::SynthEnvKind> (base), -1.0);
+                    e.decayMs = env (static_cast<mixer::SynthEnvKind> (base + 1), -1.0);
+                    const double sus = env (static_cast<mixer::SynthEnvKind> (base + 2), -100.0);
+                    e.sustain = sus < 0.0 ? -1.0 : sus / 100.0;
+                    e.releaseMs = env (static_cast<mixer::SynthEnvKind> (base + 3), -1.0);
+                };
+                fill (sp.ampEnv, 0);
+                fill (sp.filterEnv[0], 4);
+                fill (sp.filterEnv[1], 8);
+                sp.glideMs = env (mixer::kSynthGlide, -1.0);
+                const double bal = env (mixer::kFilterBalance, -100.0);
+                sp.filterBalance = bal < 0.0 ? -1.0 : bal / 100.0;
             }
             t.synth.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, sp);
         }

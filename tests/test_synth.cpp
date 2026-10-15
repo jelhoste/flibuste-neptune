@@ -553,6 +553,22 @@ TEST_CASE ("engine: the synth follows the track gain, source levels and note-off
     CHECK (r.engine.activeVoices() == 0);
 }
 
+TEST_CASE ("engine: the synth release time comes from the track parameter, not the patch")
+{
+    Rig r;
+    r.engine.setTrackType (0, TrackType::Synth);
+    auto d = sineSynth();
+    d.ampEnv.release.ms = 3000.0; // très long dans le patch
+    r.engine.publishSynth (0, std::make_shared<SynthPatch> (d));
+    r.run (1);
+    REQUIRE (r.params.set (mixer::synthEnvParam (0, mixer::kAmpRelease), 10.0));
+    r.engine.noteOn (0, 60, 1.0f);
+    r.run (8);
+    r.engine.noteOff (0, 60);
+    CHECK (r.run (200) < 1e-6f);
+    CHECK (r.engine.activeVoices() == 0);
+}
+
 TEST_CASE ("engine: synth parameters exist for every track with their documented ids and defaults")
 {
     ParameterSet set;
