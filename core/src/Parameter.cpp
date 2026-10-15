@@ -70,7 +70,7 @@ double ParamSpec::clamp (double plain) const noexcept
 {
     if (! std::isfinite (plain)) return defaultValue;
     plain = std::min (std::max (plain, min), max);
-    if (kind != Kind::Continuous) plain = std::round (plain);
+    if (kind != Kind::Continuous) plain = std::round (plain) + 0.0; // + 0.0 : -0.0 devient +0.0 (texte « -0 st » incohérent)
     return plain;
 }
 
@@ -260,7 +260,15 @@ std::string ParameterSet::toText (const ParamSpec& s, double plain) const
         return buf;
     }
     std::snprintf (buf, sizeof buf, "%.*f%s", defaultDecimals (s), v, unitSuffix (s.unit));
-    return buf;
+    std::string out = buf;
+    // un petit négatif arrondi à zéro s'affiche « -0.00 » : le signe est retiré (le texte doit se relire en la même valeur)
+    if (out.size() > 1 && out[0] == '-')
+    {
+        std::size_t i = 1;
+        while (i < out.size() && (out[i] == '0' || out[i] == '.')) ++i;
+        if (i == out.size() || ! (out[i] >= '1' && out[i] <= '9')) out.erase (0, 1);
+    }
+    return out;
 }
 
 std::string ParameterSet::toText (ParamId id) const

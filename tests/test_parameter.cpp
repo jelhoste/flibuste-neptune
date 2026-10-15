@@ -197,3 +197,14 @@ TEST_CASE ("concurrent access stays consistent")
     CHECK (bad.load() == 0);
     CHECK (ps.version (1) > 0);
 }
+
+TEST_CASE ("parameter text never shows a negative zero")
+{
+    using namespace neptune::core;
+    ParameterSet set;
+    REQUIRE (set.add (ParamSpec::stepped (1, "Tune", Unit::Semitones, -24, 24, 0)));
+    REQUIRE (set.add (ParamSpec::continuous (2, "Gain", Unit::Decibel, -12.0, 12.0, 0.0)));
+    CHECK (set.toText (set.spec (0), -0.24) == "0 st");
+    CHECK (set.toText (set.spec (1), -0.001) == "0.00 dB");
+    CHECK (set.toText (set.spec (1), -1.5) == "-1.50 dB");
+}
