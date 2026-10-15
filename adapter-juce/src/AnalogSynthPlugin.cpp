@@ -414,7 +414,7 @@ void AnalogSynthEditor::resized()
     r.removeFromTop (8);
 
     auto bottom = r.removeFromBottom (kBottomHeight);
-    synthView_->setBounds (r);
+    synthView_->placeScaled (r);
 
     const int knobSide = static_cast<int> (ui::effectiveHitSize (48.0, ui::KnobConfig {}));
     int x = bottom.getX();
@@ -424,8 +424,9 @@ void AnalogSynthEditor::resized()
         k->setBounds (x + (kKnobCell - knobSide) / 2, y, knobSide, knobSide);
         x += kKnobCell;
     }
-    redoButton_.setBounds (bottom.getRight() - 110, y + (knobSide - 44) / 2, 110, 44);
-    undoButton_.setBounds (bottom.getRight() - 230, y + (knobSide - 44) / 2, 110, 44);
+    // annuler / rétablir : petits, sur la rangée des potards, à droite
+    redoButton_.setBounds (bottom.getRight() - 84, y + (knobSide - 30) / 2, 84, 30);
+    undoButton_.setBounds (bottom.getRight() - 84 - 6 - 84, y + (knobSide - 30) / 2, 84, 30);
 
     if (modal_) modal_->setBounds (getLocalBounds());
     if (manager_) manager_->setBounds (getLocalBounds());

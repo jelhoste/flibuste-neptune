@@ -331,6 +331,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
     updateViewVisibility();
     setResizable (true, true);
+    setResizeLimits (1100, 640, 3000, 2000); // en dessous, les rangées de potards et de boutons se chevaucheraient
     setSize (1160, 960);
 }
 
@@ -1127,7 +1128,7 @@ void NeptuneEditor::resized()
     panicButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
     trackBox_.setBounds (190, 32, 220, 36);
     mixerView_->setBounds (32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 80 - 150));
-    synthView_->setBounds (32, 80, getWidth() - 64, juce::jmax (300, getHeight() - 270 - 12 - 80));
+    synthView_->placeScaled ({ 32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 270 - 12 - 80) });
     {
         auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));

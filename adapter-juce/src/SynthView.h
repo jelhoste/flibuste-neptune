@@ -73,11 +73,16 @@ private:
 
 // Vue du synthé soustractif (spec-modules §2) : trois pages (oscillateurs et mixeur, filtres, enveloppes et voix) et le clavier.
 // Les valeurs automatisables sont des potards liés aux paramètres de la piste ; le reste est la description du patch, annulable.
-class SynthView : public juce::Component
+class SynthView : public juce::Component, private juce::Timer
 {
 public:
     SynthView (ParamHost&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&, neptune::core::theme::KnobStyle);
     ~SynthView() override;
+
+    // Taille de conception : en dessous, la vue entière est réduite proportionnellement (au lieu de superposer ses éléments).
+    static constexpr int designWidth = 1100, designHeight = 570;
+    // Place la vue dans `area` ; si `area` est plus petite que la taille de conception, tout est réduit d'un même facteur.
+    void placeScaled (juce::Rectangle<int> area);
 
     std::function<void (const neptune::core::SynthDescription&)> onChange; // à chaque modification par l'utilisateur
     std::function<void()> onGestureBegin, onGestureEnd;                    // entourent un glissé : une seule entrée d'annulation
@@ -92,6 +97,7 @@ public:
     void paint (juce::Graphics&) override;
 
 private:
+    void timerCallback() override;
     struct OscPanel;
     struct Knob
     {
@@ -120,6 +126,7 @@ private:
     int track_ = 0;
     int page_ = 0;
     bool updating_ = false, dragging_ = false;
+    std::vector<std::uint32_t> shownVersions_; // versions des paramètres au dernier dessin (les valeurs sous les potards suivent l'automation)
 
     std::vector<Knob> knobs_;
     std::vector<std::pair<int, juce::Component*>> pageControls_; // (page, composant) pour la visibilité

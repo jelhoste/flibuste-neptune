@@ -552,9 +552,34 @@ SynthView::SynthView (ParamHost& host, const theme::Palette& palette, const i18n
 
     refreshControls();
     setPage (0);
+    startTimerHz (20);
 }
 
-SynthView::~SynthView() = default;
+SynthView::~SynthView() { stopTimer(); }
+
+void SynthView::placeScaled (juce::Rectangle<int> area)
+{
+    const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / designHeight);
+    const float scale = juce::jmax (0.4f, s);
+    setTransform (juce::AffineTransform::scale (scale));
+    setBounds (area.getX(), area.getY(), juce::roundToInt (static_cast<float> (area.getWidth()) / scale),
+               juce::roundToInt (static_cast<float> (area.getHeight()) / scale));
+}
+
+// Les valeurs affichées sous les potards sont dessinées par cette vue : elles doivent suivre l'automation et les presets.
+void SynthView::timerCallback()
+{
+    if (! isVisible()) return;
+    shownVersions_.resize (knobs_.size(), 0u);
+    bool changed = false;
+    for (std::size_t i = 0; i < knobs_.size(); ++i)
+    {
+        if (knobs_[i].page != page_) continue;
+        const auto v = host_.parameters().version (knobs_[i].idFor (track_));
+        if (v != shownVersions_[i]) { shownVersions_[i] = v; changed = true; }
+    }
+    if (changed) repaint();
+}
 
 juce::Colour SynthView::colour (Token t) const
 {
