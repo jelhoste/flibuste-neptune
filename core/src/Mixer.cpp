@@ -60,6 +60,33 @@ bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::
               && set.add (ParamSpec::continuous (extra (kFmGlide), prefix + "FM Glide", Unit::Milliseconds, 0.0, 2000.0, 0.0, Curve::Power, 2.0), error);
 }
 
+bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
+{
+    static const char* const footage[9] = { "16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'" };
+    auto id = [track] (int k) { return organParam (track, static_cast<OrganKind> (k)); };
+    bool ok = true;
+    for (int i = 0; ok && i < 9; ++i)
+        ok = set.add (ParamSpec::stepped (id (kOrgUpper0 + i), prefix + "Upper " + footage[i], Unit::None, 0, 8, i == 0 || i == 1 ? 8 : i == 2 ? 6 : 0), error)
+          && set.add (ParamSpec::stepped (id (kOrgLower0 + i), prefix + "Lower " + footage[i], Unit::None, 0, 8, 0), error);
+    return ok
+        && set.add (ParamSpec::stepped (id (kOrgPedal16), prefix + "Pedal 16'", Unit::None, 0, 8, 0), error)
+        && set.add (ParamSpec::stepped (id (kOrgPedal8), prefix + "Pedal 8'", Unit::None, 0, 8, 0), error)
+        && set.add (ParamSpec::toggle (id (kOrgPercOn), prefix + "Percussion"), error)
+        && set.add (ParamSpec::toggle (id (kOrgPercSoft), prefix + "Percussion Soft"), error)
+        && set.add (ParamSpec::toggle (id (kOrgPercFast), prefix + "Percussion Fast", true), error)
+        && set.add (ParamSpec::toggle (id (kOrgPercThird), prefix + "Percussion 3rd Harmonic", true), error)
+        && set.add (ParamSpec::choice (id (kOrgVibMode), prefix + "Vibrato", { "Off", "V1", "C1", "V2", "C2", "V3", "C3" }, 0), error)
+        && set.add (ParamSpec::toggle (id (kOrgVibUpper), prefix + "Vibrato Upper", true), error)
+        && set.add (ParamSpec::toggle (id (kOrgVibLower), prefix + "Vibrato Lower"), error)
+        && set.add (ParamSpec::choice (id (kOrgLeslieSpeed), prefix + "Leslie Speed", { "Chorale", "Tremolo", "Brake" }, 0), error)
+        && set.add (ParamSpec::continuous (id (kOrgLeslieMix), prefix + "Leslie Mix", Unit::Percent, 0.0, 100.0, 100.0), error)
+        && set.add (ParamSpec::toggle (id (kOrgDriveOn), prefix + "Drive"), error)
+        && set.add (ParamSpec::continuous (id (kOrgDriveInput), prefix + "Drive Input", Unit::Percent, 0.0, 100.0, 50.0), error)
+        && set.add (ParamSpec::continuous (id (kOrgDriveCharacter), prefix + "Drive Character", Unit::Percent, 0.0, 100.0, 50.0), error)
+        && set.add (ParamSpec::continuous (id (kOrgDriveOutput), prefix + "Drive Output", Unit::Percent, 0.0, 100.0, 50.0), error)
+        && set.add (ParamSpec::continuous (id (kOrgReverb), prefix + "Reverb", Unit::Percent, 0.0, 100.0, 0.0), error);
+}
+
 bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
 {
     auto level = [] (ParamId id, std::string name, double def)
@@ -88,6 +115,7 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
     // Synthé : 15 paramètres par piste
     for (int t = 0; ok && t < tracks; ++t) ok = addSynthParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addFmParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
+    for (int t = 0; ok && t < tracks; ++t) ok = addOrganParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
 
     // Pistes parallèles
     for (int p = 0; ok && p < numParallels; ++p)

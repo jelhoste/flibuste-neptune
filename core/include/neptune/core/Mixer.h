@@ -121,6 +121,24 @@ constexpr ParamId synthEnvParam (int track, SynthEnvKind kind)
     return probe::trackParam (track, synthEnvParamBase + static_cast<ParamId> (kind));
 }
 
+// Paramètres automatisables d'une piste Orgue (moteur de setBfree) : identifiants `9000 + 100.t + kind`. Le gain et le volume sont
+// ceux de l'instrument (samplerParam / probe::kVolume).
+enum OrganKind : int
+{
+    kOrgUpper0 = 0,                 // 9 tirettes du supérieur : 16', 5 1/3', 8', 4', 2 2/3', 2', 1 3/5', 1 1/3', 1' (0..8)
+    kOrgLower0 = 9,                 // 9 tirettes de l'inférieur
+    kOrgPedal16 = 18, kOrgPedal8,   // 2 tirettes du pédalier : 16' et 8'
+    kOrgPercOn = 20, kOrgPercSoft, kOrgPercFast, kOrgPercThird, // percussion : marche, douce, rapide, 3e harmonique
+    kOrgVibMode = 24, kOrgVibUpper, kOrgVibLower,               // vibrato / chorus : mode (−, V1, C1, V2, C2, V3, C3), routage
+    kOrgLeslieSpeed = 27, kOrgLeslieMix,                        // Leslie : chorale / tremolo / frein, dry-wet (%)
+    kOrgDriveOn = 29, kOrgDriveInput, kOrgDriveCharacter, kOrgDriveOutput, // préampli à lampes (%)
+    kOrgReverb = 33,                // réverbération à ressorts (%)
+    kOrganKinds
+};
+constexpr ParamId organParamBase = 9000;
+constexpr ParamId organParam (int track, int kind) { return organParamBase + probe::trackStride * static_cast<ParamId> (track) + static_cast<ParamId> (kind); }
+bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
+
 // Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.
 bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 

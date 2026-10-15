@@ -193,3 +193,41 @@ target_link_libraries(FM6Op
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
+
+# ---- Orgamon (nom provisoire) : l'orgue à roues phoniques de Neptune (moteur de setBfree), plugin CLAP instrument indépendant ------
+set(ORGAMON_CLAP_ID "com.tournedosrossini.orgamon" CACHE STRING "Identifiant CLAP de l'orgue indépendant")
+
+juce_add_plugin(Orgamon
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Orgamon"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Orgm
+  IS_SYNTH                    TRUE
+  NEEDS_MIDI_INPUT            TRUE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Orgamon
+  CLAP_ID       "${ORGAMON_CLAP_ID}"
+  CLAP_FEATURES instrument synthesizer stereo)
+
+target_sources(Orgamon PRIVATE
+  src/OrganPlugin.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Orgamon PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Orgamon
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)

@@ -1,0 +1,198 @@
+#include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <vector>
+
+#include "neptune/core/OrganEngine.h"
+
+using namespace neptune::core::organ;
+
+namespace
+{
+constexpr double kRate = 48000.0;
+
+struct Level { float peak = 0.0f, rms = 0.0f; };
+
+Level run (OrganVoices& v, const OrganLive& live, int blocks, int blockSize = 128)
+{
+    std::vector<float> l (static_cast<std::size_t> (blockSize)), r (l);
+    double sum = 0.0;
+    long n = 0;
+    Level out;
+    for (int b = 0; b < blocks; ++b)
+    {
+        v.render (l.data(), r.data(), blockSize, 1.0f, 1.0f, live, false);
+        for (float x : l) { out.peak = std::max (out.peak, std::fabs (x)); sum += static_cast<double> (x) * x; ++n; }
+    }
+    out.rms = n > 0 ? static_cast<float> (std::sqrt (sum / static_cast<double> (n))) : 0.0f;
+    return out;
+}
+} // namespace
+
+TEST_CASE ("organ description: clamped and round trips through JSON", "[organ]")
+{
+    OrganDescription d;
+    d.channel = { 5, 0, 99 };
+    d.splitLower = 48;
+    d.transpose = { 40, -3, 0 };
+    d.tuningCents = -500;
+    d = sanitised (d);
+    CHECK (d.channel[2] == 16);
+    CHECK (d.transpose[0] == 24);
+    CHECK (d.tuningCents == -100);
+    CHECK (organFromJson (toJson (d)) == d);
+    CHECK (organFromJson ("pas du json") == OrganDescription {});
+}
+
+TEST_CASE ("organ keys: channels, split and transposition choose the keyboard of setBfree", "[organ]")
+{
+    OrganDescription d; // U : canal 1, L : canal 2, P : canal 3
+    CHECK (organKeyFor (d, 0, 36) == 0);     // do le plus grave du supérieur
+    CHECK (organKeyFor (d, 0, 96) == 60);    // le plus aigu
+    CHECK (organKeyFor (d, 0, 97) == -1);    // hors étendue : muet
+    CHECK (organKeyFor (d, 1, 36) == 64);    // inférieur
+    CHECK (organKeyFor (d, 2, 24) == 128);   // pédalier
+    CHECK (organKeyFor (d, 2, 55) == 159);
+    CHECK (organKeyFor (d, 5, 60) == -1);    // canal que personne n'écoute
+    d.transpose[0] = 12;
+    CHECK (organKeyFor (d, 0, 36) == 12);
+    d.transpose[0] = 0;
+    d.splitLower = 48;                       // sur le canal du supérieur : en dessous de 48, pédalier
+    d.splitUpper = 60;                       // entre 48 et 60 : inférieur
+    CHECK (organKeyFor (d, 0, 40) == 128 + 16);
+    CHECK (organKeyFor (d, 0, 50) == 64 + 14);
+    CHECK (organKeyFor (d, 0, 72) == 36);
+    d.channel[0] = 0;                        // supérieur muet
+    CHECK (organKeyFor (d, 0, 72) == -1);
+}
+
+TEST_CASE ("organ engine: a played key sounds with the drawbars and goes silent once released", "[organ][engine]")
+{
+    OrganVoices v;
+    REQUIRE (v.reserve (kRate));
+    OrganLive live;
+    CHECK (run (v, live, 20).peak < 1.0e-4f);   // rien tant qu'aucune touche
+    v.noteOn (0, 60);
+    CHECK (v.heldKeys() == 1);
+    const auto played = run (v, live, 200);
+    CHECK (played.peak > 0.02f);
+    CHECK (std::isfinite (played.rms));
+
+    v.noteOff (0, 60);
+    CHECK (v.heldKeys() == 0);
+    run (v, live, 400);                         // la queue de la cabine et de la réverb s'éteint
+    CHECK (run (v, live, 20).peak < 0.01f);
+}
+
+TEST_CASE ("organ engine: drawbars at zero are silent, more drawbars are louder", "[organ][engine]")
+{
+    OrganVoices v;
+    REQUIRE (v.reserve (kRate));
+    OrganLive live;
+    live.drawbars[0] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    v.noteOn (0, 60);
+    run (v, live, 100);
+    CHECK (run (v, live, 100).peak < 1.0e-3f);
+    live.drawbars[0] = { 0, 0, 8, 0, 0, 0, 0, 0, 0 };
+    run (v, live, 100);
+    const auto one = run (v, live, 100);
+    live.drawbars[0] = { 8, 8, 8, 8, 0, 0, 0, 0, 0 };
+    run (v, live, 100);
+    const auto many = run (v, live, 100);
+    CHECK (one.rms > 0.005f);
+    CHECK (many.rms > 0.005f);
+    CHECK (std::fabs (many.rms - one.rms) > 0.0f);
+}
+
+TEST_CASE ("organ engine: two instances do not share their keys", "[organ][engine]")
+{
+    OrganVoices a, b;
+    REQUIRE (a.reserve (kRate));
+    REQUIRE (b.reserve (kRate));
+    OrganLive live;
+    a.noteOn (0, 60);
+    run (a, live, 100);
+    run (b, live, 100);
+    CHECK (run (a, live, 50).peak > 0.02f);
+    CHECK (run (b, live, 50).peak < 1.0e-4f);
+}
+
+TEST_CASE ("organ engine: any block size gives the same sound", "[organ][engine]")
+{
+    auto render = [] (int blockSize)
+    {
+        OrganVoices v;
+        REQUIRE (v.reserve (kRate));
+        OrganLive live;
+        v.noteOn (0, 64);
+        std::vector<float> all;
+        std::vector<float> l (static_cast<std::size_t> (blockSize)), r (l);
+        for (int rendered = 0; rendered < 24000; rendered += blockSize)
+        {
+            v.render (l.data(), r.data(), blockSize, 1.0f, 1.0f, live, false);
+            all.insert (all.end(), l.begin(), l.end());
+        }
+        all.resize (24000);
+        return all;
+    };
+    const auto a = render (128), b = render (50 * 4 + 7 - 7); // 200 : pas un multiple du fragment de 128
+    REQUIRE (a.size() == b.size());
+    // pas identiques à l'échantillon près (le Leslie et le scanner tournent sur des phases aléatoires) : même niveau
+    auto rms = [] (const std::vector<float>& v)
+    {
+        double s = 0.0;
+        for (float x : v) s += static_cast<double> (x) * x;
+        return std::sqrt (s / static_cast<double> (v.size()));
+    };
+    CHECK (rms (a) > 0.01);
+    CHECK (std::fabs (rms (a) - rms (b)) < rms (a) * 0.1);
+}
+
+#include "neptune/core/OrganSynth.h"
+
+TEST_CASE ("organ synth: parameters, playing through the queue, state round trip", "[organ][synth]")
+{
+    OrganSynthEngine e;
+    REQUIRE (e.ok());
+    e.prepare (kRate, 128);
+    e.postNoteOn (0, 60);
+    std::vector<float> l (128), r (128);
+    float peak = 0.0f;
+    for (int i = 0; i < 200; ++i)
+    {
+        e.process (l.data(), r.data(), 128);
+        for (auto v : l) peak = std::max (peak, std::fabs (v));
+    }
+    CHECK (peak > 0.02f);
+    CHECK (e.heldKeys() == 1);
+    CHECK (e.heldKeyWord (0) == (std::uint64_t (1) << 60));
+
+    // un état relu donne le même état
+    e.params().set (neptune::core::mixer::organParam (0, neptune::core::mixer::kOrgLeslieSpeed), 2.0);
+    e.params().set (neptune::core::mixer::organParam (0, neptune::core::mixer::kOrgLower0 + 2), 5.0);
+    OrganDescription d;
+    d.splitLower = 48;
+    d.transpose[1] = -12;
+    e.setDescription (d);
+    const auto text = stateToJson (e.params(), e.description(), "abc");
+    OrganSynthEngine f;
+    OrganDescription back;
+    std::string id;
+    REQUIRE (stateFromJson (text, f.params(), back, id));
+    CHECK (back == e.description());
+    CHECK (id == "abc");
+    CHECK (liveFromParams (f.params()).leslieSpeed == 2);
+    CHECK (liveFromParams (f.params()).drawbars[1][2] == 5);
+    CHECK (stateToJson (f.params(), back, id) == text);
+    CHECK_FALSE (stateFromJson ("{\"format\":\"other\"}", f.params(), back, id));
+}
+
+TEST_CASE ("organ parameters exist for every Neptune track with distinct ids", "[organ][synth]")
+{
+    using namespace neptune::core;
+    ParameterSet set;
+    REQUIRE (mixer::addOrganParams (set, 0, ""));
+    REQUIRE (mixer::addOrganParams (set, 15, ""));
+    CHECK (static_cast<int> (set.size()) == 2 * (mixer::kOrganKinds - 0));
+    CHECK (set.get (mixer::organParam (0, mixer::kOrgUpper0 + 2)) == 6.0);
+    CHECK (set.get (mixer::organParam (15, mixer::kOrgLeslieMix)) == 100.0);
+}

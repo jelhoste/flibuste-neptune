@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth et FM6Op)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op et Orgamon)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -85,6 +85,9 @@ jobs:
           FM6=$(find build/adapter-juce/FM6Op_artefacts -name 'FM6Op.clap' -print -quit)
           test -n "$FM6" || { echo "FM6Op.clap introuvable"; exit 1; }
           "$CV" validate "$FM6"
+          ORG=$(find build/adapter-juce/Orgamon_artefacts -name 'Orgamon.clap' -print -quit)
+          test -n "$ORG" || { echo "Orgamon.clap introuvable"; exit 1; }
+          "$CV" validate "$ORG"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -180,6 +183,30 @@ jobs:
         with:
           name: FM6Op-${{ matrix.name }}
           path: dist-fm/*
+          if-no-files-found: error
+
+      # L'orgue séparé, archivé à part.
+      - name: Archive Orgamon.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Orgamon_artefacts -name 'Orgamon.clap' -print -quit)
+          test -n "$CLAP" || { echo "Orgamon.clap introuvable"; exit 1; }
+          mkdir -p dist-org/stage
+          cp -R "$CLAP" dist-org/stage/
+          cd dist-org/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Orgamon-${{ matrix.name }}.zip" Orgamon.clap
+          else
+            tar -czf "../Orgamon-${{ matrix.name }}.tar.gz" Orgamon.clap
+          fi
+          cd ../..
+          rm -rf dist-org/stage
+          ls -la dist-org
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Orgamon-${{ matrix.name }}
+          path: dist-org/*
           if-no-files-found: error
 
   release:

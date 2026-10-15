@@ -117,6 +117,27 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Pas repris** : les ombres (`--csh`, `--fsh`, `--ctl-sh`) et les dimensions des composants des contrôles (`nova-controls.css`) ; à décider quand les composants de l'interface seront écrits.
 - **Branché** : seulement la fenêtre de sonde (couleurs depuis le thème/contraste de `settings.json`, textes de la bannière de récupération et de la latence via les clés). Pas de menu : on édite `settings.json`, lu une fois au démarrage. Partie adaptateur compilée par la CI (verte) et **validée dans Reaper par l'utilisateur** (langue, thème, contraste).
 
+## Orgue à roues phoniques « Orgamon » (2026-10-15, à valider dans Reaper)
+
+Décisions de l'utilisateur : moteur de **setBfree** repris comme msfa (jamais le plugin entier), réverb à ressorts incluse, nouveau type
+de piste « Orgue » + plugin séparé (nom provisoire **Orgamon**, `com.tournedosrossini.orgamon`), maquette de référence
+`nova_hammond_console_ui.html` (archive `nova-ui-series`). Licence vérifiée fichier par fichier : GPL v2 **ou ultérieure** (voir
+`third_party/setbfree/README-NEPTUNE.md`).
+
+- **Fait et testé** (371 tests) : le moteur (`OrganCore.h/.c`, liaison C avec setBfree ; `OrganEngine.h/.cpp` : description, voix,
+  routage des notes), les paramètres (`mixer::OrganKind`, ids `9000 + 100.t + k`, 34 par piste : 9 + 9 + 2 tirettes, percussion x4,
+  vibrato / chorus x3, Leslie x2, overdrive x4, réverb), le moteur du plugin (`OrganSynth.h/.cpp`, état `organ-state`).
+- **Plugin séparé Orgamon** (`adapter-juce/src/OrganPlugin.*`, cible `Orgamon`) : tirettes, interrupteurs, listes, potards, claviers
+  (canaux, transposition, split). **Jamais compilé ni écouté** : contrôlé à la syntaxe seulement. Pas de presets ni de clavier à
+  l'écran pour l'instant.
+- **Pas encore fait** : le type de piste « Orgue » dans Neptune (mixeur, vue, moteur par piste, presets), les presets de l'orgue
+  (module `organ`), les onglets Leslie / Live / Matrice / Réglages de la maquette (vitesses et rayons du Leslie, key click, diaphonie,
+  accord), le clavier MIDI en CC (tirettes par contrôleurs), taille / amortissement de la réverb (absents de setBfree).
+- **Choix par défaut à confirmer** (l'utilisateur n'avait pas de préférence) : trois claviers = trois canaux MIDI réglables (1, 2, 3)
+  + points de split sur le canal du supérieur ; transposition par clavier ; touches hors étendue muettes.
+- **Pièges** : les fichiers C de setBfree doivent rester sous `_USE_MATH_DEFINES` ; `strcasecmp` passe par `compat/strings.h` sous MSVC ;
+  la CI Windows n'a pas encore compilé ce C (premier push à faire).
+
 ## Automation du synthé, favoris globaux (2026-10-15, à valider dans Reaper)
 
 - **Favoris** : `favorites.json` dans la racine de la bibliothèque (liste d'ids de presets, y compris factory), commun à tous les plugins ; `Library::isFavorite / setFavorite` (relit le fichier avant d'écrire : deux instances ne s'écrasent pas). Gestionnaire : cœur cliquable à gauche de chaque ligne + case « Favoris seulement ». Séparé de la note 0..3. Le A/B des presets est **abandonné** pour les synthés (décision de l'utilisateur) ; il reste pertinent pour les plugins d'effets. Le bloc sysex « function parameters » est mis de côté (spec DX7II fournie, incohérente, non implémentée).
