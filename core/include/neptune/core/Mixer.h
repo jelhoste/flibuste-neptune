@@ -90,6 +90,19 @@ constexpr ParamId fmParamBase = 60;
 constexpr ParamId fmParam (int track, FmKind kind) { return probe::trackParam (track, fmParamBase + static_cast<ParamId> (kind)); }
 bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 
+// Réglages FM supplémentaires : identifiants `1000 + 100.t + 85 + kind` (7 par piste). Comme pour le synthé (SynthEnvKind), le moteur
+// lit ces paramètres et la description FM garde les mêmes valeurs (fm::extraParamValues / withLiveParams).
+enum FmExtraKind : int
+{
+    kFmLfoSpeed = 0, kFmLfoPmd, kFmLfoAmd,    // 0..99 (vitesse, profondeur de vibrato, profondeur de trémolo du LFO)
+    kFmBendRange,                             // 0..12 demi-tons
+    kFmWheelPitch, kFmWheelAmp,               // 0..15 (sensibilités de la molette)
+    kFmGlide,                                 // ms, 0..2000 (mono et legato)
+    kFmExtraKinds
+};
+constexpr ParamId fmExtraParamBase = 85;
+constexpr ParamId fmExtraParam (int track, FmExtraKind kind) { return probe::trackParam (track, fmExtraParamBase + static_cast<ParamId> (kind)); }
+
 // Enveloppes, glissando et équilibre des filtres du synthé : identifiants `1000 + 100.t + 71 + kind` (14 paramètres). Ces valeurs
 // sont la référence du moteur ; la description du synthé (JSON) garde les mêmes valeurs pour l'éditeur et la sauvegarde (voir
 // analogsynth::seedEnvelopeParams / withLiveParams).

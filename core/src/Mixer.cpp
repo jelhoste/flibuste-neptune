@@ -48,8 +48,16 @@ bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::
     for (int op = 0; ok && op < 6; ++op)
         ok = set.add (ParamSpec::continuous (id (static_cast<FmKind> (kFmLevelOp1 + op)), prefix + "FM Op " + std::to_string (op + 1) + " Level",
                                              Unit::None, -99.0, 99.0, 0.0), error);
+    auto extra = [track] (FmExtraKind k) { return fmExtraParam (track, k); };
     return ok && set.add (ParamSpec::continuous (id (kFmUnisonDetune), prefix + "FM Unison Detune", Unit::Cents, 0.0, 100.0, 15.0), error)
-              && set.add (ParamSpec::continuous (id (kFmUnisonSpread), prefix + "FM Unison Spread", Unit::Percent, 0.0, 100.0, 60.0), error);
+              && set.add (ParamSpec::continuous (id (kFmUnisonSpread), prefix + "FM Unison Spread", Unit::Percent, 0.0, 100.0, 60.0), error)
+              && set.add (ParamSpec::stepped (extra (kFmLfoSpeed), prefix + "FM LFO Speed", Unit::None, 0, 99, 35), error)
+              && set.add (ParamSpec::stepped (extra (kFmLfoPmd), prefix + "FM LFO Pitch Depth", Unit::None, 0, 99, 0), error)
+              && set.add (ParamSpec::stepped (extra (kFmLfoAmd), prefix + "FM LFO Amp Depth", Unit::None, 0, 99, 0), error)
+              && set.add (ParamSpec::stepped (extra (kFmBendRange), prefix + "FM Bend Range", Unit::Semitones, 0, 12, 2), error)
+              && set.add (ParamSpec::stepped (extra (kFmWheelPitch), prefix + "FM Wheel Pitch Sens", Unit::None, 0, 15, 0), error)
+              && set.add (ParamSpec::stepped (extra (kFmWheelAmp), prefix + "FM Wheel Amp Sens", Unit::None, 0, 15, 0), error)
+              && set.add (ParamSpec::continuous (extra (kFmGlide), prefix + "FM Glide", Unit::Milliseconds, 0.0, 2000.0, 0.0, Curve::Power, 2.0), error);
 }
 
 bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)

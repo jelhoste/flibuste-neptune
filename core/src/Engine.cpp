@@ -234,6 +234,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         for (int k = 0; k < mixer::kSynthKinds; ++k) p.synth[k] = idx (mixer::synthParam (t, static_cast<mixer::SynthKind> (k)));
         for (int k = 0; k < mixer::kSynthEnvKinds; ++k) p.synthEnv[k] = idx (mixer::synthEnvParam (t, static_cast<mixer::SynthEnvKind> (k)));
         for (int k = 0; k < mixer::kFmKinds; ++k) p.fm[k] = idx (mixer::fmParam (t, static_cast<mixer::FmKind> (k)));
+        for (int k = 0; k < mixer::kFmExtraKinds; ++k) p.fmExtra[k] = idx (mixer::fmExtraParam (t, static_cast<mixer::FmExtraKind> (k)));
     }
     for (int b = 0; b < kBuses; ++b)
     {
@@ -795,6 +796,15 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
                     live.opLevel[static_cast<std::size_t> (op)] = static_cast<float> (get (static_cast<mixer::FmKind> (mixer::kFmLevelOp1 + op), 0.0));
                 live.unisonDetuneCents = static_cast<float> (get (mixer::kFmUnisonDetune, 15.0));
                 live.unisonSpread = static_cast<float> (get (mixer::kFmUnisonSpread, 60.0) / 100.0);
+                const auto& fxe = t.idx.fmExtra;
+                auto extra = [this, &fxe] (mixer::FmExtraKind k) { return static_cast<int> (std::lround (param (fxe[static_cast<std::size_t> (k)], -1.0))); };
+                live.lfoSpeed = extra (mixer::kFmLfoSpeed);
+                live.lfoPmd = extra (mixer::kFmLfoPmd);
+                live.lfoAmd = extra (mixer::kFmLfoAmd);
+                live.bendRange = extra (mixer::kFmBendRange);
+                live.wheelPitchSens = extra (mixer::kFmWheelPitch);
+                live.wheelAmpSens = extra (mixer::kFmWheelAmp);
+                live.glideMs = extra (mixer::kFmGlide);
             }
             t.fm.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, live);
         }

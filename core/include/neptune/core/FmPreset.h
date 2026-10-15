@@ -3,6 +3,7 @@
 // valeurs automatisables des macros dans `parameters`. Les clés sont celles de la piste 0 ; `idForTrack` les ramène à une piste.
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "neptune/core/FmPatch.h"
@@ -18,6 +19,14 @@ struct KeyedParam { const char* key; ParamId id; };
 const std::vector<KeyedParam>& keyedParams();
 ParamId paramIdForKey (std::string_view key) noexcept;
 ParamId idForTrack (ParamId track0Id, int track) noexcept;
+
+// Réglages de voix automatisables (mixer::FmExtraKind) <-> description : les mêmes règles que pour le synthé (voir
+// analogsynth::withLiveParams) : on recopie la description dans les paramètres quand elle change, on remet les paramètres dans la
+// description quand on la lit pour l'afficher ou l'enregistrer.
+std::vector<std::pair<ParamId, double>> extraParamValues (const FmDescription&, int track = 0);
+bool extraParamsMatch (const FmDescription&, const ParameterSet&, int track = 0); // voir analogsynth::envelopeParamsMatch
+void seedExtraParams (const FmDescription&, ParameterSet&, int track = 0);
+FmDescription withLiveParams (FmDescription, const ParameterSet&, int track = 0);
 
 preset::LibraryConfig defaultConfig(); // rien n'est « libre » : une macro fait partie du son
 

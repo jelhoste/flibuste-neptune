@@ -170,6 +170,7 @@ private:
         std::size_t synth[mixer::kSynthKinds];
         std::size_t synthEnv[mixer::kSynthEnvKinds];
         std::size_t fm[mixer::kFmKinds];
+        std::size_t fmExtra[mixer::kFmExtraKinds];
         ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; for (auto& v : fm) v = N; }
     };
     // Un emplacement d'insert : l'instance (remise au thread audio) et l'index de son paramètre de bypass (celui de l'hôte).

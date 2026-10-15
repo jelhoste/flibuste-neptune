@@ -44,6 +44,48 @@ ParamId idForTrack (ParamId id, int track) noexcept
 
 preset::LibraryConfig defaultConfig() { return preset::LibraryConfig {}; }
 
+std::vector<std::pair<ParamId, double>> extraParamValues (const FmDescription& d, int track)
+{
+    auto id = [track] (mixer::FmExtraKind k) { return mixer::fmExtraParam (track, k); };
+    return {
+        { id (mixer::kFmLfoSpeed), static_cast<double> (d.patch.global (kLfoOffset)) },
+        { id (mixer::kFmLfoPmd), static_cast<double> (d.patch.global (kLfoOffset + 2)) },
+        { id (mixer::kFmLfoAmd), static_cast<double> (d.patch.global (kLfoOffset + 3)) },
+        { id (mixer::kFmBendRange), static_cast<double> (d.pitchBendRange) },
+        { id (mixer::kFmWheelPitch), static_cast<double> (d.wheelPitchSens) },
+        { id (mixer::kFmWheelAmp), static_cast<double> (d.wheelAmpSens) },
+        { id (mixer::kFmGlide), static_cast<double> (d.glideMs) },
+    };
+}
+
+bool extraParamsMatch (const FmDescription& d, const ParameterSet& set, int track)
+{
+    return withLiveParams (d, set, track) == sanitised (d);
+}
+
+void seedExtraParams (const FmDescription& d, ParameterSet& set, int track)
+{
+    if (extraParamsMatch (d, set, track)) return;
+    for (const auto& [id, v] : extraParamValues (d, track)) set.set (id, v);
+}
+
+FmDescription withLiveParams (FmDescription d, const ParameterSet& set, int track)
+{
+    auto get = [&set, track] (mixer::FmExtraKind k, int fallback)
+    {
+        const auto i = set.indexOf (mixer::fmExtraParam (track, k));
+        return i == ParameterSet::npos ? fallback : static_cast<int> (std::lround (set.getAt (i)));
+    };
+    d.patch.setGlobal (kLfoOffset, get (mixer::kFmLfoSpeed, d.patch.global (kLfoOffset)));
+    d.patch.setGlobal (kLfoOffset + 2, get (mixer::kFmLfoPmd, d.patch.global (kLfoOffset + 2)));
+    d.patch.setGlobal (kLfoOffset + 3, get (mixer::kFmLfoAmd, d.patch.global (kLfoOffset + 3)));
+    d.pitchBendRange = get (mixer::kFmBendRange, d.pitchBendRange);
+    d.wheelPitchSens = get (mixer::kFmWheelPitch, d.wheelPitchSens);
+    d.wheelAmpSens = get (mixer::kFmWheelAmp, d.wheelAmpSens);
+    d.glideMs = get (mixer::kFmGlide, d.glideMs);
+    return sanitised (std::move (d));
+}
+
 preset::Preset capturePreset (const ParameterSet& set, const FmDescription& d, const preset::LibraryConfig& cfg, const std::string& name,
                               const std::string& type, const preset::Preset* base, int track)
 {

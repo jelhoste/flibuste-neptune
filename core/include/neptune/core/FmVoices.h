@@ -60,6 +60,11 @@ struct FmLive
     float unisonSpread = 0.0f;                  // 0..1 : répartition stéréo
     int modWheel = 0;                           // 0..127
     int pitchBend = 8192;                       // 0..16383
+    // Réglages automatisables de la voix ; -1 : celui de la description. Vitesse du LFO : en direct ; profondeurs du LFO : prises
+    // au début de chaque note ; étendue du bend, sensibilités de la molette et glissando : en direct.
+    int lfoSpeed = -1, lfoPmd = -1, lfoAmd = -1;
+    int bendRange = -1, wheelPitchSens = -1, wheelAmpSens = -1;
+    int glideMs = -1;
 };
 
 class FmVoices
@@ -121,6 +126,7 @@ private:
     void releaseVoice (Voice&) noexcept;
     Voice* allocate (int key, bool& dropNew) noexcept;
     void renderBlock (const FmLive&) noexcept;
+    int effectiveGlideMs() const noexcept { return blockLive_.glideMs >= 0 ? blockLive_.glideMs : desc_->glideMs; }
     void pushHeld (int key, int channel, int velocity) noexcept;
     void removeHeld (int key, int channel) noexcept;
     void steal (Voice&) noexcept;
@@ -129,6 +135,7 @@ private:
     std::atomic<bool> reserved_ { false };
     const FmDescription* desc_ = nullptr;
     Lfo lfo_;
+    int lfoSpeedApplied_ = -1;                  // vitesse du LFO issue du paramètre, déjà appliquée (-1 : celle du patch)
     double sampleRate_ = 48000.0;
     std::uint64_t counter_ = 0;
     bool sustain_ = false;

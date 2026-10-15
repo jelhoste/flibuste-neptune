@@ -38,7 +38,8 @@ public:
 
     // --- thread de message ---
     void setDescription (const FmDescription&);
-    const FmDescription& description() const noexcept { return description_; }
+    // La description avec les valeurs courantes des paramètres de voix (LFO, bend, molette, glissando) : voir withLiveParams.
+    FmDescription description() const;
     void collect() { slot_.collect(); }
     void postNoteOn (int key, float velocity) noexcept { post (Event::NoteOn, key, velocity); }
     void postNoteOff (int key) noexcept { post (Event::NoteOff, key, 0.0f); }
@@ -70,6 +71,7 @@ private:
     ParameterSet params_;
     bool ok_ = true;
     std::array<std::size_t, mixer::kFmKinds> fmIdx_ {};
+    std::array<std::size_t, mixer::kFmExtraKinds> extraIdx_ {};
     std::size_t idxVolume_ = 0, idxPan_ = 0, idxGain_ = 0, idxSemi_ = 0, idxCents_ = 0;
 
     FmDescription description_;

@@ -159,6 +159,7 @@ private:
     std::unique_ptr<KnobModal> modal_;
     std::unique_ptr<PresetManager> manager_;
     std::uint32_t lastUndoRevision_ = 0;
+    std::uint32_t lastExtraVersions_ = 0;
     int lastVoices_ = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FmSynthEditor)

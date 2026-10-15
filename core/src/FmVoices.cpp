@@ -98,6 +98,7 @@ void FmVoices::setDescription (const FmDescription* d) noexcept
 {
     desc_ = d;
     if (d != nullptr) lfo_.reset (d->patch);
+    lfoSpeedApplied_ = -1;
     numHeld_ = 0;
 }
 
@@ -285,6 +286,9 @@ void FmVoices::startVoice (Voice& v, int channel, int key, int velocity, double 
         for (int op = 0; op < kOperators; ++op)
             for (int r = 0; r < 4; ++r)
                 p.setOp (op, kRate1 + r, p.op (op, kRate1 + r) + rateShift);
+    // profondeurs du LFO (paramètres de la piste) : prises à chaque note
+    if (blockLive_.lfoPmd >= 0) p.setGlobal (kLfoOffset + 2, blockLive_.lfoPmd);
+    if (blockLive_.lfoAmd >= 0) p.setGlobal (kLfoOffset + 3, blockLive_.lfoAmd);
     const int midi = std::clamp (key + (p.global (kTransposeOffset) - 24), 0, 127);
     v.active = true;
     v.keydown = true;
@@ -325,14 +329,14 @@ void FmVoices::noteOn (int channel, int key, float velocity) noexcept
             v.key = key;
             v.channel = channel;
             v.glideTarget = static_cast<double> (key - v.baseKey);
-            if (desc_->glideMs <= 0) v.glide = v.glideTarget;
+            if (effectiveGlideMs() <= 0) v.glide = v.glideTarget;
             return;
         }
         // mono (ou première touche) : la note repart ; le glissando part de la hauteur précédente si une voix sonnait
         const double from = v.active && ! v.stolen ? v.glide + static_cast<double> (v.key - key) : 0.0;
         for (std::size_t i = 1; i < voices_.size(); ++i) // une éventuelle queue d'une voix de poly précédente
             if (voices_[i].active && ! voices_[i].stolen) steal (voices_[i]);
-        startVoice (v, channel, key, vel, desc_->glideMs > 0 ? from : 0.0);
+        startVoice (v, channel, key, vel, effectiveGlideMs() > 0 ? from : 0.0);
         return;
     }
 
@@ -362,11 +366,11 @@ void FmVoices::noteOff (int channel, int key) noexcept
                     v.key = back.key;
                     v.channel = back.channel;
                     v.glideTarget = static_cast<double> (back.key - v.baseKey);
-                    if (desc_->glideMs <= 0) v.glide = v.glideTarget;
+                    if (effectiveGlideMs() <= 0) v.glide = v.glideTarget;
                 }
                 else
                     startVoice (v, back.channel, back.key, back.velocity,
-                                desc_->glideMs > 0 ? v.glide + static_cast<double> (v.key - back.key) : 0.0);
+                                effectiveGlideMs() > 0 ? v.glide + static_cast<double> (v.key - back.key) : 0.0);
             }
             return;
         }
@@ -393,14 +397,23 @@ void FmVoices::renderBlock (const FmLive& live) noexcept
     blockR_.fill (0.0f);
     if (desc_ == nullptr) return;
     const auto& d = *desc_;
+    if (live.lfoSpeed >= 0 && live.lfoSpeed != lfoSpeedApplied_)
+    {
+        Patch lp = d.patch; // la vitesse du LFO suit le paramètre ; reset() ne touche ni la phase ni le délai
+        lp.setGlobal (kLfoOffset, live.lfoSpeed);
+        lfo_.reset (lp);
+        lfoSpeedApplied_ = live.lfoSpeed;
+    }
     const std::int32_t lfoValue = lfo_.sample();
     const std::int32_t lfoDelay = lfo_.delay();
 
     Controls c;
     c.pitchBend = live.pitchBend;
-    c.pitchBendRange = d.pitchBendRange;
-    c.wheelPitchDepth = static_cast<int> (std::lround (255.0 * live.modWheel / 127.0 * d.wheelPitchSens / 15.0));
-    c.wheelAmpDepth = static_cast<int> (std::lround (99.0 * live.modWheel / 127.0 * d.wheelAmpSens / 15.0));
+    c.pitchBendRange = live.bendRange >= 0 ? std::min (live.bendRange, 12) : d.pitchBendRange;
+    const int wheelPitch = live.wheelPitchSens >= 0 ? std::min (live.wheelPitchSens, 15) : d.wheelPitchSens;
+    const int wheelAmp = live.wheelAmpSens >= 0 ? std::min (live.wheelAmpSens, 15) : d.wheelAmpSens;
+    c.wheelPitchDepth = static_cast<int> (std::lround (255.0 * live.modWheel / 127.0 * wheelPitch / 15.0));
+    c.wheelAmpDepth = static_cast<int> (std::lround (99.0 * live.modWheel / 127.0 * wheelAmp / 15.0));
 
     const std::uint8_t carriers = algorithmGraph (d.patch.algorithm()).carrierMask;
     // décalages de niveau en doublements Q24 : brillance sur les modulateurs (±2 doublements = ±12 dB), pas DX7 sur tous
@@ -414,7 +427,8 @@ void FmVoices::renderBlock (const FmLive& live) noexcept
     }
     const int feedback = std::clamp (d.patch.feedback() + static_cast<int> (std::lround (7.0f * std::clamp (live.feedbackDrive, 0.0f, 1.0f))), 0, 7);
     const double tuneCents = static_cast<double> (live.tuneCents) + d.masterTuneCents;
-    const double glideStep = d.glideMs > 0 ? static_cast<double> (kBlock) / (d.glideMs * 0.001 * sampleRate_) : 1.0e9; // fraction par bloc
+    const int glideMs = effectiveGlideMs();
+    const double glideStep = glideMs > 0 ? static_cast<double> (kBlock) / (glideMs * 0.001 * sampleRate_) : 1.0e9; // fraction par bloc
 
     for (auto& v : voices_)
     {

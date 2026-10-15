@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "neptune/core/FmPreset.h"
 #include "neptune/core/SamplerParams.h"
 
 namespace neptune::core::fm
@@ -60,6 +61,7 @@ bool stateFromJson (std::string_view text, ParameterSet& set, FmDescription& d, 
         }
     d = FmDescription();
     if (const auto f = doc.find ("fm"); f != doc.end() && f->is_object()) d = fmFromJson (f->dump());
+    seedExtraParams (d, set); // la description fait foi (les états d'avant ces paramètres n'en portent pas)
     currentPresetId.clear();
     if (const auto p = doc.find ("preset_id"); p != doc.end() && p->is_string() && p->get<std::string>().size() <= 64)
         currentPresetId = p->get<std::string>();
@@ -74,6 +76,8 @@ FmSynthEngine::FmSynthEngine()
     ok_ = addSynthParams (params_, &error);
     auto idx = [this] (ParamId id) { return params_.indexOf (id); };
     for (int k = 0; k < mixer::kFmKinds; ++k) fmIdx_[static_cast<std::size_t> (k)] = idx (mixer::fmParam (0, static_cast<mixer::FmKind> (k)));
+    for (int k = 0; k < mixer::kFmExtraKinds; ++k)
+        extraIdx_[static_cast<std::size_t> (k)] = idx (mixer::fmExtraParam (0, static_cast<mixer::FmExtraKind> (k)));
     idxVolume_ = idx (synthVolume);
     idxPan_ = idx (synthPan);
     idxGain_ = idx (sampler::gain);
@@ -100,7 +104,10 @@ void FmSynthEngine::setDescription (const FmDescription& d)
     description_ = sanitised (d);
     slot_.publish (std::make_shared<const FmDescription> (description_));
     slot_.collect();
+    seedExtraParams (description_, params_); // les paramètres suivent la description
 }
+
+FmDescription FmSynthEngine::description() const { return withLiveParams (description_, params_); }
 
 void FmSynthEngine::noteOn (int channel, int key, float velocity) noexcept
 {
@@ -163,6 +170,14 @@ void FmSynthEngine::process (float* left, float* right, int n) noexcept
     live.tuneCents = static_cast<float> (params_.getAt (idxSemi_) * 100.0 + params_.getAt (idxCents_));
     live.modWheel = modWheel_;
     live.pitchBend = pitchBend_;
+    auto extra = [this] (mixer::FmExtraKind k) { return static_cast<int> (std::lround (params_.getAt (extraIdx_[static_cast<std::size_t> (k)]))); };
+    live.lfoSpeed = extra (mixer::kFmLfoSpeed);
+    live.lfoPmd = extra (mixer::kFmLfoPmd);
+    live.lfoAmd = extra (mixer::kFmLfoAmd);
+    live.bendRange = extra (mixer::kFmBendRange);
+    live.wheelPitchSens = extra (mixer::kFmWheelPitch);
+    live.wheelAmpSens = extra (mixer::kFmWheelAmp);
+    live.glideMs = extra (mixer::kFmGlide);
 
     const float gain = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
     voices_.render (left, right, n, lastGain_, gain, live);

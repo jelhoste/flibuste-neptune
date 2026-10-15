@@ -182,7 +182,9 @@ void FmSynthProcessor::uiEditFm (fm::FmDescription d, std::string name, std::str
         previous, d,
         [this] (const fm::FmDescription& v)
         {
-            engine_.setDescription (v);
+            const auto before = snapshotNormalised();
+            engine_.setDescription (v); // recopie aussi LFO, bend, molette et glissando dans les paramètres
+            notifyHostOfParameterChanges (before);
             updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
         },
         std::move (name), std::move (mergeKey)));
@@ -495,6 +497,17 @@ void FmSynthEditor::timerCallback()
     {
         lastUndoRevision_ = rev;
         view_->setDescription (processor_.fmDescription());
+    }
+    // automation du LFO, du bend, de la molette, du glissando : la vue suit
+    {
+        std::uint32_t sum = 0;
+        for (int k = 0; k < neptune::core::mixer::kFmExtraKinds; ++k)
+            sum += processor_.engine().params().version (neptune::core::mixer::fmExtraParam (0, static_cast<neptune::core::mixer::FmExtraKind> (k)));
+        if (sum != lastExtraVersions_)
+        {
+            lastExtraVersions_ = sum;
+            view_->setDescription (processor_.fmDescription());
+        }
     }
     view_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1));
     undoButton_.setEnabled (processor_.undoManager().canUndo());

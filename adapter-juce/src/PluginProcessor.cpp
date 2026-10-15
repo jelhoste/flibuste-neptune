@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
+#include "neptune/core/FmPreset.h"
 #include "neptune/core/InstrumentEdit.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/ProbePool.h"
@@ -305,7 +306,8 @@ void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::stri
 neptune::core::fm::FmDescription NeptuneProcessor::fmDescription (int track) const
 {
     const juce::ScopedLock lock (instrumentLock_);
-    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].fm;
+    const int t = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
+    return neptune::core::fm::withLiveParams (mixer_.tracks[static_cast<std::size_t> (t)].fm, params_, t);
 }
 
 void NeptuneProcessor::uiEditFm (neptune::core::fm::FmDescription d, std::string name, std::string mergeKey, bool presetChange)
@@ -601,6 +603,7 @@ neptune::core::MixerState NeptuneProcessor::mixerState() const
         auto& tr = m.tracks[static_cast<std::size_t> (t)];
         syncInserts (tr.strip.inserts, insertInstances_[static_cast<std::size_t> (t)]);
         tr.synth = neptune::core::analogsynth::withLiveParams (tr.synth, params_, t);
+        tr.fm = neptune::core::fm::withLiveParams (tr.fm, params_, t);
     }
     for (int b = 0; b < mx::numBuses; ++b) syncInserts (m.buses[static_cast<std::size_t> (b)].inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + b)]);
     syncInserts (m.master.inserts, insertInstances_[static_cast<std::size_t> (mx::numTracks + mx::numBuses)]);
@@ -739,6 +742,8 @@ neptune::core::mixer::MasterSettings NeptuneProcessor::masterSettings() const
 void NeptuneProcessor::publishFmDescription (int track, const neptune::core::fm::FmDescription& d)
 {
     engine_.publishFm (track, std::make_shared<const neptune::core::fm::FmDescription> (neptune::core::fm::sanitised (d)));
+    if (! neptune::core::fm::extraParamsMatch (d, params_, track)) // LFO, bend, molette, glissando suivent la description
+        seedHostParameters (neptune::core::fm::extraParamValues (d, track));
 }
 
 void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthDescription& d, bool freezeRunningVoices)
@@ -748,8 +753,13 @@ void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthD
     engine_.publishSynth (track, std::move (patch));
     // Les paramètres d'enveloppe, de glissando et d'équilibre suivent la description (après la publication : les notes figées par
     // la capture par voix gardent les valeurs d'avant). L'hôte est prévenu pour que ses boutons et son automation suivent.
-    if (neptune::core::analogsynth::envelopeParamsMatch (d, params_, track)) return; // déjà cohérent : on n'y touche pas
-    for (const auto& [pid, raw] : neptune::core::analogsynth::envelopeParamValues (d, track))
+    if (! neptune::core::analogsynth::envelopeParamsMatch (d, params_, track))
+        seedHostParameters (neptune::core::analogsynth::envelopeParamValues (d, track));
+}
+
+void NeptuneProcessor::seedHostParameters (const std::vector<std::pair<neptune::core::ParamId, double>>& values)
+{
+    for (const auto& [pid, raw] : values)
     {
         const auto index = params_.indexOf (pid);
         if (index == neptune::core::ParameterSet::npos) continue;

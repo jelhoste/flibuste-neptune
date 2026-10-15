@@ -585,3 +585,73 @@ TEST_CASE ("fm synth engine: plays, volume and pan, state round trip", "[fm][eng
     CHECK (set.get (mixer::fmParam (0, mixer::kFmBrightness)) == 40.0);
     CHECK_FALSE (stateFromJson (R"({"format":"analogsynth-state"})", set, back, id));
 }
+
+TEST_CASE ("fm voice parameters follow the description and the other way round", "[fm][engine][extra]")
+{
+    FmSynthEngine e;
+    REQUIRE (e.ok());
+    FmDescription d;
+    d.patch.setGlobal (kLfoOffset, 61);
+    d.patch.setGlobal (kLfoOffset + 2, 40);
+    d.pitchBendRange = 7;
+    d.glideMs = 300;
+    e.setDescription (d);
+    auto value = [&e] (mixer::FmExtraKind k) { return e.params().get (mixer::fmExtraParam (0, k)); };
+    CHECK (value (mixer::kFmLfoSpeed) == 61.0);
+    CHECK (value (mixer::kFmLfoPmd) == 40.0);
+    CHECK (value (mixer::kFmBendRange) == 7.0);
+    CHECK (value (mixer::kFmGlide) == 300.0);
+
+    // l'automation d'un paramètre se retrouve dans la description lue ensuite, et dans l'état enregistré
+    e.params().set (mixer::fmExtraParam (0, mixer::kFmWheelPitch), 9.0);
+    CHECK (e.description().wheelPitchSens == 9);
+    const auto text = stateToJson (e.params(), e.description(), "");
+    ParameterSet set;
+    REQUIRE (addSynthParams (set));
+    FmDescription back;
+    std::string id;
+    REQUIRE (stateFromJson (text, set, back, id));
+    CHECK (back.wheelPitchSens == 9);
+    CHECK (set.get (mixer::fmExtraParam (0, mixer::kFmWheelPitch)) == 9.0);
+}
+
+TEST_CASE ("fm pitch bend range comes from the track parameter", "[fm][engine][extra]")
+{
+    // même note, même molette de pitch à fond ; l'étendue (paramètre) 0 : la hauteur ne bouge pas, 12 : elle monte d'une octave
+    auto frequencyWith = [] (double range)
+    {
+        FmSynthEngine e;
+        e.prepare (kRate, 128);
+        e.params().set (mixer::fmExtraParam (0, mixer::kFmBendRange), range);
+        e.setPitchBend (16383);
+        e.postNoteOn (57, 0.9f);
+        std::vector<float> l (128), r (128), all;
+        for (int i = 0; i < 80; ++i)
+        {
+            e.process (l.data(), r.data(), 128);
+            if (i >= 20) all.insert (all.end(), l.begin(), l.end());
+        }
+        int crossings = 0;
+        for (std::size_t i = 1; i < all.size(); ++i)
+            if (all[i - 1] <= 0.0f && all[i] > 0.0f) ++crossings;
+        return static_cast<double> (crossings);
+    };
+    const double flat = frequencyWith (0.0), up = frequencyWith (12.0);
+    CHECK (flat > 10.0);
+    CHECK (up > flat * 1.7); // une octave plus haut : environ le double de passages par zéro
+}
+
+TEST_CASE ("fm state saved, reloaded and saved again is identical", "[fm][engine][extra]")
+{
+    FmSynthEngine e;
+    e.params().set (mixer::fmExtraParam (0, mixer::kFmGlide), 99.5);
+    e.params().set (mixer::fmExtraParam (0, mixer::kFmLfoSpeed), 77.0);
+    e.params().set (mixer::fmExtraParam (0, mixer::kFmBendRange), 9.0);
+    const auto first = stateToJson (e.params(), e.description(), "");
+    FmSynthEngine f;
+    FmDescription d;
+    std::string id;
+    REQUIRE (stateFromJson (first, f.params(), d, id));
+    f.setDescription (d);
+    CHECK (stateToJson (f.params(), f.description(), "") == first);
+}
