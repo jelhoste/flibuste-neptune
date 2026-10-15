@@ -578,6 +578,14 @@ SynthView::SynthView (ParamHost& host, const theme::Palette& palette, const i18n
     reg (2, x.glide, "poly.glide");
 
     // ---- clavier
+    keyboardButton_.onClick = [this]
+    {
+        keyboardMode_ = keyboardMode_ < 0 ? 0 : keyboardMode_ == 0 ? 1 : -1; // auto -> masqué -> affiché -> auto
+        updateKeyboardButton();
+        if (! lastArea_.isEmpty()) placeScaled (lastArea_);
+    };
+    updateKeyboardButton();
+    addAndMakeVisible (keyboardButton_);
     keysHint_.setText (text ("synth.keys_hint"), juce::dontSendNotification);
     keysHint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     keysHint_.setFont (juce::FontOptions (12.0f));
@@ -610,11 +618,25 @@ SynthView::~SynthView()
 
 void SynthView::placeScaled (juce::Rectangle<int> area)
 {
-    const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / designHeight);
+    lastArea_ = area;
+    // clavier : affiché si l'utilisateur le veut, ou (auto) si la hauteur suffit
+    const bool shown = keyboardMode_ == 1 || (keyboardMode_ < 0 && area.getHeight() >= designHeight);
+    if (keyboardShown_ && ! shown) keyboard_.releaseAll(); // pas de note restée tenue sous un clavier masqué
+    keyboardShown_ = shown;
+    const int dh = shown ? designHeight : designHeightNoKeyboard;
+    const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / dh);
     const float scale = juce::jmax (0.4f, s);
     setTransform (juce::AffineTransform::scale (scale));
-    setBounds (area.getX(), area.getY(), juce::roundToInt (static_cast<float> (area.getWidth()) / scale),
-               juce::roundToInt (static_cast<float> (area.getHeight()) / scale));
+    const auto w = juce::roundToInt (static_cast<float> (area.getWidth()) / scale);
+    const auto h = juce::roundToInt (static_cast<float> (area.getHeight()) / scale);
+    if (getWidth() == w && getHeight() == h) resized(); // la visibilité du clavier a pu changer sans changement de taille
+    setBounds (area.getX(), area.getY(), w, h);
+}
+
+void SynthView::updateKeyboardButton()
+{
+    const char* key = keyboardMode_ < 0 ? "synth.kb_auto" : keyboardMode_ == 0 ? "synth.kb_hidden" : "synth.kb_shown";
+    keyboardButton_.setButtonText (text (key));
 }
 
 // Les valeurs affichées sous les potards sont dessinées par cette vue : elles doivent suivre l'automation et les presets.
@@ -810,10 +832,14 @@ void SynthView::resized()
     auto r = getLocalBounds();
     {
         auto tabs = r.removeFromTop (34);
+        keyboardButton_.setBounds (tabs.removeFromRight (190).reduced (2));
         for (auto* b : tabButtons_) b->setBounds (tabs.removeFromLeft (230).reduced (2));
     }
     r.removeFromTop (4);
-    auto bottom = r.removeFromBottom (136); // clavier : 25 % plus bas qu'avant
+    for (auto* c : std::initializer_list<juce::Component*> { &keyboard_, &octDown_, &octUp_, &hold_, &keysHint_ })
+        c->setVisible (keyboardShown_);
+    auto bottom = r.removeFromBottom (keyboardShown_ ? 136 : 0); // clavier : 25 % plus bas qu'avant
+    if (keyboardShown_)
     {
         auto line = bottom.removeFromTop (32);
         octDown_.setBounds (line.removeFromLeft (80).reduced (2));
@@ -934,7 +960,11 @@ void SynthView::resized()
             // suivi du clavier, vélocité, profondeur d'enveloppe, drive : quatre potards sur la rangée des coupures
             const int dw = mid.getWidth() / 4;
             for (auto* dial : { &x.fKey[fi], &x.fVel[fi], &x.fDepth[fi], &x.fDrive[fi] })
-                dial->setBounds (mid.removeFromLeft (dw).withTrimmedTop (14).reduced (2, 0));
+            {
+                // même taille que les autres potards : le disque fait knobSide, la valeur s'écrit dessous
+                const auto cell = mid.removeFromLeft (dw);
+                dial->setBounds (cell.getCentreX() - 35, cell.getY() + 16, 70, knobSide + 16);
+            }
             x.fEnv[fi]->setBounds (a.withTrimmedTop (4));
         }
     }

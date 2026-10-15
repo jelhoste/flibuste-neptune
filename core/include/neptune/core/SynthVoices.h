@@ -3,7 +3,9 @@
 // 2 filtres stéréo avec leurs enveloppes, enveloppe de volume et de pitch, polyphonie (poly / mono / legato, vol de voix).
 // Oscillateurs à bande limitée (PolyBLEP / PolyBLAMP / tables d'onde par octave). Aucune allocation côté audio.
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "neptune/core/Envelope.h"
@@ -60,6 +62,15 @@ public:
             if (v.active) f (describe (v));
     }
 
+    // Capture par voix : génération la plus ancienne parmi les voix figées (max si aucune) et génération du patch adopté ; publiées
+    // par l'audio pour que le publieur sache quels patchs garder en vie (SynthPatchKeeper).
+    std::uint64_t oldestFrozenGeneration() const noexcept { return oldestFrozen_.load (std::memory_order_acquire); }
+    std::uint64_t adoptedGeneration() const noexcept { return adopted_.load (std::memory_order_acquire); }
+    int frozenVoices() const noexcept;
+    int soundingVoices() const noexcept; // hors fondu de vol : comptées par la limite globale (Engine)
+    bool weakestVoice (bool& releasing, float& level, std::uint64_t& order) const noexcept; // voir SamplerVoices
+    void stealWeakest() noexcept;
+
     int activeVoices() const noexcept;
     int heldVoices() const noexcept; // ni relâchées ni en fondu de vol : comptées dans la limite
 
@@ -85,6 +96,11 @@ private:
         std::array<float, 2> fenvValue { 0.0f, 0.0f };
         float fade = 1.0f, fadeStep = 0.0f;
         float level = 0.0f;
+        // capture par voix : une voix figée garde son patch et les valeurs de paramètres d'avant le changement de preset
+        bool frozen = false;
+        const SynthPatch* patch = nullptr;
+        Params frozenParams;
+        float frozenGain = 1.0f;
     };
 
     VoiceInfo describe (const Voice& v) const noexcept;
@@ -100,8 +116,14 @@ private:
     void removeHeld (int channel, int key) noexcept;
     void renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, const Params& p) noexcept;
 
+    void publishGenerations() noexcept;
+    const SynthPatch& patchOf (const Voice& v) const noexcept { return v.frozen && v.patch != nullptr ? *v.patch : *patch_; }
+
     std::vector<Voice> voices_ = std::vector<Voice> (kMaxVoices + kFadeSlots);
     const SynthPatch* patch_ = nullptr;
+    Params lastParams_;                    // valeurs du dernier bloc rendu (point de départ du figement)
+    float lastGainEnd_ = 1.0f;
+    std::atomic<std::uint64_t> oldestFrozen_ { std::numeric_limits<std::uint64_t>::max() }, adopted_ { 0 };
     double sampleRate_ = 48000.0;
     std::uint64_t counter_ = 0;
     struct HeldKey { int channel = 0, key = 0; float velocity = 0.0f; };

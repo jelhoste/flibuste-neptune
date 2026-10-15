@@ -87,8 +87,10 @@ public:
     ~SynthView() override;
 
     // Taille de conception : en dessous, la vue entière est réduite proportionnellement (au lieu de superposer ses éléments).
-    static constexpr int designWidth = 1100, designHeight = 536;
+    static constexpr int designWidth = 1100, designHeight = 536;      // avec le clavier
+    static constexpr int designHeightNoKeyboard = 400;                 // sans le clavier
     // Place la vue dans `area` ; si `area` est plus petite que la taille de conception, tout est réduit d'un même facteur.
+    // Le clavier se masque tout seul quand la hauteur manque (mode auto) ; le bouton « Clavier » force l'affichage ou le masquage.
     void placeScaled (juce::Rectangle<int> area);
 
     std::function<void (const neptune::core::SynthDescription&)> onChange; // à chaque modification par l'utilisateur
@@ -148,7 +150,11 @@ private:
     std::unique_ptr<Extras> x_;
 
     SynthKeyboard keyboard_;
-    juce::TextButton octDown_, octUp_;
+    juce::TextButton octDown_, octUp_, keyboardButton_;
+    int keyboardMode_ = -1;          // -1 auto, 0 masqué, 1 affiché
+    bool keyboardShown_ = true;
+    juce::Rectangle<int> lastArea_;
+    void updateKeyboardButton();
     juce::ToggleButton hold_;
     juce::Label keysHint_;
 

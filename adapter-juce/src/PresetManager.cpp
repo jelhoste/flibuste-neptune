@@ -3,7 +3,8 @@
 #include <algorithm>
 #include <set>
 
-#include "AnalogSynthPlugin.h"
+#include "PresetHost.h"
+#include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FileUtil.h"
 
 using neptune::core::theme::Token;
@@ -149,7 +150,7 @@ private:
 
 struct Ctx
 {
-    AnalogSynthProcessor& p;
+    PresetHost& p;
     neptune::core::theme::Palette palette;
     const neptune::core::i18n::Translator& tr;
     std::string selected;       // preset sélectionné (partagé entre onglets)
@@ -1363,7 +1364,7 @@ private:
 // ---------------------------------------------------------------------------------------------------- PresetManager
 struct PresetManager::Impl
 {
-    Impl (PresetManager& o, AnalogSynthProcessor& p, const neptune::core::theme::Palette& pal, const neptune::core::i18n::Translator& tr)
+    Impl (PresetManager& o, PresetHost& p, const neptune::core::theme::Palette& pal, const neptune::core::i18n::Translator& tr)
         : owner (o), ctx { p, pal, tr, {}, {}, {}, {}, {}, {} }, presets (ctx), banks (ctx), grid (ctx), trash (ctx), config (ctx)
     {
         ctx.selected = p.currentPresetId();
@@ -1475,7 +1476,7 @@ struct PresetManager::Impl
     juce::Rectangle<int> panel;
 };
 
-PresetManager::PresetManager (AnalogSynthProcessor& p, const neptune::core::theme::Palette& pal, const neptune::core::i18n::Translator& tr)
+PresetManager::PresetManager (PresetHost& p, const neptune::core::theme::Palette& pal, const neptune::core::i18n::Translator& tr)
 {
     setWantsKeyboardFocus (true);
     impl_ = std::make_unique<Impl> (*this, p, pal, tr);

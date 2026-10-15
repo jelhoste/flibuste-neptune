@@ -89,6 +89,7 @@ StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
     if (s.name.size() > 64) s.name.resize (64);
     s.color = std::clamp (s.color, 0, 15);
     s.midiChannel = isBus ? 0 : std::clamp (s.midiChannel, 0, 16);
+    s.midiFilter = isBus ? midi::FilterDescription() : midi::sanitised (std::move (s.midiFilter));
     s.routing.directOut = std::clamp (s.routing.directOut, 0, numOutputs);
     s.routing.mainDest = std::clamp (s.routing.mainDest, 0, numBuses);
     // pas de cycle : un bus ne route que vers un bus d'indice supérieur (les bus sont numérotés 1..numBuses ici)
@@ -122,6 +123,7 @@ MasterSettings sanitised (MasterSettings m)
 {
     m.output = std::clamp (m.output, 1, numOutputs);
     m.panMode = m.panMode == PanMode::True ? PanMode::True : PanMode::Balance;
+    m.maxVoices = std::clamp (m.maxVoices, 1, MasterSettings::maxVoicesLimit);
     return m;
 }
 } // namespace neptune::core::mixer

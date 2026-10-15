@@ -9,6 +9,10 @@
 #include "VoicesView.h"
 #include "FilterEditor.h"
 #include "MixerView.h"
+#include "MidiFilterEditor.h"
+#include "PresetBar.h"
+#include "PresetManager.h"
+#include "ScaledRoot.h"
 #include "SynthView.h"
 #include "InsertOverlay.h"
 #include "KnobModal.h"
@@ -26,10 +30,20 @@ public:
     ~NeptuneEditor() override { stopTimer(); }
     void paint (juce::Graphics&) override;
     void resized() override;
+    void paintContent (juce::Graphics&); // dessiné dans la racine mise à l'échelle
     bool keyPressed (const juce::KeyPress&) override; // Ctrl/Cmd+Z : annuler ; Ctrl/Cmd+Maj+Z ou Ctrl+Y : rétablir
 
 private:
     void timerCallback() override;
+    void openPresetManager (bool saveAs);
+    std::unique_ptr<PresetBar> presetBar_;
+    std::unique_ptr<PresetManager> presetManager_;
+    std::unique_ptr<MidiFilterEditor> midiFilterEditor_;
+    juce::TextButton midiFilterButton_; // filtre MIDI avancé de la piste sélectionnée
+    void openMidiFilter();
+    juce::Rectangle<int> rootBounds() const noexcept { return { 0, 0, lw_, lh_ }; } // taille logique (avant mise à l'échelle)
+    ScaledRoot root_;
+    int lw_ = 1160, lh_ = 960;
 
     NeptuneProcessor& processor_;
     // Langue, thème et contraste viennent de settings.json, lus une fois au démarrage de l'instance.
@@ -53,7 +67,7 @@ private:
     juce::Label statusLabel_, rootLabel_;
     juce::Slider rootSlider_ { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     std::unique_ptr<EnvelopeEditor> envelopeEditor_;
-    juce::Label voiceCountLabel_;
+    juce::TextButton voiceCountButton_; // « Voix : n / limite » ; un clic règle la limite globale de voix
     int lastVoiceCount_ = -1;
     juce::TextButton viewButton_; // bascule entre la vue Mapping et la vue Sonde (texte de diagnostic de l'hôte)
     // Vue Mapping (jalon 5) : matrice notes × vélocité plein écran, liste des zones rétractable.

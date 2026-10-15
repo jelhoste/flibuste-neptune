@@ -14,6 +14,8 @@
 #include "neptune/core/Profile.h"
 #include "neptune/core/SamplerVoices.h"
 #include "neptune/core/StockModule.h"
+#include "neptune/core/Loudness.h"
+#include "neptune/core/MidiFilter.h"
 #include "neptune/core/Synth.h"
 #include "neptune/core/SynthVoices.h"
 
@@ -70,11 +72,18 @@ public:
     // Un changement de type coupe net les voix de la piste.
     void setTrackType (int track, TrackType type) noexcept;
     void publishSynth (int track, std::shared_ptr<const SynthPatch> patch);
+    // Filtre MIDI avancé d'une piste (normalement publié par setTrackSettings ; direct pour les tests).
+    void setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter>);
+    // Notes en cours d'une piste Synthé figées par un changement de preset (capture par voix).
+    int frozenVoices (int track) const noexcept
+    {
+        return track < 0 || track >= kTracks ? 0 : tracks_[static_cast<std::size_t> (track)].synth.frozenVoices();
+    }
     // Piste active : une piste inactive ne reçoit aucune note et ne produit rien (le mixeur ne l'affiche pas). Par défaut, toutes.
     void setTrackActive (int track, bool active) noexcept;
 
     // Réglages non automatisables du mixeur (routage, canal MIDI, mode de pan...) : thread de message, pris en compte au bloc suivant.
-    void setTrackSettings (int track, const mixer::StripSettings&) noexcept;
+    void setTrackSettings (int track, const mixer::StripSettings&); // construit le filtre MIDI : thread de message
     void setBusSettings (int bus, const mixer::StripSettings&) noexcept;
     // Pistes parallèles : `parent` 0..15 = piste, 16..47 = piste parallèle ; `tap` : point de captation dans la chaîne du parent.
     // Une piste parallèle dont le parent est inactif ou qui forme une boucle n'est jamais traitée.
@@ -114,6 +123,9 @@ public:
     Meter busMeter (int bus) const noexcept;
     Meter parallelMeter (int p) const noexcept;
     Meter masterMeter() const noexcept;
+    // Sonie du Master (LUFS momentanée, à court terme, intégrée, crête vraie) ; mesurée par libebur128 sur un thread d'analyse.
+    LoudnessMeter::Reading masterLoudness() const noexcept { return loudness_.read(); }
+    void resetLoudness() noexcept { loudness_.reset(); }
 
     int activeVoices() const noexcept;
     // Nombre de voix actives de toutes les pistes, publié par le thread audio à chaque bloc (lisible depuis l'interface sans verrou).
@@ -168,7 +180,12 @@ private:
         Inserts inserts;
         InstrumentSlot slot;
         SamplerVoices voices;
+        HandoffSlot<midi::CompiledFilter> filterSlot;   // filtre MIDI avancé de la piste
+        const midi::CompiledFilter* filter = nullptr;   // thread audio
+        midi::FilterDescription filterDescription;      // thread de message : ce qui est publié
+        std::array<std::uint64_t, 32> acceptedNotes {}; // thread audio : notes dont le Note On a passé (16 canaux x 128)
         HandoffSlot<SynthPatch> synthSlot;
+        SynthPatchKeeper synthKeeper; // thread de message : anciens patchs utilisés par des voix figées
         SynthVoices synth;
         std::atomic<std::uint64_t> held[2] {}; // touches tenues (bits 0..127), pour l'affichage du clavier
         std::atomic<int> type { 0 };   // TrackType
@@ -219,6 +236,8 @@ private:
                           const Stereo& parentFin, Stereo& parentSum, float parentGainFrom, float parentGainTo) noexcept;
     std::pair<float*, float*> channelPair (int output) const noexcept;
     Inserts* insertsOf (StripKind, int index) noexcept;
+    void pruneSynthKeeper (Track&);
+    void enforceGlobalVoiceLimit() noexcept; // avant un Note On : vole la voix la plus faible du plugin si la limite globale est atteinte
     void pushTrace (int track, int key, float shapedVelocity) noexcept;
     void publishVoices() noexcept;
     double param (std::size_t index, double fallback) const noexcept
@@ -248,6 +267,9 @@ private:
     std::array<Track, kTracks> tracks_;
     std::array<Bus, kBuses> buses_;
     std::atomic<int> masterOutput_ { 1 }, masterPanMode_ { 0 };
+    LoudnessMeter loudness_;
+    std::vector<float> loudL_, loudR_; // le signal du Master tel qu'envoyé (après trim, inserts, fader, pan, mono)
+    std::atomic<int> globalMaxVoices_ { mixer::MasterSettings::defaultMaxVoices };
     const ParameterSet* params_ = nullptr;
     std::size_t masterVolume_ = ParameterSet::npos, masterPan_ = ParameterSet::npos, masterMute_ = ParameterSet::npos,
                 masterTrim_ = ParameterSet::npos, masterMono_ = ParameterSet::npos;

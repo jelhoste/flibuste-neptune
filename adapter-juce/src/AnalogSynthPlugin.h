@@ -11,6 +11,9 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ParamHost.h"
+#include "ScaledRoot.h"
+#include "PresetBar.h"
+#include "PresetHost.h"
 #include "PresetManager.h"
 #include "SynthView.h"
 #include "neptune/core/AnalogSynth.h"
@@ -27,6 +30,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 class AnalogSynthProcessor : public juce::AudioProcessor,
                              public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                              public ParamHost,
+                             public PresetHost,
                              private juce::AsyncUpdater
 {
 public:
@@ -78,21 +82,22 @@ public:
     void uiNoteOff (int key) { engine_.postNoteOff (key); }
     void uiPanic() { engine_.postPanic(); }
 
-    // ---- presets (thread de message) ----
-    neptune::core::preset::Library& library() { return *library_; }
-    const std::string& currentPresetId() const noexcept { return currentPresetId_; }
-    const neptune::core::preset::Preset* currentPreset() const { return currentPresetId_.empty() ? nullptr : library_->find (currentPresetId_); }
-    std::uint32_t presetRevision() const noexcept { return presetRevision_; }
-    void touchPresets() noexcept { ++presetRevision_; }
-    bool loadPreset (const std::string& id);
-    bool stepPreset (int direction);                 // stepper : emplacement suivant / précédent des banques (sinon liste complète)
-    bool isModified() const;                         // le son courant diffère du preset chargé
-    bool canSaveCurrent() const;                     // preset utilisateur, non verrouillé
-    bool saveCurrent (std::string* error = nullptr); // « Enregistrer »
-    bool overwritePreset (const std::string& id, std::string* error = nullptr); // le son courant remplace celui d'un preset utilisateur
-    bool saveCurrentAs (const std::string& name, const std::string& type, neptune::core::preset::Preset* out = nullptr, std::string* error = nullptr);
-    bool saveConfig (const neptune::core::preset::LibraryConfig&);
-    const neptune::core::preset::LibraryConfig& presetConfig() const { return library_->config(); }
+    // ---- presets (thread de message) : PresetHost ----
+    neptune::core::preset::Library& library() override { return *library_; }
+    std::string currentPresetId() const override { return currentPresetId_; }
+    const neptune::core::preset::Preset* currentPreset() const override { return currentPresetId_.empty() ? nullptr : library_->find (currentPresetId_); }
+    std::uint32_t presetRevision() const override { return presetRevision_; }
+    void touchPresets() override { ++presetRevision_; }
+    bool loadPreset (const std::string& id) override;
+    bool stepPreset (int direction) override;
+    bool isModified() const override;
+    bool canSaveCurrent() const override;
+    bool saveCurrent (std::string* error = nullptr) override;
+    bool overwritePreset (const std::string& id, std::string* error = nullptr) override;
+    bool saveCurrentAs (const std::string& name, const std::string& type, neptune::core::preset::Preset* out = nullptr,
+                        std::string* error = nullptr) override;
+    bool saveConfig (const neptune::core::preset::LibraryConfig&) override;
+    const neptune::core::preset::LibraryConfig& presetConfig() const override { return library_->config(); }
 
     neptune::core::analogsynth::AnalogSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
@@ -133,11 +138,12 @@ private:
     void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
     void closeModal();
     void refreshPresetBar();
-    void openManager();
-    void quickSave();
+    void openManager (bool saveAs = false);
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token t) const;
+    void paintContent (juce::Graphics&);
 
+    ScaledRoot root_;
     AnalogSynthProcessor& processor_;
     neptune::core::i18n::Translator tr_;
     neptune::core::theme::Palette palette_;
@@ -145,14 +151,13 @@ private:
 
     std::unique_ptr<SynthView> synthView_;
     juce::OwnedArray<NeptuneKnob> knobs_;
-    juce::TextButton prevButton_, nextButton_, nameButton_, saveButton_, managerButton_, undoButton_, redoButton_, panicButton_;
+    juce::TextButton undoButton_, redoButton_, panicButton_;
+    std::unique_ptr<PresetBar> presetBar_;
     juce::Label brandLabel_, infoLabel_;
     std::unique_ptr<KnobModal> modal_;
     std::unique_ptr<PresetManager> manager_;
 
-    std::uint32_t lastPresetRevision_ = 0, lastUndoRevision_ = 0;
-    bool lastModified_ = false;
-    std::string lastPresetId_;
+    std::uint32_t lastUndoRevision_ = 0;
     int lastVoices_ = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AnalogSynthEditor)

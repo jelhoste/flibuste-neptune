@@ -212,6 +212,42 @@ bool Library::updateMetadata (const Preset& edited, std::string* error)
     return false;
 }
 
+std::string Library::stepFrom (const std::string& currentId, int direction, const std::function<bool (const Preset&)>& accept) const
+{
+    if (direction == 0) return {};
+    auto usable = [this, &accept] (const std::string& id)
+    {
+        const auto* p = find (id);
+        return p != nullptr && (! accept || accept (*p));
+    };
+    if (const auto slot = Navigator::locate (banks_, currentId))
+    {
+        Slot s = *slot;
+        // les emplacements dont le preset n'est pas utilisable ici sont sautés comme les vides
+        for (int guard = 0; guard < numBanks * programsPerBank; ++guard)
+        {
+            const auto next = Navigator::step (banks_, s, direction);
+            if (! next) return {};
+            s = *next;
+            const auto id = Navigator::presetAt (banks_, s);
+            if (usable (id)) return id;
+            if (s == *slot) return {};
+        }
+        return {};
+    }
+    std::vector<const Preset*> all;
+    const auto everything = allPresets();
+    for (const auto* p : filter (everything, {}))
+        if (! accept || accept (*p)) all.push_back (p);
+    if (all.empty()) return {};
+    int index = -1;
+    for (std::size_t i = 0; i < all.size(); ++i)
+        if (all[i]->id == currentId) index = static_cast<int> (i);
+    const int count = static_cast<int> (all.size());
+    const int next = index < 0 ? (direction > 0 ? 0 : count - 1) : (index + (direction > 0 ? 1 : -1) + count) % count;
+    return all[static_cast<std::size_t> (next)]->id;
+}
+
 // ---------------------------------------------------------------------------------------------------- corbeille
 
 bool Library::moveToTrash (const std::string& id, std::string* error)

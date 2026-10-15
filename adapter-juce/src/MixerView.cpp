@@ -770,6 +770,10 @@ public:
             owner_.processor_.uiEditMaster (m, "Master pan mode", "master");
         };
         addAndMakeVisible (panMode_);
+        lufsReset_.setButtonText ("LUFS 0");
+        lufsReset_.setTooltip ("Reset integrated loudness");
+        lufsReset_.onClick = [this] { owner_.processor_.resetLoudness(); };
+        addAndMakeVisible (lufsReset_);
     }
 
     void refresh()
@@ -783,6 +787,15 @@ public:
     {
         pan_.sync(); trim_.sync(); fader_.sync(); mute_.sync(); mono_.sync();
         inserts_.refresh();
+    }
+
+    void updateLoudness (const neptune::core::LoudnessMeter::Reading& r)
+    {
+        if (r.momentary != lufs_.momentary || r.shortTerm != lufs_.shortTerm || r.integrated != lufs_.integrated || r.truePeakDb != lufs_.truePeakDb)
+        {
+            lufs_ = r;
+            repaint (lufsArea_);
+        }
     }
 
     void updateMeter (const Engine::Meter& m)
@@ -802,6 +815,9 @@ public:
         output_.setBounds (r.removeFromTop (24).reduced (0, 1));
         panMode_.setBounds (r.removeFromTop (24).reduced (0, 1));
         inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
+        // sonie : M (momentanée), S (court terme), I (intégrée), TP (crête vraie) puis le bouton de remise à zéro
+        lufsArea_ = r.removeFromTop (4 * 14 + 4);
+        lufsReset_.setBounds (r.removeFromTop (20).reduced (0, 1));
         auto line = r.removeFromTop (18);
         trimLabel_.setBounds (line);
         trim_.setBounds (r.removeFromTop (18));
@@ -837,6 +853,21 @@ public:
         };
         bar (peakL_, rmsL_, m.getX());
         bar (peakR_, rmsR_, m.getX() + 15);
+        {
+            // LUFS : valeurs à une décimale, « -inf » en dessous de -100 ; la crête vraie passe en rouge au-dessus de -1 dBTP
+            auto value = [] (float v) { return v <= -100.0f ? juce::String ("-inf") : juce::String (v, 1); };
+            const char* const names[4] = { "M", "S", "I", "TP" };
+            const float values[4] = { lufs_.momentary, lufs_.shortTerm, lufs_.integrated, lufs_.truePeakDb };
+            g.setFont (juce::FontOptions (11.0f));
+            for (int i = 0; i < 4; ++i)
+            {
+                auto row = juce::Rectangle<int> (lufsArea_.getX() + 2, lufsArea_.getY() + 2 + i * 14, lufsArea_.getWidth() - 4, 14);
+                g.setColour (owner_.colour (Token::TextDim));
+                g.drawText (names[i], row.removeFromLeft (22), juce::Justification::centredLeft);
+                g.setColour (i == 3 && values[i] > -1.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent));
+                g.drawText (value (values[i]) + (i == 3 ? " dB" : " LUFS"), row, juce::Justification::centredRight);
+            }
+        }
         g.setColour (owner_.colour (Token::TextDim));
         g.setFont (juce::FontOptions (10.0f));
         g.drawText (fader_.getValue() <= kFaderMinDb ? juce::String::fromUTF8 ("-inf") : juce::String (fader_.getValue(), 1),
@@ -849,7 +880,9 @@ private:
     juce::ComboBox output_, panMode_;
     BoundSlider pan_, trim_, fader_;
     BoundToggle mute_, mono_;
-    juce::Rectangle<int> faderArea_;
+    juce::Rectangle<int> faderArea_, lufsArea_;
+    juce::TextButton lufsReset_;
+    neptune::core::LoudnessMeter::Reading lufs_;
     float peakL_ = 0.0f, peakR_ = 0.0f, rmsL_ = 0.0f, rmsR_ = 0.0f;
     InsertList inserts_;
 };
@@ -1043,6 +1076,7 @@ void MixerView::timerCallback()
     }
     master_->syncValues();
     master_->updateMeter (processor_.masterMeter());
+    master_->updateLoudness (processor_.masterLoudness());
 }
 
 // Changement de générateur : la configuration d'instrument est perdue (spec §1), donc une confirmation si la piste en a une.

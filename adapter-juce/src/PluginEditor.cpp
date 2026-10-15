@@ -43,9 +43,28 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addAndMakeVisible (loadButton_);
     statusLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
     addAndMakeVisible (statusLabel_);
-    voiceCountLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
-    voiceCountLabel_.setFont (juce::FontOptions (13.0f));
-    addAndMakeVisible (voiceCountLabel_);
+    midiFilterButton_.setButtonText (text ("midi.button"));
+    midiFilterButton_.setTooltip (text ("midi.title"));
+    midiFilterButton_.onClick = [this] { openMidiFilter(); };
+    addAndMakeVisible (midiFilterButton_);
+    voiceCountButton_.setTooltip (text ("voices.global_limit"));
+    voiceCountButton_.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        const int current = processor_.masterSettings().maxVoices;
+        menu.addSectionHeader (text ("voices.global_limit"));
+        for (const int n : { 16, 32, 64, 128, 256, 512, 1024 })
+            menu.addItem (n, juce::String (n), true, n == current);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&voiceCountButton_), [this] (int chosen)
+        {
+            if (chosen <= 0) return;
+            auto m = processor_.masterSettings();
+            m.maxVoices = chosen;
+            processor_.uiEditMaster (m, "Voice limit");
+            lastVoiceCount_ = -1; // le texte est relu au prochain tour
+        });
+    };
+    addAndMakeVisible (voiceCountButton_);
 
     importButton_.setButtonText (text ("sampler.import"));
     importButton_.onClick = [this] { startImport(); };
@@ -277,6 +296,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     };
     addChildComponent (*synthView_);
 
+    presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
+    presetBar_->onOpenManager = [this] (bool saveAs) { openPresetManager (saveAs); };
+    addChildComponent (*presetBar_);
+
     for (int t = 0; t < neptune::core::mixer::numTracks; ++t) trackBox_.addItem (juce::String (t + 1), t + 1);
     trackBox_.onChange = [this]
     {
@@ -333,9 +356,70 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     // La taille en dernier : resized() place les composants, qui doivent donc exister. (Fixée avant leur création,
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
     updateViewVisibility();
+    root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
+    root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
     setResizable (true, true);
-    setResizeLimits (1100, 640, 3000, 2000); // en dessous, les rangées de potards et de boutons se chevaucheraient
-    setSize (1160, 960);
+    setResizeLimits (420, 300, 3000, 2000); // en dessous de la taille de conception, l'interface est réduite (voir resized)
+    {
+        // taille de départ : celle de conception, mais jamais plus grande que 90 % de l'écran utile
+        int w = 1160, h = 960;
+        if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
+            h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
+        }
+        setSize (juce::jmax (420, w), juce::jmax (300, h));
+    }
+}
+
+void NeptuneEditor::openPresetManager (bool saveAs)
+{
+    if (presetManager_ || modal_ || insertOverlay_ || wizard_ || filterEditor_) return;
+    presetManager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
+    presetManager_->onClose = [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe == nullptr) return;
+            safe->presetManager_.reset();
+            safe->grabKeyboardFocus();
+        });
+    };
+    presetManager_->onChanged = [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+    {
+        if (safe != nullptr) safe->presetBar_->refresh();
+    };
+    root_.addAndMakeVisible (*presetManager_);
+    presetManager_->setBounds (rootBounds());
+    presetManager_->toFront (true);
+    if (saveAs) presetManager_->showSaveAs();
+}
+
+void NeptuneEditor::openMidiFilter()
+{
+    if (midiFilterEditor_ || presetManager_ || modal_ || insertOverlay_ || wizard_ || filterEditor_) return;
+    const int track = processor_.selectedTrack();
+    midiFilterEditor_ = std::make_unique<MidiFilterEditor> (
+        palette_, tr_, track,
+        [this, track] { return processor_.trackSettings (track).midiFilter; },
+        [this, track] (const neptune::core::midi::FilterDescription& f)
+        {
+            auto s = processor_.trackSettings (track);
+            s.midiFilter = f;
+            processor_.uiEditTrack (track, s, "MIDI filter", "midi_filter");
+        },
+        [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+        {
+            juce::MessageManager::callAsync ([safe]
+            {
+                if (safe == nullptr) return;
+                safe->midiFilterEditor_.reset();
+                safe->grabKeyboardFocus();
+            });
+        });
+    root_.addAndMakeVisible (*midiFilterEditor_);
+    midiFilterEditor_->setBounds (rootBounds());
+    midiFilterEditor_->toFront (true);
 }
 
 void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate::Terminal terminal)
@@ -347,8 +431,8 @@ void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate
                                               // Fermeture différée : la modale ne se détruit pas depuis son propre gestionnaire.
                                               juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
                                           });
-    addAndMakeVisible (*modal_);
-    modal_->setBounds (getLocalBounds());
+    root_.addAndMakeVisible (*modal_);
+    modal_->setBounds (rootBounds());
     modal_->toFront (true);
 }
 
@@ -365,8 +449,8 @@ void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int
                                                     });
     if (! overlay->valid()) return;
     insertOverlay_ = std::move (overlay);
-    addAndMakeVisible (*insertOverlay_);
-    insertOverlay_->setBounds (getLocalBounds());
+    root_.addAndMakeVisible (*insertOverlay_);
+    insertOverlay_->setBounds (rootBounds());
     insertOverlay_->toFront (true);
     insertOverlay_->grabKeyboardFocus();
 }
@@ -475,8 +559,8 @@ void NeptuneEditor::openWizard (std::vector<std::string> paths)
         {
             juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeWizard(); });
         });
-    addAndMakeVisible (*wizard_);
-    wizard_->setBounds (getLocalBounds());
+    root_.addAndMakeVisible (*wizard_);
+    wizard_->setBounds (rootBounds());
     wizard_->toFront (true);
 }
 
@@ -606,8 +690,8 @@ void NeptuneEditor::openFilterEditor()
         else if (const auto* spec = safe->processor_.parameters().find (id))
             safe->processor_.uiSetNormalised (id, spec->toNormalized (plain));
     };
-    addAndMakeVisible (*filterEditor_);
-    filterEditor_->setBounds (getLocalBounds());
+    root_.addAndMakeVisible (*filterEditor_);
+    filterEditor_->setBounds (rootBounds());
     filterEditor_->toFront (true);
     updateFilterEditor();
     filterEditor_->grabKeyboardFocus();
@@ -956,6 +1040,7 @@ void NeptuneEditor::updateViewVisibility()
     synthShown_ = synth;
     mixerView_->setVisible (showMixer_);
     synthView_->setVisible (synth);
+    presetBar_->setVisible (synth);
     trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (sampler);
     modeButton_.setVisible (sampler);
@@ -1069,6 +1154,11 @@ bool NeptuneEditor::keyPressed (const juce::KeyPress& k)
         processor_.uiRedo();
         return true;
     }
+    if ((code == 'S' || code == 's') && presetBar_->isVisible())
+    {
+        presetBar_->quickSave();
+        return true;
+    }
     return false;
 }
 
@@ -1092,6 +1182,7 @@ void NeptuneEditor::timerCallback()
     rebindKnobs();
     if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())) { updateViewVisibility(); resized(); } // type de la piste changé
     updateSynthView();
+    if (presetBar_->isVisible() && presetBar_->needsRefresh()) presetBar_->refresh();
     {
         const int tr = processor_.selectedTrack();
         synthView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1)); // notes MIDI reçues
@@ -1107,7 +1198,7 @@ void NeptuneEditor::timerCallback()
         if (voices != lastVoiceCount_)
         {
             lastVoiceCount_ = voices;
-            voiceCountLabel_.setText (text ("analog.voices") + " " + juce::String (voices), juce::dontSendNotification);
+            voiceCountButton_.setButtonText (text ("analog.voices") + " " + juce::String (voices) + " / " + juce::String (processor_.masterSettings().maxVoices));
         }
     }
     updateFilterEditor();
@@ -1131,25 +1222,35 @@ void NeptuneEditor::updateRecoveryBanner()
 
 void NeptuneEditor::resized()
 {
-    auto bottom = getLocalBounds().reduced (32).removeFromBottom (80);
+    // Taille logique d'au moins 1100 x 760 ; en dessous, tout le contenu est réduit d'un même facteur.
+    {
+        const auto logical = root_.fit (getWidth(), getHeight(), 1100, 760);
+        lw_ = logical.getWidth();
+        lh_ = logical.getHeight();
+    }
+    auto bottom = rootBounds().reduced (32).removeFromBottom (80);
     auto banner = bottom.removeFromTop (36);
     discardButton_.setBounds (banner.removeFromRight (90).reduced (2));
     restoreButton_.setBounds (banner.removeFromRight (90).reduced (2));
     recoveryLabel_.setBounds (banner);
-    if (modal_) modal_->setBounds (getLocalBounds());
+    if (modal_) modal_->setBounds (rootBounds());
 
     // Vue Mapping : chargement, import, état, mode, note racine en haut ; à gauche la liste des zones (rétractable) et le
     // panneau « Chargé en mémoire » ; au centre la matrice puis l'enveloppe ; les potards en bas.
-    viewButton_.setBounds (getWidth() - 32 - 100, 32, 100, 36);
-    mappingButton_.setBounds (getWidth() - 32 - 100 - 4 - 100, 32, 100, 36);
-    mixerButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
-    panicButton_.setBounds (getWidth() - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
+    viewButton_.setBounds (lw_ - 32 - 100, 32, 100, 36);
+    mappingButton_.setBounds (lw_ - 32 - 100 - 4 - 100, 32, 100, 36);
+    mixerButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
+    panicButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
     trackBox_.setBounds (190, 32, 220, 36);
-    mixerView_->placeScaled ({ 32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 80 - 150) });
-    voiceCountLabel_.setBounds (416, 32, 190, 36);
-    synthView_->placeScaled ({ 32, 80, getWidth() - 64, juce::jmax (200, getHeight() - 270 - 12 - 80) });
+    mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 150) });
+    voiceCountButton_.setBounds (416, 32, 150, 36);
+    midiFilterButton_.setBounds (570, 32, 48, 36);
+    if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
+    presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
+    synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
+    if (presetManager_) presetManager_->setBounds (rootBounds());
     {
-        auto r = juce::Rectangle<int> (32, 80, getWidth() - 64, 36);
+        auto r = juce::Rectangle<int> (32, 80, lw_ - 64, 36);
         loadButton_.setBounds (r.removeFromLeft (170).reduced (2));
         importButton_.setBounds (r.removeFromLeft (130).reduced (2));
         modeButton_.setBounds (r.removeFromLeft (190).reduced (2));
@@ -1157,7 +1258,7 @@ void NeptuneEditor::resized()
         voicesButton_.setBounds (r.removeFromLeft (140).reduced (2));
         filtersButton_.setBounds (r.removeFromLeft (110).reduced (2));
         statusLabel_.setBounds (r);
-        auto r2 = juce::Rectangle<int> (32, 122, getWidth() - 64, 36);
+        auto r2 = juce::Rectangle<int> (32, 122, lw_ - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));
         rootSlider_.setBounds (r2.removeFromLeft (150).reduced (2));
         removeButton_.setBounds (r2.removeFromLeft (150).reduced (2));
@@ -1169,9 +1270,9 @@ void NeptuneEditor::resized()
         selectionLabel_.setBounds (r2);
 
         const int top = 168;
-        const int bottom = getHeight() - 270 - 12;
+        const int bottom = lh_ - 270 - 12;
         const int h = juce::jmax (160, bottom - top);
-        const int leftW = juce::jmin (400, (getWidth() - 64) / 3);
+        const int leftW = juce::jmin (400, (lw_ - 64) / 3);
         const int panelH = 192;
         const int tableH = juce::jmax (80, h - panelH - 6);
         if (listVisible_) zoneTable_->setBounds (32, top, leftW, tableH);
@@ -1189,20 +1290,20 @@ void NeptuneEditor::resized()
         groupsSignature_.clear(); // largeur changée : les cases sont reconstruites à la prochaine mise à jour
 
         const int x = 32 + leftW + 12;
-        const int w = getWidth() - 32 - x;
+        const int w = lw_ - 32 - x;
         const int matrixH = juce::jmax (120, static_cast<int> (h * 0.62));
         matrix_->setBounds (x, top, w, matrixH);
         envelopeEditor_->setBounds (x, top + matrixH + 8, w, juce::jmax (80, h - matrixH - 8));
         voicesView_->setBounds (envelopeEditor_->getBounds());
     }
-    if (wizard_) wizard_->setBounds (getLocalBounds());
-    if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
-    if (insertOverlay_) insertOverlay_->setBounds (getLocalBounds());
+    if (wizard_) wizard_->setBounds (rootBounds());
+    if (filterEditor_) filterEditor_->setBounds (rootBounds());
+    if (insertOverlay_) insertOverlay_->setBounds (rootBounds());
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {
         const int knobSide = static_cast<int> (neptune::core::ui::effectiveHitSize (48.0, neptune::core::ui::KnobConfig {}));
-        const int top = getHeight() - 270;
+        const int top = lh_ - 270;
         int x = 32;
         for (auto* k : knobs_)
         {
@@ -1210,16 +1311,16 @@ void NeptuneEditor::resized()
             x += kKnobCell;
         }
         // annuler / rétablir : en bas de la fenêtre (jamais sur le mixeur ni sur le master), deux fois plus petits qu'avant
-        const int btnY = getHeight() - 28;
-        redoButton_.setBounds (getWidth() - 32 - 64, btnY, 64, 22);
-        undoButton_.setBounds (getWidth() - 32 - 64 - 4 - 64, btnY, 64, 22);
+        const int btnY = lh_ - 28;
+        redoButton_.setBounds (lw_ - 32 - 64, btnY, 64, 22);
+        undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, btnY, 64, 22);
     }
 
-    auto profileStrip = getLocalBounds().reduced (32).removeFromBottom (120).removeFromTop (32);
+    auto profileStrip = rootBounds().reduced (32).removeFromBottom (120).removeFromTop (32);
     profileSwitchButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
     profileLockButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
     profileLabel_.setBounds (profileStrip);
-    auto strip = getLocalBounds().reduced (32).removeFromBottom (32);
+    auto strip = rootBounds().reduced (32).removeFromBottom (32);
     latencyLabel_.setBounds (strip.removeFromLeft (260));
     for (auto* b : latencyButtons_)
     {
@@ -1227,12 +1328,12 @@ void NeptuneEditor::resized()
     }
 }
 
-void NeptuneEditor::paint (juce::Graphics& g)
+void NeptuneEditor::paintContent (juce::Graphics& g)
 {
     using namespace neptune::core;
     g.fillAll (colour (Token::BgApp));
 
-    auto area = getLocalBounds().reduced (32);
+    auto area = rootBounds().reduced (32);
     g.setColour (colour (Token::Text));
     g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
     g.drawText ("Neptune", area.removeFromTop (40), juce::Justification::centredLeft);
@@ -1338,3 +1439,5 @@ void NeptuneEditor::paint (juce::Graphics& g)
     latencyLabel_.setText (juce::String::fromUTF8 (tr_.format ("latency.reported", { std::to_string (processor_.getLatencySamples()) }).c_str()),
                            juce::dontSendNotification);
 }
+
+void NeptuneEditor::paint (juce::Graphics& g) { g.fillAll (colour (neptune::core::theme::Token::BgApp)); }

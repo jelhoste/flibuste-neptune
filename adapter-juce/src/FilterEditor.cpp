@@ -204,7 +204,7 @@ struct FilterEditor::Column
             {
                 auto cell = dials.removeFromLeft (cw);
                 l.setBounds (cell.removeFromTop (18));
-                s.setBounds (cell.reduced (4, 0));
+                s.setBounds (cell.getCentreX() - 35, cell.getY(), 70, 50 + 16); // disque de 50 px comme les autres potards, valeur dessous
             };
             place (keyLabel, keyTrack);
             place (velLabel, velocity);

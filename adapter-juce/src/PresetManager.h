@@ -5,7 +5,7 @@
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
 
-class AnalogSynthProcessor;
+class PresetHost;
 
 // Gestionnaire de presets (modèle de données §1 à §11), superposé à la fenêtre du plugin comme les modales de potard :
 //  - « Presets » : recherche à facettes (nom, type, caractéristiques, note, champs personnalisés), détails et métadonnées
@@ -18,7 +18,7 @@ class AnalogSynthProcessor;
 class PresetManager : public juce::Component
 {
 public:
-    PresetManager (AnalogSynthProcessor&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
+    PresetManager (PresetHost&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
     ~PresetManager() override;
 
     std::function<void()> onClose;

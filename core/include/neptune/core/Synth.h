@@ -9,8 +9,11 @@
 // Les valeurs automatisables (niveaux des sources, fine tune, largeur d'impulsion, détune d'unisson, profondeur de l'enveloppe de
 // pitch, coupures et résonances, gain, accordage) sont des paramètres de la piste (Mixer.h : samplerParam, synthParam).
 #include <array>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "neptune/core/Envelope.h"
 #include "neptune/core/Filter.h"
@@ -112,7 +115,41 @@ struct SynthPatch
     EnvelopeRuntime ampEnv, pitchEnv;            // tables précalculées
     std::array<EnvelopeRuntime, 2> filterEnv;
 
+    // Génération du patch (numéro croissant attribué à la construction) : les voix gardées en vie à un changement de preset
+    // y font référence ; le publieur garde le patch vivant tant qu'une voix s'en sert (voir SynthPatchKeeper).
+    std::uint64_t generation = 0;
+    // Changement de preset (capture par voix) : à l'adoption de ce patch, les notes en cours gardent l'ancien patch et leurs
+    // valeurs de paramètres d'avant ; les nouvelles notes prennent ce patch. Faux pour une simple retouche du patch (les notes en
+    // cours suivent alors le nouveau réglage).
+    bool freezeRunningVoices = false;
+
     // Construit aussi (une fois) les tables d'onde : à faire hors temps réel, donc ici.
     explicit SynthPatch (const SynthDescription& d);
+};
+
+// Garde en vie les anciens patchs tant que des voix figées (capture par voix) s'en servent. Thread de message uniquement ;
+// la lecture de ce que l'audio publie se fait par `SynthVoices::oldestFrozenGeneration()` / `adoptedGeneration()`.
+class SynthPatchKeeper
+{
+public:
+    void add (std::shared_ptr<const SynthPatch> patch) { kept_.push_back (std::move (patch)); }
+    // Retire ce qui n'est plus utile : tout patch de génération inférieure à la plus ancienne voix figée ET à celle du patch
+    // actuellement adopté par l'audio. Le plus récent est toujours gardé.
+    void prune (std::uint64_t oldestFrozen, std::uint64_t adopted)
+    {
+        const std::uint64_t floor = oldestFrozen < adopted ? oldestFrozen : adopted;
+        std::size_t out = 0;
+        for (std::size_t i = 0; i < kept_.size(); ++i)
+        {
+            const auto g = kept_[i]->generation;
+            // utile : adopté ou plus ancien mais encore utilisé par une voix figée ; ou le plus récent (peut-être pas encore adopté)
+            if ((g <= adopted && g >= floor) || i + 1 == kept_.size()) kept_[out++] = std::move (kept_[i]);
+        }
+        kept_.resize (out);
+    }
+    std::size_t size() const noexcept { return kept_.size(); }
+
+private:
+    std::vector<std::shared_ptr<const SynthPatch>> kept_;
 };
 } // namespace neptune::core

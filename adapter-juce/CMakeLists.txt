@@ -35,6 +35,9 @@ target_sources(Neptune PRIVATE
   src/FilterEditor.cpp
   src/MixerView.cpp
   src/SynthView.cpp
+  src/PresetBar.cpp
+  src/PresetManager.cpp
+  src/MidiFilterEditor.cpp
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
   src/NeptuneKnob.cpp
@@ -121,6 +124,7 @@ clap_juce_extensions_plugin(
 target_sources(AnalogSynth PRIVATE
   src/AnalogSynthPlugin.cpp
   src/PresetManager.cpp
+  src/PresetBar.cpp
   src/SynthView.cpp
   src/EnvelopeEditor.cpp
   src/NeptuneKnob.cpp

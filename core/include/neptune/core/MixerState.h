@@ -21,10 +21,11 @@ struct TrackState
     TrackType type = TrackType::Sampler;
     InstrumentDescription instrument;   // type Sampler
     SynthDescription synth;             // type Synthé
+    std::string synthPresetId;          // preset de synthé chargé sur la piste (informatif : « modifié » se déduit du son courant)
     mixer::StripSettings strip;
     bool operator== (const TrackState& o) const noexcept
     {
-        return active == o.active && type == o.type && instrument == o.instrument && synth == o.synth && strip == o.strip;
+        return active == o.active && type == o.type && instrument == o.instrument && synth == o.synth && synthPresetId == o.synthPresetId && strip == o.strip;
     }
 };
 

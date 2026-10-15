@@ -669,3 +669,38 @@ TEST_CASE ("state: a synth track survives save and load")
     CHECK (*r.mixer == m);
     CHECK (r.mixer->tracks[0].type == TrackType::Synth);
 }
+
+TEST_CASE ("global voice limit steals the weakest voice across tracks", "[synth][voices]")
+{
+    Engine e;
+    e.prepare (48000.0, 256);
+    for (int t = 0; t < 3; ++t)
+    {
+        e.setTrackActive (t, true);
+        e.setTrackType (t, TrackType::Synth);
+        SynthDescription d;
+        d.ampEnv.attack.ms = 0.0;
+        d.ampEnv.release.ms = 500.0;
+        e.publishSynth (t, std::make_shared<SynthPatch> (d));
+    }
+    mixer::MasterSettings m;
+    m.maxVoices = 8;
+    e.setMasterSettings (m);
+
+    std::vector<float> l (256), r (256);
+    float* out[2] = { l.data(), r.data() };
+    // 3 pistes x 6 notes = 18 notes demandées : jamais plus de 8 voix qui sonnent hors fondu
+    for (int n = 0; n < 6; ++n)
+        for (int t = 0; t < 3; ++t)
+        {
+            e.noteOnTrack (t, 0, 48 + n * 2 + t, 0.5f + 0.05f * static_cast<float> (n));
+            e.process (out, 2, 256);
+            int sounding = 0;
+            for (int i = 0; i < 3; ++i) sounding += e.activeVoices (i);
+            CHECK (sounding <= 8 + 3); // + les voix volées encore en fondu de quelques millisecondes
+        }
+    for (int i = 0; i < 40; ++i) e.process (out, 2, 256); // les fondus sont finis
+    int total = 0;
+    for (int i = 0; i < 3; ++i) total += e.activeVoices (i);
+    CHECK (total == 8);
+}

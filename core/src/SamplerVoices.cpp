@@ -102,6 +102,48 @@ int SamplerVoices::heldVoices() const noexcept
                                             [] (const Voice& v) { return v.active && ! v.releasing && ! v.stolen; }));
 }
 
+int SamplerVoices::soundingVoices() const noexcept
+{
+    return static_cast<int> (std::count_if (voices_.begin(), voices_.end(), [] (const Voice& v) { return v.active && ! v.stolen; }));
+}
+
+namespace
+{
+// ordre de sacrifice : relâchement d'abord, puis niveau croissant, puis la plus ancienne
+bool sacrificedBefore (bool relA, float levA, std::uint64_t ordA, bool relB, float levB, std::uint64_t ordB) noexcept
+{
+    if (relA != relB) return relA;
+    if (levA != levB) return levA < levB;
+    return ordA < ordB;
+}
+} // namespace
+
+bool SamplerVoices::weakestVoice (bool& releasing, float& level, std::uint64_t& order) const noexcept
+{
+    const Voice* best = nullptr;
+    for (const auto& v : voices_)
+    {
+        if (! v.active || v.stolen) continue;
+        if (best == nullptr || sacrificedBefore (v.releasing, v.level, v.order, best->releasing, best->level, best->order)) best = &v;
+    }
+    if (best == nullptr) return false;
+    releasing = best->releasing;
+    level = best->level;
+    order = best->order;
+    return true;
+}
+
+void SamplerVoices::stealWeakest() noexcept
+{
+    Voice* best = nullptr;
+    for (auto& v : voices_)
+    {
+        if (! v.active || v.stolen) continue;
+        if (best == nullptr || sacrificedBefore (v.releasing, v.level, v.order, best->releasing, best->level, best->order)) best = &v;
+    }
+    if (best != nullptr) steal (*best);
+}
+
 void SamplerVoices::steal (Voice& v) noexcept
 {
     v.stolen = true;

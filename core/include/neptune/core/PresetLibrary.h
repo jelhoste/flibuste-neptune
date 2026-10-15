@@ -9,6 +9,7 @@
 //   <racine>/grids/<gridId>.json         grilles concert
 //   <racine>/trash/AAAA-MM-JJ_HHhMM_<label>/<id>.flipreset + meta.json (date de suppression, id, nom)
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,10 @@ public:
     std::vector<Preset> allPresets() const; // factory puis utilisateur
     const Preset* find (const std::string& id) const;
     std::vector<std::string> allIds() const;
+
+    // Preset suivant (direction > 0) ou précédent d'un preset courant : dans les banques si le preset y est placé, sinon dans la
+    // liste complète triée par nom. "" s'il n'y en a pas. `accept` (facultatif) filtre les presets utilisables (ex. même module).
+    std::string stepFrom (const std::string& currentId, int direction, const std::function<bool (const Preset&)>& accept = {}) const;
 
     // ---- écriture (utilisateur) ----
     // Enregistre ; refuse (faux, `error`) un preset factory ou verrouillé (l'appelant propose « Enregistrer sous »).

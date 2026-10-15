@@ -27,7 +27,6 @@ theme::Palette makePalette (const settings::GlobalSettings& st)
 
 constexpr int kKnobCell = 118;
 constexpr int kBottomHeight = 120;
-constexpr double kEpsilon = 1.0e-9;
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------- processeur
@@ -221,9 +220,7 @@ bool AnalogSynthProcessor::loadPreset (const std::string& id)
     const auto* p = library_->find (id);
     if (p == nullptr) return false;
     const auto before = snapshotNormalised();
-    auto d = engine_.description();
-    if (! analog::applyPreset (*p, engine_.params(), d, library_->config())) return false;
-    engine_.setDescription (d);
+    if (! engine_.loadPreset (*p, library_->config())) return false; // capture par voix : voir AnalogSynthEngine::loadPreset
     currentPresetId_ = id;
     undo_.clear();
     notifyHostOfParameterChanges (before);
@@ -259,24 +256,7 @@ bool AnalogSynthProcessor::stepPreset (int direction)
 bool AnalogSynthProcessor::isModified() const
 {
     const auto* p = currentPreset();
-    if (p == nullptr) return false;
-    const auto& cfg = library_->config();
-    const auto& set = engine_.params();
-    for (const auto& [key, value] : p->parameters)
-    {
-        const auto id = analog::paramIdForKey (key);
-        if (id == 0 || value.isText || preset::captureOf (key, *p, cfg) == preset::Capture::Free) continue;
-        const auto index = set.indexOf (id);
-        if (index != ParameterSet::npos && std::fabs (set.getAt (index) - value.number) > kEpsilon) return true;
-    }
-    if (! p->state.empty())
-    {
-        auto stored = synthFromJson (p->state);
-        auto current = engine_.description();
-        if (preset::captureOf (analog::glideKey, *p, cfg) == preset::Capture::Free) stored.glideMs = current.glideMs;
-        if (! (stored == current)) return true;
-    }
-    return false;
+    return p != nullptr && analog::differsFromPreset (*p, engine_.params(), engine_.description(), library_->config());
 }
 
 bool AnalogSynthProcessor::canSaveCurrent() const
@@ -370,45 +350,45 @@ AnalogSynthEditor::AnalogSynthEditor (AnalogSynthProcessor& p)
     infoLabel_.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (infoLabel_);
 
-    prevButton_.setButtonText ("<");
-    prevButton_.setTooltip (text ("preset.prev"));
-    prevButton_.onClick = [this] { processor_.stepPreset (-1); refreshPresetBar(); };
-    nextButton_.setButtonText (">");
-    nextButton_.setTooltip (text ("preset.next"));
-    nextButton_.onClick = [this] { processor_.stepPreset (+1); refreshPresetBar(); };
-    nameButton_.onClick = [this] { openManager(); };
-    saveButton_.setButtonText (text ("preset.save"));
-    saveButton_.onClick = [this] { quickSave(); };
-    managerButton_.setButtonText (text ("preset.manager"));
-    managerButton_.onClick = [this] { openManager(); };
+    presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
+    presetBar_->onOpenManager = [this] (bool saveAs) { openManager (saveAs); };
+    presetBar_->onLoaded = [this] { synthView_->setDescription (processor_.synthDescription()); };
+    presetBar_->onStatus = [this] (const juce::String& m) { infoLabel_.setText (m, juce::dontSendNotification); };
+    addAndMakeVisible (*presetBar_);
     undoButton_.setButtonText (text ("undo.undo"));
     undoButton_.onClick = [this] { processor_.uiUndo(); };
     redoButton_.setButtonText (text ("undo.redo"));
     redoButton_.onClick = [this] { processor_.uiRedo(); };
     panicButton_.setButtonText (text ("panic.button"));
     panicButton_.onClick = [this] { processor_.uiPanic(); synthView_->releaseKeys(); };
-    for (auto* b : { &prevButton_, &nextButton_, &nameButton_, &saveButton_, &managerButton_, &undoButton_, &redoButton_, &panicButton_ })
-        addAndMakeVisible (b);
+    for (auto* b : { &undoButton_, &redoButton_, &panicButton_ }) addAndMakeVisible (b);
 
-    refreshPresetBar();
     synthView_->setDescription (processor_.synthDescription());
     startTimerHz (15);
 
+    root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
+    root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
     setResizable (true, true);
-    setResizeLimits (900, 560, 1800, 1100);
-    setSize (1180, 700); // en dernier : resized() place les composants créés ci-dessus
+    setResizeLimits (360, 240, 2400, 1400); // en dessous de la taille de conception (820 x 600), tout est réduit
+    {
+        // taille de départ : 1180 x 700 au plus, jamais plus de 90 % de l'écran utile
+        int w = 1180, h = 700;
+        if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
+            h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
+        }
+        setSize (juce::jmax (360, w), juce::jmax (240, h)); // en dernier : resized() place les composants créés ci-dessus
+    }
 }
 
 void AnalogSynthEditor::resized()
 {
-    auto r = getLocalBounds().reduced (24, 12);
+    const auto logical = root_.fit (getWidth(), getHeight(), 820, 600);
+    auto r = logical.reduced (24, 12);
     auto top = r.removeFromTop (40);
     brandLabel_.setBounds (top.removeFromLeft (190));
-    prevButton_.setBounds (top.removeFromLeft (40).reduced (2));
-    nameButton_.setBounds (top.removeFromLeft (juce::jmin (360, juce::jmax (180, top.getWidth() / 3))).reduced (2));
-    nextButton_.setBounds (top.removeFromLeft (40).reduced (2));
-    saveButton_.setBounds (top.removeFromLeft (90).reduced (2));
-    managerButton_.setBounds (top.removeFromLeft (120).reduced (2));
+    presetBar_->setBounds (top.removeFromLeft (juce::jmin (620, top.getWidth() - 110 - 140)));
     panicButton_.setBounds (top.removeFromRight (110).reduced (2));
     infoLabel_.setBounds (top);
     r.removeFromTop (8);
@@ -428,11 +408,13 @@ void AnalogSynthEditor::resized()
     redoButton_.setBounds (bottom.getRight() - 64, y + (knobSide - 22) / 2, 64, 22);
     undoButton_.setBounds (bottom.getRight() - 64 - 4 - 64, y + (knobSide - 22) / 2, 64, 22);
 
-    if (modal_) modal_->setBounds (getLocalBounds());
-    if (manager_) manager_->setBounds (getLocalBounds());
+    if (modal_) modal_->setBounds (logical);
+    if (manager_) manager_->setBounds (logical);
 }
 
-void AnalogSynthEditor::paint (juce::Graphics& g)
+void AnalogSynthEditor::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgApp)); }
+
+void AnalogSynthEditor::paintContent (juce::Graphics& g)
 {
     g.fillAll (colour (Token::BgApp));
     // noms et valeurs sous / sur les potards de la rangée du bas
@@ -463,7 +445,7 @@ bool AnalogSynthEditor::keyPressed (const juce::KeyPress& k)
         return true;
     }
     if (code == 'Y' || code == 'y') { processor_.uiRedo(); return true; }
-    if (code == 'S' || code == 's') { quickSave(); return true; }
+    if (code == 'S' || code == 's') { presetBar_->quickSave(); return true; }
     return false;
 }
 
@@ -475,8 +457,8 @@ void AnalogSynthEditor::openModal (ParamId id, uistate::Terminal terminal)
                                           {
                                               juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
                                           });
-    addAndMakeVisible (*modal_);
-    modal_->setBounds (getLocalBounds());
+    root_.addAndMakeVisible (*modal_);
+    modal_->setBounds (root_.getLocalBounds());
     modal_->toFront (true);
 }
 
@@ -488,7 +470,7 @@ void AnalogSynthEditor::closeModal()
     grabKeyboardFocus();
 }
 
-void AnalogSynthEditor::openManager()
+void AnalogSynthEditor::openManager (bool saveAs)
 {
     if (manager_ || modal_) return;
     manager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
@@ -506,45 +488,20 @@ void AnalogSynthEditor::openManager()
     {
         if (safe != nullptr) { safe->refreshPresetBar(); safe->synthView_->setDescription (safe->processor_.synthDescription()); }
     };
-    addAndMakeVisible (*manager_);
-    manager_->setBounds (getLocalBounds());
+    root_.addAndMakeVisible (*manager_);
+    manager_->setBounds (root_.getLocalBounds());
     manager_->toFront (true);
+    if (saveAs) manager_->showSaveAs();
 }
 
-// « Enregistrer » : sur le preset courant s'il est enregistrable ; sinon (factory, verrouillé, aucun) c'est « Enregistrer sous ».
-void AnalogSynthEditor::quickSave()
-{
-    if (processor_.canSaveCurrent())
-    {
-        std::string error;
-        if (processor_.saveCurrent (&error)) { infoLabel_.setText (text ("preset.saved"), juce::dontSendNotification); refreshPresetBar(); return; }
-    }
-    openManager();
-    if (manager_) manager_->showSaveAs();
-}
-
-void AnalogSynthEditor::refreshPresetBar()
-{
-    const auto* p = processor_.currentPreset();
-    const bool modified = processor_.isModified();
-    juce::String name = p != nullptr ? juce::String::fromUTF8 (p->name.c_str()) : text ("preset.none");
-    if (modified) name += " *";
-    if (p != nullptr && p->locked) name = text ("preset.tag_locked") + "  " + name;
-    nameButton_.setButtonText (name);
-    saveButton_.setEnabled (true);
-    lastModified_ = modified;
-    lastPresetId_ = processor_.currentPresetId();
-    lastPresetRevision_ = processor_.presetRevision();
-}
+void AnalogSynthEditor::refreshPresetBar() { presetBar_->refresh(); }
 
 void AnalogSynthEditor::timerCallback()
 {
-    const bool modified = processor_.isModified();
-    if (modified != lastModified_ || lastPresetId_ != processor_.currentPresetId() || lastPresetRevision_ != processor_.presetRevision())
+    if (presetBar_->needsRefresh())
     {
-        const auto before = lastPresetRevision_;
-        refreshPresetBar();
-        if (before != processor_.presetRevision()) synthView_->setDescription (processor_.synthDescription());
+        presetBar_->refresh();
+        synthView_->setDescription (processor_.synthDescription()); // un preset vient d'être chargé (ou la sélection a changé)
     }
     const auto rev = static_cast<std::uint32_t> (processor_.undoManager().revision());
     if (rev != lastUndoRevision_)
@@ -561,7 +518,7 @@ void AnalogSynthEditor::timerCallback()
         lastVoices_ = voices;
         infoLabel_.setText (text ("analog.voices") + " " + juce::String (voices), juce::dontSendNotification);
     }
-    repaint (0, getHeight() - kBottomHeight - 12, getWidth(), kBottomHeight + 12); // valeurs des potards (automation de l'hôte)
+    root_.repaint(); // valeurs des potards (automation de l'hôte)
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new AnalogSynthProcessor(); }

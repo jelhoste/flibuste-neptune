@@ -44,13 +44,25 @@ std::string stateToJson (const ParameterSet&, const SynthDescription&, const std
 bool stateFromJson (std::string_view text, ParameterSet&, SynthDescription&, std::string& currentPresetId);
 
 // ---- presets ----
+// Les identifiants de `keyedParams()` sont ceux de la piste 0 ; Neptune applique les mêmes presets à n'importe laquelle de ses
+// pistes Synthé : `idForTrack` donne l'identifiant du même réglage sur la piste `track`.
+ParamId idForTrack (ParamId track0Id, int track) noexcept;
+
 // Instantané du son courant : les paramètres capturés (selon `cfg`), la description complète en `state`.
 // `base` (facultatif) : preset existant dont on garde l'identité, les métadonnées et les exceptions de capture (« Enregistrer »).
 preset::Preset capturePreset (const ParameterSet&, const SynthDescription&, const preset::LibraryConfig& cfg,
-                              const std::string& name, const std::string& type = {}, const preset::Preset* base = nullptr);
-// Applique un preset : les paramètres capturés présents dans le preset sont écrits ; la description est remplacée (hors glissando
-// si libre). Les paramètres libres ou absents gardent leur valeur courante. Retourne faux si le preset n'est pas pour ce module.
-bool applyPreset (const preset::Preset&, ParameterSet&, SynthDescription&, const preset::LibraryConfig& cfg);
+                              const std::string& name, const std::string& type = {}, const preset::Preset* base = nullptr,
+                              int track = 0);
+// La description que donnerait le preset (le glissando libre est conservé). Sans effet de bord : sert à publier le patch avant
+// de changer les valeurs (capture par voix).
+SynthDescription presetDescription (const preset::Preset&, const SynthDescription& current, const preset::LibraryConfig& cfg);
+// Écrit les valeurs capturées du preset (les paramètres libres ou absents gardent leur valeur).
+void applyPresetValues (const preset::Preset&, ParameterSet&, const preset::LibraryConfig& cfg, int track = 0);
+// Les deux ensemble ; retourne faux si le preset n'est pas pour ce module.
+bool applyPreset (const preset::Preset&, ParameterSet&, SynthDescription&, const preset::LibraryConfig& cfg, int track = 0);
+// Vrai si le son courant diffère du preset (valeurs capturées ou patch).
+bool differsFromPreset (const preset::Preset&, const ParameterSet&, const SynthDescription&, const preset::LibraryConfig& cfg,
+                        int track = 0);
 // Presets livrés avec le plugin (lecture seule, ids stables « factory-analogsynth-NN »).
 std::vector<preset::Preset> factoryPresets();
 
@@ -67,9 +79,15 @@ public:
     void prepare (double sampleRate, int maxBlockSize);
 
     // --- thread de message ---
-    void setDescription (const SynthDescription&); // construit le patch et le remet au thread audio
+    // Construit le patch et le remet au thread audio. `newPreset` : changement de preset -> les notes en cours gardent l'ancien
+    // patch et leurs anciennes valeurs (capture par voix) ; faux : retouche du patch, les notes en cours suivent.
+    void setDescription (const SynthDescription&, bool newPreset = false);
+    int frozenVoices() const noexcept { return voices_.frozenVoices(); }
     const SynthDescription& description() const noexcept { return description_; }
-    void collect() { patchSlot_.collect(); }      // libère les anciens patchs
+    // Charge un preset avec capture par voix : le nouveau patch est publié AVANT de changer les valeurs, pour que l'audio fige les
+    // notes en cours avec les valeurs d'avant (voir SynthVoices::setPatch). Faux si le preset est d'un autre module.
+    bool loadPreset (const preset::Preset&, const preset::LibraryConfig&);
+    void collect() { patchSlot_.collect(); pruneKeeper(); } // libère les anciens patchs
     // Notes de l'interface (clavier à l'écran, aperçu) : file sans verrou vers le thread audio, un seul producteur.
     void postNoteOn (int key, float velocity) noexcept { post (Event::NoteOn, key, velocity); }
     void postNoteOff (int key) noexcept { post (Event::NoteOff, key, 0.0f); }
@@ -115,7 +133,9 @@ private:
     std::array<std::size_t, 2> idxCutoff_ {}, idxReso_ {};
 
     SynthDescription description_;
+    void pruneKeeper();
     HandoffSlot<SynthPatch> patchSlot_;
+    SynthPatchKeeper keeper_;
     SynthVoices voices_;
     float lastGain_ = 1.0f, lastFader_ = 1.0f, lastPanL_ = 1.0f, lastPanR_ = 1.0f;
     std::atomic<float> peakL_ { 0.0f }, peakR_ { 0.0f };

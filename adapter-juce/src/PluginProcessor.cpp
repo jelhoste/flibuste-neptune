@@ -281,7 +281,7 @@ neptune::core::SynthDescription NeptuneProcessor::synthDescription (int track) c
     return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].synth;
 }
 
-void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::string name, std::string mergeKey)
+void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::string name, std::string mergeKey, bool presetChange)
 {
     using namespace neptune::core;
     const int track = selectedTrack();
@@ -290,10 +290,10 @@ void NeptuneProcessor::uiEditSynth (neptune::core::SynthDescription d, std::stri
     if (previous == d) return;
     undo_.perform (std::make_unique<SnapshotCommand<SynthDescription>> (
         previous, d,
-        [this, track] (const SynthDescription& v)
+        [this, track, presetChange] (const SynthDescription& v)
         {
             { const juce::ScopedLock lock (instrumentLock_); mixer_.tracks[static_cast<std::size_t> (track)].synth = v; }
-            publishSynthPatch (track, v);
+            publishSynthPatch (track, v, presetChange);
             ++revision_;
             notifyStateChanged();
         },
@@ -697,9 +697,138 @@ neptune::core::mixer::MasterSettings NeptuneProcessor::masterSettings() const
     return mixer_.master;
 }
 
-void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthDescription& d)
+void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthDescription& d, bool freezeRunningVoices)
 {
-    engine_.publishSynth (track, std::make_shared<const neptune::core::SynthPatch> (d));
+    auto patch = std::make_shared<neptune::core::SynthPatch> (d);
+    patch->freezeRunningVoices = freezeRunningVoices;
+    engine_.publishSynth (track, std::move (patch));
+}
+
+// ---- presets de synthé de la piste sélectionnée
+void NeptuneProcessor::setTrackPresetId (int track, const std::string& id)
+{
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        mixer_.tracks[static_cast<std::size_t> (track)].synthPresetId = id;
+    }
+    ++presetRevision_;
+    notifyStateChanged();
+}
+
+std::string NeptuneProcessor::currentPresetId() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (selectedTrack())].synthPresetId;
+}
+
+const neptune::core::preset::Preset* NeptuneProcessor::currentPreset() const
+{
+    const auto id = currentPresetId();
+    return id.empty() ? nullptr : presetLibrary_->find (id);
+}
+
+bool NeptuneProcessor::loadPreset (const std::string& id)
+{
+    using namespace neptune::core;
+    const int track = selectedTrack();
+    if (trackType (track) != TrackType::Synth) return false;
+    const auto* p = presetLibrary_->find (id);
+    if (p == nullptr || (! p->module.empty() && p->module != analogsynth::moduleId)) return false;
+    const auto& cfg = presetLibrary_->config();
+
+    undo_.beginTransaction ("Preset");
+    // le patch d'abord (capture par voix : l'audio fige les notes en cours avec les valeurs d'avant), puis les valeurs
+    uiEditSynth (analogsynth::presetDescription (*p, synthDescription (track), cfg), "Preset", {}, true);
+    for (const auto& [key, value] : p->parameters)
+    {
+        const ParamId base = analogsynth::paramIdForKey (key);
+        if (base == 0 || value.isText || preset::captureOf (key, *p, cfg) == preset::Capture::Free) continue;
+        const ParamId pid = analogsynth::idForTrack (base, track);
+        const auto index = params_.indexOf (pid);
+        if (index == ParameterSet::npos) continue;
+        const double v = params_.spec (index).clamp (value.number);
+        if (params_.getAt (index) == v) continue;
+        undo_.setParameter (params_, pid, v);
+        auto* hostParam = getParameters()[static_cast<int> (index)];
+        hostParam->beginChangeGesture();
+        hostParam->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+        hostParam->endChangeGesture();
+    }
+    undo_.endTransaction();
+    setTrackPresetId (track, id);
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withParameterInfoChanged (false).withNonParameterStateChanged (true));
+    return true;
+}
+
+bool NeptuneProcessor::stepPreset (int direction)
+{
+    const auto next = presetLibrary_->stepFrom (currentPresetId(), direction, [] (const neptune::core::preset::Preset& p)
+                                                { return p.module.empty() || p.module == neptune::core::analogsynth::moduleId; });
+    return ! next.empty() && loadPreset (next);
+}
+
+bool NeptuneProcessor::isModified() const
+{
+    const auto* p = currentPreset();
+    if (p == nullptr) return false;
+    const int track = selectedTrack();
+    return neptune::core::analogsynth::differsFromPreset (*p, params_, synthDescription (track), presetLibrary_->config(), track);
+}
+
+bool NeptuneProcessor::canSaveCurrent() const
+{
+    const auto* p = currentPreset();
+    return p != nullptr && ! p->factory && ! p->locked;
+}
+
+bool NeptuneProcessor::overwritePreset (const std::string& id, std::string* error)
+{
+    const auto* base = presetLibrary_->find (id);
+    if (base == nullptr || base->factory) { if (error) *error = "factory preset is read-only"; return false; }
+    if (base->locked) { if (error) *error = "preset is locked"; return false; }
+    const int track = selectedTrack();
+    auto p = neptune::core::analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), base->name, base->type,
+                                                        base, track);
+    const bool ok = presetLibrary_->save (std::move (p), error);
+    if (ok) ++presetRevision_;
+    return ok;
+}
+
+bool NeptuneProcessor::saveCurrent (std::string* error)
+{
+    const auto id = currentPresetId();
+    if (id.empty()) { if (error) *error = "no current preset"; return false; }
+    return overwritePreset (id, error);
+}
+
+bool NeptuneProcessor::saveCurrentAs (const std::string& name, const std::string& type, neptune::core::preset::Preset* out, std::string* error)
+{
+    using namespace neptune::core;
+    const int track = selectedTrack();
+    if (trackType (track) != TrackType::Synth) { if (error) *error = "not a synth track"; return false; }
+    auto p = analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), name, type, nullptr, track);
+    if (const auto* cur = currentPreset())
+    {
+        p.characteristics = cur->characteristics;
+        p.customFields = cur->customFields;
+        p.rating = cur->rating;
+        p.captureOverrides = cur->captureOverrides;
+        if (p.type.empty()) p.type = cur->type;
+        p.derivedFrom = cur->factory ? cur->id : cur->derivedFrom;
+        p = analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), name, p.type, &p, track);
+    }
+    preset::Preset stored;
+    if (! presetLibrary_->importPreset (std::move (p), &stored, error)) return false;
+    setTrackPresetId (track, stored.id);
+    if (out != nullptr) *out = stored;
+    return true;
+}
+
+bool NeptuneProcessor::saveConfig (const neptune::core::preset::LibraryConfig& c)
+{
+    const bool ok = presetLibrary_->setConfig (c);
+    if (ok) ++presetRevision_;
+    return ok;
 }
 
 void NeptuneProcessor::pushMixerSettingsToEngine()
@@ -871,6 +1000,13 @@ NeptuneProcessor::NeptuneProcessor()
     for (const auto& w : warnings)
         DBG ("Neptune settings: " << juce::String (w));
     loader_ = std::make_unique<InstrumentLoader> (*this);
+    {
+        // Presets de synthé : la même bibliothèque qu'AnalogSynth (dossier choisi dans les réglages, sinon <config>/AnalogSynth).
+        auto root = settings_.presetsDir.empty() ? configDir / "AnalogSynth" : std::filesystem::u8path (settings_.presetsDir);
+        presetLibrary_ = std::make_unique<neptune::core::preset::Library> (std::move (root), neptune::core::analogsynth::factoryPresets());
+        presetLibrary_->open (&warnings);
+        if (presetLibrary_->config().parameterCaptureDefaults.empty()) presetLibrary_->setConfig (neptune::core::analogsynth::defaultConfig());
+    }
     uiStateFile_ = configDir / "ui_state.json";
     uiState_ = neptune::core::uistate::loadFile (uiStateFile_);
 

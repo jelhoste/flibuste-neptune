@@ -79,6 +79,11 @@ public:
     }
 
     int activeVoices() const noexcept;    // voix qui sonnent (y compris en relâchement)
+    int soundingVoices() const noexcept;  // voix qui sonnent hors fondu de vol : comptées par la limite globale (Engine)
+    // Vol global (limite de voix du plugin) : la voix à sacrifier en premier ; les voix en relâchement d'abord, puis la plus faible.
+    // Retourne faux s'il n'y en a pas. `releasing` / `level` / `order` permettent à l'appelant de comparer entre pistes.
+    bool weakestVoice (bool& releasing, float& level, std::uint64_t& order) const noexcept;
+    void stealWeakest() noexcept;
     int heldVoices() const noexcept;      // voix comptées dans la limite (ni relâchées ni en fondu de vol)
 
 private:

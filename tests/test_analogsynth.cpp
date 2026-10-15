@@ -8,6 +8,8 @@
 
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/Mixer.h"
+#include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
 #include "neptune/core/WaveCatalog.h"
 
 using namespace neptune::core;
@@ -313,4 +315,168 @@ TEST_CASE ("analogsynth publishes the held keys for the on-screen keyboard", "[a
     e.panic();
     CHECK (e.heldKeyWord (0) == 0);
     CHECK (e.heldKeyWord (1) == 0);
+}
+
+namespace
+{
+SynthDescription sineWith (int wave)
+{
+    SynthDescription d;
+    d.osc[0].wave = wave;
+    d.ampEnv.attack.ms = 0.0;
+    d.ampEnv.release.ms = 10.0;
+    d.filters.filter[0].on = false;
+    return d;
+}
+
+
+float rms (const std::vector<float>& v, int from, int to)
+{
+    double s = 0.0;
+    for (int i = from; i < to; ++i) s += v[static_cast<std::size_t> (i)] * v[static_cast<std::size_t> (i)];
+    return static_cast<float> (std::sqrt (s / (to - from)));
+}
+} // namespace
+
+TEST_CASE ("per-voice capture: a held note keeps its old patch and values across a preset change", "[analogsynth][capture]")
+{
+    AnalogSynthEngine e;
+    e.prepare (kRate, 128);
+    const auto cfg = defaultConfig();
+
+    // preset A : sinus, niveau 100 ; preset B : carré, niveau 30, accordé une octave plus haut
+    preset::Preset a = capturePreset (e.params(), sineWith (kWaveSine), cfg, "A");
+    e.params().set (mixer::synthParam (0, mixer::kLevelOsc1), 30.0);
+    e.params().set (sampler::tuneSemitones, 12.0);
+    preset::Preset b = capturePreset (e.params(), sineWith (kWaveSquare), cfg, "B");
+    e.params().resetAll();
+    REQUIRE (e.loadPreset (a, cfg));
+
+    std::vector<float> l (128), r (128);
+    auto run = [&] (int blocks, std::vector<float>* collect = nullptr)
+    {
+        for (int i = 0; i < blocks; ++i)
+        {
+            e.process (l.data(), r.data(), 128);
+            if (collect != nullptr) collect->insert (collect->end(), l.begin(), l.end());
+        }
+    };
+    e.noteOn (0, 57, 1.0f); // la 3 = 220 Hz
+    run (50);
+    CHECK (e.frozenVoices() == 0);
+
+    REQUIRE (e.loadPreset (b, cfg));
+    run (2);
+    CHECK (e.frozenVoices() == 1); // la note tenue est figée sur le preset A
+    e.noteOn (0, 69, 1.0f);        // 440 Hz, preset B (+12 demi-tons : 880 Hz)
+    run (50);
+    CHECK (e.activeVoices() == 2);
+
+    // relâcher la note figée : elle finit avec le son de A (sinus, jamais carré), puis disparaît
+    e.noteOff (0, 57);
+    run (20);
+    CHECK (e.frozenVoices() == 0);
+    CHECK (e.activeVoices() == 1);
+    e.panic();
+    run (10);
+}
+
+TEST_CASE ("per-voice capture: frozen voices ignore later knob moves, new notes follow them", "[analogsynth][capture]")
+{
+    AnalogSynthEngine e;
+    e.prepare (kRate, 128);
+    const auto cfg = defaultConfig();
+    const auto p = capturePreset (e.params(), sineWith (kWaveSine), cfg, "A");
+    REQUIRE (e.loadPreset (p, cfg));
+
+    std::vector<float> l (128), r (128), all;
+    auto run = [&] (int blocks)
+    {
+        all.clear();
+        for (int i = 0; i < blocks; ++i)
+        {
+            e.process (l.data(), r.data(), 128);
+            all.insert (all.end(), l.begin(), l.end());
+        }
+    };
+    e.noteOn (0, 57, 1.0f);
+    run (40);
+    const float before = rms (all, 128 * 20, 128 * 40);
+    REQUIRE (before > 0.01f);
+
+    REQUIRE (e.loadPreset (p, cfg)); // même preset rechargé : nouvelle génération, la note est figée
+    run (2);
+    CHECK (e.frozenVoices() == 1);
+    e.params().set (mixer::synthParam (0, mixer::kLevelOsc1), 0.0); // niveau coupé après le changement
+    run (40);
+    const float frozen = rms (all, 128 * 20, 128 * 40);
+    CHECK (frozen > before * 0.8f); // la note figée sonne toujours à l'ancien niveau
+
+    e.noteOn (0, 69, 1.0f); // nouvelle note : le niveau coupé s'applique
+    run (40);
+    // seule la note figée sonne (niveau d'avant) : le niveau global n'a pas augmenté
+    CHECK (rms (all, 128 * 20, 128 * 40) < before * 1.2f);
+}
+
+TEST_CASE ("per-voice capture: the keeper releases old patches once frozen voices are gone", "[analogsynth][capture]")
+{
+    AnalogSynthEngine e;
+    e.prepare (kRate, 128);
+    const auto cfg = defaultConfig();
+    const auto p = capturePreset (e.params(), sineWith (kWaveSine), cfg, "A");
+    REQUIRE (e.loadPreset (p, cfg));
+    std::vector<float> l (128), r (128);
+    e.noteOn (0, 60, 1.0f);
+    for (int i = 0; i < 20; ++i) e.process (l.data(), r.data(), 128);
+    for (int k = 0; k < 5; ++k)
+    {
+        REQUIRE (e.loadPreset (p, cfg));
+        for (int i = 0; i < 4; ++i) e.process (l.data(), r.data(), 128);
+    }
+    CHECK (e.frozenVoices() == 1);
+    e.noteOff (0, 60);
+    for (int i = 0; i < 200; ++i) e.process (l.data(), r.data(), 128);
+    CHECK (e.frozenVoices() == 0);
+    e.collect(); // pas de patch resté épinglé, pas de crash
+    REQUIRE (e.loadPreset (p, cfg));
+    e.noteOn (0, 64, 1.0f);
+    for (int i = 0; i < 20; ++i) e.process (l.data(), r.data(), 128);
+    CHECK (e.activeVoices() == 1);
+}
+
+TEST_CASE ("presets apply to any Neptune synth track through idForTrack", "[analogsynth][preset]")
+{
+    // jeu de paramètres de Neptune : 16 pistes, 16 bus
+    ParameterSet set;
+    REQUIRE (probe::buildPool (set, mixer::numTracks));
+    REQUIRE (sampler::addParams (set));
+    REQUIRE (mixer::addParams (set, mixer::numTracks, mixer::numBuses));
+
+    CHECK (idForTrack (volume, 0) == volume);
+    CHECK (idForTrack (volume, 3) == probe::trackParam (3, probe::kVolume));
+    CHECK (idForTrack (sampler::filter2Cutoff, 4) == mixer::samplerParam (4, mixer::kFilter2Cutoff));
+    CHECK (idForTrack (mixer::synthParam (0, mixer::kDetuneOsc3), 7) == mixer::synthParam (7, mixer::kDetuneOsc3));
+    for (const auto& k : keyedParams())
+        for (int t : { 0, 1, 9, 15 }) CHECK (set.indexOf (idForTrack (k.id, t)) != ParameterSet::npos);
+
+    const auto cfg = defaultConfig();
+    set.set (mixer::synthParam (2, mixer::kLevelOsc2), 42.0);
+    set.set (mixer::samplerParam (2, mixer::kFilter1Cutoff), 1500.0);
+    set.set (probe::trackParam (2, probe::kVolume), -9.0);
+    SynthDescription d;
+    d.osc[1].wave = kWaveTriangle;
+    const auto p = capturePreset (set, d, cfg, "Piste 3", "Pad", nullptr, 2);
+    CHECK (p.parameters.at ("osc2.level").number == 42.0);
+    CHECK (p.parameters.at ("filter1.cutoff").number == 1500.0);
+    CHECK (p.parameters.count ("output.volume") == 0); // le fader de la piste est libre
+
+    SynthDescription target;
+    REQUIRE (applyPreset (p, set, target, cfg, 6));
+    CHECK (set.get (mixer::synthParam (6, mixer::kLevelOsc2)) == 42.0);
+    CHECK (set.get (mixer::samplerParam (6, mixer::kFilter1Cutoff)) == 1500.0);
+    CHECK (set.get (mixer::synthParam (5, mixer::kLevelOsc2)) == 0.0); // les autres pistes ne bougent pas
+    CHECK (target.osc[1].wave == kWaveTriangle);
+    CHECK_FALSE (differsFromPreset (p, set, target, cfg, 6));
+    set.set (mixer::synthParam (6, mixer::kLevelOsc2), 43.0);
+    CHECK (differsFromPreset (p, set, target, cfg, 6));
 }

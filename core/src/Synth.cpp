@@ -1,6 +1,7 @@
 #include "neptune/core/Synth.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 
 #include <nlohmann/json.hpp>
@@ -164,10 +165,16 @@ SynthDescription synthFromJson (std::string_view text)
     return sanitised (std::move (d));
 }
 
+namespace
+{
+std::atomic<std::uint64_t> gPatchGeneration { 0 };
+}
+
 SynthPatch::SynthPatch (const SynthDescription& d)
     : desc (sanitised (d)), ampEnv (desc.ampEnv), pitchEnv (desc.pitchEnv),
       filterEnv { EnvelopeRuntime (desc.filters.filter[0].env), EnvelopeRuntime (desc.filters.filter[1].env) }
 {
+    generation = ++gPatchGeneration;
     WaveTables::instance(); // construit les tables d'onde ici (thread de message), jamais sur le thread audio
 }
 } // namespace neptune::core

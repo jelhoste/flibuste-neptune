@@ -50,6 +50,9 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     lastMasterPanL_ = lastMasterPanR_ = 1.0f;
     const auto n = static_cast<std::size_t> (maxBlockSize_);
     raw_.resize (n); inserted_.resize (n); postFader_.resize (n); final_.resize (n); sum0_.resize (n); master_.resize (n);
+    loudL_.assign (n, 0.0f);
+    loudR_.assign (n, 0.0f);
+    loudness_.prepare (sampleRate);
     levels_.resize (kParallels);
     for (auto& l : levels_) l.resize (n);
     for (auto& p : parallels_) { p.lastFader = 1.0f; p.lastPanL = p.lastPanR = 1.0f; }
@@ -85,7 +88,17 @@ void Engine::setTrackType (int track, TrackType type) noexcept
 void Engine::publishSynth (int track, std::shared_ptr<const SynthPatch> patch)
 {
     if (track < 0 || track >= kTracks) return;
-    tracks_[static_cast<std::size_t> (track)].synthSlot.publish (std::move (patch));
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    t.synthKeeper.add (patch);
+    t.synthSlot.publish (std::move (patch));
+    pruneSynthKeeper (t);
+}
+
+void Engine::pruneSynthKeeper (Track& t)
+{
+    const auto adopted = t.synth.adoptedGeneration(); // l'audio écrit les voix figées avant le patch adopté : on lit dans l'ordre inverse
+    const auto oldest = t.synth.oldestFrozenGeneration();
+    t.synthKeeper.prune (oldest, adopted);
 }
 
 void Engine::setTrackActive (int track, bool active) noexcept
@@ -119,6 +132,8 @@ void Engine::collectGarbage()
     {
         t.slot.collect();
         t.synthSlot.collect();
+        t.filterSlot.collect();
+        pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
     }
     for (auto& b : buses_)
@@ -140,10 +155,23 @@ void Engine::adoptInserts() noexcept
     for (auto& s : masterInserts_) s.slot.adoptPending();
 }
 
-void Engine::setTrackSettings (int track, const mixer::StripSettings& s) noexcept
+void Engine::setTrackSettings (int track, const mixer::StripSettings& s)
 {
     if (track < 0 || track >= kTracks) return;
-    tracks_[static_cast<std::size_t> (track)].config.load (mixer::sanitisedStrip (s, false, track));
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    const auto clean = mixer::sanitisedStrip (s, false, track);
+    t.config.load (clean);
+    if (clean.midiFilter != t.filterDescription)
+    {
+        t.filterDescription = clean.midiFilter;
+        t.filterSlot.publish (std::make_shared<const midi::CompiledFilter> (clean.midiFilter));
+    }
+}
+
+void Engine::setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter> filter)
+{
+    if (track < 0 || track >= kTracks) return;
+    tracks_[static_cast<std::size_t> (track)].filterSlot.publish (std::move (filter));
 }
 
 void Engine::setBusSettings (int bus, const mixer::StripSettings& s) noexcept
@@ -173,6 +201,7 @@ void Engine::setMasterSettings (const mixer::MasterSettings& m) noexcept
     const auto s = mixer::sanitised (m);
     masterOutput_.store (s.output, std::memory_order_relaxed);
     masterPanMode_.store (static_cast<int> (s.panMode), std::memory_order_relaxed);
+    globalMaxVoices_.store (s.maxVoices, std::memory_order_relaxed);
 }
 
 void Engine::attachParameters (const ParameterSet* parameters) noexcept
@@ -239,6 +268,7 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     if (track < 0 || track >= kTracks) return;
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (t.active.load (std::memory_order_relaxed) == 0) return;
+    enforceGlobalVoiceLimit();
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
     ++activeNotes_;
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth))
@@ -251,6 +281,39 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     if (key >= 0 && key < 128) pushTrace (track, key, t.voices.lastShapedVelocity());
 }
 
+// Limite globale de voix (toutes pistes, Sampler et Synthé) : tant qu'elle est atteinte, on fait s'éteindre en fondu la voix
+// la plus à sacrifier du plugin (les voix en relâchement d'abord, puis la plus faible). Les limites par piste restent appliquées.
+void Engine::enforceGlobalVoiceLimit() noexcept
+{
+    const int limit = globalMaxVoices_.load (std::memory_order_relaxed);
+    for (int guard = 0; guard < 32; ++guard)
+    {
+        int total = 0;
+        for (const auto& t : tracks_) total += t.voices.soundingVoices() + t.synth.soundingVoices();
+        if (total < limit) return;
+
+        int bestTrack = -1;
+        bool bestSynth = false, bestRel = false;
+        float bestLevel = 0.0f;
+        std::uint64_t bestOrder = 0;
+        auto consider = [&] (int track, bool synth, bool rel, float level, std::uint64_t order)
+        {
+            const bool better = bestTrack < 0 || (rel != bestRel ? rel : (level != bestLevel ? level < bestLevel : order < bestOrder));
+            if (better) { bestTrack = track; bestSynth = synth; bestRel = rel; bestLevel = level; bestOrder = order; }
+        };
+        for (int i = 0; i < kTracks; ++i)
+        {
+            const auto& t = tracks_[static_cast<std::size_t> (i)];
+            bool rel; float level; std::uint64_t order;
+            if (t.voices.weakestVoice (rel, level, order)) consider (i, false, rel, level, order);
+            if (t.synth.weakestVoice (rel, level, order)) consider (i, true, rel, level, order);
+        }
+        if (bestTrack < 0) return;
+        auto& t = tracks_[static_cast<std::size_t> (bestTrack)];
+        if (bestSynth) t.synth.stealWeakest(); else t.voices.stealWeakest();
+    }
+}
+
 void Engine::noteOffTrack (int track, int channel, int key) noexcept
 {
     if (track < 0 || track >= kTracks) return;
@@ -261,21 +324,40 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
     else t.voices.noteOff (channel, key);
 }
 
+// Une note entrante est distribuée aux pistes dont le canal convient ET dont le filtre MIDI avancé laisse passer le message.
+// Un Note Off suit toujours le sort de son Note On (sinon une note resterait bloquée si la règle dépend de la vélocité).
 void Engine::noteOn (int channel, int key, float velocity) noexcept
 {
+    midi::Message m;
+    m.kind = midi::MsgKind::NoteOn;
+    m.channel = channel & 15;
+    m.data1 = key;
+    m.data2 = std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 0, 127);
+    const auto bit = static_cast<std::size_t> (((channel & 15) << 7) | (key & 127));
     for (int t = 0; t < kTracks; ++t)
     {
-        const int ch = tracks_[static_cast<std::size_t> (t)].config.midiChannel.load (std::memory_order_relaxed);
-        if (ch == 0 || ch == channel + 1) noteOnTrack (t, channel, key, velocity);
+        auto& tr = tracks_[static_cast<std::size_t> (t)];
+        const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
+        if (! (ch == 0 || ch == channel + 1)) continue;
+        if (tr.filter != nullptr && ! tr.filter->passes (m)) continue;
+        tr.acceptedNotes[bit >> 6] |= std::uint64_t (1) << (bit & 63);
+        noteOnTrack (t, channel, key, velocity);
     }
 }
 
 void Engine::noteOff (int channel, int key) noexcept
 {
+    const auto bit = static_cast<std::size_t> (((channel & 15) << 7) | (key & 127));
     for (int t = 0; t < kTracks; ++t)
     {
-        const int ch = tracks_[static_cast<std::size_t> (t)].config.midiChannel.load (std::memory_order_relaxed);
-        if (ch == 0 || ch == channel + 1) noteOffTrack (t, channel, key);
+        auto& tr = tracks_[static_cast<std::size_t> (t)];
+        const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
+        if (! (ch == 0 || ch == channel + 1)) continue;
+        const std::uint64_t mask = std::uint64_t (1) << (bit & 63);
+        const bool accepted = (tr.acceptedNotes[bit >> 6] & mask) != 0;
+        if (tr.filter != nullptr && tr.filter->enabled() && ! accepted) continue; // le Note On n'est jamais passé
+        tr.acceptedNotes[bit >> 6] &= ~mask;
+        noteOffTrack (t, channel, key);
     }
 }
 
@@ -352,6 +434,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     {
         if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());
         if (t.synthSlot.adoptPending()) t.synth.setPatch (t.synthSlot.current());
+        if (t.filterSlot.adoptPending()) t.filter = t.filterSlot.current();
         // changement de type ou désactivation : les voix de la piste s'arrêtent net (rien ne doit sonner sous l'ancien type)
         const int type = t.type.load (std::memory_order_relaxed), active = t.active.load (std::memory_order_relaxed);
         if (type != t.appliedType || (active == 0 && t.appliedActive != 0))
@@ -787,11 +870,14 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             if (mono) l = r = 0.5f * (l + r);
             peakL = std::max (peakL, std::abs (l)); peakR = std::max (peakR, std::abs (r));
             sumL += l * l; sumR += r * r;
+            loudL_[static_cast<std::size_t> (i)] = l;
+            loudR_[static_cast<std::size_t> (i)] = r;
             if (pair.first != nullptr) pair.first[i] += l;
             if (pair.second != nullptr) pair.second[i] += r;
             gt += tStep; gf += fStep; gl += plStep; gr += prStep;
         }
         lastMasterTrim_ = trimTarget; lastMasterFader_ = faderTarget; lastMasterPanL_ = pl; lastMasterPanR_ = pr;
+        loudness_.push (loudL_.data(), loudR_.data(), n);
         masterPeakL_.store (peakL, std::memory_order_relaxed);
         masterPeakR_.store (peakR, std::memory_order_relaxed);
         masterRmsL_.store (std::sqrt (sumL / static_cast<float> (n)), std::memory_order_relaxed);

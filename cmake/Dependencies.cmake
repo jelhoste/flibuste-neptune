@@ -76,13 +76,16 @@ if(NEPTUNE_WITH_LIBSNDFILE)
   endif()
 endif()
 
-# --- Analyse de niveau (plus tard : LUFS, spec-modules §3) : désactivé tant qu'il n'est pas utilisé ---
-# libebur128 v1.2.6 (MIT). Activer avec -DNEPTUNE_WITH_EBUR128=ON.
-option(NEPTUNE_WITH_EBUR128 "Activer libebur128" OFF)
+# --- Analyse de niveau : LUFS du Master (EBU R128 / ITU BS.1770) ---
+# libebur128 v1.2.6 (MIT). Désactiver avec -DNEPTUNE_WITH_EBUR128=OFF (le compteur affiche alors « -inf »).
+option(NEPTUNE_WITH_EBUR128 "Activer libebur128 (LUFS du Master)" ON)
 if(NEPTUNE_WITH_EBUR128)
+  set(WITH_STATIC_PIC ON CACHE BOOL "libebur128 : code indépendant de la position (lié dans le .clap)" FORCE)
   FetchContent_Declare(libebur128
     GIT_REPOSITORY https://github.com/jiixyj/libebur128.git
     GIT_TAG        v1.2.6
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  ebur128) # seulement la bibliothèque (pas les tests ni les exemples du dépôt)
   FetchContent_MakeAvailable(libebur128)
+  target_include_directories(ebur128 PUBLIC ${libebur128_SOURCE_DIR}/ebur128)
 endif()

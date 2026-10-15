@@ -13,6 +13,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <string>
 #include "HostProbe.h"
 #include "ParamHost.h"
+#include "PresetHost.h"
+#include "neptune/core/AnalogSynth.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
@@ -29,7 +31,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 // Fine couche d'adaptation : traduit JUCE/CLAP <-> cœur. Aucune logique métier ici.
 class NeptuneProcessor : public juce::AudioProcessor,
                          public clap_juce_extensions::clap_juce_audio_processor_capabilities,
-                         public ParamHost
+                         public ParamHost,
+                         public PresetHost // presets du synthé de la piste sélectionnée (mêmes presets qu'AnalogSynth)
 {
 public:
     NeptuneProcessor();
@@ -115,7 +118,26 @@ public:
     neptune::core::SynthDescription synthDescription() const { return synthDescription (selectedTrack()); }
     neptune::core::SynthDescription synthDescription (int track) const; // copie
     // Édition du patch de la piste sélectionnée : annulable, fusionnée par geste.
-    void uiEditSynth (neptune::core::SynthDescription, std::string name, std::string mergeKey = {});
+    // `presetChange` : changement de preset (les notes en cours gardent l'ancien son : capture par voix).
+    void uiEditSynth (neptune::core::SynthDescription, std::string name, std::string mergeKey = {}, bool presetChange = false);
+
+    // ---- presets de synthé (PresetHost : agit sur la piste sélectionnée, si elle est de type Synthé) ----
+    neptune::core::preset::Library& library() override { return *presetLibrary_; }
+    std::string currentPresetId() const override;
+    const neptune::core::preset::Preset* currentPreset() const override;
+    std::uint32_t presetRevision() const override { return presetRevision_.load(); }
+    void touchPresets() override { ++presetRevision_; }
+    bool loadPreset (const std::string& id) override;
+    bool stepPreset (int direction) override;
+    bool isModified() const override;
+    bool canSaveCurrent() const override;
+    bool saveCurrent (std::string* error = nullptr) override;
+    bool overwritePreset (const std::string& id, std::string* error = nullptr) override;
+    bool saveCurrentAs (const std::string& name, const std::string& type, neptune::core::preset::Preset* out = nullptr,
+                        std::string* error = nullptr) override;
+    bool saveConfig (const neptune::core::preset::LibraryConfig&) override;
+    const neptune::core::preset::LibraryConfig& presetConfig() const override { return presetLibrary_->config(); }
+    bool presetsAvailable() const override { return trackType (selectedTrack()) == neptune::core::TrackType::Synth; }
     // Change le type de la piste : la configuration d'instrument est perdue (spec §1), les réglages de bande sont conservés.
     // Vide l'historique d'annulation.
     void uiSetTrackType (int track, neptune::core::TrackType);
@@ -162,6 +184,8 @@ public:
     neptune::core::Engine::Meter busMeter (int bus) const { return engine_.busMeter (bus); }
     neptune::core::Engine::Meter parallelMeter (int p) const { return engine_.parallelMeter (p); }
     neptune::core::Engine::Meter masterMeter() const { return engine_.masterMeter(); }
+    neptune::core::LoudnessMeter::Reading masterLoudness() const { return engine_.masterLoudness(); } // LUFS du Master
+    void resetLoudness() { engine_.resetLoudness(); }
 
     // Jeu depuis l'interface (clavier de la matrice, bouton d'écoute) : thread de message ; appliqué au bloc audio suivant.
     // Toujours sur la piste sélectionnée.
@@ -239,7 +263,10 @@ private:
     std::set<std::string> otherTracksPaths (int track) const;
     void setStatus (int track, InstrumentStatus);
     void pushMixerSettingsToEngine();
-    void publishSynthPatch (int track, const neptune::core::SynthDescription&);
+    void publishSynthPatch (int track, const neptune::core::SynthDescription&, bool freezeRunningVoices = false);
+    void setTrackPresetId (int track, const std::string& id);
+    std::unique_ptr<neptune::core::preset::Library> presetLibrary_;
+    std::atomic<std::uint32_t> presetRevision_ { 1 };
     void resetTrackParameters (int track, bool includeMixer); // valeurs d'origine (instrument ; fader, pan, mute, solo, envois si includeMixer)
     std::string currentStateText() const; // état complet tel qu'écrit dans le projet et dans l'autosave
     void adoptStateIdentity (const std::string& idFromState);

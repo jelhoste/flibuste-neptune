@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 
 namespace neptune::core::analogsynth
@@ -114,8 +115,16 @@ bool stateFromJson (std::string_view text, ParameterSet& set, SynthDescription& 
 
 // ---------------------------------------------------------------------------------------------------- presets
 
+ParamId idForTrack (ParamId id, int track) noexcept
+{
+    if (track <= 0) return id;
+    if (id >= sampler::gain && id <= sampler::filter2Resonance) // réglages d'instrument : identifiants historiques pour la piste 0
+        return mixer::samplerParam (track, static_cast<mixer::SamplerKind> (id - sampler::gain));
+    return id + probe::trackStride * static_cast<ParamId> (track); // volume, pan, paramètres du synthé : un bloc par piste
+}
+
 preset::Preset capturePreset (const ParameterSet& set, const SynthDescription& d, const preset::LibraryConfig& cfg,
-                              const std::string& name, const std::string& type, const preset::Preset* base)
+                              const std::string& name, const std::string& type, const preset::Preset* base, int track)
 {
     preset::Preset p;
     if (base != nullptr)
@@ -135,29 +144,56 @@ preset::Preset capturePreset (const ParameterSet& set, const SynthDescription& d
     for (const auto& k : keyedParams())
     {
         if (preset::captureOf (k.key, p, cfg) == preset::Capture::Free) continue;
-        const auto idx = set.indexOf (k.id);
+        const auto idx = set.indexOf (idForTrack (k.id, track));
         if (idx != ParameterSet::npos) p.parameters[k.key] = preset::ParamValue::ofNumber (set.getAt (idx));
     }
     return preset::sanitised (std::move (p));
 }
 
-bool applyPreset (const preset::Preset& p, ParameterSet& set, SynthDescription& d, const preset::LibraryConfig& cfg)
+SynthDescription presetDescription (const preset::Preset& p, const SynthDescription& current, const preset::LibraryConfig& cfg)
 {
-    if (! p.module.empty() && p.module != moduleId) return false;
+    if (p.state.empty()) return current;
+    SynthDescription n = synthFromJson (p.state);
+    if (preset::captureOf (glideKey, p, cfg) == preset::Capture::Free) n.glideMs = current.glideMs;
+    return n;
+}
+
+void applyPresetValues (const preset::Preset& p, ParameterSet& set, const preset::LibraryConfig& cfg, int track)
+{
     for (const auto& [key, value] : p.parameters)
     {
         const ParamId id = paramIdForKey (key);
         if (id == 0 || value.isText) continue;
         if (preset::captureOf (key, p, cfg) == preset::Capture::Free) continue;
-        set.set (id, value.number);
+        set.set (idForTrack (id, track), value.number);
+    }
+}
+
+bool applyPreset (const preset::Preset& p, ParameterSet& set, SynthDescription& d, const preset::LibraryConfig& cfg, int track)
+{
+    if (! p.module.empty() && p.module != moduleId) return false;
+    applyPresetValues (p, set, cfg, track);
+    d = presetDescription (p, d, cfg);
+    return true;
+}
+
+bool differsFromPreset (const preset::Preset& p, const ParameterSet& set, const SynthDescription& d, const preset::LibraryConfig& cfg,
+                        int track)
+{
+    for (const auto& [key, value] : p.parameters)
+    {
+        const ParamId id = paramIdForKey (key);
+        if (id == 0 || value.isText || preset::captureOf (key, p, cfg) == preset::Capture::Free) continue;
+        const auto index = set.indexOf (idForTrack (id, track));
+        if (index != ParameterSet::npos && std::fabs (set.getAt (index) - value.number) > 1.0e-9) return true;
     }
     if (! p.state.empty())
     {
-        SynthDescription n = synthFromJson (p.state);
-        if (preset::captureOf (glideKey, p, cfg) == preset::Capture::Free) n.glideMs = d.glideMs;
-        d = std::move (n);
+        auto stored = synthFromJson (p.state);
+        if (preset::captureOf (glideKey, p, cfg) == preset::Capture::Free) stored.glideMs = d.glideMs;
+        if (! (stored == d)) return true;
     }
-    return true;
+    return false;
 }
 
 namespace
@@ -276,11 +312,31 @@ void AnalogSynthEngine::prepare (double sampleRate, int)
     lastPanR_ = r;
 }
 
-void AnalogSynthEngine::setDescription (const SynthDescription& d)
+void AnalogSynthEngine::setDescription (const SynthDescription& d, bool newPreset)
 {
     description_ = sanitised (d);
-    patchSlot_.publish (std::make_shared<const SynthPatch> (description_));
+    auto patch = std::make_shared<SynthPatch> (description_);
+    patch->freezeRunningVoices = newPreset;
+    keeper_.add (patch);
+    patchSlot_.publish (std::move (patch));
     patchSlot_.collect();
+    pruneKeeper();
+}
+
+bool AnalogSynthEngine::loadPreset (const preset::Preset& p, const preset::LibraryConfig& cfg)
+{
+    if (! p.module.empty() && p.module != moduleId) return false;
+    // le patch d'abord : les valeurs ne bougent qu'après la publication
+    setDescription (presetDescription (p, description_, cfg), true);
+    applyPresetValues (p, params_, cfg);
+    return true;
+}
+
+void AnalogSynthEngine::pruneKeeper()
+{
+    const auto adopted = voices_.adoptedGeneration(); // l'audio écrit les voix figées avant le patch adopté : lecture dans l'ordre inverse
+    const auto oldest = voices_.oldestFrozenGeneration();
+    keeper_.prune (oldest, adopted);
 }
 
 void AnalogSynthEngine::post (Event::Type t, int key, float velocity) noexcept

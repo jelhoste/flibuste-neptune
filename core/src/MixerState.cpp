@@ -66,6 +66,7 @@ json stripToJson (const mixer::StripSettings& s)
     if (! s.name.empty()) o["name"] = s.name;
     if (s.color != 0) o["color"] = s.color;
     o["midi_channel"] = s.midiChannel;
+    if (s.midiFilter != midi::FilterDescription()) o["midi_filter"] = json::parse (midi::toJson (s.midiFilter));
     json r;
     r["main_dest"] = s.routing.mainDest;
     r["main_enabled"] = s.routing.mainEnabled;
@@ -106,6 +107,7 @@ mixer::StripSettings stripFromJson (const json& o, mixer::StripSettings s, bool 
     if (const auto it = o.find ("name"); it != o.end() && it->is_string()) s.name = it->get<std::string>();
     s.color = intOf (o, "color", s.color);
     s.midiChannel = intOf (o, "midi_channel", s.midiChannel);
+    if (const auto mf = o.find ("midi_filter"); mf != o.end() && mf->is_object()) s.midiFilter = midi::filterFromJson (mf->dump());
     if (const auto r = o.find ("routing"); r != o.end() && r->is_object())
     {
         s.routing.mainDest = intOf (*r, "main_dest", s.routing.mainDest);
@@ -253,6 +255,7 @@ std::string toJson (const MixerState& m)
                 o["instrument"] = json::parse (toJson (m.tracks[t].instrument));
             if (! (m.tracks[t].synth == defaults.tracks[t].synth))
                 o["synth"] = json::parse (toJson (m.tracks[t].synth));
+            if (! m.tracks[t].synthPresetId.empty()) o["synth_preset"] = m.tracks[t].synthPresetId;
         }
         tracks.push_back (std::move (o));
     }
@@ -283,6 +286,7 @@ std::string toJson (const MixerState& m)
     json master;
     master["output"] = m.master.output;
     if (m.master.panMode != mixer::PanMode::Balance) master["pan_mode"] = "true";
+    if (m.master.maxVoices != mixer::MasterSettings::defaultMaxVoices) master["max_voices"] = m.master.maxVoices;
     if (anyInsert (m.master.inserts)) master["inserts"] = insertsToJson (m.master.inserts);
     doc["master"] = std::move (master);
     return doc.dump();
@@ -307,6 +311,8 @@ MixerState mixerFromJson (std::string_view text)
                 tr.instrument = instrumentFromJson (ins->dump());
             if (const auto sy = o.find ("synth"); sy != o.end() && sy->is_object())
                 tr.synth = synthFromJson (sy->dump());
+            if (const auto sp = o.find ("synth_preset"); sp != o.end() && sp->is_string() && sp->get<std::string>().size() <= 64)
+                tr.synthPresetId = sp->get<std::string>();
             // « active » absent (projets v5, antérieurs aux pistes actives) : la piste 1 et toute piste qui a du contenu
             // (instrument, nom, routage...) sont actives, les autres sont masquées.
             if (const auto it = o.find ("active"); it != o.end() && it->is_boolean()) tr.active = it->get<bool>();
@@ -335,6 +341,7 @@ MixerState mixerFromJson (std::string_view text)
     if (const auto mm = doc.find ("master"); mm != doc.end() && mm->is_object())
     {
         m.master.output = intOf (*mm, "output", m.master.output);
+        m.master.maxVoices = intOf (*mm, "max_voices", m.master.maxVoices);
         if (const auto p = mm->find ("pan_mode"); p != mm->end() && p->is_string() && p->get<std::string>() == "true")
             m.master.panMode = mixer::PanMode::True;
         insertsFromJson (*mm, m.master.inserts);

@@ -17,6 +17,7 @@
 #include <map>
 #include <string>
 
+#include "neptune/core/MidiFilter.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
@@ -122,6 +123,7 @@ struct StripSettings
     std::string name;
     int color = 0;                       // indice de palette
     int midiChannel = 0;                 // pistes : 0 = tous, 1..16
+    midi::FilterDescription midiFilter;  // pistes : filtre MIDI avancé (en plus du canal), éteint par défaut
     Routing routing;
     PanMode panMode = PanMode::Balance;
     std::array<SendSettings, numSends> sends;
@@ -130,7 +132,7 @@ struct StripSettings
 
     bool operator== (const StripSettings& o) const noexcept
     {
-        return name == o.name && color == o.color && midiChannel == o.midiChannel && routing == o.routing
+        return name == o.name && color == o.color && midiChannel == o.midiChannel && midiFilter == o.midiFilter && routing == o.routing
             && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim;
     }
 };
@@ -159,8 +161,13 @@ struct MasterSettings
 {
     int output = 1;                      // sortie physique du master (1..numOutputs)
     PanMode panMode = PanMode::Balance;
+    int maxVoices = defaultMaxVoices;    // limite globale de voix, toutes pistes confondues (1..maxVoicesLimit)
     std::array<InsertState, numInserts> inserts;
-    bool operator== (const MasterSettings& o) const noexcept { return output == o.output && panMode == o.panMode && inserts == o.inserts; }
+    static constexpr int defaultMaxVoices = 256, maxVoicesLimit = 1024;
+    bool operator== (const MasterSettings& o) const noexcept
+    {
+        return output == o.output && panMode == o.panMode && maxVoices == o.maxVoices && inserts == o.inserts;
+    }
 };
 
 // Bornes les réglages (indices, cycles interdits : un bus ne route que vers un bus d'indice supérieur).

@@ -15,7 +15,7 @@ Document complémentaire au brief (`brief-projet-sampler-clap.md`) et à la road
 ### Sélection MIDI (au niveau piste, pas dans les modules)
 - Port/canal choisi directement sur la piste, à côté du sélecteur de type de génération.
 - Raison du choix : cohérence lors d'un changement de type de piste (la source MIDI n'a pas besoin d'être réassignée), et même point d'entrée que le futur routeur de notes du mode orgue (palier 7).
-- Bouton dédié ouvrant une modale de **filtre MIDI avancé** : canal (ou tous canaux), type de message (Note On/Off avec plage de notes + plage de vélocité ; Control Change avec plage de numéros CC + plage de valeurs ; Pitch Bend ; Aftertouch monophonique et polyphonique séparément ; Program Change). Plusieurs règles empilables, combinables via le système de logique booléenne (partagé avec le moteur de modulation, palier 5).
+- Bouton dédié ouvrant une modale de **filtre MIDI avancé** : canal (ou tous canaux), type de message (Note On/Off avec plage de notes + plage de vélocité ; Control Change avec plage de numéros CC + plage de valeurs ; Pitch Bend ; Aftertouch monophonique et polyphonique séparément ; Program Change). Plusieurs règles empilables, combinables via le système de logique booléenne (partagé avec le moteur de modulation, palier 5). **Implémenté le 2026-10-16** (`MidiFilter.h`) : arbre ET / OU / OU exclusif / NON ET / NON OU / NON ; seules les notes sont consommées pour l'instant.
 - Ce même mécanisme sera réutilisé pour les splits de clavier en mode orgue.
 
 ### Composants génériques transverses (à construire dès le palier 0)

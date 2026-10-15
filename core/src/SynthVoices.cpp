@@ -147,9 +147,35 @@ void SynthVoices::prepare (double sampleRate) noexcept
 
 void SynthVoices::setPatch (const SynthPatch* patch) noexcept
 {
+    // changement de preset : les notes en cours gardent l'ancien patch et leurs valeurs (capture par voix)
+    if (patch != nullptr && patch_ != nullptr && patch != patch_ && patch->freezeRunningVoices)
+        for (auto& v : voices_)
+        {
+            if (! v.active || v.frozen) continue;
+            v.frozen = true;
+            v.patch = patch_;
+            v.frozenParams = lastParams_;
+            v.frozenGain = lastGainEnd_;
+        }
     patch_ = patch;
     if (patch == nullptr) allSoundOff();
     numHeld_ = 0;
+    publishGenerations();
+}
+
+void SynthVoices::publishGenerations() noexcept
+{
+    std::uint64_t oldest = std::numeric_limits<std::uint64_t>::max();
+    for (const auto& v : voices_)
+        if (v.active && v.frozen && v.patch != nullptr) oldest = std::min (oldest, v.patch->generation);
+    // ordre : d'abord les voix figées, ensuite le patch adopté (le publieur lit dans l'ordre inverse)
+    oldestFrozen_.store (oldest, std::memory_order_release);
+    adopted_.store (patch_ != nullptr ? patch_->generation : 0, std::memory_order_release);
+}
+
+int SynthVoices::frozenVoices() const noexcept
+{
+    return static_cast<int> (std::count_if (voices_.begin(), voices_.end(), [] (const Voice& v) { return v.active && v.frozen; }));
 }
 
 void SynthVoices::allSoundOff() noexcept
@@ -180,6 +206,47 @@ int SynthVoices::heldVoices() const noexcept
 {
     return static_cast<int> (std::count_if (voices_.begin(), voices_.end(),
                                             [] (const Voice& v) { return v.active && ! v.releasing && ! v.stolen; }));
+}
+
+int SynthVoices::soundingVoices() const noexcept
+{
+    return static_cast<int> (std::count_if (voices_.begin(), voices_.end(), [] (const Voice& v) { return v.active && ! v.stolen; }));
+}
+
+namespace
+{
+bool sacrificedBefore (bool relA, float levA, std::uint64_t ordA, bool relB, float levB, std::uint64_t ordB) noexcept
+{
+    if (relA != relB) return relA;
+    if (levA != levB) return levA < levB;
+    return ordA < ordB;
+}
+} // namespace
+
+bool SynthVoices::weakestVoice (bool& releasing, float& level, std::uint64_t& order) const noexcept
+{
+    const Voice* best = nullptr;
+    for (const auto& v : voices_)
+    {
+        if (! v.active || v.stolen) continue;
+        if (best == nullptr || sacrificedBefore (v.releasing, v.level, v.order, best->releasing, best->level, best->order)) best = &v;
+    }
+    if (best == nullptr) return false;
+    releasing = best->releasing;
+    level = best->level;
+    order = best->order;
+    return true;
+}
+
+void SynthVoices::stealWeakest() noexcept
+{
+    Voice* best = nullptr;
+    for (auto& v : voices_)
+    {
+        if (! v.active || v.stolen) continue;
+        if (best == nullptr || sacrificedBefore (v.releasing, v.level, v.order, best->releasing, best->level, best->order)) best = &v;
+    }
+    if (best != nullptr) steal (*best);
 }
 
 void SynthVoices::steal (Voice& v) noexcept
@@ -213,9 +280,10 @@ void SynthVoices::releaseAll() noexcept
         {
             if (! v.active || v.releasing || v.stolen) continue;
             v.releasing = true;
-            v.env.noteOff (patch_->ampEnv, sampleRate_);
-            v.penv.noteOff (patch_->pitchEnv, sampleRate_);
-            for (std::size_t f = 0; f < 2; ++f) v.fenv[f].noteOff (patch_->filterEnv[f], sampleRate_);
+            const auto& pt = patchOf (v);
+            v.env.noteOff (pt.ampEnv, sampleRate_);
+            v.penv.noteOff (pt.pitchEnv, sampleRate_);
+            for (std::size_t f = 0; f < 2; ++f) v.fenv[f].noteOff (pt.filterEnv[f], sampleRate_);
         }
     numHeld_ = 0;
 }
@@ -390,22 +458,35 @@ void SynthVoices::noteOff (int channel, int key) noexcept
     {
         if (! v.active || v.releasing || v.stolen || v.channel != channel || v.key != key) continue;
         v.releasing = true;
-        v.env.noteOff (patch_->ampEnv, sampleRate_);
-        v.penv.noteOff (patch_->pitchEnv, sampleRate_);
-        for (std::size_t f = 0; f < 2; ++f) v.fenv[f].noteOff (patch_->filterEnv[f], sampleRate_);
+        const auto& pt = patchOf (v);
+        v.env.noteOff (pt.ampEnv, sampleRate_);
+        v.penv.noteOff (pt.pitchEnv, sampleRate_);
+        for (std::size_t f = 0; f < 2; ++f) v.fenv[f].noteOff (pt.filterEnv[f], sampleRate_);
     }
 }
 
 void SynthVoices::render (float* left, float* right, int numFrames, float gainStart, float gainEnd, const Params& params) noexcept
 {
     if (patch_ == nullptr || left == nullptr || numFrames <= 0) return;
+    lastParams_ = params;
+    lastGainEnd_ = gainEnd;
+    bool anyFrozen = false;
     for (auto& v : voices_)
-        if (v.active) renderVoice (v, left, right, numFrames, gainStart, gainEnd, params);
+    {
+        if (! v.active) continue;
+        if (v.frozen)
+        {
+            anyFrozen = true;
+            renderVoice (v, left, right, numFrames, v.frozenGain, v.frozenGain, v.frozenParams);
+        }
+        else renderVoice (v, left, right, numFrames, gainStart, gainEnd, params);
+    }
+    if (anyFrozen || oldestFrozen_.load (std::memory_order_relaxed) != std::numeric_limits<std::uint64_t>::max()) publishGenerations();
 }
 
 void SynthVoices::renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, const Params& p) noexcept
 {
-    const auto& patch = *patch_;
+    const auto& patch = patchOf (v);
     const auto& d = patch.desc;
     const float gStep = (g1 - g0) / static_cast<float> (numFrames);
     float mg = g0;
