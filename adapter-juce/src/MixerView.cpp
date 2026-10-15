@@ -943,8 +943,9 @@ void MixerView::placeScaled (juce::Rectangle<int> area)
     const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / designHeight);
     const float scale = juce::jmax (0.4f, s);
     setTransform (juce::AffineTransform::scale (scale));
-    setBounds (area.getX(), area.getY(), juce::roundToInt (static_cast<float> (area.getWidth()) / scale),
-               juce::roundToInt (static_cast<float> (area.getHeight()) / scale));
+    // la transformation s'applique aux limites dans le repère du parent (autour de son origine) : position = zone / échelle
+    setBounds (juce::roundToInt (static_cast<float> (area.getX()) / scale), juce::roundToInt (static_cast<float> (area.getY()) / scale),
+               juce::roundToInt (static_cast<float> (area.getWidth()) / scale), juce::roundToInt (static_cast<float> (area.getHeight()) / scale));
 }
 
 void MixerView::resized()

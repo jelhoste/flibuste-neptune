@@ -627,10 +627,14 @@ void SynthView::placeScaled (juce::Rectangle<int> area)
     const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / dh);
     const float scale = juce::jmax (0.4f, s);
     setTransform (juce::AffineTransform::scale (scale));
+    // JUCE applique la transformation aux limites exprimées dans le repère du PARENT (autour de l'origine du parent, pas du coin de
+    // la composante) : pour que la vue apparaisse à (area.x, area.y) il faut placer ses limites à area / échelle.
+    const auto x = juce::roundToInt (static_cast<float> (area.getX()) / scale);
+    const auto y = juce::roundToInt (static_cast<float> (area.getY()) / scale);
     const auto w = juce::roundToInt (static_cast<float> (area.getWidth()) / scale);
     const auto h = juce::roundToInt (static_cast<float> (area.getHeight()) / scale);
     if (getWidth() == w && getHeight() == h) resized(); // la visibilité du clavier a pu changer sans changement de taille
-    setBounds (area.getX(), area.getY(), w, h);
+    setBounds (x, y, w, h);
 }
 
 void SynthView::updateKeyboardButton()
