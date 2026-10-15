@@ -329,6 +329,17 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     fmView_->onExportBank = [this] { sysexIO_->exportBank(); };
     addChildComponent (*fmView_);
 
+    {
+        using namespace neptune::core;
+        const auto& themeDef = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
+        OrganView::KnobIds extra;
+        extra.push_back ([] (int t) { return mixer::samplerParam (t, mixer::kGain); }); // le volume est celui de la bande
+        organView_ = std::make_unique<OrganView> (processor_, palette_, tr_, themeDef.knob, std::move (extra),
+                                                  [this] (neptune::core::ParamId id, neptune::core::uistate::Terminal t) { openModal (id, t); });
+        organView_->onChange = [this] (const organ::OrganDescription& d) { processor_.uiEditOrgan (d, "Organ keyboards", "organ"); };
+        addChildComponent (*organView_);
+    }
+
     presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
     presetBar_->onOpenManager = [this] (bool saveAs) { openPresetManager (saveAs); };
     addChildComponent (*presetBar_);
@@ -1070,12 +1081,15 @@ void NeptuneEditor::updateViewVisibility()
     const bool mapping = ! showProbe_ && ! showMixer_;
     const bool synth = mapping && selectedIsSynth();
     const bool fmMode = mapping && selectedIsFm();
-    const bool sampler = mapping && ! synth && ! fmMode;
+    const bool organMode = mapping && selectedIsOrgan();
+    const bool sampler = mapping && ! synth && ! fmMode && ! organMode;
     synthShown_ = synth;
     fmShown_ = fmMode;
+    organShown_ = organMode;
     mixerView_->setVisible (showMixer_);
     synthView_->setVisible (synth);
     fmView_->setVisible (fmMode);
+    organView_->setVisible (organMode);
     presetBar_->setVisible (synth || fmMode);
     trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (sampler);
@@ -1110,7 +1124,7 @@ void NeptuneEditor::updateViewVisibility()
     for (auto* knob : knobs_)
     {
         const bool filterKnob = k >= static_cast<int> (neptune::core::mixer::kFilter1Cutoff);
-        knob->setVisible (mapping && ! ((synth || fmMode) && filterKnob));
+        knob->setVisible (mapping && ! ((synth || fmMode || organMode) && filterKnob));
         ++k;
     }
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
@@ -1144,7 +1158,9 @@ void NeptuneEditor::updateTrackBox()
     {
         if (! processor_.trackActive (t)) continue;
         const auto s = processor_.trackSettings (t);
-        const auto kind = processor_.trackType (t) == neptune::core::TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
+        const auto tt = processor_.trackType (t);
+        const auto kind = tt == neptune::core::TrackType::Organ ? "mix.type_short_organ" : tt == neptune::core::TrackType::Fm ? "mix.type_short_fm"
+                        : tt == neptune::core::TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
         const auto label = juce::String (t + 1) + "  " + text (kind) + (s.name.empty() ? juce::String() : "  " + juce::String::fromUTF8 (s.name.c_str()));
         trackBox_.addItem (label, t + 1);
     }
@@ -1159,6 +1175,7 @@ void NeptuneEditor::rebindKnobs()
     knobTrack_ = track;
     synthView_->setTrack (track);
     fmView_->setTrack (track);
+    organView_->setTrack (track);
     fmView_->releaseKeys();
     synthView_->releaseKeys(); // touches tenues à l'écran : relâchées sur la piste où elles ont démarré
     zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
@@ -1219,9 +1236,15 @@ void NeptuneEditor::timerCallback()
     updateTrackBox();
     rebindKnobs();
     if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())
-        || fmShown_ != (! showProbe_ && ! showMixer_ && selectedIsFm())) { updateViewVisibility(); resized(); } // type de la piste changé
+        || fmShown_ != (! showProbe_ && ! showMixer_ && selectedIsFm())
+        || organShown_ != (! showProbe_ && ! showMixer_ && selectedIsOrgan())) { updateViewVisibility(); resized(); } // type de la piste changé
     updateSynthView();
     if (fmView_->isVisible()) fmView_->setDescription (processor_.fmDescription());
+    if (organView_->isVisible())
+    {
+        organView_->setDescription (processor_.organDescription());
+        organView_->refreshFromParameters();
+    }
     if (presetBar_->isVisible() && presetBar_->needsRefresh()) presetBar_->refresh();
     {
         const int tr = processor_.selectedTrack();
@@ -1290,6 +1313,7 @@ void NeptuneEditor::resized()
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
     fmView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
+    organView_->placeScaled ({ 32, 80 + 6, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 6) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
     {
         auto r = juce::Rectangle<int> (32, 80, lw_ - 64, 36);

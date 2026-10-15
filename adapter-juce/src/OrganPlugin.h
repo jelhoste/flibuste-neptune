@@ -10,6 +10,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "HostProbe.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
+#include "OrganView.h"
 #include "ParamHost.h"
 #include "ScaledRoot.h"
 #include "neptune/core/I18n.h"
@@ -88,18 +89,11 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
 
 private:
-    class Drawbar;
-    class Switch;
-    struct ComboLink { juce::ComboBox box; neptune::core::ParamId id = 0; };
-
     void timerCallback() override;
     void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
     void closeModal();
-    void paintContent (juce::Graphics&);
-    void refreshDescriptionControls();
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token t) const;
-    void addSection (const juce::String& title, juce::Rectangle<int>);
 
     ScaledRoot root_;
     OrganProcessor& processor_;
@@ -107,18 +101,10 @@ private:
     neptune::core::theme::Palette palette_;
     neptune::core::theme::KnobStyle knobStyle_;
 
-    juce::OwnedArray<Drawbar> drawbars_;
-    juce::OwnedArray<Switch> switches_;
-    juce::OwnedArray<NeptuneKnob> knobs_;
-    juce::OwnedArray<ComboLink> combos_;
-    juce::ComboBox channelBox_[3], transposeBox_[3];
-    juce::Slider splitLower_, splitUpper_;
+    std::unique_ptr<OrganView> view_;
     juce::Label brandLabel_, infoLabel_;
     juce::TextButton undoButton_, redoButton_, panicButton_;
     std::unique_ptr<KnobModal> modal_;
-    struct Section { juce::String title; juce::Rectangle<int> area; };
-    std::vector<Section> sections_;
-    bool updating_ = false;
     std::uint32_t lastUndoRevision_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganEditor)

@@ -552,7 +552,7 @@ public:
         if (! isBus_ && ! isPar_)
         {
             const auto type = owner_.processor_.trackType (index_);
-            const char* key = type == TrackType::Fm ? "mix.type_short_fm" : type == TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
+            const char* key = type == TrackType::Organ ? "mix.type_short_organ" : type == TrackType::Fm ? "mix.type_short_fm" : type == TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
             typeButton_.setButtonText (u8 (std::string (owner_.tr_.tr (key))));
         }
         const auto s = settings();
@@ -666,12 +666,13 @@ private:
         menu.addItem (2, u8 (std::string (owner_.tr_.tr ("mix.type_synth"))), true, current == TrackType::Synth);
         menu.addSeparator();
         menu.addItem (3, u8 (std::string (owner_.tr_.tr ("mix.type_fm"))), true, current == TrackType::Fm);
+        menu.addItem (5, u8 (std::string (owner_.tr_.tr ("mix.type_organ"))), true, current == TrackType::Organ);
         menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), false);       // plus tard
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (160),
                             [safe = juce::Component::SafePointer<Strip> (this)] (int choice)
                             {
                                 if (safe == nullptr || choice == 0) return;
-                                safe->owner_.requestTypeChange (safe->index_, choice == 3 ? TrackType::Fm : choice == 2 ? TrackType::Synth : TrackType::Sampler);
+                                safe->owner_.requestTypeChange (safe->index_, choice == 5 ? TrackType::Organ : choice == 3 ? TrackType::Fm : choice == 2 ? TrackType::Synth : TrackType::Sampler);
                             });
     }
 

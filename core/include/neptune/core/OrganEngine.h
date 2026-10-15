@@ -52,6 +52,11 @@ struct OrganLive
     OrganLive();
 };
 
+// Valeurs lues à chaque bloc à partir de `numKinds` valeurs de paramètres dans l'ordre de mixer::OrganKind (tirettes du supérieur,
+// de l'inférieur, pédalier 16' et 8', percussion, vibrato, Leslie, overdrive, réverb) : même traduction pour le plugin et Neptune.
+constexpr int kOrganValues = 34;
+OrganLive liveFromValues (const double* values) noexcept;
+
 class OrganVoices
 {
 public:

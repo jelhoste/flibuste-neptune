@@ -24,6 +24,7 @@ clap_juce_extensions_plugin(
 target_sources(Neptune PRIVATE
   src/PluginProcessor.cpp
   src/PluginEditor.cpp
+  src/OrganView.cpp
   src/EnvelopeEditor.cpp
   src/ImportWizard.cpp
   src/ZoneTable.cpp
@@ -213,6 +214,7 @@ clap_juce_extensions_plugin(
 
 target_sources(Orgamon PRIVATE
   src/OrganPlugin.cpp
+  src/OrganView.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

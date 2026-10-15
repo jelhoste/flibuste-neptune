@@ -10,6 +10,7 @@
 #include "neptune/core/Instrument.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/FmVoices.h"
+#include "neptune/core/OrganEngine.h"
 #include "neptune/core/Synth.h"
 
 namespace neptune::core
@@ -23,11 +24,12 @@ struct TrackState
     InstrumentDescription instrument;   // type Sampler
     SynthDescription synth;             // type Synthé
     fm::FmDescription fm;               // type FM
+    organ::OrganDescription organ;      // type Orgue
     std::string synthPresetId;          // preset de synthé chargé sur la piste (informatif : « modifié » se déduit du son courant)
     mixer::StripSettings strip;
     bool operator== (const TrackState& o) const noexcept
     {
-        return active == o.active && type == o.type && instrument == o.instrument && synth == o.synth && fm == o.fm && synthPresetId == o.synthPresetId && strip == o.strip;
+        return active == o.active && type == o.type && instrument == o.instrument && synth == o.synth && fm == o.fm && organ == o.organ && synthPresetId == o.synthPresetId && strip == o.strip;
     }
 };
 

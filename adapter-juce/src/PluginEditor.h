@@ -12,6 +12,7 @@
 #include "MidiFilterEditor.h"
 #include "FmSysexIO.h"
 #include "FmView.h"
+#include "OrganView.h"
 #include "PresetBar.h"
 #include "PresetManager.h"
 #include "ScaledRoot.h"
@@ -110,7 +111,10 @@ private:
     std::unique_ptr<InsertOverlay> insertOverlay_;
     void openInsert (NeptuneProcessor::StripKind, int index, int slot);
     void closeInsert();
-    bool synthShown_ = false, fmShown_ = false;
+    bool synthShown_ = false, fmShown_ = false, organShown_ = false;
+    // Vue Orgue : remplace la vue Mapping quand la piste sélectionnée est de type Orgue.
+    std::unique_ptr<OrganView> organView_;
+    bool selectedIsOrgan() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Organ; }
     // Vue FM : remplace la vue Mapping quand la piste sélectionnée est de type FM.
     std::unique_ptr<FmView> fmView_;
     std::unique_ptr<FmSysexIO> sysexIO_;

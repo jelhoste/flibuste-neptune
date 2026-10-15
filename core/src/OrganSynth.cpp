@@ -28,37 +28,18 @@ bool addSynthParams (ParameterSet& set, std::string* error)
         && mixer::addOrganParams (set, 0, "", error);
 }
 
+static_assert (mixer::kOrganKinds == kOrganValues, "OrganKind et liveFromValues doivent rester d'accord");
+
 OrganLive liveFromParams (const ParameterSet& set, int track)
 {
-    OrganLive l;
-    auto get = [&set, track] (int k, double fallback)
+    // valeurs par défaut des paramètres déclarés, remplacées par les valeurs courantes quand le paramètre existe
+    double v[kOrganValues];
+    for (int k = 0; k < kOrganValues; ++k)
     {
-        const auto i = set.indexOf (mixer::organParam (track, static_cast<mixer::OrganKind> (k)));
-        return i == ParameterSet::npos ? fallback : set.getAt (i);
-    };
-    auto db = [&get] (int k, int fallback) { return std::clamp (static_cast<int> (std::lround (get (k, fallback))), 0, 8); };
-    for (int i = 0; i < kDrawbars; ++i)
-    {
-        l.drawbars[0][static_cast<std::size_t> (i)] = db (mixer::kOrgUpper0 + i, l.drawbars[0][static_cast<std::size_t> (i)]);
-        l.drawbars[1][static_cast<std::size_t> (i)] = db (mixer::kOrgLower0 + i, 0);
+        const auto i = set.indexOf (mixer::organParam (track, k));
+        v[k] = i == ParameterSet::npos ? 0.0 : set.getAt (i);
     }
-    l.drawbars[2][0] = db (mixer::kOrgPedal16, 0);
-    l.drawbars[2][2] = db (mixer::kOrgPedal8, 0);
-    l.percussionOn = get (mixer::kOrgPercOn, 0) >= 0.5;
-    l.percussionSoft = get (mixer::kOrgPercSoft, 0) >= 0.5;
-    l.percussionFast = get (mixer::kOrgPercFast, 1) >= 0.5;
-    l.percussionThird = get (mixer::kOrgPercThird, 1) >= 0.5;
-    l.vibratoMode = std::clamp (static_cast<int> (std::lround (get (mixer::kOrgVibMode, 0))), 0, kVibratoModes - 1);
-    l.vibratoUpper = get (mixer::kOrgVibUpper, 1) >= 0.5;
-    l.vibratoLower = get (mixer::kOrgVibLower, 0) >= 0.5;
-    l.leslieSpeed = std::clamp (static_cast<int> (std::lround (get (mixer::kOrgLeslieSpeed, 0))), 0, 2);
-    l.leslieMix = static_cast<float> (std::clamp (get (mixer::kOrgLeslieMix, 100.0) / 100.0, 0.0, 1.0));
-    l.driveOn = get (mixer::kOrgDriveOn, 0) >= 0.5;
-    l.driveInput = static_cast<float> (std::clamp (get (mixer::kOrgDriveInput, 50.0) / 100.0, 0.0, 1.0));
-    l.driveCharacter = static_cast<float> (std::clamp (get (mixer::kOrgDriveCharacter, 50.0) / 100.0, 0.0, 1.0));
-    l.driveOutput = static_cast<float> (std::clamp (get (mixer::kOrgDriveOutput, 50.0) / 100.0, 0.0, 1.0));
-    l.reverbMix = static_cast<float> (std::clamp (get (mixer::kOrgReverb, 0.0) / 100.0, 0.0, 1.0));
-    return l;
+    return liveFromValues (v);
 }
 
 std::string stateToJson (const ParameterSet& set, const OrganDescription& d, const std::string& currentPresetId)

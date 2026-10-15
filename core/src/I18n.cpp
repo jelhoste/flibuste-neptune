@@ -217,6 +217,8 @@ const Entry kEntries[] = {
     { "mix.type_short_sampler", { "SMP", "SMP" } },
     { "mix.type_short_synth", { "SYN", "SYN" } },
     { "mix.type_short_fm", { "FM", "FM" } },
+    { "mix.type_organ", { "Tonewheel organ", "Orgue à roues phoniques" } },
+    { "mix.type_short_organ", { "ORG", "ORG" } },
     { "mix.type_tip", { "Sound generator of this track", "Générateur de son de cette piste" } },
     { "mix.add_track", { "+ Track", "+ Piste" } },
     { "mix.remove_tip", { "Remove this track", "Supprimer cette piste" } },

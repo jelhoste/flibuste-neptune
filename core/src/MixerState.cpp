@@ -256,6 +256,7 @@ std::string toJson (const MixerState& m)
             if (! (m.tracks[t].synth == defaults.tracks[t].synth))
                 o["synth"] = json::parse (toJson (m.tracks[t].synth));
             if (! (m.tracks[t].fm == defaults.tracks[t].fm)) o["fm"] = json::parse (fm::toJson (m.tracks[t].fm));
+            if (! (m.tracks[t].organ == defaults.tracks[t].organ)) o["organ"] = json::parse (organ::toJson (m.tracks[t].organ));
             if (! m.tracks[t].synthPresetId.empty()) o["synth_preset"] = m.tracks[t].synthPresetId;
         }
         tracks.push_back (std::move (o));
@@ -314,6 +315,8 @@ MixerState mixerFromJson (std::string_view text)
                 tr.synth = synthFromJson (sy->dump());
             if (const auto fx = o.find ("fm"); fx != o.end() && fx->is_object())
                 tr.fm = fm::fmFromJson (fx->dump());
+            if (const auto og = o.find ("organ"); og != o.end() && og->is_object())
+                tr.organ = organ::organFromJson (og->dump());
             if (const auto sp = o.find ("synth_preset"); sp != o.end() && sp->is_string() && sp->get<std::string>().size() <= 64)
                 tr.synthPresetId = sp->get<std::string>();
             // « active » absent (projets v5, antérieurs aux pistes actives) : la piste 1 et toute piste qui a du contenu

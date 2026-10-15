@@ -569,6 +569,38 @@ TEST_CASE ("engine: the synth release time comes from the track parameter, not t
     CHECK (r.engine.activeVoices() == 0);
 }
 
+TEST_CASE ("engine: an organ track plays on the channels of its own keyboards, whatever the track channel")
+{
+    Rig r;
+    r.engine.setTrackType (0, TrackType::Organ);
+    auto d = std::make_shared<organ::OrganDescription>();
+    d->channel = { 4, 0, 0 }; // supérieur sur le canal 4 seulement
+    r.engine.publishOrgan (0, d);
+    r.run (2);
+    r.engine.noteOn (0, 60, 0.8f); // canal 1 : aucun clavier ne l'écoute
+    CHECK (r.run (40) < 1.0e-4f);
+    r.engine.noteOff (0, 60);
+    r.engine.noteOn (3, 60, 0.8f); // canal 4 : le supérieur
+    CHECK (r.run (60) > 0.01f);
+    r.engine.noteOff (3, 60);
+    r.run (1);
+    r.engine.panic();
+    CHECK (r.engine.activeVoices() == 0);
+}
+
+TEST_CASE ("mixer state: the organ keyboards round trip with the track type")
+{
+    auto m = MixerState::freshProject();
+    m.tracks[0].type = TrackType::Organ;
+    m.tracks[0].organ.channel = { 2, 3, 0 };
+    m.tracks[0].organ.splitLower = 48;
+    m.tracks[0].organ.transpose[2] = -12;
+    const auto back = mixerFromJson (toJson (m));
+    CHECK (back == m);
+    CHECK (back.tracks[0].type == TrackType::Organ);
+    CHECK (back.tracks[0].organ.splitLower == 48);
+}
+
 TEST_CASE ("engine: synth parameters exist for every track with their documented ids and defaults")
 {
     ParameterSet set;

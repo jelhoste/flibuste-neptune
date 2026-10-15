@@ -130,7 +130,8 @@ de piste « Orgue » + plugin séparé (nom provisoire **Orgamon**, `com.tourned
 - **Plugin séparé Orgamon** (`adapter-juce/src/OrganPlugin.*`, cible `Orgamon`) : tirettes, interrupteurs, listes, potards, claviers
   (canaux, transposition, split). **Jamais compilé ni écouté** : contrôlé à la syntaxe seulement. Pas de presets ni de clavier à
   l'écran pour l'instant.
-- **Pas encore fait** : le type de piste « Orgue » dans Neptune (mixeur, vue, moteur par piste, presets), les presets de l'orgue
+- **Type de piste « Orgue » dans Neptune** (écrit, à valider) : `TrackType::Organ` (menu du type de piste du mixeur), moteur par piste (`Engine::publishOrgan`, `OrganVoices` par piste, notes de tous les canaux présentées à l'orgue, qui choisit ses claviers par sa description), état (`organ` dans la bande), vue `OrganView` (commune avec Orgamon). Au repos quand aucune touche n'est tenue ET que la piste est déjà muette.
+- **Pas encore fait** : les presets de l'orgue
   (module `organ`), les onglets Leslie / Live / Matrice / Réglages de la maquette (vitesses et rayons du Leslie, key click, diaphonie,
   accord), le clavier MIDI en CC (tirettes par contrôleurs), taille / amortissement de la réverb (absents de setBfree).
 - **Choix par défaut à confirmer** (l'utilisateur n'avait pas de préférence) : trois claviers = trois canaux MIDI réglables (1, 2, 3)

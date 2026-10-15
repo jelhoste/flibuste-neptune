@@ -15,6 +15,7 @@
 #include "neptune/core/SamplerVoices.h"
 #include "neptune/core/StockModule.h"
 #include "neptune/core/FmVoices.h"
+#include "neptune/core/OrganEngine.h"
 #include "neptune/core/Loudness.h"
 #include "neptune/core/MidiFilter.h"
 #include "neptune/core/Synth.h"
@@ -75,6 +76,8 @@ public:
     void publishSynth (int track, std::shared_ptr<const SynthPatch> patch);
     // Module FM : description d'une piste de type FM (adoptée au bloc suivant).
     void publishFm (int track, std::shared_ptr<const fm::FmDescription> description);
+    // Type Orgue : description des claviers (canaux, split, transposition), adoptée au bloc suivant.
+    void publishOrgan (int track, std::shared_ptr<const organ::OrganDescription> description);
     // Filtre MIDI avancé d'une piste (normalement publié par setTrackSettings ; direct pour les tests).
     void setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter>);
     // Notes en cours d'une piste Synthé figées par un changement de preset (capture par voix).
@@ -142,7 +145,7 @@ public:
     int activeVoices (int track) const noexcept
     {
         const auto& t = tracks_[static_cast<std::size_t> (track)];
-        return t.voices.activeVoices() + t.synth.activeVoices() + t.fm.activeVoices();
+        return t.voices.activeVoices() + t.synth.activeVoices() + t.fm.activeVoices() + t.organ.heldKeys();
     }
     double sampleRate() const noexcept { return sampleRate_; }
     // Sous-alimentations du streaming depuis le démarrage (une voix s'est éteinte faute de données du disque).
@@ -170,8 +173,9 @@ private:
         std::size_t synth[mixer::kSynthKinds];
         std::size_t synthEnv[mixer::kSynthEnvKinds];
         std::size_t fm[mixer::kFmKinds];
+        std::size_t organ[mixer::kOrganKinds];
         std::size_t fmExtra[mixer::kFmExtraKinds];
-        ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; for (auto& v : fm) v = N; }
+        ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; for (auto& v : fm) v = N; for (auto& v : organ) v = N; }
     };
     // Un emplacement d'insert : l'instance (remise au thread audio) et l'index de son paramètre de bypass (celui de l'hôte).
     struct InsertSlot
@@ -192,6 +196,8 @@ private:
         std::array<std::uint64_t, 32> acceptedNotes {}; // thread audio : notes dont le Note On a passé (16 canaux x 128)
         HandoffSlot<fm::FmDescription> fmSlot;         // module FM : description (patch DX7 et réglages de voix)
         fm::FmVoices fm;
+        HandoffSlot<organ::OrganDescription> organSlot; // type Orgue : description des claviers
+        organ::OrganVoices organ;
         HandoffSlot<SynthPatch> synthSlot;
         SynthPatchKeeper synthKeeper; // thread de message : anciens patchs utilisés par des voix figées
         SynthVoices synth;

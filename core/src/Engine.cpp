@@ -43,6 +43,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
         t.voices.prepare (sampleRate);
         t.synth.prepare (sampleRate);
         t.fm.prepare (sampleRate);
+        if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ)) t.organ.reserve (sampleRate); // hors lecture
         t.lastGain = 1.0f;
         t.lastFader = 1.0f;
         t.lastPanL = t.lastPanR = 1.0f;
@@ -86,6 +87,7 @@ void Engine::setTrackType (int track, TrackType type) noexcept
     if (track < 0 || track >= kTracks) return;
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (type == TrackType::Fm) t.fm.reserve(); // les notes sont allouées avant que l'audio ne voie le type FM
+    if (type == TrackType::Organ) t.organ.reserve (sampleRate_); // idem : moteur d'orgue (tables d'ondes)
     t.type.store (static_cast<int> (type), std::memory_order_relaxed);
 }
 
@@ -102,6 +104,12 @@ void Engine::publishFm (int track, std::shared_ptr<const fm::FmDescription> desc
 {
     if (track < 0 || track >= kTracks) return;
     tracks_[static_cast<std::size_t> (track)].fmSlot.publish (std::move (description));
+}
+
+void Engine::publishOrgan (int track, std::shared_ptr<const organ::OrganDescription> description)
+{
+    if (track < 0 || track >= kTracks) return;
+    tracks_[static_cast<std::size_t> (track)].organSlot.publish (std::move (description));
 }
 
 void Engine::pruneSynthKeeper (Track& t)
@@ -143,6 +151,7 @@ void Engine::collectGarbage()
         t.slot.collect();
         t.synthSlot.collect();
         t.fmSlot.collect();
+        t.organSlot.collect();
         t.filterSlot.collect();
         pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
@@ -235,6 +244,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         for (int k = 0; k < mixer::kSynthEnvKinds; ++k) p.synthEnv[k] = idx (mixer::synthEnvParam (t, static_cast<mixer::SynthEnvKind> (k)));
         for (int k = 0; k < mixer::kFmKinds; ++k) p.fm[k] = idx (mixer::fmParam (t, static_cast<mixer::FmKind> (k)));
         for (int k = 0; k < mixer::kFmExtraKinds; ++k) p.fmExtra[k] = idx (mixer::fmExtraParam (t, static_cast<mixer::FmExtraKind> (k)));
+        for (int k = 0; k < mixer::kOrganKinds; ++k) p.organ[k] = idx (mixer::organParam (t, k));
     }
     for (int b = 0; b < kBuses; ++b)
     {
@@ -285,6 +295,12 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     enforceGlobalVoiceLimit();
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
     ++activeNotes_;
+    if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ))
+    {
+        t.organ.noteOn (channel, key); // la vélocité n'agit pas sur un orgue
+        if (key >= 0 && key < 128) pushTrace (track, key, velocity);
+        return;
+    }
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Fm))
     {
         t.fm.noteOn (channel, key, velocity);
@@ -343,7 +359,8 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
     const int type = t.type.load (std::memory_order_relaxed);
-    if (type == static_cast<int> (TrackType::Fm)) t.fm.noteOff (channel, key);
+    if (type == static_cast<int> (TrackType::Organ)) t.organ.noteOff (channel, key);
+    else if (type == static_cast<int> (TrackType::Fm)) t.fm.noteOff (channel, key);
     else if (type == static_cast<int> (TrackType::Synth)) t.synth.noteOff (channel, key);
     else t.voices.noteOff (channel, key);
 }
@@ -362,7 +379,9 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
     {
         auto& tr = tracks_[static_cast<std::size_t> (t)];
         const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
-        if (! (ch == 0 || ch == channel + 1)) continue;
+        // un orgue écoute les canaux de ses propres claviers (description) : tous les canaux lui sont présentés
+        const bool organ = tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
+        if (! (organ || ch == 0 || ch == channel + 1)) continue;
         if (tr.filter != nullptr && ! tr.filter->passes (m)) continue;
         tr.acceptedNotes[bit >> 6] |= std::uint64_t (1) << (bit & 63);
         noteOnTrack (t, channel, key, velocity);
@@ -376,7 +395,8 @@ void Engine::noteOff (int channel, int key) noexcept
     {
         auto& tr = tracks_[static_cast<std::size_t> (t)];
         const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
-        if (! (ch == 0 || ch == channel + 1)) continue;
+        const bool organ = tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
+        if (! (organ || ch == 0 || ch == channel + 1)) continue;
         const std::uint64_t mask = std::uint64_t (1) << (bit & 63);
         const bool accepted = (tr.acceptedNotes[bit >> 6] & mask) != 0;
         if (tr.filter != nullptr && tr.filter->enabled() && ! accepted) continue; // le Note On n'est jamais passé
@@ -388,13 +408,13 @@ void Engine::noteOff (int channel, int key) noexcept
 void Engine::panic() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.fm.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
+    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.fm.panic(); t.organ.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
 }
 
 void Engine::releaseAll() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.fm.releaseAll(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
+    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.fm.releaseAll(); t.organ.allNotesOff(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
 }
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
@@ -402,7 +422,7 @@ void Engine::setParameter (std::uint32_t, double) noexcept {}
 int Engine::activeVoices() const noexcept
 {
     int n = 0;
-    for (const auto& t : tracks_) n += t.voices.activeVoices() + t.synth.activeVoices() + t.fm.activeVoices();
+    for (const auto& t : tracks_) n += t.voices.activeVoices() + t.synth.activeVoices() + t.fm.activeVoices() + t.organ.heldKeys();
     return n;
 }
 
@@ -459,6 +479,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());
         if (t.synthSlot.adoptPending()) t.synth.setPatch (t.synthSlot.current());
         if (t.fmSlot.adoptPending()) t.fm.setDescription (t.fmSlot.current());
+        if (t.organSlot.adoptPending()) t.organ.setDescription (t.organSlot.current());
         if (t.filterSlot.adoptPending()) t.filter = t.filterSlot.current();
         // changement de type ou désactivation : les voix de la piste s'arrêtent net (rien ne doit sonner sous l'ancien type)
         const int type = t.type.load (std::memory_order_relaxed), active = t.active.load (std::memory_order_relaxed);
@@ -467,6 +488,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
             t.voices.allSoundOff();
             t.synth.allSoundOff();
             t.fm.allSoundOff();
+            t.organ.allNotesOff();
             t.held[0].store (0, std::memory_order_relaxed);
             t.held[1].store (0, std::memory_order_relaxed);
             t.appliedType = type;
@@ -758,9 +780,12 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         if (t.active.load (std::memory_order_relaxed) == 0) { t.lastSend.fill (0.0f); continue; }
         const bool synthTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth);
         const bool fmTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Fm);
+        const bool organTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
         const bool wasSilent = t.peakL.load (std::memory_order_relaxed) == 0.0f && t.peakR.load (std::memory_order_relaxed) == 0.0f;
         // piste sans instrument, ou au repos et déjà silencieuse (elle et ses pistes parallèles) : rien à faire
-        const bool idle = fmTrack ? t.fm.activeVoices() == 0
+        // l'orgue (Leslie, réverb) a une queue : au repos seulement quand aucune touche n'est tenue ET que la piste est déjà muette
+        const bool idle = organTrack ? t.organ.heldKeys() == 0
+                        : fmTrack ? t.fm.activeVoices() == 0
                         : synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
         if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0) { t.lastSend.fill (0.0f); continue; }
 
@@ -781,7 +806,17 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             if (s[kFilter2Cutoff] != ParameterSet::npos) fp.cutoffHz[1] = params_->getAt (s[kFilter2Cutoff]);
             if (s[kFilter2Resonance] != ParameterSet::npos) fp.resonance[1] = params_->getAt (s[kFilter2Resonance]) / 100.0;
         }
-        if (fmTrack)
+        if (organTrack)
+        {
+            double values[organ::kOrganValues];
+            // valeurs par défaut de mixer::addOrganParams quand aucun jeu de paramètres n'est attaché
+            static constexpr double kDefaults[organ::kOrganValues] = { 8, 8, 6, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0,  0, 0,
+                                                                       0, 0, 1, 1,  0, 1, 0,  0, 100,  0, 50, 50, 50,  0 };
+            for (int k = 0; k < organ::kOrganValues; ++k) values[k] = param (t.idx.organ[static_cast<std::size_t> (k)], kDefaults[k]);
+            organ::OrganLive live = organ::liveFromValues (values);
+            t.organ.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, live);
+        }
+        else if (fmTrack)
         {
             fm::FmLive live;
             live.tuneCents = static_cast<float> (cents);

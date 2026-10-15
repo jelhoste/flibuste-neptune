@@ -122,6 +122,10 @@ public:
     neptune::core::fm::FmDescription fmDescription() const { return fmDescription (selectedTrack()); }
     neptune::core::fm::FmDescription fmDescription (int track) const;
     void uiEditFm (neptune::core::fm::FmDescription, std::string name, std::string mergeKey = {}, bool presetChange = false);
+    // Type Orgue : canaux des claviers, split, transposition (les tirettes et réglages sont des paramètres de la piste).
+    neptune::core::organ::OrganDescription organDescription() const { return organDescription (selectedTrack()); }
+    neptune::core::organ::OrganDescription organDescription (int track) const;
+    void uiEditOrgan (neptune::core::organ::OrganDescription, std::string name, std::string mergeKey = {});
     // Édition du patch de la piste sélectionnée : annulable, fusionnée par geste.
     // `presetChange` : changement de preset (les notes en cours gardent l'ancien son : capture par voix).
     void uiEditSynth (neptune::core::SynthDescription, std::string name, std::string mergeKey = {}, bool presetChange = false);
@@ -278,6 +282,7 @@ private:
     void pushMixerSettingsToEngine();
     void publishSynthPatch (int track, const neptune::core::SynthDescription&, bool freezeRunningVoices = false);
     void publishFmDescription (int track, const neptune::core::fm::FmDescription&);
+    void publishOrganDescription (int track, const neptune::core::organ::OrganDescription&);
     void setTrackPresetId (int track, const std::string& id);
     std::unique_ptr<neptune::core::preset::Library> presetLibrary_;
     std::atomic<std::uint32_t> presetRevision_ { 1 };

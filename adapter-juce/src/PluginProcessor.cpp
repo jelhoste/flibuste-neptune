@@ -273,7 +273,8 @@ bool NeptuneProcessor::trackHasContent (int track) const
 {
     const juce::ScopedLock lock (instrumentLock_);
     const auto& t = mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))];
-    return ! t.instrument.empty() || ! (t.synth == neptune::core::SynthDescription {}) || ! (t.fm == neptune::core::fm::FmDescription {});
+    return ! t.instrument.empty() || ! (t.synth == neptune::core::SynthDescription {}) || ! (t.fm == neptune::core::fm::FmDescription {})
+        || ! (t.organ == neptune::core::organ::OrganDescription {});
 }
 
 neptune::core::SynthDescription NeptuneProcessor::synthDescription (int track) const
@@ -330,10 +331,36 @@ void NeptuneProcessor::uiEditFm (neptune::core::fm::FmDescription d, std::string
         std::move (name), std::move (mergeKey)));
 }
 
+neptune::core::organ::OrganDescription NeptuneProcessor::organDescription (int track) const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.tracks[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))].organ;
+}
+
+void NeptuneProcessor::uiEditOrgan (neptune::core::organ::OrganDescription d, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    const int track = selectedTrack();
+    d = organ::sanitised (std::move (d));
+    const auto previous = organDescription (track);
+    if (previous == d) return;
+    undo_.perform (std::make_unique<SnapshotCommand<organ::OrganDescription>> (
+        previous, d,
+        [this, track] (const organ::OrganDescription& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.tracks[static_cast<std::size_t> (track)].organ = v; }
+            publishOrganDescription (track, v);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
 void NeptuneProcessor::resetTrackParameters (int track, bool includeMixer)
 {
     using namespace neptune::core;
     std::vector<ParamId> ids;
+    for (int k = 0; k < mixer::kOrganKinds; ++k) ids.push_back (mixer::organParam (track, k));
     for (int k = 0; k < mixer::kFmKinds; ++k) ids.push_back (mixer::fmParam (track, static_cast<mixer::FmKind> (k)));
     for (int k = 0; k < mixer::kSamplerKinds; ++k) ids.push_back (mixer::samplerParam (track, static_cast<mixer::SamplerKind> (k)));
     for (int k = 0; k < mixer::kSynthKinds; ++k) ids.push_back (mixer::synthParam (track, static_cast<mixer::SynthKind> (k)));
@@ -364,11 +391,13 @@ void NeptuneProcessor::uiSetTrackType (int track, neptune::core::TrackType type)
         t.instrument = InstrumentDescription {};
         t.synth = SynthDescription {};
         t.fm = fm::FmDescription {};
+        t.organ = organ::OrganDescription {};
         t.synthPresetId.clear();
     }
     engine_.setTrackType (track, type);
     publishSynthPatch (track, SynthDescription {});
     publishFmDescription (track, fm::FmDescription {});
+    publishOrganDescription (track, organ::OrganDescription {});
     loader_->request (track, InstrumentDescription {}, false); // libère les samples de l'ancien instrument
     resetTrackParameters (track, false);
     undo_.clear(); // l'historique parlait de l'ancienne configuration de cette piste
@@ -407,6 +436,7 @@ int NeptuneProcessor::uiAddTrack()
     engine_.setTrackActive (index, true);
     publishSynthPatch (index, SynthDescription {});
     publishFmDescription (index, fm::FmDescription {});
+    publishOrganDescription (index, organ::OrganDescription {});
     loader_->request (index, InstrumentDescription {}, false);
     undo_.clear();
     selectTrack (index);
@@ -450,6 +480,7 @@ bool NeptuneProcessor::uiRemoveTrack (int track)
     engine_.setTrackSettings (track, trackSettings (track));
     publishSynthPatch (track, SynthDescription {});
     publishFmDescription (track, fm::FmDescription {});
+    publishOrganDescription (track, organ::OrganDescription {});
     loader_->request (track, InstrumentDescription {}, false);
     resetTrackParameters (track, true);
     undo_.clear();
@@ -746,6 +777,11 @@ void NeptuneProcessor::publishFmDescription (int track, const neptune::core::fm:
         seedHostParameters (neptune::core::fm::extraParamValues (d, track));
 }
 
+void NeptuneProcessor::publishOrganDescription (int track, const neptune::core::organ::OrganDescription& d)
+{
+    engine_.publishOrgan (track, std::make_shared<const neptune::core::organ::OrganDescription> (neptune::core::organ::sanitised (d)));
+}
+
 void NeptuneProcessor::publishSynthPatch (int track, const neptune::core::SynthDescription& d, bool freezeRunningVoices)
 {
     auto patch = std::make_shared<neptune::core::SynthPatch> (d);
@@ -971,6 +1007,7 @@ void NeptuneProcessor::pushMixerSettingsToEngine()
         engine_.setTrackActive (t, ts.active);
         publishSynthPatch (t, ts.synth);
         publishFmDescription (t, ts.fm);
+        publishOrganDescription (t, ts.organ);
     }
     for (int b = 0; b < neptune::core::mixer::numBuses; ++b) engine_.setBusSettings (b, m.buses[static_cast<std::size_t> (b)]);
     for (int p = 0; p < neptune::core::mixer::numParallels; ++p)

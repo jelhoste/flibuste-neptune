@@ -19,6 +19,34 @@ OrganLive::OrganLive()
     drawbars[0] = { 8, 8, 6, 0, 0, 0, 0, 0, 0 };
 }
 
+OrganLive liveFromValues (const double* v) noexcept
+{
+    OrganLive l;
+    auto db = [] (double x) { return std::clamp (static_cast<int> (std::lround (x)), 0, 8); };
+    for (int i = 0; i < kDrawbars; ++i)
+    {
+        l.drawbars[0][static_cast<std::size_t> (i)] = db (v[0 + i]);
+        l.drawbars[1][static_cast<std::size_t> (i)] = db (v[9 + i]);
+    }
+    l.drawbars[2][0] = db (v[18]);
+    l.drawbars[2][2] = db (v[19]);
+    l.percussionOn = v[20] >= 0.5;
+    l.percussionSoft = v[21] >= 0.5;
+    l.percussionFast = v[22] >= 0.5;
+    l.percussionThird = v[23] >= 0.5;
+    l.vibratoMode = std::clamp (static_cast<int> (std::lround (v[24])), 0, kVibratoModes - 1);
+    l.vibratoUpper = v[25] >= 0.5;
+    l.vibratoLower = v[26] >= 0.5;
+    l.leslieSpeed = std::clamp (static_cast<int> (std::lround (v[27])), 0, 2);
+    l.leslieMix = static_cast<float> (std::clamp (v[28] / 100.0, 0.0, 1.0));
+    l.driveOn = v[29] >= 0.5;
+    l.driveInput = static_cast<float> (std::clamp (v[30] / 100.0, 0.0, 1.0));
+    l.driveCharacter = static_cast<float> (std::clamp (v[31] / 100.0, 0.0, 1.0));
+    l.driveOutput = static_cast<float> (std::clamp (v[32] / 100.0, 0.0, 1.0));
+    l.reverbMix = static_cast<float> (std::clamp (v[33] / 100.0, 0.0, 1.0));
+    return l;
+}
+
 // ---------------------------------------------------------------------------------------------------- description
 
 OrganDescription sanitised (OrganDescription d)
