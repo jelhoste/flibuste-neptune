@@ -601,7 +601,7 @@ struct FmView::Impl
             add (*mk.knob, 1);
             macros.push_back (std::move (mk));
         }
-        setPage (0);
+        // ne pas appeler setPage ici : FmView::resized() lit impl_, qui n'est assigné qu'après ce constructeur
     }
 
     // ---- état
@@ -781,6 +781,7 @@ FmView::FmView (ParamHost& host, const theme::Palette& palette, const i18n::Tran
       keyboard_ (palette)
 {
     impl_ = std::make_unique<Impl> (*this);
+    impl_->setPage (0); // après l'assignation de impl_ (resized() et paint() la lisent)
     keyboard_.onNoteOn = [this] (int key, float v) { if (onNoteOn) onNoteOn (key, v); };
     keyboard_.onNoteOff = [this] (int key) { if (onNoteOff) onNoteOff (key); };
     octDown_.setButtonText (text ("synth.oct_down"));
@@ -837,6 +838,7 @@ void FmView::placeScaled (juce::Rectangle<int> area)
 
 void FmView::setDescription (const fm::FmDescription& d)
 {
+    if (impl_ == nullptr) return;
     if (impl_->dragging) return;
     const auto clean = fm::sanitised (d);
     if (clean == impl_->d) return;
@@ -846,6 +848,7 @@ void FmView::setDescription (const fm::FmDescription& d)
 
 void FmView::setTrack (int track)
 {
+    if (impl_ == nullptr) return;
     impl_->track = track;
     for (auto& m : impl_->macros) m.knob->setParamId (mixer::fmParam (track, m.kind));
 }
@@ -858,6 +861,7 @@ void FmView::timerCallback()
 
 void FmView::paint (juce::Graphics& g)
 {
+    if (impl_ == nullptr) return;
     // légendes et valeurs des macros (page globale)
     if (impl_->page != 1) return;
     for (const auto& m : impl_->macros)
@@ -874,6 +878,7 @@ void FmView::paint (juce::Graphics& g)
 
 void FmView::resized()
 {
+    if (impl_ == nullptr) return;
     auto& m = *impl_;
     auto r = getLocalBounds();
     {
