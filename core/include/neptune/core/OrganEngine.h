@@ -22,12 +22,21 @@ struct OrganDescription
     int splitLower = 0;                              // note MIDI : sur le canal du supérieur, en dessous : pédalier (0 : pas de split)
     int splitUpper = 0;                              // note MIDI : sur ce même canal, en dessous : inférieur (0 : pas de split)
     std::array<int, kManuals> transpose { 0, 0, 0 }; // demi-tons, -24..24
-    int tuningCents = 0;                             // -100..100 (accord général)
+    int tuningCents = 0;                             // -100..100 (accord général : le la = 440 Hz x 2^(cents / 1200))
+
+    // Cabine Leslie (valeurs d'origine de setBfree) : vitesses en tours par minute, constantes de temps en secondes.
+    double hornSlowRpm = 40.32, hornFastRpm = 423.36;   // 5..200, 100..900
+    double drumSlowRpm = 36.0, drumFastRpm = 357.3;     // 5..100, 60..600
+    double hornAcc = 0.161, hornDec = 0.321;            // 0.05..2
+    double drumAcc = 4.127, drumDec = 1.371;            // 0.5..10
+    double hornLevel = 0.7;                             // 0..1 : niveau du cornet
 
     bool operator== (const OrganDescription& o) const noexcept
     {
         return channel == o.channel && splitLower == o.splitLower && splitUpper == o.splitUpper && transpose == o.transpose
-            && tuningCents == o.tuningCents;
+            && tuningCents == o.tuningCents && hornSlowRpm == o.hornSlowRpm && hornFastRpm == o.hornFastRpm && drumSlowRpm == o.drumSlowRpm
+            && drumFastRpm == o.drumFastRpm && hornAcc == o.hornAcc && hornDec == o.hornDec && drumAcc == o.drumAcc && drumDec == o.drumDec
+            && hornLevel == o.hornLevel;
     }
     bool operator!= (const OrganDescription& o) const noexcept { return ! (*this == o); }
 };
@@ -48,13 +57,13 @@ struct OrganLive
     bool driveOn = false;
     float driveInput = 0.5f, driveCharacter = 0.5f, driveOutput = 0.5f; // 0..1
     float reverbMix = 0.0f;                        // 0..1
-    float tuneCents = 0.0f;                        // réservé : accord de la piste
+    float vibratoDepth = 0.5f;                     // 0..1 (0,5 : réglage d'origine de setBfree)
     OrganLive();
 };
 
 // Valeurs lues à chaque bloc à partir de `numKinds` valeurs de paramètres dans l'ordre de mixer::OrganKind (tirettes du supérieur,
 // de l'inférieur, pédalier 16' et 8', percussion, vibrato, Leslie, overdrive, réverb) : même traduction pour le plugin et Neptune.
-constexpr int kOrganValues = 34;
+constexpr int kOrganValues = 35;
 OrganLive liveFromValues (const double* values) noexcept;
 
 class OrganVoices
@@ -69,8 +78,12 @@ public:
     // fréquence recrée le moteur (appeler hors lecture).
     bool reserve (double sampleRate);
     bool reserved() const noexcept { return reserved_.load (std::memory_order_acquire); }
-    // Description adoptée (nulle : celle par défaut).
-    void setDescription (const OrganDescription* d) noexcept { desc_ = d; }
+    // Description adoptée (nulle : celle par défaut). Thread audio : elle sert au routage des notes et au Leslie.
+    void setDescription (const OrganDescription* d) noexcept { desc_ = d; leslieDirty_ = true; }
+    // Thread de message : l'accord (cents) fixe les tables d'ondes. Un autre accord construit un nouvel orgue, que l'audio adopte au
+    // bloc suivant (les touches tenues sont rejouées) ; l'ancien est libéré par collect().
+    void requestTuning (int cents);
+    void collect();                                  // thread de message : libère l'orgue remplacé
 
     void noteOn (int channel, int note) noexcept;    // canal 0..15 (hôte), note 0..127
     void noteOff (int channel, int note) noexcept;
@@ -85,6 +98,7 @@ private:
     struct Impl;
     Impl* impl_ = nullptr;
     const OrganDescription* desc_ = nullptr;
+    bool leslieDirty_ = true;
     std::atomic<bool> reserved_ { false };
 };
 

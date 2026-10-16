@@ -399,8 +399,8 @@ nb3_free_parts (nb3_engine* e)
 	if (e->inst.preamp) freePreamp (e->inst.preamp);
 }
 
-nb3_engine*
-nb3_create (double sampleRate)
+static nb3_engine*
+nb3_create_impl (double sampleRate, double refA_Hz)
 {
 	nb3_engine* e = (nb3_engine*)calloc (1, sizeof (nb3_engine));
 	if (e == NULL) return NULL;
@@ -416,6 +416,8 @@ nb3_create (double sampleRate)
 		free (e);
 		return NULL;
 	}
+	/* l'accord se fixe avant la construction des tables d'ondes */
+	if (refA_Hz >= 220.0 && refA_Hz <= 880.0) setTuning (e->inst.synth, refA_Hz);
 	/* équivalent de initSynth() de setBfree (b_synth/lv2.c) sans le module MIDI, les programmes ni l'état courant */
 	initToneGenerator (e->inst.synth, e);
 	initVibrato (e->inst.synth, e);
@@ -431,6 +433,9 @@ nb3_create (double sampleRate)
 	e->gain = 1.0f;
 	return e;
 }
+
+nb3_engine* nb3_create (double sampleRate) { return nb3_create_impl (sampleRate, 0.0); }
+nb3_engine* nb3_create_tuned (double sampleRate, double refA_Hz) { return nb3_create_impl (sampleRate, refA_Hz); }
 
 void
 nb3_destroy (nb3_engine* e)
@@ -495,6 +500,48 @@ nb3_config (nb3_engine* e, const char* key, const char* value)
 	ack += reverbConfig (e->inst.reverb, &cfg);
 	ack += whirlConfig (e->inst.whirl, &cfg);
 	return ack > 0;
+}
+
+void
+nb3_set_leslie (nb3_engine* e, const nb3_leslie* p)
+{
+	struct b_whirl* w;
+	if (e == NULL || p == NULL) return;
+	w = e->inst.whirl;
+	w->hornRPMslow = p->hornSlowRpm;
+	w->hornRPMfast = p->hornFastRpm;
+	w->drumRPMslow = p->drumSlowRpm;
+	w->drumRPMfast = p->drumFastRpm;
+	w->hornAcc = p->hornAcc;
+	w->hornDec = p->hornDec;
+	w->drumAcc = p->drumAcc;
+	w->drumDec = p->drumDec;
+	w->hornLevel = p->hornLevel;
+	computeRotationSpeeds (w); /* recalcule les vitesses cibles de chaque combinaison (sans allocation) */
+}
+
+void
+nb3_set_vibrato_depth (nb3_engine* e, float scale)
+{
+	struct b_vibrato* v;
+	const double S = 65536.0;
+	int i;
+	double a1, a2, a3;
+	if (e == NULL) return;
+	v = &e->inst.synth->inst_vibrato;
+	scale = scale < 0.0f ? 0.0f : scale > 2.0f ? 2.0f : scale;
+	a1 = 3.0 * scale; a2 = 6.0 * scale; a3 = 9.0 * scale;
+	if (a1 > 12.0) a1 = 12.0;
+	if (a2 > 12.0) a2 = 12.0;
+	if (a3 > 12.0) a3 = 12.0;
+	v->vib1OffAmp = a1; v->vib2OffAmp = a2; v->vib3OffAmp = a3;
+	/* mêmes tables que initIncrementTables() de vibrato.c, sans vider le tampon de retard (pas de clic pendant un balayage) */
+	for (i = 0; i < INCTBL_SIZE; i++) {
+		const double m = sin ((2.0 * M_PI * i) / INCTBL_SIZE);
+		v->offset1Table[i] = (unsigned int)((1.0 + a1 + (m * a1)) * S);
+		v->offset2Table[i] = (unsigned int)((1.0 + a2 + (m * a2)) * S);
+		v->offset3Table[i] = (unsigned int)((1.0 + a3 + (m * a3)) * S);
+	}
 }
 
 void nb3_set_leslie_mix (nb3_engine* e, float mix) { if (e != NULL) e->leslieMix = mix < 0.0f ? 0.0f : mix > 1.0f ? 1.0f : mix; }

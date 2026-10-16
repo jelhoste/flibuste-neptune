@@ -36,7 +36,11 @@ public:
 
     // Place la vue dans `area` en la réduisant si besoin (jamais agrandie).
     void placeScaled (juce::Rectangle<int> area);
-    static constexpr int designWidth = 960, designHeight = 580;
+    static constexpr int designWidth = 1140, designHeight = 620;
+
+    enum class Page { Drawbars = 0, Leslie, Live, Settings };
+    void setPage (Page);
+    Page page() const noexcept { return page_; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -44,12 +48,19 @@ public:
 private:
     class Drawbar;
     class Switch;
+    class SpeedSquare;
+    struct LeslieSlider;
     struct ComboLink;
     struct Section { juce::String title; juce::Rectangle<int> area; };
 
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token t) const;
     void bindTrack();
+    void updateVisibility();
+    void layoutDrawbars (juce::Rectangle<int> area, bool live);
+    void layoutLeslie (juce::Rectangle<int> area);
+    void layoutSettings (juce::Rectangle<int> area);
+    void layoutKeyboard (juce::Rectangle<int> area);
 
     ParamHost& host_;
     neptune::core::theme::Palette palette_;
@@ -63,7 +74,15 @@ private:
 
     juce::OwnedArray<Drawbar> drawbars_;
     juce::OwnedArray<Switch> switches_;
-    juce::OwnedArray<NeptuneKnob> knobs_;      // 5 potards de l'orgue puis les potards d'instrument
+    juce::OwnedArray<NeptuneKnob> knobs_;      // 6 potards de l'orgue (Leslie dry/wet, overdrive x3, réverb, profondeur du vibrato) puis ceux d'instrument
+    static constexpr int kOwnKnobs = 6;
+    Page page_ = Page::Drawbars;
+    juce::TextButton pageButtons_[4];
+    juce::OwnedArray<SpeedSquare> squares_;
+    juce::OwnedArray<LeslieSlider> leslieSliders_;
+    juce::Slider tuneSlider_;
+    juce::Label tuneLabel_, tuneHint_, midiHint_;
+    juce::Rectangle<int> contentArea_;
     juce::OwnedArray<ComboLink> combos_;
     juce::ComboBox channelBox_[3], transposeBox_[3];
     juce::Slider splitLower_, splitUpper_;

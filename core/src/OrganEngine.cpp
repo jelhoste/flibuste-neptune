@@ -1,6 +1,7 @@
 #include "neptune/core/OrganEngine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -44,6 +45,7 @@ OrganLive liveFromValues (const double* v) noexcept
     l.driveCharacter = static_cast<float> (std::clamp (v[31] / 100.0, 0.0, 1.0));
     l.driveOutput = static_cast<float> (std::clamp (v[32] / 100.0, 0.0, 1.0));
     l.reverbMix = static_cast<float> (std::clamp (v[33] / 100.0, 0.0, 1.0));
+    l.vibratoDepth = static_cast<float> (std::clamp (v[34] / 100.0, 0.0, 1.0));
     return l;
 }
 
@@ -56,6 +58,15 @@ OrganDescription sanitised (OrganDescription d)
     d.splitUpper = std::clamp (d.splitUpper, 0, 127);
     for (auto& t : d.transpose) t = std::clamp (t, -24, 24);
     d.tuningCents = std::clamp (d.tuningCents, -100, 100);
+    d.hornSlowRpm = std::clamp (d.hornSlowRpm, 5.0, 200.0);
+    d.hornFastRpm = std::clamp (d.hornFastRpm, 100.0, 900.0);
+    d.drumSlowRpm = std::clamp (d.drumSlowRpm, 5.0, 100.0);
+    d.drumFastRpm = std::clamp (d.drumFastRpm, 60.0, 600.0);
+    d.hornAcc = std::clamp (d.hornAcc, 0.05, 2.0);
+    d.hornDec = std::clamp (d.hornDec, 0.05, 2.0);
+    d.drumAcc = std::clamp (d.drumAcc, 0.5, 10.0);
+    d.drumDec = std::clamp (d.drumDec, 0.5, 10.0);
+    d.hornLevel = std::clamp (d.hornLevel, 0.0, 1.0);
     return d;
 }
 
@@ -67,6 +78,9 @@ std::string toJson (const OrganDescription& d)
     o["split_upper"] = d.splitUpper;
     o["transpose"] = d.transpose;
     o["tuning_cents"] = d.tuningCents;
+    o["leslie"] = { { "horn_slow_rpm", d.hornSlowRpm }, { "horn_fast_rpm", d.hornFastRpm }, { "drum_slow_rpm", d.drumSlowRpm },
+                    { "drum_fast_rpm", d.drumFastRpm }, { "horn_acc", d.hornAcc }, { "horn_dec", d.hornDec }, { "drum_acc", d.drumAcc },
+                    { "drum_dec", d.drumDec }, { "horn_level", d.hornLevel } };
     return o.dump();
 }
 
@@ -92,6 +106,23 @@ OrganDescription organFromJson (std::string_view text)
     d.splitUpper = num ("split_upper", d.splitUpper);
     arr ("transpose", d.transpose);
     d.tuningCents = num ("tuning_cents", d.tuningCents);
+    if (const auto l = o.find ("leslie"); l != o.end() && l->is_object())
+    {
+        auto real = [&l] (const char* key, double fallback)
+        {
+            const auto it = l->find (key);
+            return it != l->end() && it->is_number() && std::isfinite (it->get<double>()) ? it->get<double>() : fallback;
+        };
+        d.hornSlowRpm = real ("horn_slow_rpm", d.hornSlowRpm);
+        d.hornFastRpm = real ("horn_fast_rpm", d.hornFastRpm);
+        d.drumSlowRpm = real ("drum_slow_rpm", d.drumSlowRpm);
+        d.drumFastRpm = real ("drum_fast_rpm", d.drumFastRpm);
+        d.hornAcc = real ("horn_acc", d.hornAcc);
+        d.hornDec = real ("horn_dec", d.hornDec);
+        d.drumAcc = real ("drum_acc", d.drumAcc);
+        d.drumDec = real ("drum_dec", d.drumDec);
+        d.hornLevel = real ("horn_level", d.hornLevel);
+    }
     return sanitised (d);
 }
 
@@ -121,6 +152,9 @@ int organKeyFor (const OrganDescription& d, int channel, int note) noexcept
 struct OrganVoices::Impl
 {
     nb3_engine* engine = nullptr;
+    std::atomic<nb3_engine*> pending { nullptr };   // orgue accordé autrement, construit par le thread de message
+    std::atomic<nb3_engine*> retired { nullptr };   // orgue remplacé, à libérer par le thread de message
+    int tuningCents = 0;                            // accord de l'orgue en cours ou en attente (thread de message)
     double sampleRate = 0.0;
     std::array<std::int16_t, 16 * 128> held; // clavier de setBfree par (canal, note) ; -1 : aucune
     std::array<std::uint8_t, 160> keyCount {};  // nombre de notes qui tiennent chaque touche
@@ -131,7 +165,12 @@ struct OrganVoices::Impl
 
     static constexpr int kChunk = 2048;
     Impl() : scratch (2 * kChunk) { held.fill (-1); }
-    ~Impl() { if (engine != nullptr) nb3_destroy (engine); }
+    ~Impl()
+    {
+        if (engine != nullptr) nb3_destroy (engine);
+        if (auto* p = pending.exchange (nullptr)) nb3_destroy (p);
+        if (auto* r = retired.exchange (nullptr)) nb3_destroy (r);
+    }
 
     static int cc (float v01) { return static_cast<int> (std::lround (std::clamp (v01, 0.0f, 1.0f) * 127.0f)); }
 
@@ -172,6 +211,8 @@ struct OrganVoices::Impl
         if (first || n.driveCharacter != a.driveCharacter) nb3_control (engine, "overdrive.character", cc (n.driveCharacter));
         if (first || n.driveOutput != a.driveOutput) nb3_control (engine, "overdrive.outputgain", cc (n.driveOutput));
         if (first || n.reverbMix != a.reverbMix) nb3_control (engine, "reverb.mix", cc (n.reverbMix));
+        // le vibrato / chorus : la profondeur change les tables du scanner (le vibrato.knob reste tel quel)
+        if (first || n.vibratoDepth != a.vibratoDepth) nb3_set_vibrato_depth (engine, n.vibratoDepth * 2.0f);
         (void) tuningCents;
         applied = n;
         haveApplied = true;
@@ -186,7 +227,8 @@ bool OrganVoices::reserve (double sampleRate)
     if (impl_->engine != nullptr && impl_->sampleRate == sampleRate) return true;
     reserved_.store (false, std::memory_order_release);
     if (impl_->engine != nullptr) { nb3_destroy (impl_->engine); impl_->engine = nullptr; }
-    impl_->engine = nb3_create (sampleRate);
+    if (auto* p = impl_->pending.exchange (nullptr)) nb3_destroy (p);
+    impl_->engine = nb3_create_tuned (sampleRate, 440.0 * std::pow (2.0, impl_->tuningCents / 1200.0));
     impl_->sampleRate = sampleRate;
     impl_->haveApplied = false;
     impl_->held.fill (-1);
@@ -194,6 +236,22 @@ bool OrganVoices::reserve (double sampleRate)
     if (impl_->engine == nullptr) return false;
     reserved_.store (true, std::memory_order_release);
     return true;
+}
+
+void OrganVoices::requestTuning (int cents)
+{
+    cents = std::clamp (cents, -100, 100);
+    if (cents == impl_->tuningCents) return;
+    impl_->tuningCents = cents;
+    if (! reserved()) return; // reserve() créera l'orgue à cet accord
+    auto* fresh = nb3_create_tuned (impl_->sampleRate, 440.0 * std::pow (2.0, cents / 1200.0));
+    if (fresh == nullptr) return;
+    if (auto* old = impl_->pending.exchange (fresh)) nb3_destroy (old); // une demande plus récente remplace celle qui n'a pas été adoptée
+}
+
+void OrganVoices::collect()
+{
+    if (auto* r = impl_->retired.exchange (nullptr)) nb3_destroy (r);
 }
 
 void OrganVoices::noteOn (int channel, int note) noexcept
@@ -246,6 +304,34 @@ void OrganVoices::render (float* left, float* right, int numFrames, float gainSt
             if (right != nullptr) std::fill (right, right + numFrames, 0.0f);
         }
         return;
+    }
+    // orgue accordé autrement : adopté ici (l'ancien est remis au thread de message) ; les touches tenues sont rejouées
+    if (impl_->retired.load (std::memory_order_acquire) == nullptr)
+        if (auto* fresh = impl_->pending.exchange (nullptr, std::memory_order_acq_rel))
+        {
+            impl_->retired.store (impl_->engine, std::memory_order_release);
+            impl_->engine = fresh;
+            impl_->haveApplied = false;
+            leslieDirty_ = true;
+            for (std::size_t k = 0; k < impl_->keyCount.size(); ++k)
+                if (impl_->keyCount[k] > 0) nb3_key_on (impl_->engine, static_cast<int> (k));
+        }
+    if (leslieDirty_)
+    {
+        const OrganDescription& d = desc_ != nullptr ? *desc_ : impl_->fallback;
+        nb3_leslie les;
+        les.hornSlowRpm = static_cast<float> (d.hornSlowRpm);
+        les.hornFastRpm = static_cast<float> (d.hornFastRpm);
+        les.drumSlowRpm = static_cast<float> (d.drumSlowRpm);
+        les.drumFastRpm = static_cast<float> (d.drumFastRpm);
+        les.hornAcc = static_cast<float> (d.hornAcc);
+        les.hornDec = static_cast<float> (d.hornDec);
+        les.drumAcc = static_cast<float> (d.drumAcc);
+        les.drumDec = static_cast<float> (d.drumDec);
+        les.hornLevel = static_cast<float> (d.hornLevel);
+        nb3_set_leslie (impl_->engine, &les);
+        leslieDirty_ = false;
+        impl_->haveApplied = false; // computeRotationSpeeds a rebasculé la vitesse : on la renvoie
     }
     impl_->applyChanges (live, desc_ != nullptr ? desc_->tuningCents : 0);
     const float step = (gainEnd - gainStart) / static_cast<float> (numFrames);

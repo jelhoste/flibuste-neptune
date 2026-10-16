@@ -41,6 +41,7 @@ const std::vector<KeyedParam>& buildKeys()
         add ("organ.drive.character", mixer::kOrgDriveCharacter);
         add ("organ.drive.output", mixer::kOrgDriveOutput);
         add ("organ.reverb", mixer::kOrgReverb);
+        add ("organ.vibrato.depth", mixer::kOrgVibDepth);
         return k;
     }();
     return keys;
@@ -168,6 +169,7 @@ preset::Preset make (int n, const Reg& r)
     set ("organ.drive.character", 50);
     set ("organ.drive.output", 50);
     set ("organ.reverb", r.reverb);
+    set ("organ.vibrato.depth", 50);
     return p;
 }
 } // namespace

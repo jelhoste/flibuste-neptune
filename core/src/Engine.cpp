@@ -109,7 +109,9 @@ void Engine::publishFm (int track, std::shared_ptr<const fm::FmDescription> desc
 void Engine::publishOrgan (int track, std::shared_ptr<const organ::OrganDescription> description)
 {
     if (track < 0 || track >= kTracks) return;
-    tracks_[static_cast<std::size_t> (track)].organSlot.publish (std::move (description));
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    t.organ.requestTuning (description->tuningCents); // l'accord fixe les tables d'ondes : un nouvel orgue est construit ici
+    t.organSlot.publish (std::move (description));
 }
 
 void Engine::pruneSynthKeeper (Track& t)
@@ -152,6 +154,7 @@ void Engine::collectGarbage()
         t.synthSlot.collect();
         t.fmSlot.collect();
         t.organSlot.collect();
+        t.organ.collect();
         t.filterSlot.collect();
         pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
@@ -811,7 +814,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             double values[organ::kOrganValues];
             // valeurs par défaut de mixer::addOrganParams quand aucun jeu de paramètres n'est attaché
             static constexpr double kDefaults[organ::kOrganValues] = { 8, 8, 6, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0,  0, 0,
-                                                                       0, 0, 1, 1,  0, 1, 0,  0, 100,  0, 50, 50, 50,  0 };
+                                                                       0, 0, 1, 1,  0, 1, 0,  0, 100,  0, 50, 50, 50,  0, 50 };
             for (int k = 0; k < organ::kOrganValues; ++k) values[k] = param (t.idx.organ[static_cast<std::size_t> (k)], kDefaults[k]);
             organ::OrganLive live = organ::liveFromValues (values);
             t.organ.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, live);

@@ -84,7 +84,8 @@ bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, st
         && set.add (ParamSpec::continuous (id (kOrgDriveInput), prefix + "Drive Input", Unit::Percent, 0.0, 100.0, 50.0), error)
         && set.add (ParamSpec::continuous (id (kOrgDriveCharacter), prefix + "Drive Character", Unit::Percent, 0.0, 100.0, 50.0), error)
         && set.add (ParamSpec::continuous (id (kOrgDriveOutput), prefix + "Drive Output", Unit::Percent, 0.0, 100.0, 50.0), error)
-        && set.add (ParamSpec::continuous (id (kOrgReverb), prefix + "Reverb", Unit::Percent, 0.0, 100.0, 0.0), error);
+        && set.add (ParamSpec::continuous (id (kOrgReverb), prefix + "Reverb", Unit::Percent, 0.0, 100.0, 0.0), error)
+        && set.add (ParamSpec::continuous (id (kOrgVibDepth), prefix + "Vibrato Depth", Unit::Percent, 0.0, 100.0, 50.0), error);
 }
 
 bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)

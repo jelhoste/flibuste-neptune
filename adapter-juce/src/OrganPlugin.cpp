@@ -85,6 +85,7 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         else if (m.isAllNotesOff()) engine_.allNotesOff();
         else if (m.isAllSoundOff()) engine_.panic();
         else if (m.isController() && m.getControllerNumber() == 0) midiBank_.store (juce::jlimit (0, 127, m.getControllerValue()));
+        else if (m.isController()) engine_.controlChange (m.getChannel() - 1, m.getControllerNumber(), m.getControllerValue());
         else if (m.isProgramChange())
         {
             pendingBank_.store (midiBank_.load());

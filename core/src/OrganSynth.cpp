@@ -78,6 +78,56 @@ bool stateFromJson (std::string_view text, ParameterSet& set, OrganDescription& 
     return true;
 }
 
+bool applyControlChange (const OrganDescription& d, ParameterSet& set, int channel, int cc, int value, int track)
+{
+    value = std::clamp (value, 0, 127);
+    const int ch = channel + 1;
+    auto put = [&] (int kind, double v) { set.set (mixer::organParam (track, kind), v); };
+    auto get = [&] (int kind) { return set.get (mixer::organParam (track, kind)); };
+    const bool upper = d.channel[0] != 0 && ch == d.channel[0];
+    const bool lower = d.channel[1] != 0 && ch == d.channel[1];
+    const bool pedal = d.channel[2] != 0 && ch == d.channel[2];
+    if (! (upper || lower || pedal)) return false;
+
+    // tirettes : 127 = rentrée, 0 = sortie à fond (comme les faders d'un contrôleur)
+    if (cc >= 70 && cc <= 78)
+    {
+        const int i = cc - 70;
+        const double db = std::rint ((127 - value) * 8.0 / 127.0);
+        if (upper) put (mixer::kOrgUpper0 + i, db);
+        else if (lower) put (mixer::kOrgLower0 + i, db);
+        else if (pedal && i == 0) put (mixer::kOrgPedal16, db);
+        else if (pedal && i == 2) put (mixer::kOrgPedal8, db);
+        else return false;
+        return true;
+    }
+    // communs à tous les claviers
+    if (cc == 1) { put (mixer::kOrgLeslieSpeed, value / 43 == 0 ? kLeslieChorale : value / 43 == 1 ? kLeslieBrake : kLeslieTremolo); return true; }
+    if (cc == 64)
+    {
+        if (value > 63) put (mixer::kOrgLeslieSpeed, std::lround (get (mixer::kOrgLeslieSpeed)) == kLeslieChorale ? kLeslieTremolo : kLeslieChorale);
+        return true;
+    }
+    if (cc == 66) { put (mixer::kOrgPercOn, value >= 64 ? 1 : 0); return true; }
+    if (cc == 65) { put (mixer::kOrgDriveOn, value >= 64 ? 1 : 0); return true; }
+    if (! upper) return false; // le reste agit sur la voie du clavier supérieur
+    switch (cc)
+    {
+        case 91: put (mixer::kOrgReverb, value * 100.0 / 127.0); return true;
+        case 80: put (mixer::kOrgPercOn, value >= 64 ? 1 : 0); return true;
+        case 81: put (mixer::kOrgPercSoft, value >= 64 ? 1 : 0); return true;
+        case 82: put (mixer::kOrgPercFast, value >= 64 ? 1 : 0); return true;
+        case 83: put (mixer::kOrgPercThird, value >= 64 ? 0 : 1); return true; // haut : 2e harmonique, bas : 3e
+        case 92: put (mixer::kOrgVibMode, 1 + std::clamp (value / 23, 0, 5)); return true;
+        case 95: put (mixer::kOrgVibLower, (value / 32) == 1 || (value / 32) == 3 ? 1 : 0);
+                 put (mixer::kOrgVibUpper, (value / 32) >= 2 ? 1 : 0); return true;
+        case 30: put (mixer::kOrgVibLower, value >= 64 ? 1 : 0); return true;
+        case 31: put (mixer::kOrgVibUpper, value >= 64 ? 1 : 0); return true;
+        case 93: put (mixer::kOrgDriveCharacter, value * 100.0 / 127.0); return true;
+        default: return false;
+    }
+}
+
 OrganSynthEngine::OrganSynthEngine()
 {
     std::string error;
@@ -103,6 +153,7 @@ void OrganSynthEngine::prepare (double sampleRate, int)
 void OrganSynthEngine::setDescription (const OrganDescription& d)
 {
     description_ = sanitised (d);
+    voices_.requestTuning (description_.tuningCents);
     slot_.publish (std::make_shared<const OrganDescription> (description_));
     slot_.collect();
 }

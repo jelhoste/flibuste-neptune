@@ -128,16 +128,16 @@ de piste « Orgue » + plugin séparé (nom provisoire **Orgamon**, `com.tourned
   routage des notes), les paramètres (`mixer::OrganKind`, ids `9000 + 100.t + k`, 34 par piste : 9 + 9 + 2 tirettes, percussion x4,
   vibrato / chorus x3, Leslie x2, overdrive x4, réverb), le moteur du plugin (`OrganSynth.h/.cpp`, état `organ-state`).
 - **Plugin séparé Orgamon** (`adapter-juce/src/OrganPlugin.*`, cible `Orgamon`) : tirettes, interrupteurs, listes, potards, claviers
-  (canaux, transposition, split). **Jamais compilé ni écouté** : contrôlé à la syntaxe seulement. Pas de presets ni de clavier à
-  l'écran pour l'instant.
+  (canaux, transposition, split), clavier à l'écran, presets. Validé en CI et écouté par l'utilisateur (« ça a l'air bien »).
 - **Type de piste « Orgue » dans Neptune** (écrit, à valider) : `TrackType::Organ` (menu du type de piste du mixeur), moteur par piste (`Engine::publishOrgan`, `OrganVoices` par piste, notes de tous les canaux présentées à l'orgue, qui choisit ses claviers par sa description), état (`organ` dans la bande), vue `OrganView` (commune avec Orgamon). Au repos quand aucune touche n'est tenue ET que la piste est déjà muette.
-- **Pas encore fait** : les presets de l'orgue
-  (module `organ`), les onglets Leslie / Live / Matrice / Réglages de la maquette (vitesses et rayons du Leslie, key click, diaphonie,
-  accord), le clavier MIDI en CC (tirettes par contrôleurs), taille / amortissement de la réverb (absents de setBfree).
+- **Presets de l'orgue** (validés en CI, à écouter) : `OrganPreset.h/.cpp`, module `organ`, clés `organ.*` ; d'après `docs/modele-donnees-presets.md` §9 (copie sur le Bureau, pensé pour Orgamon seul) : tirettes, percussion, vibrato, overdrive, réverb capturés, **vitesse du Leslie libre** (la configuration partagée de la bibliothèque est complétée au démarrage) ; volume de sortie et claviers (canaux / split / transposition) hors preset. 18 presets livrés « factory-organ-NN » (noms de la maquette, registrations classiques : points de départ jamais écoutés). Barre de presets + gestionnaire dans Orgamon (avec programmes MIDI) et sur la piste Orgue de Neptune.
+- **Onglets Leslie / Live / Réglages** (écrits, à valider) : la maquette n'a pas de page propre pour Leslie ni Réglages (seule la barre du bas : MOTOR NOISE, CTRL CH, TUNE). Faits : **Leslie** (grands carrés Chorale / Tremolo / Frein, dry/wet, vitesses lente/rapide et accélérations du cornet et du tambour, niveau du cornet : champs de la description, appliqués par le thread audio via `nb3_set_leslie`), **Live** (tirettes + commandes de jeu agrandies + carrés du Leslie, sans la configuration des claviers), **Réglages** (accord général en cents : l'accord fixe les tables d'ondes, donc un nouvel orgue est construit par le thread de message (`OrganVoices::requestTuning`) et adopté au bloc suivant, les touches tenues rejouées). Potard **profondeur du vibrato** (`kOrgVibDepth`, id 34, 50 % = réglage d'origine de setBfree ; `nb3_set_vibrato_depth` réécrit les tables sans vider le tampon).
+- **Contrôleurs MIDI (CC)** : `applyControlChange` (OrganSynth.cpp), mêmes numéros que setBfree (tirettes 70-78 par voie de clavier, réverb 91, percussion 66/80-83, vibrato 92/95/30/31, overdrive 65/93, Leslie 1/64), branché dans **Orgamon seulement**. **Neptune** : les CC ne sont pas acheminés jusqu'aux pistes (décision de l'utilisateur : à réfléchir, c'est aussi une piste pour alléger les paramètres d'automation). « CTRL CH » de la maquette non repris : chaque clavier écoute ses CC sur sa propre voie, comme dans setBfree.
+- **Pas repris** : MOTOR NOISE (n'existe pas dans setBfree), taille / amortissement de la réverb (setBfree n'a qu'un niveau), diaphonie (« leakage » : tables fixées à la création du moteur, comme l'accord), rayons / micros / filtres du Leslie (choix « essentiel »), page MATRICE de la maquette.
 - **Choix par défaut à confirmer** (l'utilisateur n'avait pas de préférence) : trois claviers = trois canaux MIDI réglables (1, 2, 3)
   + points de split sur le canal du supérieur ; transposition par clavier ; touches hors étendue muettes.
 - **Pièges** : les fichiers C de setBfree doivent rester sous `_USE_MATH_DEFINES` ; `strcasecmp` passe par `compat/strings.h` sous MSVC ;
-  la CI Windows n'a pas encore compilé ce C (premier push à faire).
+  la CI (Linux, Windows, macOS) compile ce C.
 
 ## Automation du synthé, favoris globaux (2026-10-15, à valider dans Reaper)
 

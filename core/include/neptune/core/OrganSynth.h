@@ -24,6 +24,13 @@ bool addSynthParams (ParameterSet& set, std::string* error = nullptr);
 // Valeurs lues à chaque bloc dans un jeu de paramètres, pour la piste `track` (0 pour le plugin).
 OrganLive liveFromParams (const ParameterSet&, int track = 0);
 
+// Contrôleurs MIDI (CC) : mêmes numéros que setBfree. Chaque clavier écoute sa propre voie : tirettes 70..78 (valeur inversée, 127 =
+// rentrée) ; sur la voie du supérieur : 91 réverb, 66 / 80 percussion, 81 douce, 82 rapide, 83 2e harmonique, 92 type de vibrato,
+// 95 routage, 30 vibrato inférieur, 31 vibrato supérieur, 65 overdrive, 93 caractère de l'overdrive ; sur toutes les voies : 1 vitesse
+// du Leslie (0..42 chorale, 43..85 frein, 86.. tremolo), 64 pédale (bascule chorale / tremolo). Écrit dans les paramètres de la piste.
+// Retourne faux si le message ne concerne pas l'orgue.
+bool applyControlChange (const OrganDescription&, ParameterSet&, int channel, int cc, int value, int track = 0);
+
 // État du plugin (getStateInformation) : JSON versionné.
 std::string stateToJson (const ParameterSet&, const OrganDescription&, const std::string& currentPresetId);
 bool stateFromJson (std::string_view text, ParameterSet&, OrganDescription&, std::string& currentPresetId);
@@ -42,7 +49,7 @@ public:
     // --- thread de message ---
     void setDescription (const OrganDescription&);
     const OrganDescription& description() const noexcept { return description_; }
-    void collect() { slot_.collect(); }
+    void collect() { slot_.collect(); voices_.collect(); }
     void postNoteOn (int channel, int key) noexcept { post (Event::NoteOn, channel, key); }
     void postNoteOff (int channel, int key) noexcept { post (Event::NoteOff, channel, key); }
     void postPanic() noexcept { post (Event::Panic, 0, 0); }
@@ -52,6 +59,7 @@ public:
     void noteOff (int channel, int key) noexcept;
     void allNotesOff() noexcept { voices_.allNotesOff(); clearHeld(); }
     void panic() noexcept { voices_.panic(); clearHeld(); }
+    void controlChange (int channel, int cc, int value) noexcept { if (const auto* d = slot_.current()) applyControlChange (*d, params_, channel, cc, value); }
     // Écrase `left` et `right` avec le rendu (volume et pan appliqués). Aucune allocation.
     void process (float* left, float* right, int numFrames) noexcept;
 

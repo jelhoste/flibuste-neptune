@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <cmath>
 #include <set>
 #include <string>
@@ -254,4 +255,94 @@ TEST_CASE ("organ factory presets: complete, distinct and in range, they apply t
     }
     CHECK (ids.size() == list.size());
     CHECK (names.size() == list.size());
+}
+
+TEST_CASE ("organ description: Leslie settings are bounded and round trip", "[organ][leslie]")
+{
+    OrganDescription d;
+    CHECK (d.hornSlowRpm == 40.32);
+    d.hornSlowRpm = 5000.0;
+    d.drumAcc = -3.0;
+    d.hornLevel = 7.0;
+    d = sanitised (d);
+    CHECK (d.hornSlowRpm == 200.0);
+    CHECK (d.drumAcc == 0.5);
+    CHECK (d.hornLevel == 1.0);
+    d.hornFastRpm = 500.0;
+    d.drumDec = 2.0;
+    CHECK (organFromJson (toJson (d)) == d);
+}
+
+TEST_CASE ("organ engine: a new tuning builds another organ that takes over, held keys keep sounding", "[organ][engine][tuning]")
+{
+    auto crossings = [] (OrganVoices& v, const OrganLive& live)
+    {
+        std::vector<float> l (128), r (128), all;
+        for (int i = 0; i < 120; ++i)
+        {
+            v.render (l.data(), r.data(), 128, 1.0f, 1.0f, live, false);
+            if (i >= 60) all.insert (all.end(), l.begin(), l.end());
+        }
+        int n = 0;
+        for (std::size_t i = 1; i < all.size(); ++i) if (all[i - 1] <= 0.0f && all[i] > 0.0f) ++n;
+        return n;
+    };
+    OrganVoices v;
+    REQUIRE (v.reserve (kRate));
+    OrganLive live;
+    live.leslieMix = 0.0f; // sans Leslie : la fréquence est celle de la note
+    live.drawbars[0] = { 0, 0, 8, 0, 0, 0, 0, 0, 0 };
+    live.vibratoMode = 0;
+    v.noteOn (0, 69);
+    const int before = crossings (v, live);
+    REQUIRE (before > 20);
+    v.requestTuning (100); // un demi-ton environ plus haut
+    const int after = crossings (v, live); // la note tenue est rejouée sur le nouvel orgue
+    v.collect();           // le thread de message libère l'ancien
+    CHECK (after > before);
+    CHECK (static_cast<double> (after) / before == Catch::Approx (std::pow (2.0, 100.0 / 1200.0)).epsilon (0.04));
+    CHECK (v.heldKeys() == 1);
+}
+
+TEST_CASE ("organ MIDI controllers follow setBfree numbers, each keyboard on its own channel", "[organ][cc]")
+{
+    using namespace neptune::core;
+    ParameterSet set;
+    REQUIRE (mixer::addOrganParams (set, 0, ""));
+    const OrganDescription d; // U : canal 1, L : canal 2, P : canal 3
+    auto value = [&set] (int kind) { return set.get (mixer::organParam (0, kind)); };
+
+    CHECK (applyControlChange (d, set, 0, 72, 0));          // supérieur, 8' : 0 = sorti à fond
+    CHECK (value (mixer::kOrgUpper0 + 2) == 8.0);
+    CHECK (applyControlChange (d, set, 0, 72, 127));        // 127 = rentré
+    CHECK (value (mixer::kOrgUpper0 + 2) == 0.0);
+    CHECK (applyControlChange (d, set, 1, 70, 0));          // inférieur 16'
+    CHECK (value (mixer::kOrgLower0) == 8.0);
+    CHECK (applyControlChange (d, set, 2, 72, 0));          // pédalier 8'
+    CHECK (value (mixer::kOrgPedal8) == 8.0);
+    CHECK_FALSE (applyControlChange (d, set, 2, 71, 0));    // le pédalier n'a que 16' et 8'
+    CHECK_FALSE (applyControlChange (d, set, 9, 72, 0));    // voie que personne n'écoute
+
+    CHECK (applyControlChange (d, set, 0, 91, 127));        // réverb
+    CHECK (value (mixer::kOrgReverb) == 100.0);
+    CHECK (applyControlChange (d, set, 0, 66, 127));        // percussion
+    CHECK (value (mixer::kOrgPercOn) == 1.0);
+    CHECK (applyControlChange (d, set, 0, 83, 127));        // haut : 2e harmonique
+    CHECK (value (mixer::kOrgPercThird) == 0.0);
+    CHECK (applyControlChange (d, set, 0, 92, 23 * 3));     // type de vibrato : 4e position = C2
+    CHECK (value (mixer::kOrgVibMode) == 4.0);
+    CHECK (applyControlChange (d, set, 0, 95, 127));        // routage : les deux claviers
+    CHECK (value (mixer::kOrgVibUpper) == 1.0);
+    CHECK (value (mixer::kOrgVibLower) == 1.0);
+    CHECK_FALSE (applyControlChange (d, set, 1, 91, 127));  // la réverb ne se pilote que sur la voie du supérieur
+
+    CHECK (applyControlChange (d, set, 1, 1, 100));         // vitesse du Leslie : toutes les voies, haut = tremolo
+    CHECK (value (mixer::kOrgLeslieSpeed) == kLeslieTremolo);
+    CHECK (applyControlChange (d, set, 2, 1, 50));          // milieu = frein
+    CHECK (value (mixer::kOrgLeslieSpeed) == kLeslieBrake);
+    set.set (mixer::organParam (0, mixer::kOrgLeslieSpeed), kLeslieChorale);
+    CHECK (applyControlChange (d, set, 0, 64, 127));        // pédale : bascule chorale / tremolo
+    CHECK (value (mixer::kOrgLeslieSpeed) == kLeslieTremolo);
+    CHECK (applyControlChange (d, set, 0, 64, 127));
+    CHECK (value (mixer::kOrgLeslieSpeed) == kLeslieChorale);
 }

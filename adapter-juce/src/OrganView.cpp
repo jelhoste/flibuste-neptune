@@ -107,6 +107,53 @@ private:
     const theme::Palette& palette_;
 };
 
+// Grand carré de la vitesse du Leslie (Chorale / Tremolo / Frein) : un clic choisit la vitesse.
+class OrganView::SpeedSquare : public juce::Component
+{
+public:
+    SpeedSquare (ParamHost& host, int value, const juce::String& label, const theme::Palette& pal)
+        : host_ (host), value_ (value), label_ (label), palette_ (pal) {}
+
+    void setTrack (int track) { id_ = mixer::organParam (track, mixer::kOrgLeslieSpeed); repaint(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto c = [this] (Token t) { const auto& x = palette_.color (t); return juce::Colour (x.r, x.g, x.b, static_cast<float> (x.a)); };
+        const bool on = static_cast<int> (std::lround (host_.parameters().get (id_))) == value_;
+        const auto b = getLocalBounds().toFloat().reduced (3.0f);
+        g.setColour (on ? c (Token::Accent) : c (Token::Grid));
+        g.fillRoundedRectangle (b, 8.0f);
+        g.setColour (c (Token::CtlBd));
+        g.drawRoundedRectangle (b, 8.0f, 1.5f);
+        g.setColour (on ? c (Token::BgApp) : c (Token::Text));
+        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.drawText (label_, getLocalBounds(), juce::Justification::centred, true);
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! getLocalBounds().contains (e.getPosition())) return;
+        host_.uiBeginEdit (id_);
+        host_.uiSetNormalised (id_, static_cast<double> (value_) / 2.0);
+        host_.uiEndEdit (id_);
+        repaint();
+    }
+
+private:
+    ParamHost& host_;
+    ParamId id_ = 0;
+    int value_;
+    juce::String label_;
+    const theme::Palette& palette_;
+};
+
+// Réglage de la cabine Leslie (champ de la description) : curseur et intitulé.
+struct OrganView::LeslieSlider
+{
+    juce::Slider slider;
+    const char* labelKey = "";
+    double organ::OrganDescription::* field = nullptr;
+};
+
 struct OrganView::ComboLink
 {
     juce::ComboBox box;
@@ -239,22 +286,136 @@ OrganView::OrganView (ParamHost& host, const theme::Palette& palette, const i18n
     addAndMakeVisible (octUp_);
     addAndMakeVisible (hold_);
 
+    // vibrato : profondeur (potard de l'orgue n° 6)
+    addAndMakeVisible (knobs_.insert (kOwnKnobs - 1, new NeptuneKnob (host_, mx::organParam (0, mx::kOrgVibDepth), palette_, knobStyle_,
+                                                                       [this] (ParamId pid, uistate::Terminal t) { if (openModal_) openModal_ (pid, t); })));
+
+    // vitesse du Leslie : grands carrés (Chorale, Tremolo, Frein)
+    for (int v = 0; v < 3; ++v)
+        addChildComponent (squares_.add (new SpeedSquare (host_, v, text (v == 0 ? "organ.leslie_chorale" : v == 1 ? "organ.leslie_tremolo" : "organ.leslie_brake"), palette_)));
+
+    // réglages de la cabine (essentiel) : vitesses, accélérations, niveau du cornet
+    struct Def { const char* key; double organ::OrganDescription::* field; double lo, hi, step; const char* suffix; };
+    static const Def defs[] = {
+        { "organ.horn_slow", &organ::OrganDescription::hornSlowRpm, 5.0, 200.0, 0.5, " rpm" },
+        { "organ.horn_fast", &organ::OrganDescription::hornFastRpm, 100.0, 900.0, 1.0, " rpm" },
+        { "organ.drum_slow", &organ::OrganDescription::drumSlowRpm, 5.0, 100.0, 0.5, " rpm" },
+        { "organ.drum_fast", &organ::OrganDescription::drumFastRpm, 60.0, 600.0, 1.0, " rpm" },
+        { "organ.horn_acc", &organ::OrganDescription::hornAcc, 0.05, 2.0, 0.01, " s" },
+        { "organ.horn_dec", &organ::OrganDescription::hornDec, 0.05, 2.0, 0.01, " s" },
+        { "organ.drum_acc", &organ::OrganDescription::drumAcc, 0.5, 10.0, 0.05, " s" },
+        { "organ.drum_dec", &organ::OrganDescription::drumDec, 0.5, 10.0, 0.05, " s" },
+        { "organ.horn_level", &organ::OrganDescription::hornLevel, 0.0, 1.0, 0.01, "" },
+    };
+    for (const auto& def : defs)
+    {
+        auto* ls = leslieSliders_.add (new LeslieSlider);
+        ls->labelKey = def.key;
+        ls->field = def.field;
+        ls->slider.setRange (def.lo, def.hi, def.step);
+        ls->slider.setSliderStyle (juce::Slider::LinearBar);
+        ls->slider.setTextValueSuffix (def.suffix);
+        ls->slider.setColour (juce::Slider::trackColourId, colour (Token::Accent));
+        ls->slider.setColour (juce::Slider::backgroundColourId, colour (Token::Grid));
+        ls->slider.setColour (juce::Slider::textBoxTextColourId, colour (Token::Text));
+        ls->slider.onValueChange = [this, ls]
+        {
+            if (updating_) return;
+            auto d = description_;
+            d.*(ls->field) = ls->slider.getValue();
+            description_ = d;
+            if (onChange) onChange (d);
+        };
+        addChildComponent (ls->slider);
+    }
+
+    // accord général
+    tuneSlider_.setRange (-100.0, 100.0, 1.0);
+    tuneSlider_.setSliderStyle (juce::Slider::LinearBar);
+    tuneSlider_.setTextValueSuffix (" cents");
+    tuneSlider_.setColour (juce::Slider::trackColourId, colour (Token::Accent));
+    tuneSlider_.setColour (juce::Slider::backgroundColourId, colour (Token::Grid));
+    tuneSlider_.setColour (juce::Slider::textBoxTextColourId, colour (Token::Text));
+    tuneSlider_.onValueChange = [this]
+    {
+        if (updating_) return;
+        auto d = description_;
+        d.tuningCents = static_cast<int> (tuneSlider_.getValue());
+        description_ = d;
+        if (onChange) onChange (d);
+    };
+    addChildComponent (tuneSlider_);
+    tuneLabel_.setText (text ("organ.tune"), juce::dontSendNotification);
+    tuneLabel_.setColour (juce::Label::textColourId, colour (Token::Text));
+    addChildComponent (tuneLabel_);
+    tuneHint_.setText (text ("organ.tune_hint"), juce::dontSendNotification);
+    tuneHint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    tuneHint_.setFont (juce::FontOptions (11.0f));
+    addChildComponent (tuneHint_);
+    midiHint_.setText (text ("organ.midi_hint"), juce::dontSendNotification);
+    midiHint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    midiHint_.setFont (juce::FontOptions (11.0f));
+    midiHint_.setJustificationType (juce::Justification::topLeft);
+    addChildComponent (midiHint_);
+
+    // onglets
+    static const char* const pageKeys[4] = { "organ.page_drawbars", "organ.page_leslie", "organ.page_live", "organ.page_settings" };
+    for (int i = 0; i < 4; ++i)
+    {
+        pageButtons_[i].setButtonText (text (pageKeys[i]));
+        pageButtons_[i].setClickingTogglesState (false);
+        pageButtons_[i].onClick = [this, i] { setPage (static_cast<Page> (i)); };
+        addAndMakeVisible (pageButtons_[i]);
+    }
+
     bindTrack();
     setDescription (description_);
+    updateVisibility();
 }
 
 OrganView::~OrganView() = default;
+
+void OrganView::setPage (Page p)
+{
+    if (p == page_) return;
+    page_ = p;
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void OrganView::updateVisibility()
+{
+    const bool main = page_ == Page::Drawbars, live = page_ == Page::Live, les = page_ == Page::Leslie, set = page_ == Page::Settings;
+    for (int i = 0; i < 4; ++i) pageButtons_[i].setToggleState (static_cast<int> (page_) == i, juce::dontSendNotification);
+    for (auto* d : drawbars_) d->setVisible (main || live);
+    for (int i = 0; i < switches_.size(); ++i) switches_[i]->setVisible (main || live);
+    combos_[0]->box.setVisible (main || live);
+    combos_[1]->box.setVisible (main);
+    for (int i = 0; i < knobs_.size(); ++i)
+        knobs_[i]->setVisible (i == 0 ? (main || les) : (main || live));
+    for (int m = 0; m < 3; ++m) { channelBox_[m].setVisible (main); transposeBox_[m].setVisible (main); }
+    splitLower_.setVisible (main);
+    splitUpper_.setVisible (main);
+    for (auto* s : squares_) s->setVisible (les || live);
+    for (auto* l : leslieSliders_) l->slider.setVisible (les);
+    tuneSlider_.setVisible (set);
+    tuneLabel_.setVisible (set);
+    tuneHint_.setVisible (set);
+    midiHint_.setVisible (set);
+}
 
 void OrganView::bindTrack()
 {
     for (auto* d : drawbars_) d->setTrack (track_);
     for (auto* s : switches_) s->setTrack (track_);
     for (auto* c : combos_) c->id = mixer::organParam (track_, c->offset);
-    const int own = 5; // les potards propres de l'orgue
-    static const int kinds[own] = { mixer::kOrgLeslieMix, mixer::kOrgDriveInput, mixer::kOrgDriveCharacter, mixer::kOrgDriveOutput, mixer::kOrgReverb };
-    for (int i = 0; i < own && i < knobs_.size(); ++i) knobs_[i]->setParamId (mixer::organParam (track_, kinds[i]));
-    for (std::size_t i = 0; i < extraIds_.size() && own + static_cast<int> (i) < knobs_.size(); ++i)
-        knobs_[own + static_cast<int> (i)]->setParamId (extraIds_[i] (track_));
+    static const int kinds[kOwnKnobs] = { mixer::kOrgLeslieMix, mixer::kOrgDriveInput, mixer::kOrgDriveCharacter, mixer::kOrgDriveOutput,
+                                          mixer::kOrgReverb, mixer::kOrgVibDepth };
+    for (int i = 0; i < kOwnKnobs && i < knobs_.size(); ++i) knobs_[i]->setParamId (mixer::organParam (track_, kinds[i]));
+    for (std::size_t i = 0; i < extraIds_.size() && kOwnKnobs + static_cast<int> (i) < knobs_.size(); ++i)
+        knobs_[kOwnKnobs + static_cast<int> (i)]->setParamId (extraIds_[i] (track_));
+    for (auto* s : squares_) s->setTrack (track_);
     refreshFromParameters();
     repaint();
 }
@@ -277,6 +438,8 @@ void OrganView::setDescription (const organ::OrganDescription& d)
     }
     splitLower_.setValue (d.splitLower, juce::dontSendNotification);
     splitUpper_.setValue (d.splitUpper, juce::dontSendNotification);
+    for (auto* l : leslieSliders_) l->slider.setValue (d.*(l->field), juce::dontSendNotification);
+    tuneSlider_.setValue (d.tuningCents, juce::dontSendNotification);
     updating_ = false;
 }
 
@@ -291,6 +454,7 @@ void OrganView::refreshFromParameters()
     updating_ = false;
     for (auto* d : drawbars_) d->repaint();
     for (auto* s : switches_) s->repaint();
+    for (auto* s : squares_) s->repaint();
     repaint();
 }
 
@@ -312,9 +476,40 @@ void OrganView::placeScaled (juce::Rectangle<int> area)
 void OrganView::resized()
 {
     sections_.clear();
+    keyboardArea_ = {};
     auto r = getLocalBounds().reduced (4, 2);
 
-    // tirettes
+    // onglets
+    auto tabs = r.removeFromTop (28);
+    for (int i = 0; i < 4; ++i) pageButtons_[i].setBounds (tabs.removeFromLeft (130).reduced (2));
+    r.removeFromTop (6);
+
+    // clavier à l'écran : toujours en bas
+    auto bottom = r.removeFromBottom (28 + 8 + 84);
+    layoutKeyboard (bottom);
+    contentArea_ = r;
+    switch (page_)
+    {
+        case Page::Drawbars: layoutDrawbars (r, false); break;
+        case Page::Live: layoutDrawbars (r, true); break;
+        case Page::Leslie: layoutLeslie (r); break;
+        case Page::Settings: layoutSettings (r); break;
+    }
+}
+
+void OrganView::layoutKeyboard (juce::Rectangle<int> area)
+{
+    area.removeFromTop (8);
+    auto strip = area.removeFromTop (28);
+    octDown_.setBounds (strip.removeFromLeft (60).reduced (2));
+    octUp_.setBounds (strip.removeFromLeft (60).reduced (2));
+    hold_.setBounds (strip.removeFromLeft (110).reduced (2));
+    keyboard_.setBounds (area.removeFromTop (juce::jmin (84, area.getHeight())));
+}
+
+// Page des tirettes ; en mode « Live » : sans la configuration des claviers, les commandes de jeu agrandies et les trois carrés du Leslie.
+void OrganView::layoutDrawbars (juce::Rectangle<int> r, bool live)
+{
     auto row = r.removeFromTop (kDrawbarH + 34);
     int x = row.getX();
     auto place = [&] (int firstIndex, int count, const juce::String& title)
@@ -330,7 +525,7 @@ void OrganView::resized()
     place (18, 2, text ("organ.pedal"));
 
     r.removeFromTop (10);
-    auto ctl = r.removeFromTop (124);
+    auto ctl = r.removeFromTop (live ? 150 : 124);
     auto cell = [&] (int width, const juce::String& title) -> juce::Rectangle<int>
     {
         auto a = ctl.removeFromLeft (width);
@@ -340,7 +535,7 @@ void OrganView::resized()
     };
     {
         auto a = cell (190, text ("organ.percussion"));
-        const int w = a.getWidth() / 2, h = juce::jmin (36, a.getHeight() / 2);
+        const int w = a.getWidth() / 2, h = juce::jmin (live ? 48 : 36, a.getHeight() / 2);
         switches_[0]->setBounds (a.getX(), a.getY(), w, h);
         switches_[1]->setBounds (a.getX() + w, a.getY(), w, h);
         switches_[2]->setBounds (a.getX(), a.getY() + h + 2, w, h);
@@ -348,12 +543,19 @@ void OrganView::resized()
     }
     {
         auto a = cell (170, text ("organ.vibrato"));
-        combos_[0]->box.setBounds (a.removeFromTop (28));
+        combos_[0]->box.setBounds (a.removeFromTop (live ? 36 : 28));
         a.removeFromTop (6);
         const int w = a.getWidth() / 2;
-        switches_[4]->setBounds (a.getX(), a.getY(), w, 32);
-        switches_[5]->setBounds (a.getX() + w, a.getY(), w, 32);
+        switches_[4]->setBounds (a.getX(), a.getY(), w, live ? 40 : 32);
+        switches_[5]->setBounds (a.getX() + w, a.getY(), w, live ? 40 : 32);
     }
+    if (live)
+    {
+        // trois grands carrés pour la vitesse du Leslie, la profondeur du vibrato reste au potard
+        auto a = cell (3 * 104 + 16, text ("organ.leslie"));
+        for (int i = 0; i < 3; ++i) squares_[i]->setBounds (a.getX() + i * 104, a.getY(), 100, a.getHeight() - 4);
+    }
+    else
     {
         auto a = cell (170, text ("organ.leslie"));
         combos_[1]->box.setBounds (a.removeFromLeft (90).withHeight (28));
@@ -365,33 +567,73 @@ void OrganView::resized()
         for (int i = 0; i < 3; ++i) knobs_[1 + i]->setBounds (a.getX() + 76 + i * 62, a.getY(), 48, 48);
     }
     {
-        // réverb puis les potards d'instrument (volume, gain...)
-        const int extra = knobs_.size() - 5;
-        auto a = cell (70 * (1 + extra) + 16, text ("organ.reverb"));
-        for (int i = 0; i < 1 + extra; ++i) knobs_[4 + i]->setBounds (a.getX() + 6 + i * 70, a.getY(), 48, 48);
+        // réverb, profondeur du vibrato puis les potards d'instrument (gain...)
+        const int count = knobs_.size() - 4; // réverb (4), profondeur (5), instrument (6..)
+        auto a = cell (70 * count + 16, text ("organ.reverb"));
+        for (int i = 0; i < count; ++i) knobs_[4 + i]->setBounds (a.getX() + 6 + i * 70, a.getY(), 48, 48);
     }
 
-    r.removeFromTop (8);
-    auto kb = r.removeFromTop (86);
-    keyboardArea_ = kb;
-    sections_.push_back ({ text ("organ.keyboards"), kb });
-    auto k = kb.withTrimmedTop (26).reduced (6, 2);
-    const int colW = 150;
-    for (int m = 0; m < 3; ++m)
+    if (! live)
     {
-        channelBox_[m].setBounds (k.getX() + m * colW, k.getY(), colW - 10, 24);
-        transposeBox_[m].setBounds (k.getX() + m * colW, k.getY() + 30, colW - 10, 24);
+        r.removeFromTop (8);
+        auto kb = r.removeFromTop (86);
+        keyboardArea_ = kb;
+        sections_.push_back ({ text ("organ.keyboards"), kb });
+        auto k = kb.withTrimmedTop (26).reduced (6, 2);
+        const int colW = 150;
+        for (int m = 0; m < 3; ++m)
+        {
+            channelBox_[m].setBounds (k.getX() + m * colW, k.getY(), colW - 10, 24);
+            transposeBox_[m].setBounds (k.getX() + m * colW, k.getY() + 30, colW - 10, 24);
+        }
+        splitLower_.setBounds (k.getX() + 3 * colW + 20, k.getY(), 190, 24);
+        splitUpper_.setBounds (k.getX() + 3 * colW + 20, k.getY() + 30, 190, 24);
     }
-    splitLower_.setBounds (k.getX() + 3 * colW + 20, k.getY(), 190, 24);
-    splitUpper_.setBounds (k.getX() + 3 * colW + 20, k.getY() + 30, 190, 24);
+}
 
-    // clavier à l'écran
-    r.removeFromTop (8);
-    auto strip = r.removeFromTop (28);
-    octDown_.setBounds (strip.removeFromLeft (60).reduced (2));
-    octUp_.setBounds (strip.removeFromLeft (60).reduced (2));
-    hold_.setBounds (strip.removeFromLeft (110).reduced (2));
-    keyboard_.setBounds (r.removeFromTop (juce::jmin (84, r.getHeight())));
+// Page Leslie : vitesse (grands carrés + dry/wet), cornet, tambour.
+void OrganView::layoutLeslie (juce::Rectangle<int> r)
+{
+    auto top = r.removeFromTop (150);
+    sections_.push_back ({ text ("organ.leslie"), top });
+    auto a = top.withTrimmedTop (28).reduced (10, 4);
+    for (int i = 0; i < 3; ++i) squares_[i]->setBounds (a.getX() + i * 150, a.getY(), 140, a.getHeight() - 6);
+    knobs_[0]->setBounds (a.getX() + 3 * 150 + 40, a.getY() + 6, 52, 52);
+
+    r.removeFromTop (10);
+    const int colW = (r.getWidth() - 10) / 2;
+    auto horn = r.removeFromLeft (colW);
+    r.removeFromLeft (10);
+    auto drum = r;
+    sections_.push_back ({ text ("organ.horn"), horn.withHeight (230) });
+    sections_.push_back ({ text ("organ.drum"), drum.withHeight (230) });
+    auto place = [&] (juce::Rectangle<int> col, std::initializer_list<int> idx)
+    {
+        auto c = col.withTrimmedTop (30).reduced (12, 2);
+        for (const int i : idx)
+        {
+            c.removeFromTop (14);
+            leslieSliders_[i]->slider.setBounds (c.removeFromTop (24));
+            c.removeFromTop (6);
+        }
+    };
+    place (horn, { 0, 1, 4, 5, 8 });
+    place (drum, { 2, 3, 6, 7 });
+}
+
+// Page Réglages : accord général et rappel des contrôleurs MIDI.
+void OrganView::layoutSettings (juce::Rectangle<int> r)
+{
+    auto box = r.removeFromTop (130);
+    sections_.push_back ({ text ("organ.page_settings"), box });
+    auto a = box.withTrimmedTop (30).reduced (12, 4);
+    tuneLabel_.setBounds (a.removeFromTop (22));
+    tuneSlider_.setBounds (a.removeFromTop (28).withWidth (juce::jmin (420, a.getWidth())));
+    tuneHint_.setBounds (a.removeFromTop (30));
+    r.removeFromTop (10);
+    auto midi = r.removeFromTop (150);
+    sections_.push_back ({ "MIDI", midi });
+    midiHint_.setBounds (midi.withTrimmedTop (30).reduced (12, 4));
 }
 
 void OrganView::paint (juce::Graphics& g)
@@ -410,6 +652,7 @@ void OrganView::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (10.0f));
     for (auto* k : knobs_)
     {
+        if (! k->isVisible()) continue;
         const auto b = k->getBounds();
         const auto index = set.indexOf (k->paramId());
         if (index == ParameterSet::npos) continue;
@@ -417,6 +660,16 @@ void OrganView::paint (juce::Graphics& g)
         g.drawText (juce::String::fromUTF8 (set.spec (index).name.c_str()), b.getCentreX() - 38, b.getBottom() + 1, 76, 14, juce::Justification::centred, true);
         g.setColour (colour (Token::Text));
         g.drawText (juce::String::fromUTF8 (set.toText (k->paramId()).c_str()), b.getCentreX() - 38, b.getBottom() + 14, 76, 14, juce::Justification::centred, true);
+    }
+    if (page_ == Page::Leslie)
+    {
+        g.setColour (colour (Token::TextDim));
+        g.setFont (juce::FontOptions (11.0f));
+        for (auto* l : leslieSliders_)
+        {
+            const auto b = l->slider.getBounds();
+            g.drawText (text (l->labelKey), b.getX(), b.getY() - 14, b.getWidth(), 14, juce::Justification::centredLeft, true);
+        }
     }
     if (! keyboardArea_.isEmpty())
     {

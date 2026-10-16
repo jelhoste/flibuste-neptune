@@ -133,6 +133,7 @@ enum OrganKind : int
     kOrgLeslieSpeed = 27, kOrgLeslieMix,                        // Leslie : chorale / tremolo / frein, dry-wet (%)
     kOrgDriveOn = 29, kOrgDriveInput, kOrgDriveCharacter, kOrgDriveOutput, // préampli à lampes (%)
     kOrgReverb = 33,                // réverbération à ressorts (%)
+    kOrgVibDepth = 34,              // profondeur du vibrato / chorus (%, 50 : réglage d'origine)
     kOrganKinds
 };
 constexpr ParamId organParamBase = 9000;
