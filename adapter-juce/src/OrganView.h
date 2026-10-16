@@ -5,6 +5,7 @@
 #include <vector>
 #include "NeptuneKnob.h"
 #include "ParamHost.h"
+#include "SynthKeyboard.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/OrganEngine.h"
 #include "neptune/core/Theme.h"
@@ -24,6 +25,10 @@ public:
 
     std::function<void (const neptune::core::organ::OrganDescription&)> onChange; // l'utilisateur a modifié les claviers
     std::function<void()> onGestureBegin, onGestureEnd;
+    // Clavier à l'écran : joue le clavier supérieur (donc aussi les zones de split). `channel` : canal MIDI 0..15 de ce clavier.
+    std::function<void (int key, int channel)> onNoteOn, onNoteOff;
+    void releaseKeys() { keyboard_.releaseAll(); }
+    void setHeldKeys (std::uint64_t lo, std::uint64_t hi) { keyboard_.setHeldKeys (lo, hi); }
 
     void setTrack (int track);                                                    // rebranche les commandes sur une autre piste
     void setDescription (const neptune::core::organ::OrganDescription&);          // sans notification
@@ -31,7 +36,7 @@ public:
 
     // Place la vue dans `area` en la réduisant si besoin (jamais agrandie).
     void placeScaled (juce::Rectangle<int> area);
-    static constexpr int designWidth = 960, designHeight = 480;
+    static constexpr int designWidth = 960, designHeight = 580;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -62,6 +67,9 @@ private:
     juce::OwnedArray<ComboLink> combos_;
     juce::ComboBox channelBox_[3], transposeBox_[3];
     juce::Slider splitLower_, splitUpper_;
+    SynthKeyboard keyboard_;
+    juce::TextButton octDown_, octUp_;
+    juce::ToggleButton hold_;
     std::vector<Section> sections_;
     juce::Rectangle<int> keyboardArea_;
     juce::Rectangle<int> lastArea_;

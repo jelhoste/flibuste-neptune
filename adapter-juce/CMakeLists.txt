@@ -36,6 +36,7 @@ target_sources(Neptune PRIVATE
   src/FilterEditor.cpp
   src/MixerView.cpp
   src/SynthView.cpp
+  src/SynthKeyboard.cpp
   src/PresetBar.cpp
   src/PresetManager.cpp
   src/MidiFilterEditor.cpp
@@ -129,6 +130,7 @@ target_sources(AnalogSynth PRIVATE
   src/PresetManager.cpp
   src/PresetBar.cpp
   src/SynthView.cpp
+  src/SynthKeyboard.cpp
   src/EnvelopeEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
@@ -175,6 +177,7 @@ target_sources(FM6Op PRIVATE
   src/PresetBar.cpp
   src/PresetManager.cpp
   src/SynthView.cpp
+  src/SynthKeyboard.cpp
   src/EnvelopeEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
@@ -215,6 +218,7 @@ clap_juce_extensions_plugin(
 target_sources(Orgamon PRIVATE
   src/OrganPlugin.cpp
   src/OrganView.cpp
+  src/SynthKeyboard.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

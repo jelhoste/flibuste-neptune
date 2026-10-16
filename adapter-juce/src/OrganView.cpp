@@ -35,9 +35,9 @@ public:
         g.fillRoundedRectangle (slot, 3.0f);
         const int v = value();
         const float y = slot.getY() + slot.getHeight() * (static_cast<float> (v) / 8.0f);
+        // la bande de couleur va du côté des « pieds » (le repère en haut) jusqu'à la tirette orange ; en dessous, la partie vide
         g.setColour (bodyColour);
-        g.fillRoundedRectangle (b.getX() + 3.0f, juce::jmax (slot.getY(), y - 3.0f), b.getWidth() - 6.0f,
-                                slot.getBottom() - juce::jmax (slot.getY(), y - 3.0f), 3.0f);
+        g.fillRoundedRectangle (b.getX() + 3.0f, slot.getY(), b.getWidth() - 6.0f, juce::jmax (0.0f, y - slot.getY()), 3.0f);
         g.setColour (c (Token::Accent));
         g.fillRoundedRectangle (b.getX() + 1.0f, y - 6.0f, b.getWidth() - 2.0f, 12.0f, 3.0f);
         g.setColour (c (Token::Text));
@@ -122,7 +122,8 @@ juce::Colour OrganView::colour (Token t) const
 
 OrganView::OrganView (ParamHost& host, const theme::Palette& palette, const i18n::Translator& tr, theme::KnobStyle knobStyle,
                       KnobIds extraKnobs, OpenModal openModal)
-    : host_ (host), palette_ (palette), tr_ (tr), knobStyle_ (knobStyle), extraIds_ (std::move (extraKnobs)), openModal_ (std::move (openModal))
+    : host_ (host), palette_ (palette), tr_ (tr), knobStyle_ (knobStyle), extraIds_ (std::move (extraKnobs)), openModal_ (std::move (openModal)),
+      keyboard_ (palette)
 {
     namespace mx = neptune::core::mixer;
     for (int i = 0; i < 9; ++i) addAndMakeVisible (drawbars_.add (new Drawbar (host_, kDrawbarKind[i], mx::kOrgUpper0 + i, kFootage[i], palette_)));
@@ -221,6 +222,22 @@ OrganView::OrganView (ParamHost& host, const theme::Palette& palette, const i18n
         description_ = d;
         if (onChange) onChange (d);
     };
+
+    // clavier à l'écran
+    auto channelOfUpper = [this] { return juce::jmax (0, description_.channel[0] - 1); };
+    keyboard_.onNoteOn = [this, channelOfUpper] (int key, float) { if (onNoteOn) onNoteOn (key, channelOfUpper()); };
+    keyboard_.onNoteOff = [this, channelOfUpper] (int key) { if (onNoteOff) onNoteOff (key, channelOfUpper()); };
+    addAndMakeVisible (keyboard_);
+    octDown_.setButtonText (text ("synth.oct_down"));
+    octUp_.setButtonText (text ("synth.oct_up"));
+    octDown_.onClick = [this] { keyboard_.shiftOctave (-1); };
+    octUp_.onClick = [this] { keyboard_.shiftOctave (1); };
+    hold_.setButtonText (text ("synth.hold"));
+    hold_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+    hold_.onClick = [this] { keyboard_.setHold (hold_.getToggleState()); };
+    addAndMakeVisible (octDown_);
+    addAndMakeVisible (octUp_);
+    addAndMakeVisible (hold_);
 
     bindTrack();
     setDescription (description_);
@@ -367,6 +384,14 @@ void OrganView::resized()
     }
     splitLower_.setBounds (k.getX() + 3 * colW + 20, k.getY(), 190, 24);
     splitUpper_.setBounds (k.getX() + 3 * colW + 20, k.getY() + 30, 190, 24);
+
+    // clavier à l'écran
+    r.removeFromTop (8);
+    auto strip = r.removeFromTop (28);
+    octDown_.setBounds (strip.removeFromLeft (60).reduced (2));
+    octUp_.setBounds (strip.removeFromLeft (60).reduced (2));
+    hold_.setBounds (strip.removeFromLeft (110).reduced (2));
+    keyboard_.setBounds (r.removeFromTop (juce::jmin (84, r.getHeight())));
 }
 
 void OrganView::paint (juce::Graphics& g)

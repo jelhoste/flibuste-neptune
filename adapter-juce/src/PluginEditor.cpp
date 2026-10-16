@@ -218,6 +218,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         matrix_->clearHeldKeys();
         synthView_->releaseKeys();
         fmView_->releaseKeys();
+        organView_->releaseKeys();
     };
     addAndMakeVisible (panicButton_);
     addChildComponent (voicesButton_);
@@ -337,6 +338,16 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         organView_ = std::make_unique<OrganView> (processor_, palette_, tr_, themeDef.knob, std::move (extra),
                                                   [this] (neptune::core::ParamId id, neptune::core::uistate::Terminal t) { openModal (id, t); });
         organView_->onChange = [this] (const organ::OrganDescription& d) { processor_.uiEditOrgan (d, "Organ keyboards", "organ"); };
+        organView_->onNoteOn = [this] (int key, int channel)
+        {
+            const int track = processor_.selectedTrack();
+            synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))] = track;
+            processor_.uiNoteOnTrack (track, key, 0.8f, channel);
+        };
+        organView_->onNoteOff = [this] (int key, int channel)
+        {
+            processor_.uiNoteOffTrack (synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))], key, channel);
+        };
         addChildComponent (*organView_);
     }
 
@@ -1124,7 +1135,7 @@ void NeptuneEditor::updateViewVisibility()
     for (auto* knob : knobs_)
     {
         const bool filterKnob = k >= static_cast<int> (neptune::core::mixer::kFilter1Cutoff);
-        knob->setVisible (mapping && ! ((synth || fmMode || organMode) && filterKnob));
+        knob->setVisible (mapping && ! organMode && ! ((synth || fmMode) && filterKnob)); // le gain de l'orgue est dans sa console
         ++k;
     }
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
@@ -1176,6 +1187,7 @@ void NeptuneEditor::rebindKnobs()
     synthView_->setTrack (track);
     fmView_->setTrack (track);
     organView_->setTrack (track);
+    organView_->releaseKeys();
     fmView_->releaseKeys();
     synthView_->releaseKeys(); // touches tenues à l'écran : relâchées sur la piste où elles ont démarré
     zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
@@ -1249,6 +1261,7 @@ void NeptuneEditor::timerCallback()
     {
         const int tr = processor_.selectedTrack();
         synthView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1)); // notes MIDI reçues
+        organView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1));
         fmView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1));
     }
     updateRecoveryBanner();
@@ -1313,7 +1326,7 @@ void NeptuneEditor::resized()
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
     fmView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
-    organView_->placeScaled ({ 32, 80 + 6, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 6) });
+    organView_->placeScaled ({ 32, 80 + 6, lw_ - 64, juce::jmax (200, lh_ - 80 - 6 - 160) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
     {
         auto r = juce::Rectangle<int> (32, 80, lw_ - 64, 36);

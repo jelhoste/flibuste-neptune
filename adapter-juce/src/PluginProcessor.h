@@ -207,8 +207,8 @@ public:
     void uiNoteOn (int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity, selectedTrack() }); }
     void uiNoteOff (int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f, selectedTrack() }); }
     // Même chose sur une piste précise (le clavier du synthé : une touche tenue doit s'arrêter sur la piste où elle a démarré).
-    void uiNoteOnTrack (int track, int key, float velocity) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, 0, key, velocity, track }); }
-    void uiNoteOffTrack (int track, int key) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, 0, key, 0.0f, track }); }
+    void uiNoteOnTrack (int track, int key, float velocity, int channel = 0) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, channel, key, velocity, track }); }
+    void uiNoteOffTrack (int track, int key, int channel = 0) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, channel, key, 0.0f, track }); }
     void uiPreviewZone (int zoneIndex) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewZone, 0, zoneIndex, 0.0f, selectedTrack() }); }
     void uiPreviewRelease() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewRelease, 0, 0, 0.0f, selectedTrack() }); }
     // Notes jouées (piste, touche, vélocité après courbe) pour le curseur de la matrice ; thread de message.

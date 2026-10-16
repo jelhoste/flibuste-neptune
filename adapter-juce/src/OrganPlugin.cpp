@@ -182,6 +182,8 @@ OrganEditor::OrganEditor (OrganProcessor& p)
     view_ = std::make_unique<OrganView> (processor_, palette_, tr_, knobStyle_, std::move (extra),
                                          [this] (ParamId id, uistate::Terminal t) { openModal (id, t); });
     view_->onChange = [this] (const organ::OrganDescription& d) { processor_.uiEditOrgan (d, "Organ keyboards", "organ"); };
+    view_->onNoteOn = [this] (int key, int channel) { processor_.uiNoteOn (channel, key); };
+    view_->onNoteOff = [this] (int key, int channel) { processor_.uiNoteOff (channel, key); };
     view_->setDescription (processor_.organDescription());
     addAndMakeVisible (*view_);
 
@@ -198,7 +200,7 @@ OrganEditor::OrganEditor (OrganProcessor& p)
     redoButton_.setButtonText (text ("undo.redo"));
     redoButton_.onClick = [this] { processor_.uiRedo(); };
     panicButton_.setButtonText (text ("panic.button"));
-    panicButton_.onClick = [this] { processor_.uiPanic(); };
+    panicButton_.onClick = [this] { processor_.uiPanic(); view_->releaseKeys(); };
     for (auto* b : { &undoButton_, &redoButton_, &panicButton_ }) addAndMakeVisible (b);
 
     startTimerHz (15);
@@ -279,6 +281,7 @@ void OrganEditor::timerCallback()
         view_->setDescription (processor_.organDescription());
     }
     view_->refreshFromParameters();
+    view_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1)); // notes MIDI reçues
     undoButton_.setEnabled (processor_.undoManager().canUndo());
     redoButton_.setEnabled (processor_.undoManager().canRedo());
     infoLabel_.setText ("Orgamon - " + juce::String (processor_.engine().heldKeys()), juce::dontSendNotification);

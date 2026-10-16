@@ -62,6 +62,8 @@ public:
     neptune::core::organ::OrganDescription organDescription() const { return engine_.description(); }
     void uiEditOrgan (neptune::core::organ::OrganDescription, std::string name, std::string mergeKey = {});
     void uiPanic() { engine_.postPanic(); }
+    void uiNoteOn (int channel, int key) { engine_.postNoteOn (channel, key); }
+    void uiNoteOff (int channel, int key) { engine_.postNoteOff (channel, key); }
     neptune::core::UndoManager& undoManager() { return undo_; }
     neptune::core::organ::OrganSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
