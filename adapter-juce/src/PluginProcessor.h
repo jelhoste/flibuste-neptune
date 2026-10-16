@@ -149,7 +149,7 @@ public:
     bool presetsAvailable() const override
     {
         const auto t = trackType (selectedTrack());
-        return t == neptune::core::TrackType::Synth || t == neptune::core::TrackType::Fm;
+        return t == neptune::core::TrackType::Synth || t == neptune::core::TrackType::Fm || t == neptune::core::TrackType::Organ;
     }
     bool acceptsPreset (const neptune::core::preset::Preset& p) const override;
     std::vector<std::string> presetKeys() const override;

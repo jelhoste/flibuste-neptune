@@ -12,8 +12,12 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "NeptuneKnob.h"
 #include "OrganView.h"
 #include "ParamHost.h"
+#include "PresetBar.h"
+#include "PresetHost.h"
+#include "PresetManager.h"
 #include "ScaledRoot.h"
 #include "neptune/core/I18n.h"
+#include "neptune/core/OrganPreset.h"
 #include "neptune/core/OrganSynth.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/Theme.h"
@@ -22,10 +26,13 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 // « Orgamon » (nom provisoire) : l'orgue à roues phoniques de Neptune (moteur de setBfree) en plugin CLAP instrument indépendant.
 class OrganProcessor : public juce::AudioProcessor,
                        public clap_juce_extensions::clap_juce_audio_processor_capabilities,
-                       public ParamHost
+                       public ParamHost,
+                       public PresetHost,
+                       private juce::AsyncUpdater
 {
 public:
     OrganProcessor();
+    ~OrganProcessor() override { cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -65,17 +72,49 @@ public:
     void uiNoteOn (int channel, int key) { engine_.postNoteOn (channel, key); }
     void uiNoteOff (int channel, int key) { engine_.postNoteOff (channel, key); }
     neptune::core::UndoManager& undoManager() { return undo_; }
+    // ---- presets (PresetHost) ----
+    neptune::core::preset::Library& library() override { return *library_; }
+    std::string currentPresetId() const override { return currentPresetId_; }
+    const neptune::core::preset::Preset* currentPreset() const override { return currentPresetId_.empty() ? nullptr : library_->find (currentPresetId_); }
+    std::uint32_t presetRevision() const override { return presetRevision_; }
+    void touchPresets() override { ++presetRevision_; }
+    bool loadPreset (const std::string& id) override;
+    bool stepPreset (int direction) override;
+    bool isModified() const override;
+    bool canSaveCurrent() const override;
+    bool saveCurrent (std::string* error = nullptr) override;
+    bool overwritePreset (const std::string& id, std::string* error = nullptr) override;
+    bool saveCurrentAs (const std::string& name, const std::string& type, neptune::core::preset::Preset* out = nullptr,
+                        std::string* error = nullptr) override;
+    bool saveConfig (const neptune::core::preset::LibraryConfig&) override;
+    const neptune::core::preset::LibraryConfig& presetConfig() const override { return library_->config(); }
+    bool acceptsPreset (const neptune::core::preset::Preset& p) const override { return p.module.empty() || p.module == neptune::core::organ::moduleId; }
+    std::vector<std::string> presetKeys() const override
+    {
+        std::vector<std::string> keys;
+        for (const auto& k : neptune::core::organ::keyedParams()) keys.push_back (k.key);
+        return keys;
+    }
+
     neptune::core::organ::OrganSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
 
 private:
     static BusesProperties makeBuses();
+    void handleAsyncUpdate() override;
+    void notifyHostOfParameterChanges (const std::vector<float>& before);
+    std::vector<float> snapshotNormalised() const;
 
     neptune::core::organ::OrganSynthEngine engine_;
     HostProbe probe_;
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;
     neptune::core::uistate::Size modal_[2] {};
+    std::unique_ptr<neptune::core::preset::Library> library_;
+    std::string currentPresetId_;
+    std::uint32_t presetRevision_ = 1;
+    std::atomic<int> midiBank_ { 0 };
+    std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)
 };
@@ -94,6 +133,7 @@ private:
     void timerCallback() override;
     void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
     void closeModal();
+    void openManager (bool saveAs);
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token t) const;
 
@@ -104,6 +144,8 @@ private:
     neptune::core::theme::KnobStyle knobStyle_;
 
     std::unique_ptr<OrganView> view_;
+    std::unique_ptr<PresetBar> presetBar_;
+    std::unique_ptr<PresetManager> manager_;
     juce::Label brandLabel_, infoLabel_;
     juce::TextButton undoButton_, redoButton_, panicButton_;
     std::unique_ptr<KnobModal> modal_;

@@ -217,6 +217,8 @@ clap_juce_extensions_plugin(
 
 target_sources(Orgamon PRIVATE
   src/OrganPlugin.cpp
+  src/PresetBar.cpp
+  src/PresetManager.cpp
   src/OrganView.cpp
   src/SynthKeyboard.cpp
   src/NeptuneKnob.cpp

@@ -38,7 +38,20 @@ OrganProcessor::OrganProcessor() : juce::AudioProcessor (makeBuses())
     auto& set = engine_.params();
     for (std::size_t i = 0; i < set.size(); ++i) addParameter (new NeptuneParameter (set, i, probe_));
     std::vector<std::string> warnings;
-    settings_ = settings::loadFile (configDirectory() / "settings.json", &warnings);
+    const auto dir = configDirectory();
+    settings_ = settings::loadFile (dir / "settings.json", &warnings);
+    // la même bibliothèque que Neptune et les autres synthés (dossier choisi dans les réglages, sinon <config>/AnalogSynth)
+    std::filesystem::path root = settings_.presetsDir.empty() ? dir / "AnalogSynth" : std::filesystem::u8path (settings_.presetsDir);
+    library_ = std::make_unique<preset::Library> (std::move (root), organ::factoryPresets());
+    library_->open (&warnings);
+    {
+        auto cfg = library_->config();
+        if (cfg.parameterCaptureDefaults.count (organ::leslieSpeedKey) == 0)
+        {
+            cfg.parameterCaptureDefaults[organ::leslieSpeedKey] = preset::Capture::Free; // la vitesse du Leslie : libre par défaut
+            library_->setConfig (cfg);
+        }
+    }
     for (auto& s : modal_) s = {};
 }
 
@@ -71,14 +84,29 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         else if (m.isNoteOff()) engine_.noteOff (m.getChannel() - 1, m.getNoteNumber());
         else if (m.isAllNotesOff()) engine_.allNotesOff();
         else if (m.isAllSoundOff()) engine_.panic();
+        else if (m.isController() && m.getControllerNumber() == 0) midiBank_.store (juce::jlimit (0, 127, m.getControllerValue()));
+        else if (m.isProgramChange())
+        {
+            pendingBank_.store (midiBank_.load());
+            pendingProgram_.store (m.getProgramChangeNumber());
+            triggerAsyncUpdate();
+        }
     }
     if (pos < n) engine_.process (left + pos, right != nullptr ? right + pos : nullptr, n - pos);
     midi.clear();
 }
 
+void OrganProcessor::handleAsyncUpdate()
+{
+    const int bank = pendingBank_.exchange (-1), program = pendingProgram_.exchange (-1);
+    if (bank < 0 || program < 0) return;
+    const auto id = preset::Navigator::presetAt (library_->banks(), { bank, program });
+    if (! id.empty()) loadPreset (id);
+}
+
 void OrganProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    const auto text = organ::stateToJson (engine_.params(), engine_.description(), {});
+    const auto text = organ::stateToJson (engine_.params(), engine_.description(), currentPresetId_);
     dest.append (text.data(), text.size());
 }
 
@@ -90,7 +118,9 @@ void OrganProcessor::setStateInformation (const void* data, int size)
     const std::string text (static_cast<const char*> (data), static_cast<std::size_t> (size));
     if (! organ::stateFromJson (text, engine_.params(), d, presetId)) return;
     engine_.setDescription (d);
+    currentPresetId_ = presetId;
     undo_.clear();
+    ++presetRevision_;
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
@@ -158,6 +188,107 @@ void OrganProcessor::uiEditOrgan (organ::OrganDescription d, std::string name, s
         std::move (name), std::move (mergeKey)));
 }
 
+// ---- presets
+std::vector<float> OrganProcessor::snapshotNormalised() const
+{
+    std::vector<float> v;
+    const auto& set = engine_.params();
+    v.reserve (set.size());
+    for (std::size_t i = 0; i < set.size(); ++i) v.push_back (static_cast<float> (set.getNormalizedAt (i)));
+    return v;
+}
+
+void OrganProcessor::notifyHostOfParameterChanges (const std::vector<float>& before)
+{
+    const auto& set = engine_.params();
+    for (std::size_t i = 0; i < set.size() && i < before.size(); ++i)
+    {
+        const auto now = static_cast<float> (set.getNormalizedAt (i));
+        if (now == before[i]) continue;
+        auto* p = getParameters()[static_cast<int> (i)];
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (now);
+        p->endChangeGesture();
+    }
+}
+
+bool OrganProcessor::loadPreset (const std::string& id)
+{
+    const auto* p = library_->find (id);
+    if (p == nullptr || ! acceptsPreset (*p)) return false;
+    const auto before = snapshotNormalised();
+    organ::applyPresetValues (*p, engine_.params(), library_->config());
+    currentPresetId_ = id;
+    undo_.clear();
+    notifyHostOfParameterChanges (before);
+    ++presetRevision_;
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true).withNonParameterStateChanged (true));
+    return true;
+}
+
+bool OrganProcessor::stepPreset (int direction)
+{
+    const auto next = library_->stepFrom (currentPresetId_, direction, [this] (const preset::Preset& p) { return acceptsPreset (p); });
+    return ! next.empty() && loadPreset (next);
+}
+
+bool OrganProcessor::isModified() const
+{
+    const auto* p = currentPreset();
+    return p != nullptr && organ::differsFromPreset (*p, engine_.params(), library_->config());
+}
+
+bool OrganProcessor::canSaveCurrent() const
+{
+    const auto* p = currentPreset();
+    return p != nullptr && ! p->factory && ! p->locked;
+}
+
+bool OrganProcessor::overwritePreset (const std::string& id, std::string* error)
+{
+    const auto* base = library_->find (id);
+    if (base == nullptr || base->factory) { if (error) *error = "factory preset is read-only"; return false; }
+    if (base->locked) { if (error) *error = "preset is locked"; return false; }
+    auto p = organ::capturePreset (engine_.params(), library_->config(), base->name, base->type, base);
+    const bool ok = library_->save (std::move (p), error);
+    if (ok) ++presetRevision_;
+    return ok;
+}
+
+bool OrganProcessor::saveCurrent (std::string* error)
+{
+    if (currentPresetId_.empty()) { if (error) *error = "no current preset"; return false; }
+    return overwritePreset (currentPresetId_, error);
+}
+
+bool OrganProcessor::saveCurrentAs (const std::string& name, const std::string& type, preset::Preset* out, std::string* error)
+{
+    auto p = organ::capturePreset (engine_.params(), library_->config(), name, type);
+    if (const auto* cur = currentPreset())
+    {
+        p.characteristics = cur->characteristics;
+        p.customFields = cur->customFields;
+        p.rating = cur->rating;
+        p.captureOverrides = cur->captureOverrides;
+        if (p.type.empty()) p.type = cur->type;
+        p.derivedFrom = cur->factory ? cur->id : cur->derivedFrom;
+        p = organ::capturePreset (engine_.params(), library_->config(), name, p.type, &p);
+    }
+    preset::Preset stored;
+    if (! library_->importPreset (std::move (p), &stored, error)) return false;
+    currentPresetId_ = stored.id;
+    ++presetRevision_;
+    if (out != nullptr) *out = stored;
+    return true;
+}
+
+bool OrganProcessor::saveConfig (const preset::LibraryConfig& c)
+{
+    const bool ok = library_->setConfig (c);
+    if (ok) ++presetRevision_;
+    return ok;
+}
+
 juce::AudioProcessorEditor* OrganProcessor::createEditor() { return new OrganEditor (*this); }
 
 // ---------------------------------------------------------------------------------------------------- éditeur
@@ -186,6 +317,11 @@ OrganEditor::OrganEditor (OrganProcessor& p)
     view_->onNoteOff = [this] (int key, int channel) { processor_.uiNoteOff (channel, key); };
     view_->setDescription (processor_.organDescription());
     addAndMakeVisible (*view_);
+
+    presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
+    presetBar_->onOpenManager = [this] (bool saveAs) { openManager (saveAs); };
+    presetBar_->onStatus = [this] (const juce::String& m) { infoLabel_.setText (m, juce::dontSendNotification); };
+    addAndMakeVisible (*presetBar_);
 
     brandLabel_.setText ("ORGAMON", juce::dontSendNotification);
     brandLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
@@ -225,14 +361,16 @@ void OrganEditor::resized()
     const auto logical = root_.fit (getWidth(), getHeight(), OrganView::designWidth + 40, OrganView::designHeight + 70);
     auto r = logical.reduced (20, 10);
     auto top = r.removeFromTop (36);
-    brandLabel_.setBounds (top.removeFromLeft (170));
+    brandLabel_.setBounds (top.removeFromLeft (150));
     redoButton_.setBounds (top.removeFromRight (64).reduced (2));
     undoButton_.setBounds (top.removeFromRight (64).reduced (2));
     panicButton_.setBounds (top.removeFromRight (120).reduced (2));
+    presetBar_->setBounds (top.removeFromLeft (juce::jmin (560, top.getWidth() - 120)));
     infoLabel_.setBounds (top);
     r.removeFromTop (8);
     view_->placeScaled (r);
     if (modal_) modal_->setBounds (logical);
+    if (manager_) manager_->setBounds (logical);
 }
 
 void OrganEditor::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgApp)); }
@@ -248,12 +386,13 @@ bool OrganEditor::keyPressed (const juce::KeyPress& k)
         return true;
     }
     if (code == 'Y' || code == 'y') { processor_.uiRedo(); return true; }
+    if (code == 'S' || code == 's') { presetBar_->quickSave(); return true; }
     return false;
 }
 
 void OrganEditor::openModal (ParamId id, uistate::Terminal terminal)
 {
-    if (modal_) return;
+    if (modal_ || manager_) return;
     modal_ = std::make_unique<KnobModal> (processor_, id, terminal, palette_, tr_,
                                           [safe = juce::Component::SafePointer<OrganEditor> (this)]
                                           {
@@ -262,6 +401,27 @@ void OrganEditor::openModal (ParamId id, uistate::Terminal terminal)
     root_.addAndMakeVisible (*modal_);
     modal_->setBounds (root_.getLocalBounds());
     modal_->toFront (true);
+}
+
+void OrganEditor::openManager (bool saveAs)
+{
+    if (manager_ || modal_) return;
+    manager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
+    manager_->onClose = [safe = juce::Component::SafePointer<OrganEditor> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe == nullptr) return;
+            safe->manager_.reset();
+            safe->presetBar_->refresh();
+            safe->grabKeyboardFocus();
+        });
+    };
+    manager_->onChanged = [safe = juce::Component::SafePointer<OrganEditor> (this)] { if (safe != nullptr) safe->presetBar_->refresh(); };
+    root_.addAndMakeVisible (*manager_);
+    manager_->setBounds (root_.getLocalBounds());
+    manager_->toFront (true);
+    if (saveAs) manager_->showSaveAs();
 }
 
 void OrganEditor::closeModal()
@@ -274,6 +434,7 @@ void OrganEditor::closeModal()
 
 void OrganEditor::timerCallback()
 {
+    if (presetBar_->needsRefresh()) presetBar_->refresh();
     const auto rev = static_cast<std::uint32_t> (processor_.undoManager().revision());
     if (rev != lastUndoRevision_)
     {

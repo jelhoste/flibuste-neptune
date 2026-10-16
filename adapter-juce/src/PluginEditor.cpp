@@ -1101,7 +1101,7 @@ void NeptuneEditor::updateViewVisibility()
     synthView_->setVisible (synth);
     fmView_->setVisible (fmMode);
     organView_->setVisible (organMode);
-    presetBar_->setVisible (synth || fmMode);
+    presetBar_->setVisible (synth || fmMode || organMode);
     trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (sampler);
     modeButton_.setVisible (sampler);
@@ -1326,7 +1326,7 @@ void NeptuneEditor::resized()
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
     fmView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
-    organView_->placeScaled ({ 32, 80 + 6, lw_ - 64, juce::jmax (200, lh_ - 80 - 6 - 160) });
+    organView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 80 - 38 - 160) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
     {
         auto r = juce::Rectangle<int> (32, 80, lw_ - 64, 36);

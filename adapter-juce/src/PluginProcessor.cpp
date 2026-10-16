@@ -3,6 +3,7 @@
 #include "PluginEditor.h"
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/InstrumentEdit.h"
+#include "neptune/core/OrganPreset.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
@@ -840,6 +841,7 @@ bool NeptuneProcessor::acceptsPreset (const neptune::core::preset::Preset& p) co
     using namespace neptune::core;
     if (p.module.empty()) return true;
     const auto t = trackType (selectedTrack());
+    if (t == TrackType::Organ) return p.module == organ::moduleId;
     if (t == TrackType::Fm) return p.module == fm::moduleId;
     if (t == TrackType::Synth) return p.module == analogsynth::moduleId;
     return false;
@@ -849,7 +851,9 @@ std::vector<std::string> NeptuneProcessor::presetKeys() const
 {
     using namespace neptune::core;
     std::vector<std::string> keys;
-    if (trackType (selectedTrack()) == TrackType::Fm)
+    if (trackType (selectedTrack()) == TrackType::Organ)
+        for (const auto& k : organ::keyedParams()) keys.push_back (k.key);
+    else if (trackType (selectedTrack()) == TrackType::Fm)
         for (const auto& k : fm::keyedParams()) keys.push_back (k.key);
     else
     {
@@ -864,14 +868,27 @@ bool NeptuneProcessor::loadPreset (const std::string& id)
     using namespace neptune::core;
     const int track = selectedTrack();
     const auto type = trackType (track);
-    if (type != TrackType::Synth && type != TrackType::Fm) return false;
+    if (type != TrackType::Synth && type != TrackType::Fm && type != TrackType::Organ) return false;
     const auto* p = presetLibrary_->find (id);
     if (p == nullptr || ! acceptsPreset (*p)) return false;
     const auto& cfg = presetLibrary_->config();
 
     undo_.beginTransaction ("Preset");
     std::vector<std::pair<ParamId, double>> values; // identifiants de la piste, valeurs à écrire
-    if (type == TrackType::Fm)
+    if (type == TrackType::Organ)
+    {
+        // l'orgue n'a que des valeurs (les claviers ne font pas partie d'un preset) ; une clé absente remet le réglage à son défaut
+        for (const auto& k : organ::keyedParams())
+        {
+            if (preset::captureOf (k.key, *p, cfg) == preset::Capture::Free) continue;
+            const ParamId pid = organ::idForTrack (k.id, track);
+            const auto index = params_.indexOf (pid);
+            if (index == ParameterSet::npos) continue;
+            const auto it = p->parameters.find (k.key);
+            values.emplace_back (pid, it != p->parameters.end() && ! it->second.isText ? it->second.number : params_.spec (index).defaultValue);
+        }
+    }
+    else if (type == TrackType::Fm)
     {
         uiEditFm (fm::presetDescription (*p, fmDescription (track), cfg), "Preset", {}, true);
         // macros : celles du preset, sinon leur défaut (un patch importé ne porte pas de macros)
@@ -927,6 +944,7 @@ bool NeptuneProcessor::isModified() const
     const auto* p = currentPreset();
     if (p == nullptr) return false;
     const int track = selectedTrack();
+    if (trackType (track) == TrackType::Organ) return organ::differsFromPreset (*p, params_, presetLibrary_->config(), track);
     if (trackType (track) == TrackType::Fm)
         return fm::differsFromPreset (*p, params_, fmDescription (track), presetLibrary_->config(), track);
     return analogsynth::differsFromPreset (*p, params_, synthDescription (track), presetLibrary_->config(), track);
@@ -945,7 +963,9 @@ bool NeptuneProcessor::overwritePreset (const std::string& id, std::string* erro
     if (base == nullptr || base->factory) { if (error) *error = "factory preset is read-only"; return false; }
     if (base->locked) { if (error) *error = "preset is locked"; return false; }
     const int track = selectedTrack();
-    preset::Preset p = trackType (track) == TrackType::Fm
+    preset::Preset p = trackType (track) == TrackType::Organ
+        ? organ::capturePreset (params_, presetLibrary_->config(), base->name, base->type, base, track)
+        : trackType (track) == TrackType::Fm
         ? fm::capturePreset (params_, fmDescription (track), presetLibrary_->config(), base->name, base->type, base, track)
         : analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), base->name, base->type, base, track);
     const bool ok = presetLibrary_->save (std::move (p), error);
@@ -965,9 +985,10 @@ bool NeptuneProcessor::saveCurrentAs (const std::string& name, const std::string
     using namespace neptune::core;
     const int track = selectedTrack();
     const auto tt = trackType (track);
-    if (tt != TrackType::Synth && tt != TrackType::Fm) { if (error) *error = "not a synth or FM track"; return false; }
+    if (tt != TrackType::Synth && tt != TrackType::Fm && tt != TrackType::Organ) { if (error) *error = "not a synth, FM or organ track"; return false; }
     auto capture = [&] (const preset::Preset* base, const std::string& n, const std::string& ty)
     {
+        if (tt == TrackType::Organ) return organ::capturePreset (params_, presetLibrary_->config(), n, ty, base, track);
         return tt == TrackType::Fm ? fm::capturePreset (params_, fmDescription (track), presetLibrary_->config(), n, ty, base, track)
                                    : analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), n, ty, base, track);
     };
@@ -1170,9 +1191,18 @@ NeptuneProcessor::NeptuneProcessor()
     {
         // Presets de synthé : la même bibliothèque qu'AnalogSynth (dossier choisi dans les réglages, sinon <config>/AnalogSynth).
         auto root = settings_.presetsDir.empty() ? configDir / "AnalogSynth" : std::filesystem::u8path (settings_.presetsDir);
-        presetLibrary_ = std::make_unique<neptune::core::preset::Library> (std::move (root), [] { auto all = neptune::core::analogsynth::factoryPresets(); for (auto& f : neptune::core::fm::factoryPresets()) all.push_back (std::move (f)); return all; }());
+        presetLibrary_ = std::make_unique<neptune::core::preset::Library> (std::move (root), [] { auto all = neptune::core::analogsynth::factoryPresets(); for (auto& f : neptune::core::fm::factoryPresets()) all.push_back (std::move (f)); for (auto& f : neptune::core::organ::factoryPresets()) all.push_back (std::move (f)); return all; }());
         presetLibrary_->open (&warnings);
         if (presetLibrary_->config().parameterCaptureDefaults.empty()) presetLibrary_->setConfig (neptune::core::analogsynth::defaultConfig());
+        {
+            // la vitesse du Leslie est libre par défaut (configuration partagée avec les autres plugins : on complète)
+            auto cfg = presetLibrary_->config();
+            if (cfg.parameterCaptureDefaults.count (neptune::core::organ::leslieSpeedKey) == 0)
+            {
+                cfg.parameterCaptureDefaults[neptune::core::organ::leslieSpeedKey] = neptune::core::preset::Capture::Free;
+                presetLibrary_->setConfig (cfg);
+            }
+        }
     }
     uiStateFile_ = configDir / "ui_state.json";
     uiState_ = neptune::core::uistate::loadFile (uiStateFile_);

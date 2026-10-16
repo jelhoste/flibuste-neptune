@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "neptune/core/OrganEngine.h"
@@ -195,4 +197,61 @@ TEST_CASE ("organ parameters exist for every Neptune track with distinct ids", "
     CHECK (static_cast<int> (set.size()) == 2 * (mixer::kOrganKinds - 0));
     CHECK (set.get (mixer::organParam (0, mixer::kOrgUpper0 + 2)) == 6.0);
     CHECK (set.get (mixer::organParam (15, mixer::kOrgLeslieMix)) == 100.0);
+}
+
+#include "neptune/core/OrganPreset.h"
+
+TEST_CASE ("organ presets: keys are unique and map to track 0 ids, the Leslie speed is free", "[organ][preset]")
+{
+    using namespace neptune::core;
+    std::set<std::string> keys;
+    std::set<ParamId> ids;
+    for (const auto& k : organ::keyedParams()) { keys.insert (k.key); ids.insert (k.id); }
+    CHECK (static_cast<int> (keys.size()) == mixer::kOrganKinds);
+    CHECK (static_cast<int> (ids.size()) == mixer::kOrganKinds);
+    CHECK (organ::paramIdForKey ("organ.upper.8") == mixer::organParam (0, mixer::kOrgUpper0 + 2));
+    CHECK (organ::idForTrack (mixer::organParam (0, mixer::kOrgReverb), 3) == mixer::organParam (3, mixer::kOrgReverb));
+
+    ParameterSet set;
+    REQUIRE (mixer::addOrganParams (set, 0, ""));
+    const auto cfg = organ::defaultConfig();
+    set.set (mixer::organParam (0, mixer::kOrgLeslieSpeed), 2.0);
+    set.set (mixer::organParam (0, mixer::kOrgUpper0), 5.0);
+    const auto p = organ::capturePreset (set, cfg, "Mine", "Jazz");
+    CHECK (p.module == "organ");
+    CHECK (p.parameters.count (organ::leslieSpeedKey) == 0); // libre : jamais enregistré
+    CHECK (p.parameters.at ("organ.upper.16").number == 5.0);
+    CHECK_FALSE (organ::differsFromPreset (p, set, cfg));
+    set.set (mixer::organParam (0, mixer::kOrgUpper0), 1.0);
+    CHECK (organ::differsFromPreset (p, set, cfg));
+    organ::applyPresetValues (p, set, cfg);
+    CHECK (set.get (mixer::organParam (0, mixer::kOrgUpper0)) == 5.0);
+    CHECK (set.get (mixer::organParam (0, mixer::kOrgLeslieSpeed)) == 2.0); // la vitesse du Leslie n'a pas bougé
+}
+
+TEST_CASE ("organ factory presets: complete, distinct and in range, they apply to any track", "[organ][preset]")
+{
+    using namespace neptune::core;
+    const auto list = organ::factoryPresets();
+    CHECK (list.size() == 18);
+    std::set<std::string> ids, names;
+    ParameterSet set;
+    REQUIRE (mixer::addOrganParams (set, 5, ""));
+    for (const auto& p : list)
+    {
+        ids.insert (p.id);
+        names.insert (p.name);
+        CHECK (p.module == "organ");
+        organ::applyPresetValues (p, set, organ::defaultConfig(), 5);
+        CHECK_FALSE (organ::differsFromPreset (p, set, organ::defaultConfig(), 5));
+        for (const auto& [key, value] : p.parameters)
+        {
+            const auto index = set.indexOf (organ::idForTrack (organ::paramIdForKey (key), 5));
+            REQUIRE (index != ParameterSet::npos);
+            CHECK (value.number >= set.spec (index).min);
+            CHECK (value.number <= set.spec (index).max);
+        }
+    }
+    CHECK (ids.size() == list.size());
+    CHECK (names.size() == list.size());
 }
