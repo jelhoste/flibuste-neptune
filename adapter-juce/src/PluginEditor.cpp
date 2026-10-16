@@ -743,7 +743,7 @@ void NeptuneEditor::showSlotAssignMenu (int zone, const std::string& group)
     using namespace neptune::core;
     const auto d = processor_.instrumentDescription();
     if (group.empty() && (zone < 0 || zone >= static_cast<int> (d.zones.size()))) return;
-    constexpr int kOpenWindow = 100000;
+    static constexpr int kOpenWindow = 100000;
     juce::PopupMenu menu;
     const juce::String targetName = group.empty() ? text ("slots.zone") + " " + juce::String (zone + 1) : text ("slots.group") + " " + juce::String::fromUTF8 (group.c_str());
     menu.addSectionHeader (targetName);
