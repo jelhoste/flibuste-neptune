@@ -60,6 +60,14 @@ bool addFmParams (ParameterSet& set, int track, const std::string& prefix, std::
               && set.add (ParamSpec::continuous (extra (kFmGlide), prefix + "FM Glide", Unit::Milliseconds, 0.0, 2000.0, 0.0, Curve::Power, 2.0), error);
 }
 
+bool addZoneSlotParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
+{
+    for (int s = 0; s < 16; ++s)
+        if (! set.add (ParamSpec::continuous (zoneSlotParam (track, s), prefix + "Slot " + std::to_string (s + 1), Unit::Percent, -100.0, 100.0, 0.0), error))
+            return false;
+    return true;
+}
+
 bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
 {
     static const char* const footage[9] = { "16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'" };
@@ -117,6 +125,7 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
     for (int t = 0; ok && t < tracks; ++t) ok = addSynthParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addFmParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addOrganParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
+    for (int t = 0; ok && t < tracks; ++t) ok = addZoneSlotParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
 
     // Pistes parallèles
     for (int p = 0; ok && p < numParallels; ++p)

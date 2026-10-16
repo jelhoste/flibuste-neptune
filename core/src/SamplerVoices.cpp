@@ -39,10 +39,17 @@ void SamplerVoices::prepare (double sampleRate) noexcept
     allSoundOff();
 }
 
+SlotMods SamplerVoices::slotModsFor (const Zone& zone) const noexcept
+{
+    if (instrument_ == nullptr) return SlotMods {};
+    return resolveSlotMods (instrument_->slots, slotAmounts_.data(), zone.sourceIndex, zone.groupId);
+}
+
 void SamplerVoices::bindZone (Voice& v, const Zone& zone) noexcept
 {
     v.zone = &zone;
-    const double semis = static_cast<double> (v.key - zone.rootNote) + zone.tuneCents / 100.0;
+    v.mods = slotModsFor (zone);
+    const double semis = static_cast<double> (v.key - zone.rootNote) + (zone.tuneCents + v.mods.tuneCents) / 100.0;
     v.baseRatio = zone.sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
     v.targetRatio = v.baseRatio;
     v.glideLeft = 0;
@@ -294,7 +301,7 @@ bool SamplerVoices::retargetHeld (int newKey) noexcept
     {
         if (! v.active || v.releasing || v.stolen || v.zone == nullptr) continue;
         v.key = newKey;
-        const double semis = static_cast<double> (newKey - v.zone->rootNote) + v.zone->tuneCents / 100.0;
+        const double semis = static_cast<double> (newKey - v.zone->rootNote) + (v.zone->tuneCents + v.mods.tuneCents) / 100.0;
         v.targetRatio = v.zone->sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
         if (glideFrames > 0)
         {
@@ -393,9 +400,18 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     bindZone (*v, zone);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     v->layerGain = layerGain;
-    v->level = v->velocity * zone.gain * layerGain;
+    v->level = v->velocity * zone.gain * v->mods.gain * layerGain;
     v->targetRatio = v->baseRatio;
-    v->env.begin (zone.env, sampleRate_);
+    if (v->mods.any)
+    {
+        auto timing = EnvelopeTiming::of (zone.env);
+        timing.attackSec *= v->mods.attack;
+        timing.decaySec *= v->mods.decay;
+        timing.sustain = std::clamp (timing.sustain * v->mods.sustain, 0.0f, 1.0f);
+        v->env.begin (zone.env, sampleRate_, &timing);
+    }
+    else
+        v->env.begin (zone.env, sampleRate_);
     if (zone.filters != nullptr)
         for (std::size_t i = 0; i < 2; ++i)
             if (zone.filters->settings[i].on) v->fenv[i].begin (zone.filters->env[i], sampleRate_);
@@ -598,7 +614,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
-        float e = v.velocity * z.gain * v.layerGain * mg * envValue;
+        float e = v.velocity * z.gain * v.mods.gain * v.layerGain * mg * envValue;
         if (v.stolen)
         {
             v.fade -= v.fadeStep;
@@ -629,7 +645,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         }
     }
     v.baseRatio = ratio; // le glissando du legato se poursuit au bloc suivant
-    v.level = v.velocity * z.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
+    v.level = v.velocity * z.gain * v.mods.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
 }
 
 void SamplerVoices::render (float* left, float* right, int numFrames, float gainStart, float gainEnd, double masterTuneCents) noexcept
@@ -651,7 +667,16 @@ void SamplerVoices::render (float* left, float* right, int numFrames, float gain
 
 void SamplerVoices::releaseEnvelopes (Voice& v) noexcept
 {
-    v.env.noteOff (v.zone->env, sampleRate_);
+    // le relâchement lit les emplacements au moment du Note Off (le charley ouvert qu'on raccourcit pendant qu'on le tient)
+    const SlotMods now = slotModsFor (*v.zone);
+    if (now.release != 1.0f)
+    {
+        auto timing = EnvelopeTiming::of (v.zone->env);
+        timing.releaseSec *= now.release;
+        v.env.noteOff (v.zone->env, sampleRate_, &timing);
+    }
+    else
+        v.env.noteOff (v.zone->env, sampleRate_);
     if (const auto* fr = v.zone->filters.get())
         for (std::size_t i = 0; i < 2; ++i)
             if (fr->settings[i].on) v.fenv[i].noteOff (fr->env[i], sampleRate_);

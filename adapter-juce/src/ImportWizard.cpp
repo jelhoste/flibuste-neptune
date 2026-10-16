@@ -568,6 +568,11 @@ void ImportWizard::updateMemory()
     const auto fresh = import::includedZones (plan_);
 
     InstrumentDescription replaceDesc = existing_;
+    {
+        std::vector<int> all (replaceDesc.zones.size());
+        for (std::size_t i = 0; i < all.size(); ++i) all[i] = static_cast<int> (i);
+        replaceDesc.removeZones (std::move (all));
+    }
     replaceDesc.zones = fresh;
     replaceDesc.mainRoundRobinOnly = ! wantAlternates;
     replaceDesc.loadReleaseSamples = wantRelease;

@@ -25,6 +25,23 @@ juce::Colour NeptuneEditor::colour (Token t) const
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
 }
 
+// Clic droit sur la case de chargement d'un Groupe : menu « Assigner à un emplacement ».
+struct NeptuneEditor::GroupMenuListener : public juce::MouseListener
+{
+    explicit GroupMenuListener (NeptuneEditor& o) : owner (o) {}
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu()) return;
+        for (int i = 0; i < owner.groupToggles_.size(); ++i)
+            if (owner.groupToggles_[i] == e.eventComponent && static_cast<std::size_t> (i) < owner.groupNames_.size())
+            {
+                owner.showSlotAssignMenu (-1, owner.groupNames_[static_cast<std::size_t> (i)]);
+                return;
+            }
+    }
+    NeptuneEditor& owner;
+};
+
 NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
 {
@@ -211,6 +228,11 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     filtersButton_.setButtonText (text ("filt.button"));
     filtersButton_.onClick = [this] { openFilterEditor(); };
     addAndMakeVisible (filtersButton_);
+    slotsButton_.setButtonText (text ("slots.button"));
+    slotsButton_.onClick = [this] { openSlotsPanel (slotsButton_); };
+    addChildComponent (slotsButton_);
+    zoneTable_->onContextMenu = [this] (int row) { showSlotAssignMenu (row, {}); };
+    groupMenuListener_ = std::make_unique<GroupMenuListener> (*this);
     panicButton_.setButtonText (text ("panic.button"));
     panicButton_.onClick = [this]
     {
@@ -629,7 +651,12 @@ void NeptuneEditor::applyImport (const ImportWizard::Result& r)
 {
     processor_.setLastImportTemplate (r.templ.toJson());
     auto d = processor_.instrumentDescription();
-    if (r.replace) d.zones.clear();
+    if (r.replace)
+    {
+        std::vector<int> all (d.zones.size());
+        for (std::size_t i = 0; i < all.size(); ++i) all[i] = static_cast<int> (i);
+        d.removeZones (std::move (all)); // les emplacements visant des zones sont libérés ; ceux qui visent un Groupe restent
+    }
     for (const auto& z : r.zones) d.zones.push_back (z);
     // Import léger : en remplaçant, le choix de l'assistant s'applique tel quel ; en ajoutant, on ne fait que restreindre.
     d.mainRoundRobinOnly = r.replace ? r.mainRoundRobinOnly : (d.mainRoundRobinOnly || r.mainRoundRobinOnly);
@@ -694,6 +721,68 @@ void NeptuneEditor::openPolyphonyPanel (juce::Component& anchor)
     juce::Component::SafePointer<PolyphonyPanel> focus (panel.get());
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
     juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
+}
+
+// Emplacements assignables : fenêtre flottante (les 16 lignes) ou menu contextuel d'une zone / d'un Groupe.
+void NeptuneEditor::openSlotsPanel (juce::Component& anchor)
+{
+    auto panel = std::make_unique<SlotsPanel> (processor_, palette_, tr_, processor_.selectedTrack());
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    panel->getDescription = [safe] { return safe != nullptr ? safe->processor_.instrumentDescription() : neptune::core::InstrumentDescription {}; };
+    panel->getSelectedZones = [safe] { return safe != nullptr ? safe->zoneTable_->selectedRows() : std::vector<int> {}; };
+    panel->onEdit = [safe] (neptune::core::InstrumentDescription d)
+    {
+        if (safe != nullptr) safe->processor_.uiEditInstrument (std::move (d), "Slots", "slots");
+    };
+    slotsPanel_ = panel.get();
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+}
+
+void NeptuneEditor::showSlotAssignMenu (int zone, const std::string& group)
+{
+    using namespace neptune::core;
+    const auto d = processor_.instrumentDescription();
+    if (group.empty() && (zone < 0 || zone >= static_cast<int> (d.zones.size()))) return;
+    constexpr int kOpenWindow = 100000;
+    juce::PopupMenu menu;
+    const juce::String targetName = group.empty() ? text ("slots.zone") + " " + juce::String (zone + 1) : text ("slots.group") + " " + juce::String::fromUTF8 (group.c_str());
+    menu.addSectionHeader (targetName);
+    for (int s = 0; s < kZoneSlots; ++s)
+    {
+        juce::PopupMenu sub;
+        const auto& cur = d.slots[static_cast<std::size_t> (s)];
+        const bool same = cur.assigned() && (group.empty() ? (! cur.isGroup && cur.zone == zone) : (cur.isGroup && cur.group == group));
+        for (int p = 1; p < kSlotParams; ++p)
+        {
+            static const char* const keys[kSlotParams] = { "", "slots.param_attack", "slots.param_decay", "slots.param_sustain", "slots.param_release",
+                                                           "slots.param_level", "slots.param_tune" };
+            sub.addItem (1 + s * 16 + p, text (keys[p]), true, same && static_cast<int> (cur.param) == p);
+        }
+        if (same) { sub.addSeparator(); sub.addItem (1 + s * 16, text ("slots.free_slot")); }
+        juce::String title = text ("slots.slot") + " " + juce::String (s + 1);
+        if (cur.assigned() && ! same) title += "  (" + text ("slots.taken") + ")";
+        menu.addSubMenu (title, sub, true, nullptr, same);
+    }
+    menu.addSeparator();
+    menu.addItem (kOpenWindow, text ("slots.open_window"));
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options(), [safe, zone, group] (int choice)
+    {
+        if (safe == nullptr || choice == 0) return;
+        if (choice == kOpenWindow) { safe->openSlotsPanel (safe->slotsButton_); return; }
+        const int slot = (choice - 1) / 16, param = (choice - 1) % 16;
+        auto desc = safe->processor_.instrumentDescription();
+        if (slot < 0 || slot >= kZoneSlots) return;
+        auto& a = desc.slots[static_cast<std::size_t> (slot)];
+        if (param == 0) a = SlotAssignment {};   // libérer l'emplacement
+        else
+        {
+            a = SlotAssignment {};
+            a.param = static_cast<SlotParam> (param);
+            if (group.empty()) a.zone = zone; else { a.isGroup = true; a.group = group; }
+        }
+        safe->processor_.uiEditInstrument (std::move (desc), "Slots", "slots");
+    });
 }
 
 // Éditeur des filtres par voie.
@@ -900,10 +989,8 @@ void NeptuneEditor::removeSelectedZones()
 {
     auto selection = zoneTable_->selectedRows();
     if (selection.empty()) return;
-    std::sort (selection.begin(), selection.end(), std::greater<int>());
     auto d = processor_.instrumentDescription();
-    for (const int row : selection)
-        if (row >= 0 && row < static_cast<int> (d.zones.size())) d.zones.erase (d.zones.begin() + row);
+    d.removeZones (selection); // les emplacements assignables qui visaient ces zones sont libérés, les autres suivent le décalage
     processor_.uiEditInstrument (std::move (d), "Remove zones");
     lastRevision_ = 0xFFFFFFFFu;
     updateSamplerControls();
@@ -1062,8 +1149,10 @@ void NeptuneEditor::rebuildLoadPanel()
     {
         groupsSignature_ = signature;
         groupToggles_.clear();
+        groupNames_.clear();
         for (const auto& [name, bytes] : groups)
         {
+            groupNames_.push_back (name);
             auto* t = groupToggles_.add (new juce::ToggleButton());
             t->setButtonText (juce::String::fromUTF8 (tr_.format ("load.group", { name, mb (bytes) }).c_str()));
             t->setColour (juce::ToggleButton::textColourId, colour (Token::Text));
@@ -1077,6 +1166,7 @@ void NeptuneEditor::rebuildLoadPanel()
                 if (! t->getToggleState()) u.push_back (name); // décoché = laissé sur le disque
                 processor_.uiEditInstrument (std::move (desc), "Load group");
             };
+            t->addMouseListener (groupMenuListener_.get(), false);
             groupsHolder_.addAndMakeVisible (t);
         }
         const int w = juce::jmax (200, groupsViewport_.getWidth() - 20);
@@ -1112,6 +1202,7 @@ void NeptuneEditor::updateViewVisibility()
     voicesView_->setVisible (sampler && showVoices_);
     voicesButton_.setVisible (sampler);
     filtersButton_.setVisible (sampler);
+    slotsButton_.setVisible (sampler);
     importButton_.setVisible (sampler);
     removeButton_.setVisible (sampler);
     selectionLabel_.setVisible (sampler);
@@ -1336,6 +1427,7 @@ void NeptuneEditor::resized()
         listToggleButton_.setBounds (r.removeFromLeft (150).reduced (2));
         voicesButton_.setBounds (r.removeFromLeft (140).reduced (2));
         filtersButton_.setBounds (r.removeFromLeft (110).reduced (2));
+        slotsButton_.setBounds (r.removeFromLeft (110).reduced (2));
         statusLabel_.setBounds (r);
         auto r2 = juce::Rectangle<int> (32, 122, lw_ - 64, 36);
         rootLabel_.setBounds (r2.removeFromLeft (200));

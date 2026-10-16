@@ -140,6 +140,11 @@ constexpr ParamId organParamBase = 9000;
 constexpr ParamId organParam (int track, int kind) { return organParamBase + probe::trackStride * static_cast<ParamId> (track) + static_cast<ParamId> (kind); }
 bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 
+// Emplacements assignables d'une piste Sampler (ZoneSlots.h) : 16 valeurs automatisables, identifiants `12000 + 16.t + slot`, -100..+100 %.
+constexpr ParamId zoneSlotBase = 12000;
+constexpr ParamId zoneSlotParam (int track, int slot) { return zoneSlotBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (slot); }
+bool addZoneSlotParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
+
 // Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.
 bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 

@@ -25,6 +25,8 @@ public:
         double resonance[2] = { 0.0, 0.0 }; // 0..1
     };
     void setFilterParams (const FilterParams& p) noexcept { filterParams_ = p; }
+    // Valeurs des 16 emplacements assignables (-1..+1, voir ZoneSlots.h), lues une fois par bloc. Prises au début de chaque note.
+    void setSlotAmounts (const float* amounts) noexcept { for (int i = 0; i < kZoneSlots; ++i) slotAmounts_[static_cast<std::size_t> (i)] = amounts[i]; }
 
     void prepare (double sampleRate) noexcept;
     // Streaming disque (facultatif) : les échantillons dont seul le début est en mémoire y sont lus. Nul = jamais de streaming.
@@ -111,6 +113,7 @@ private:
         std::array<EnvelopeRunner, 2> fenv {};
         std::array<FilterCoefs, 2> fcoef {};
         std::array<float, 2> fenvValue { 0.0f, 0.0f };
+        SlotMods mods;                      // effet des emplacements assignables, fixé au Note On
         int fcount = 0;
         bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
         int streamSlot = -1;
@@ -118,6 +121,8 @@ private:
     };
 
     VoiceInfo describe (const Voice& v) const noexcept;
+    SlotMods slotModsFor (const Zone& zone) const noexcept;
+    std::array<float, kZoneSlots> slotAmounts_ {};
     void releaseEnvelopes (Voice& v) noexcept; // Note Off des enveloppes de volume et de filtres
     void updateFilterCoefs (Voice& v, const FilterRuntimeBlock& fr) const noexcept;
     void steal (Voice& v) noexcept;

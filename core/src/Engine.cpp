@@ -248,6 +248,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         for (int k = 0; k < mixer::kFmKinds; ++k) p.fm[k] = idx (mixer::fmParam (t, static_cast<mixer::FmKind> (k)));
         for (int k = 0; k < mixer::kFmExtraKinds; ++k) p.fmExtra[k] = idx (mixer::fmExtraParam (t, static_cast<mixer::FmExtraKind> (k)));
         for (int k = 0; k < mixer::kOrganKinds; ++k) p.organ[k] = idx (mixer::organParam (t, k));
+        for (int k = 0; k < 16; ++k) p.slot[k] = idx (mixer::zoneSlotParam (t, k));
     }
     for (int b = 0; b < kBuses; ++b)
     {
@@ -885,6 +886,11 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         else
         {
             t.voices.setFilterParams (fp);
+            {
+                float amounts[kZoneSlots];
+                for (int k = 0; k < kZoneSlots; ++k) amounts[k] = static_cast<float> (param (t.idx.slot[static_cast<std::size_t> (k)], 0.0) / 100.0);
+                t.voices.setSlotAmounts (amounts);
+            }
             t.voices.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, cents);
         }
         t.lastGain = gain;

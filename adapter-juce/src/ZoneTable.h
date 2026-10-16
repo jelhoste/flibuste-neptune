@@ -23,6 +23,8 @@ public:
     std::function<void (int row, int column, int value)> onCellEdited;
     // Bouton d'écoute : `down` à l'appui, relâché ensuite ; `stop` = Maj enfoncé (coupe l'écoute).
     std::function<void (int row, bool down, bool stop)> onPlay;
+    // Clic droit sur une ligne (menu contextuel : assigner la zone à un emplacement, etc.).
+    std::function<void (int row)> onContextMenu;
 
     void resized() override { table_.setBounds (getLocalBounds()); }
 
@@ -31,6 +33,7 @@ private:
     void paintRowBackground (juce::Graphics&, int row, int width, int height, bool selected) override;
     void paintCell (juce::Graphics&, int row, int column, int width, int height, bool selected) override;
     void selectedRowsChanged (int) override { if (onSelectionChanged) onSelectionChanged(); }
+    void cellClicked (int row, int, const juce::MouseEvent& e) override { if (e.mods.isPopupMenu() && onContextMenu) onContextMenu (row); }
     juce::Component* refreshComponentForCell (int row, int column, bool selected, juce::Component* existing) override;
     juce::Colour colour (neptune::core::theme::Token t) const;
 

@@ -19,6 +19,7 @@
 #include "neptune/core/Filter.h"
 #include "neptune/core/SampleData.h"
 #include "neptune/core/VelocityResponse.h"
+#include "neptune/core/ZoneSlots.h"
 
 namespace neptune::core
 {
@@ -125,7 +126,11 @@ struct InstrumentDescription
     bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
     static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
 
-    // Copie tout sauf les zones (réglages de chargement, de streaming et de réponse de vélocité).
+    // Emplacements assignables (ZoneSlots.h) : qui vise quoi. Ils font référence aux zones par leur indice (retirés ou décalés quand des
+    // zones disparaissent, voir removeZones) et aux Groupes par leur nom.
+    SlotAssignments slots;
+
+    // Copie tout sauf les zones (réglages de chargement, de streaming, de réponse de vélocité, emplacements assignables).
     void copySettingsFrom (const InstrumentDescription& o)
     {
         roundRobinMode = o.roundRobinMode; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
@@ -133,6 +138,7 @@ struct InstrumentDescription
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
         cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters;
+        slots = o.slots;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept
@@ -143,9 +149,14 @@ struct InstrumentDescription
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
             && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
-            && defaultFilters == o.defaultFilters;
+            && defaultFilters == o.defaultFilters && slots == o.slots;
     }
     bool empty() const noexcept { return zones.empty(); }
+
+    // Retire des zones (indices dans l'ordre quelconque) ; les emplacements qui les visaient sont libérés, les autres suivent le décalage.
+    void removeZones (std::vector<int> indices);
+    // Libère les emplacements qui visent une zone inexistante.
+    void pruneSlots();
 };
 
 // Quelles zones de la description sont chargées en mémoire, selon les options ci-dessus. Le principal d'une place
@@ -200,6 +211,7 @@ struct Instrument
 {
     std::vector<Zone> zones;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    SlotRuntimes slots;   // emplacements assignables résolus (voir ZoneSlots.h)
 
     // Première zone qui couvre la note et la vélocité (0..1 -> 1..127) ; nul si aucune. Ignore le round-robin et
     // les zones déclenchées au relâchement.

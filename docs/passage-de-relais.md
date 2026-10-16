@@ -117,6 +117,15 @@ Options CMake : `NEPTUNE_BUILD_PLUGIN` (ON), `NEPTUNE_BUILD_TESTS` (ON), `NEPTUN
 - **Pas repris** : les ombres (`--csh`, `--fsh`, `--ctl-sh`) et les dimensions des composants des contrôles (`nova-controls.css`) ; à décider quand les composants de l'interface seront écrits.
 - **Branché** : seulement la fenêtre de sonde (couleurs depuis le thème/contraste de `settings.json`, textes de la bannière de récupération et de la latence via les clés). Pas de menu : on édite `settings.json`, lu une fois au démarrage. Partie adaptateur compilée par la CI (verte) et **validée dans Reaper par l'utilisateur** (langue, thème, contraste).
 
+## Emplacements assignables du Sampler (2026-10-17, à valider dans Reaper)
+
+Décisions de l'utilisateur : 16 emplacements par piste Sampler dans un pool commun, chacun vise une **zone ou un Groupe** ; valeur **relative et neutre à 0** ; 6 paramètres (attaque, décroissance, sustain, relâchement, niveau, accordage) ; assignation **rangée avec l'instrument** ; interface **fenêtre « Emplacements... » + menu contextuel**. Les enveloppes du sampler ne sont PAS exposées autrement (chaque zone a la sienne).
+
+- **Paramètres** : `mixer::zoneSlotParam(track, slot)` = `12000 + 16.t + slot`, -100..+100 %, défaut 0 (16 par piste, déclarés pour les 16 pistes). **Assignation** : `InstrumentDescription::slots` (`ZoneSlots.h`) : par emplacement {paramètre, zone (indice dans la description) ou Groupe (nom)} ; JSON `slots` ; retirée avec la zone, décalée quand des zones disparaissent (`removeZones`, `pruneSlots` ; l'import « remplacer » libère les emplacements de zone, ceux de Groupe restent) ; annulable (copiée par `copySettingsFrom`).
+- **Moteur** : `Instrument::slots` (Groupe résolu en identifiant au chargement), `SamplerVoices::setSlotAmounts` (lu par bloc), `resolveSlotMods` : temps x10^v (attaque, décroissance, relâchement), sustain x(1+v), niveau ±24 dB, accordage ±100 cents ; plusieurs emplacements sur une zone se cumulent. Pris au **Note On** ; le **relâchement est lu au Note Off** (le charley qu'on raccourcit pendant qu'on le tient). Pas de variation en cours de note (sauf le relâchement).
+- **Interface** : bouton « Emplacements... » (vue Sampler, à côté de « Filtres ») -> `SlotsPanel` (fenêtre flottante, 16 lignes : cible = Groupe ou zone sélectionnée dans la liste, paramètre, curseur de valeur) ; clic droit sur une zone de la liste ou sur la case d'un Groupe -> « Assigner à un emplacement ».
+- **À valider** : le menu contextuel, la fenêtre (disposition), l'effet sur un charley ouvert (relâchement x0,1), les emplacements après suppression de zones, annuler/rétablir. Les noms des paramètres dans l'hôte sont « Track n Slot k » (non renommables selon l'assignation).
+
 ## Orgue à roues phoniques « Orgamon » (2026-10-15, à valider dans Reaper)
 
 Décisions de l'utilisateur : moteur de **setBfree** repris comme msfa (jamais le plugin entier), réverb à ressorts incluse, nouveau type

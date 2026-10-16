@@ -228,6 +228,18 @@ std::string toJson (const InstrumentDescription& d)
     if (! (d.defaultFilters == FilterBlock {})) doc["default_filters"] = filterBlockToJson (d.defaultFilters);
     if (d.streamFromDisk) doc["stream_from_disk"] = true;
     if (d.preloadKB != InstrumentDescription::defaultPreloadKB) doc["preload_kb"] = d.preloadKB;
+    nlohmann::json slots = nlohmann::json::array();
+    for (std::size_t i = 0; i < d.slots.size(); ++i)
+    {
+        const auto& s = d.slots[i];
+        if (! s.assigned()) continue;
+        nlohmann::json o;
+        o["slot"] = i;
+        o["param"] = toString (s.param);
+        if (s.isGroup) o["group"] = s.group; else o["zone"] = s.zone;
+        slots.push_back (std::move (o));
+    }
+    if (! slots.empty()) doc["slots"] = std::move (slots);
     doc["zones"] = std::move (zones);
     return doc.dump();
 }
@@ -365,6 +377,26 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("unloaded_groups"); m != doc.end() && m->is_array())
         for (const auto& g : *m)
             if (g.is_string() && g.get<std::string>().size() <= 128 && d.unloadedGroups.size() < 256) d.unloadedGroups.push_back (g.get<std::string>());
+    if (const auto sl = doc.find ("slots"); sl != doc.end() && sl->is_array())
+        for (const auto& o : *sl)
+        {
+            if (! o.is_object()) continue;
+            const auto idx = o.find ("slot"), prm = o.find ("param");
+            if (idx == o.end() || ! idx->is_number_integer() || prm == o.end() || ! prm->is_string()) continue;
+            const int i = idx->get<int>();
+            SlotParam p;
+            if (i < 0 || i >= kZoneSlots || ! slotParamFromString (prm->get<std::string>(), p) || p == SlotParam::None) continue;
+            SlotAssignment a;
+            a.param = p;
+            if (const auto g = o.find ("group"); g != o.end() && g->is_string() && ! g->get<std::string>().empty())
+            {
+                a.isGroup = true;
+                a.group = g->get<std::string>();
+            }
+            else if (const auto z = o.find ("zone"); z != o.end() && z->is_number_integer() && z->get<int>() >= 0) a.zone = z->get<int>();
+            else continue;
+            d.slots[static_cast<std::size_t> (i)] = std::move (a);
+        }
     const auto zones = doc.find ("zones");
     if (zones == doc.end() || ! zones->is_array()) return d;
     constexpr std::size_t kMaxZones = 32768; // un piano 88 notes x ~30 vélocités x round-robin dépasse 4096
@@ -373,7 +405,33 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         if (d.zones.size() >= kMaxZones) break;
         if (z.is_object()) d.zones.push_back (zoneFromJson (z));
     }
+    d.pruneSlots();
     return d;
+}
+
+void InstrumentDescription::pruneSlots()
+{
+    for (auto& s : slots)
+    {
+        if (s.group.size() > 128) s.group.resize (128);
+        if (! s.isGroup && s.zone >= static_cast<int> (zones.size())) s = SlotAssignment {};
+        if (! s.assigned()) s = SlotAssignment {};
+    }
+}
+
+void InstrumentDescription::removeZones (std::vector<int> indices)
+{
+    std::sort (indices.begin(), indices.end());
+    indices.erase (std::unique (indices.begin(), indices.end()), indices.end());
+    indices.erase (std::remove_if (indices.begin(), indices.end(), [this] (int i) { return i < 0 || i >= static_cast<int> (zones.size()); }),
+                   indices.end());
+    for (auto& s : slots)
+    {
+        if (s.isGroup || s.zone < 0) continue;
+        if (std::binary_search (indices.begin(), indices.end(), s.zone)) { s = SlotAssignment {}; continue; }
+        s.zone -= static_cast<int> (std::lower_bound (indices.begin(), indices.end(), s.zone) - indices.begin()); // zones retirées avant elle
+    }
+    for (auto it = indices.rbegin(); it != indices.rend(); ++it) zones.erase (zones.begin() + *it);
 }
 
 const Zone* Instrument::find (int key, float velocity) const noexcept
@@ -680,6 +738,20 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.loopEnd = zd.loopEnd < 0 ? frames : std::min<std::int64_t> (zd.loopEnd, frames);
         if (z.loopEnd <= z.loopStart) { z.loopStart = 0; z.loopEnd = frames; }
         inst->zones.push_back (std::move (z));
+    }
+    for (std::size_t i = 0; i < description.slots.size(); ++i)
+    {
+        const auto& a = description.slots[i];
+        if (! a.assigned()) continue;
+        auto& r = inst->slots[i];
+        r.param = a.param;
+        r.isGroup = a.isGroup;
+        r.zoneIndex = a.zone;
+        if (a.isGroup)
+        {
+            const auto g = groupIds.find (a.group);
+            r.groupId = g != groupIds.end() ? g->second : 0; // aucun groupe chargé de ce nom : l'emplacement ne vise rien
+        }
     }
     inst->finalize();
     // On ne garde en cache que ce qui est chargé : décharger une table libère vraiment la mémoire.

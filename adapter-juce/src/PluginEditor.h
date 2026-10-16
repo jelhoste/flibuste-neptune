@@ -5,6 +5,7 @@
 #include "MappingMatrix.h"
 #include "VelocityPanel.h"
 #include "PolyphonyPanel.h"
+#include "SlotsPanel.h"
 #include "ChokePanel.h"
 #include "VoicesView.h"
 #include "FilterEditor.h"
@@ -101,6 +102,14 @@ private:
     juce::Component::SafePointer<VelocityPanel> velocityPanel_;
     void openPolyphonyPanel (juce::Component& anchor);
     juce::Component::SafePointer<PolyphonyPanel> polyphonyPanel_;
+    void openSlotsPanel (juce::Component& anchor);
+    juce::Component::SafePointer<SlotsPanel> slotsPanel_;
+    juce::TextButton slotsButton_;
+    // Menu contextuel « Assigner à un emplacement » pour une zone (`zone` >= 0) ou un Groupe (`group` non vide).
+    void showSlotAssignMenu (int zone, const std::string& group);
+    struct GroupMenuListener;
+    std::vector<std::string> groupNames_;   // noms des Groupes, dans l'ordre des cases de chargement
+    std::unique_ptr<juce::MouseListener> groupMenuListener_;
     bool showProbe_ = false;
     bool showMixer_ = true; // on arrive sur le Mixeur
     // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
