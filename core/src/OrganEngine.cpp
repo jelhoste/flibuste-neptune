@@ -166,7 +166,8 @@ struct OrganVoices::Impl
 {
     nb3_engine* engine = nullptr;
     std::atomic<nb3_engine*> pending { nullptr };   // orgue accordé autrement, construit par le thread de message
-    std::atomic<nb3_engine*> retired { nullptr };   // orgue remplacé, à libérer par le thread de message
+    static constexpr int kRetired = 4;
+    std::array<std::atomic<nb3_engine*>, kRetired> retired {}; // orgues remplacés, à libérer par le thread de message
     int tuningCents = 0;                            // accord de l'orgue en cours ou en attente (thread de message)
     bool extended = false, foldback = true;         // câblage idem
     std::array<std::array<int, 5>, 9> taperDb {};
@@ -194,7 +195,8 @@ struct OrganVoices::Impl
     {
         if (engine != nullptr) nb3_destroy (engine);
         if (auto* p = pending.exchange (nullptr)) nb3_destroy (p);
-        if (auto* r = retired.exchange (nullptr)) nb3_destroy (r);
+        for (auto& slot : retired)
+            if (auto* r = slot.exchange (nullptr)) nb3_destroy (r);
     }
 
     static int cc (float v01) { return static_cast<int> (std::lround (std::clamp (v01, 0.0f, 1.0f) * 127.0f)); }
@@ -283,7 +285,8 @@ void OrganVoices::requestBuild (const OrganDescription& d)
 
 void OrganVoices::collect()
 {
-    if (auto* r = impl_->retired.exchange (nullptr)) nb3_destroy (r);
+    for (auto& slot : impl_->retired)
+        if (auto* r = slot.exchange (nullptr)) nb3_destroy (r);
 }
 
 void OrganVoices::noteOn (int channel, int note) noexcept
@@ -338,10 +341,14 @@ void OrganVoices::render (float* left, float* right, int numFrames, float gainSt
         return;
     }
     // orgue accordé autrement : adopté ici (l'ancien est remis au thread de message) ; les touches tenues sont rejouées
-    if (impl_->retired.load (std::memory_order_acquire) == nullptr)
+    // une case libre pour l'ancien orgue (le thread de message les libère) : sinon on garde la demande pour le bloc suivant
+    int freeSlot = -1;
+    for (int i = 0; i < Impl::kRetired; ++i)
+        if (impl_->retired[static_cast<std::size_t> (i)].load (std::memory_order_acquire) == nullptr) { freeSlot = i; break; }
+    if (freeSlot >= 0)
         if (auto* fresh = impl_->pending.exchange (nullptr, std::memory_order_acq_rel))
         {
-            impl_->retired.store (impl_->engine, std::memory_order_release);
+            impl_->retired[static_cast<std::size_t> (freeSlot)].store (impl_->engine, std::memory_order_release);
             impl_->engine = fresh;
             impl_->haveApplied = false;
             leslieDirty_ = true;

@@ -435,6 +435,7 @@ void OrganEditor::closeModal()
 
 void OrganEditor::timerCallback()
 {
+    processor_.engine().collect(); // libère l'orgue remplacé après un changement d'accord ou de câblage
     if (presetBar_->needsRefresh()) presetBar_->refresh();
     const auto rev = static_cast<std::uint32_t> (processor_.undoManager().revision());
     if (rev != lastUndoRevision_)

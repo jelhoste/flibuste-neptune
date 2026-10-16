@@ -394,3 +394,41 @@ TEST_CASE ("organ wiring: extended mode can drop the bass foldback and reshape t
     const auto loud = measure (ext, 40);
     CHECK (loud.rms / base.rms == Catch::Approx (4.0).epsilon (0.1)); // +12 dB = x3,98
 }
+
+TEST_CASE ("organ synth: several wiring changes in a row are all taken into account, without anyone calling collect", "[organ][synth][wiring]")
+{
+    auto frequency = [] (OrganSynthEngine& e)
+    {
+        std::vector<float> l (128), r (128), all;
+        for (int i = 0; i < 200; ++i)
+        {
+            e.process (l.data(), r.data(), 128);
+            if (i >= 100) all.insert (all.end(), l.begin(), l.end());
+        }
+        int z = 0;
+        for (std::size_t i = 1; i < all.size(); ++i) if (all[i - 1] <= 0.0f && all[i] > 0.0f) ++z;
+        return z / (static_cast<double> (all.size()) / kRate);
+    };
+    OrganSynthEngine e;
+    e.prepare (kRate, 128);
+    // 16' seul, sans Leslie ni vibrato, comme le test du moteur
+    using namespace neptune::core;
+    for (int i = 0; i < 9; ++i) e.params().set (mixer::organParam (0, mixer::kOrgUpper0 + i), i == 0 ? 8.0 : 0.0);
+    e.params().set (mixer::organParam (0, mixer::kOrgLeslieMix), 0.0);
+    e.params().set (mixer::organParam (0, mixer::kOrgReverb), 0.0);
+    e.params().set (mixer::organParam (0, mixer::kOrgVibUpper), 0.0);
+    e.postNoteOn (0, 40);
+    const double classic = frequency (e);
+    CHECK (classic > 75.0); // replié : 82 Hz
+
+    OrganDescription d = e.description();
+    d.extended = true;
+    e.setDescription (d);            // 1er changement : même son (repli gardé)
+    CHECK (frequency (e) > 75.0);
+    d.foldback = false;
+    e.setDescription (d);            // 2e changement, sans collect() explicite : doit être pris en compte
+    CHECK (frequency (e) < 55.0);    // 41 Hz
+    d.foldback = true;
+    e.setDescription (d);            // 3e : retour au repli
+    CHECK (frequency (e) > 75.0);
+}
