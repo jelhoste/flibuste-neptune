@@ -296,7 +296,9 @@ TEST_CASE ("organ engine: a new tuning builds another organ that takes over, hel
     v.noteOn (0, 69);
     const int before = crossings (v, live);
     REQUIRE (before > 20);
-    v.requestTuning (100); // un demi-ton environ plus haut
+    OrganDescription tuned;
+    tuned.tuningCents = 100;
+    v.requestBuild (tuned); // un demi-ton environ plus haut
     const int after = crossings (v, live); // la note tenue est rejouée sur le nouvel orgue
     v.collect();           // le thread de message libère l'ancien
     CHECK (after > before);
@@ -345,4 +347,50 @@ TEST_CASE ("organ MIDI controllers follow setBfree numbers, each keyboard on its
     CHECK (value (mixer::kOrgLeslieSpeed) == kLeslieTremolo);
     CHECK (applyControlChange (d, set, 0, 64, 127));
     CHECK (value (mixer::kOrgLeslieSpeed) == kLeslieChorale);
+}
+
+TEST_CASE ("organ wiring: extended mode can drop the bass foldback and reshape the 16' taper, classic mode is untouched", "[organ][engine][wiring]")
+{
+    struct Result { double rms; double freq; };
+    auto measure = [] (const OrganDescription& d, int note)
+    {
+        OrganVoices v;
+        v.requestBuild (d);
+        REQUIRE (v.reserve (kRate));
+        OrganLive live;
+        live.leslieMix = 0.0f; live.vibratoMode = 0; live.reverbMix = 0.0f;
+        live.drawbars[0] = { 8, 0, 0, 0, 0, 0, 0, 0, 0 }; // 16' seul
+        v.noteOn (0, note);
+        std::vector<float> l (128), r (128), all;
+        double sum = 0.0;
+        long n = 0;
+        for (int i = 0; i < 200; ++i)
+        {
+            v.render (l.data(), r.data(), 128, 1.0f, 1.0f, live, false);
+            if (i >= 100) { all.insert (all.end(), l.begin(), l.end()); for (float x : l) { sum += static_cast<double> (x) * x; ++n; } }
+        }
+        int z = 0;
+        for (std::size_t i = 1; i < all.size(); ++i) if (all[i - 1] <= 0.0f && all[i] > 0.0f) ++z;
+        return Result { std::sqrt (sum / static_cast<double> (n)), z / (static_cast<double> (all.size()) / kRate) };
+    };
+    OrganDescription classic;
+    const auto base = measure (classic, 40); // mi 2 (MIDI 40) : dans les 12 touches graves
+    CHECK (base.freq > 75.0);                 // 82 Hz (le 16' est replié une octave plus haut que les 41 Hz attendus)
+
+    OrganDescription ext = classic;
+    ext.extended = true;
+    ext.foldback = true; // étendu mais comme setBfree : même son
+    const auto same = measure (ext, 40);
+    CHECK (same.rms == Catch::Approx (base.rms).epsilon (0.02));
+
+    ext.foldback = false;
+    const auto low = measure (ext, 40);
+    CHECK (low.freq < 55.0);                  // 41 Hz : le vrai 16'
+    CHECK (low.freq > 30.0);
+
+    ext = classic;
+    ext.extended = true;
+    for (auto& v : ext.taperDb[0]) v = 12;    // +12 dB sur toute l'étendue du 16'
+    const auto loud = measure (ext, 40);
+    CHECK (loud.rms / base.rms == Catch::Approx (4.0).epsilon (0.1)); // +12 dB = x3,98
 }

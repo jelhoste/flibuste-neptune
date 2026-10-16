@@ -21,6 +21,7 @@ module MIDI, aides de lecture de configuration copiées de `cfgParser.c`).
 ## Modifications faites par Neptune
 
 - `b_overdrive/overdrive.c` : les `printf` de débogage des fonctions de contrôle sont retirés (ils s'exécutaient dans le thread audio).
+- `src/tonegen.h/.c` : `userTaperOn` / `userTaperDb[9][5]` et `neptuneUserTaperDb()` : correction de niveau (dB) par tirette et par plage d'octave, multipliée au modèle de pondération (`taperingModel`) dans `applyManualDefaults` ; sans effet tant que `userTaperOn` vaut 0 (mode classique).
 - `compat/strings.h` : `<strings.h>` pour MSVC (`strcasecmp` -> `_stricmp`). Le reste des sources est inchangé.
 
 ## Limites connues

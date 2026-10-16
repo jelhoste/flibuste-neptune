@@ -358,6 +358,34 @@ OrganView::OrganView (ParamHost& host, const theme::Palette& palette, const i18n
     midiHint_.setJustificationType (juce::Justification::topLeft);
     addChildComponent (midiHint_);
 
+    // câblage : mode classique (setBfree tel quel) ou étendu (repli des graves, correction de niveau par tirette et par plage d'octave)
+    wiringMode_.addItem (text ("organ.wiring_classic"), 1);
+    wiringMode_.addItem (text ("organ.wiring_extended"), 2);
+    wiringMode_.onChange = [this]
+    {
+        if (updating_) return;
+        applyWiring();
+    };
+    addChildComponent (wiringMode_);
+    foldbackToggle_.setButtonText (text ("organ.foldback"));
+    foldbackToggle_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+    foldbackToggle_.onClick = [this] { if (! updating_) applyWiring(); };
+    addChildComponent (foldbackToggle_);
+    for (int i = 0; i < 9 * 5; ++i)
+    {
+        auto* s = taperSliders_.add (new juce::Slider);
+        s->setRange (-24.0, 12.0, 1.0);
+        s->setSliderStyle (juce::Slider::LinearBar);
+        s->setTextValueSuffix (" dB");
+        s->setColour (juce::Slider::trackColourId, colour (Token::Accent));
+        s->setColour (juce::Slider::backgroundColourId, colour (Token::Grid));
+        s->setColour (juce::Slider::textBoxTextColourId, colour (Token::Text));
+        // chaque changement reconstruit les roues : on n'applique qu'à la fin du glissé (ou pour un changement sans souris)
+        s->onValueChange = [this, s] { if (! updating_ && ! s->isMouseButtonDown()) applyWiring(); };
+        s->onDragEnd = [this] { if (! updating_) applyWiring(); };
+        addChildComponent (s);
+    }
+
     // onglets
     static const char* const pageKeys[4] = { "organ.page_drawbars", "organ.page_leslie", "organ.page_live", "organ.page_settings" };
     for (int i = 0; i < 4; ++i)
@@ -374,6 +402,20 @@ OrganView::OrganView (ParamHost& host, const theme::Palette& palette, const i18n
 }
 
 OrganView::~OrganView() = default;
+
+void OrganView::applyWiring()
+{
+    auto d = description_;
+    d.extended = wiringMode_.getSelectedId() == 2;
+    d.foldback = foldbackToggle_.getToggleState();
+    for (int b = 0; b < 9; ++b)
+        for (int k = 0; k < 5; ++k) d.taperDb[static_cast<std::size_t> (b)][static_cast<std::size_t> (k)] = static_cast<int> (taperSliders_[b * 5 + k]->getValue());
+    for (auto* s : taperSliders_) s->setEnabled (d.extended);
+    foldbackToggle_.setEnabled (d.extended);
+    if (d == description_) return;
+    description_ = d;
+    if (onChange) onChange (d);
+}
 
 void OrganView::setPage (Page p)
 {
@@ -403,6 +445,9 @@ void OrganView::updateVisibility()
     tuneLabel_.setVisible (set);
     tuneHint_.setVisible (set);
     midiHint_.setVisible (set);
+    wiringMode_.setVisible (set);
+    foldbackToggle_.setVisible (set);
+    for (auto* s : taperSliders_) s->setVisible (set);
 }
 
 void OrganView::bindTrack()
@@ -440,6 +485,14 @@ void OrganView::setDescription (const organ::OrganDescription& d)
     splitUpper_.setValue (d.splitUpper, juce::dontSendNotification);
     for (auto* l : leslieSliders_) l->slider.setValue (d.*(l->field), juce::dontSendNotification);
     tuneSlider_.setValue (d.tuningCents, juce::dontSendNotification);
+    wiringMode_.setSelectedId (d.extended ? 2 : 1, juce::dontSendNotification);
+    foldbackToggle_.setToggleState (d.foldback, juce::dontSendNotification);
+    for (int b = 0; b < 9; ++b)
+        for (int k = 0; k < 5; ++k)
+            if (! taperSliders_[b * 5 + k]->isMouseButtonDown())
+                taperSliders_[b * 5 + k]->setValue (d.taperDb[static_cast<std::size_t> (b)][static_cast<std::size_t> (k)], juce::dontSendNotification);
+    for (auto* s : taperSliders_) s->setEnabled (d.extended);
+    foldbackToggle_.setEnabled (d.extended);
     updating_ = false;
 }
 
@@ -621,19 +674,38 @@ void OrganView::layoutLeslie (juce::Rectangle<int> r)
     place (drum, { 2, 3, 6, 7 });
 }
 
-// Page Réglages : accord général et rappel des contrôleurs MIDI.
+// Page Réglages : à gauche l'accord général et le rappel des contrôleurs MIDI ; à droite le câblage du générateur (classique ou étendu).
 void OrganView::layoutSettings (juce::Rectangle<int> r)
 {
-    auto box = r.removeFromTop (130);
-    sections_.push_back ({ text ("organ.page_settings"), box });
+    auto left = r.removeFromLeft (400);
+    r.removeFromLeft (10);
+    auto box = left.removeFromTop (130);
+    sections_.push_back ({ text ("organ.tune_section"), box });
     auto a = box.withTrimmedTop (30).reduced (12, 4);
     tuneLabel_.setBounds (a.removeFromTop (22));
-    tuneSlider_.setBounds (a.removeFromTop (28).withWidth (juce::jmin (420, a.getWidth())));
-    tuneHint_.setBounds (a.removeFromTop (30));
-    r.removeFromTop (10);
-    auto midi = r.removeFromTop (150);
+    tuneSlider_.setBounds (a.removeFromTop (28).withWidth (juce::jmin (330, a.getWidth())));
+    tuneHint_.setBounds (a.removeFromTop (36));
+    left.removeFromTop (10);
+    auto midi = left;
     sections_.push_back ({ "MIDI", midi });
     midiHint_.setBounds (midi.withTrimmedTop (30).reduced (12, 4));
+
+    sections_.push_back ({ text ("organ.wiring"), r });
+    auto w = r.withTrimmedTop (28).reduced (12, 2);
+    auto top = w.removeFromTop (28);
+    wiringMode_.setBounds (top.removeFromLeft (200));
+    top.removeFromLeft (14);
+    foldbackToggle_.setBounds (top.removeFromLeft (340));
+    w.removeFromTop (6);
+    const int labelW = 64;
+    auto header = w.removeFromTop (18);
+    wiringGrid_ = w;
+    const int colW = (w.getWidth() - labelW) / 5;
+    (void) header;
+    const int rowH = juce::jmin (26, w.getHeight() / 9);
+    for (int b = 0; b < 9; ++b)
+        for (int k = 0; k < 5; ++k)
+            taperSliders_[b * 5 + k]->setBounds (w.getX() + labelW + k * colW + 3, w.getY() + b * rowH + 2, colW - 6, rowH - 4);
 }
 
 void OrganView::paint (juce::Graphics& g)
@@ -660,6 +732,18 @@ void OrganView::paint (juce::Graphics& g)
         g.drawText (juce::String::fromUTF8 (set.spec (index).name.c_str()), b.getCentreX() - 38, b.getBottom() + 1, 76, 14, juce::Justification::centred, true);
         g.setColour (colour (Token::Text));
         g.drawText (juce::String::fromUTF8 (set.toText (k->paramId()).c_str()), b.getCentreX() - 38, b.getBottom() + 14, 76, 14, juce::Justification::centred, true);
+    }
+    if (page_ == Page::Settings && ! wiringGrid_.isEmpty())
+    {
+        g.setColour (colour (Token::TextDim));
+        g.setFont (juce::FontOptions (10.0f));
+        static const char* const bands[5] = { "C2-B2", "C3-B3", "C4-B4", "C5-B5", "C6+" };
+        const int labelW = 64, colW = (wiringGrid_.getWidth() - labelW) / 5;
+        const int rowH = juce::jmin (26, wiringGrid_.getHeight() / 9);
+        for (int k = 0; k < 5; ++k)
+            g.drawText (bands[k], wiringGrid_.getX() + labelW + k * colW, wiringGrid_.getY() - 16, colW, 14, juce::Justification::centred, true);
+        for (int b = 0; b < 9; ++b)
+            g.drawText (kFootage[b], wiringGrid_.getX(), wiringGrid_.getY() + b * rowH, labelW - 6, rowH, juce::Justification::centredRight, true);
     }
     if (page_ == Page::Leslie)
     {

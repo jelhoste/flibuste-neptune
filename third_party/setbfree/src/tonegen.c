@@ -622,6 +622,30 @@ taperingModel (int key, int bus)
 /**
  * Applies the built-in default model to the manual tapering and crosstalk.
  */
+/**
+ * Neptune : correction de niveau (dB) demandée par l'utilisateur pour la touche k (0..60) et la tirette b (0..8) : interpolation
+ * linéaire (en dB) entre les centres des cinq plages d'octave.
+ */
+static double
+neptuneUserTaperDb (const struct b_tonegen* t, int k, int b)
+{
+	static const double centre[5] = { 6.0, 18.0, 30.0, 42.0, 54.0 };
+	int i;
+	if (!t->userTaperOn) {
+		return 0.0;
+	}
+	if (k <= centre[0]) {
+		return t->userTaperDb[b][0];
+	}
+	for (i = 0; i < 4; i++) {
+		if (k <= centre[i + 1]) {
+			const double u = (k - centre[i]) / (centre[i + 1] - centre[i]);
+			return t->userTaperDb[b][i] + u * (t->userTaperDb[b][i + 1] - t->userTaperDb[b][i]);
+		}
+	}
+	return t->userTaperDb[b][4];
+}
+
 static void
 applyManualDefaults (struct b_tonegen* t, int keyOffset, int busOffset)
 {
@@ -684,7 +708,7 @@ applyManualDefaults (struct b_tonegen* t, int keyOffset, int busOffset)
 				lep                   = newConfigListElement (t);
 				LE_TERMINAL_OF (lep)  = (short)terminalNumber;
 				LE_BUSNUMBER_OF (lep) = (short)(b + busOffset);
-				LE_LEVEL_OF (lep)     = (float)taperingModel (k, b);
+				LE_LEVEL_OF (lep)     = (float)(taperingModel (k, b) * dBToGain (neptuneUserTaperDb (t, k, b)));
 
 				appendListElement (&(t->keyTaper[keyNumber]), lep);
 			}

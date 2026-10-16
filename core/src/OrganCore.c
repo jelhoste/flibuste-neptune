@@ -400,7 +400,7 @@ nb3_free_parts (nb3_engine* e)
 }
 
 static nb3_engine*
-nb3_create_impl (double sampleRate, double refA_Hz)
+nb3_create_impl (double sampleRate, double refA_Hz, const nb3_wiring* wiring)
 {
 	nb3_engine* e = (nb3_engine*)calloc (1, sizeof (nb3_engine));
 	if (e == NULL) return NULL;
@@ -416,8 +416,16 @@ nb3_create_impl (double sampleRate, double refA_Hz)
 		free (e);
 		return NULL;
 	}
-	/* l'accord se fixe avant la construction des tables d'ondes */
+	/* l'accord et le câblage se fixent avant la construction des tables d'ondes */
 	if (refA_Hz >= 220.0 && refA_Hz <= 880.0) setTuning (e->inst.synth, refA_Hz);
+	if (wiring != NULL)
+	{
+		int b, o;
+		if (!wiring->foldback) setToneGeneratorModel (e->inst.synth, TG_91FB00);
+		e->inst.synth->userTaperOn = wiring->taperOn ? 1 : 0;
+		for (b = 0; b < 9; ++b)
+			for (o = 0; o < 5; ++o) e->inst.synth->userTaperDb[b][o] = wiring->taperDb[b][o];
+	}
 	/* équivalent de initSynth() de setBfree (b_synth/lv2.c) sans le module MIDI, les programmes ni l'état courant */
 	initToneGenerator (e->inst.synth, e);
 	initVibrato (e->inst.synth, e);
@@ -434,8 +442,9 @@ nb3_create_impl (double sampleRate, double refA_Hz)
 	return e;
 }
 
-nb3_engine* nb3_create (double sampleRate) { return nb3_create_impl (sampleRate, 0.0); }
-nb3_engine* nb3_create_tuned (double sampleRate, double refA_Hz) { return nb3_create_impl (sampleRate, refA_Hz); }
+nb3_engine* nb3_create (double sampleRate) { return nb3_create_impl (sampleRate, 0.0, NULL); }
+nb3_engine* nb3_create_tuned (double sampleRate, double refA_Hz) { return nb3_create_impl (sampleRate, refA_Hz, NULL); }
+nb3_engine* nb3_create_ex (double sampleRate, double refA_Hz, const nb3_wiring* wiring) { return nb3_create_impl (sampleRate, refA_Hz, wiring); }
 
 void
 nb3_destroy (nb3_engine* e)

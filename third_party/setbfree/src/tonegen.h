@@ -165,6 +165,14 @@ typedef struct _connection {
 
 struct b_tonegen {
 	/**
+	 * Neptune : correction de niveau (dB) appliquée (en gain) au modèle de pondération (tapering) par défaut des claviers, par tirette (bus 0..8)
+	 * et par plage d'octave (touches 0..11, 12..23, 24..35, 36..47, 48..60), avec interpolation entre les centres des plages.
+	 * Lue une seule fois, à la construction des tables (applyManualDefaults) ; sans effet si userTaperOn vaut 0.
+	 */
+	int   userTaperOn;
+	float userTaperDb[9][5];
+
+	/**
  * The leConfig pointer points to ListElements allocated during config.
  * The referenced memory is released once config is complete.
  */

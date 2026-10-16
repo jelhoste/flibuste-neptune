@@ -110,7 +110,7 @@ void Engine::publishOrgan (int track, std::shared_ptr<const organ::OrganDescript
 {
     if (track < 0 || track >= kTracks) return;
     auto& t = tracks_[static_cast<std::size_t> (track)];
-    t.organ.requestTuning (description->tuningCents); // l'accord fixe les tables d'ondes : un nouvel orgue est construit ici
+    t.organ.requestBuild (*description); // l'accord et le câblage fixent les tables d'ondes : un nouvel orgue est construit ici
     t.organSlot.publish (std::move (description));
 }
 

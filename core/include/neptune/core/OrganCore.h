@@ -15,6 +15,17 @@ typedef struct nb3_engine nb3_engine;
 // tables d'ondes, donc il se choisit à la création.
 nb3_engine* nb3_create (double sampleRate);
 nb3_engine* nb3_create_tuned (double sampleRate, double refA_Hz);
+
+// Câblage « étendu » : repli des 12 premières touches (comme setBfree par défaut) ou non, et correction de niveau en dB par tirette
+// (9) et par plage d'octave (5 : do 2, do 3, do 4, do 5, do 6 et au-dessus), ajoutée au modèle de pondération de setBfree. Comme
+// l'accord, il se fixe à la construction.
+typedef struct
+{
+	int foldback;           /* 1 : repli des 12 notes graves (setBfree) ; 0 : le 16' descend à sa vraie hauteur */
+	int taperOn;            /* 0 : modèle de setBfree seul */
+	float taperDb[9][5];
+} nb3_wiring;
+nb3_engine* nb3_create_ex (double sampleRate, double refA_Hz, const nb3_wiring* wiring);
 void nb3_destroy (nb3_engine*);
 
 // Touche du clavier de setBfree : 0..60 manuel supérieur, 64..124 inférieur, 128..159 pédalier.

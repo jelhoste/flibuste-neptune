@@ -153,7 +153,7 @@ void OrganSynthEngine::prepare (double sampleRate, int)
 void OrganSynthEngine::setDescription (const OrganDescription& d)
 {
     description_ = sanitised (d);
-    voices_.requestTuning (description_.tuningCents);
+    voices_.requestBuild (description_);
     slot_.publish (std::make_shared<const OrganDescription> (description_));
     slot_.collect();
 }

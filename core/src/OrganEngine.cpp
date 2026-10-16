@@ -67,6 +67,8 @@ OrganDescription sanitised (OrganDescription d)
     d.drumAcc = std::clamp (d.drumAcc, 0.5, 10.0);
     d.drumDec = std::clamp (d.drumDec, 0.5, 10.0);
     d.hornLevel = std::clamp (d.hornLevel, 0.0, 1.0);
+    for (auto& row : d.taperDb)
+        for (auto& v : row) v = std::clamp (v, -24, 12);
     return d;
 }
 
@@ -78,6 +80,7 @@ std::string toJson (const OrganDescription& d)
     o["split_upper"] = d.splitUpper;
     o["transpose"] = d.transpose;
     o["tuning_cents"] = d.tuningCents;
+    o["wiring"] = { { "extended", d.extended }, { "foldback", d.foldback }, { "taper_db", d.taperDb } };
     o["leslie"] = { { "horn_slow_rpm", d.hornSlowRpm }, { "horn_fast_rpm", d.hornFastRpm }, { "drum_slow_rpm", d.drumSlowRpm },
                     { "drum_fast_rpm", d.drumFastRpm }, { "horn_acc", d.hornAcc }, { "horn_dec", d.hornDec }, { "drum_acc", d.drumAcc },
                     { "drum_dec", d.drumDec }, { "horn_level", d.hornLevel } };
@@ -106,6 +109,16 @@ OrganDescription organFromJson (std::string_view text)
     d.splitUpper = num ("split_upper", d.splitUpper);
     arr ("transpose", d.transpose);
     d.tuningCents = num ("tuning_cents", d.tuningCents);
+    if (const auto w = o.find ("wiring"); w != o.end() && w->is_object())
+    {
+        if (const auto it = w->find ("extended"); it != w->end() && it->is_boolean()) d.extended = it->get<bool>();
+        if (const auto it = w->find ("foldback"); it != w->end() && it->is_boolean()) d.foldback = it->get<bool>();
+        if (const auto it = w->find ("taper_db"); it != w->end() && it->is_array() && it->size() == 9)
+            for (std::size_t b = 0; b < 9; ++b)
+                if ((*it)[b].is_array() && (*it)[b].size() == 5)
+                    for (std::size_t k = 0; k < 5; ++k)
+                        if ((*it)[b][k].is_number()) d.taperDb[b][k] = (*it)[b][k].get<int>();
+    }
     if (const auto l = o.find ("leslie"); l != o.end() && l->is_object())
     {
         auto real = [&l] (const char* key, double fallback)
@@ -155,6 +168,18 @@ struct OrganVoices::Impl
     std::atomic<nb3_engine*> pending { nullptr };   // orgue accordé autrement, construit par le thread de message
     std::atomic<nb3_engine*> retired { nullptr };   // orgue remplacé, à libérer par le thread de message
     int tuningCents = 0;                            // accord de l'orgue en cours ou en attente (thread de message)
+    bool extended = false, foldback = true;         // câblage idem
+    std::array<std::array<int, 5>, 9> taperDb {};
+
+    nb3_engine* build (double rate) const
+    {
+        nb3_wiring w {};
+        w.foldback = ! extended || foldback ? 1 : 0;
+        w.taperOn = extended ? 1 : 0;
+        for (std::size_t b = 0; b < 9; ++b)
+            for (std::size_t k = 0; k < 5; ++k) w.taperDb[b][k] = extended ? static_cast<float> (taperDb[b][k]) : 0.0f;
+        return nb3_create_ex (rate, 440.0 * std::pow (2.0, tuningCents / 1200.0), &w);
+    }
     double sampleRate = 0.0;
     std::array<std::int16_t, 16 * 128> held; // clavier de setBfree par (canal, note) ; -1 : aucune
     std::array<std::uint8_t, 160> keyCount {};  // nombre de notes qui tiennent chaque touche
@@ -228,7 +253,7 @@ bool OrganVoices::reserve (double sampleRate)
     reserved_.store (false, std::memory_order_release);
     if (impl_->engine != nullptr) { nb3_destroy (impl_->engine); impl_->engine = nullptr; }
     if (auto* p = impl_->pending.exchange (nullptr)) nb3_destroy (p);
-    impl_->engine = nb3_create_tuned (sampleRate, 440.0 * std::pow (2.0, impl_->tuningCents / 1200.0));
+    impl_->engine = impl_->build (sampleRate);
     impl_->sampleRate = sampleRate;
     impl_->haveApplied = false;
     impl_->held.fill (-1);
@@ -238,13 +263,20 @@ bool OrganVoices::reserve (double sampleRate)
     return true;
 }
 
-void OrganVoices::requestTuning (int cents)
+void OrganVoices::requestBuild (const OrganDescription& d)
 {
-    cents = std::clamp (cents, -100, 100);
-    if (cents == impl_->tuningCents) return;
+    const int cents = std::clamp (d.tuningCents, -100, 100);
+    // en mode classique, le câblage étendu est ignoré : on ne reconstruit rien pour un réglage qui n'agit pas
+    const bool ext = d.extended;
+    const bool fold = d.foldback;
+    const auto taper = d.taperDb;
+    if (cents == impl_->tuningCents && ext == impl_->extended && (! ext || (fold == impl_->foldback && taper == impl_->taperDb))) return;
     impl_->tuningCents = cents;
-    if (! reserved()) return; // reserve() créera l'orgue à cet accord
-    auto* fresh = nb3_create_tuned (impl_->sampleRate, 440.0 * std::pow (2.0, cents / 1200.0));
+    impl_->extended = ext;
+    impl_->foldback = fold;
+    impl_->taperDb = taper;
+    if (! reserved()) return; // reserve() créera l'orgue avec ces réglages
+    auto* fresh = impl_->build (impl_->sampleRate);
     if (fresh == nullptr) return;
     if (auto* old = impl_->pending.exchange (fresh)) nb3_destroy (old); // une demande plus récente remplace celle qui n'a pas été adoptée
 }

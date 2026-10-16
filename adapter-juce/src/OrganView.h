@@ -81,6 +81,11 @@ private:
     juce::OwnedArray<SpeedSquare> squares_;
     juce::OwnedArray<LeslieSlider> leslieSliders_;
     juce::Slider tuneSlider_;
+    juce::ComboBox wiringMode_;                       // Classique (portage de setBfree) / Étendu
+    juce::ToggleButton foldbackToggle_;
+    juce::OwnedArray<juce::Slider> taperSliders_;     // 9 tirettes x 5 plages d'octave, rangés par tirette
+    juce::Rectangle<int> wiringGrid_;
+    void applyWiring();                               // relit la grille et notifie (fin de geste seulement : chaque changement reconstruit les roues)
     juce::Label tuneLabel_, tuneHint_, midiHint_;
     juce::Rectangle<int> contentArea_;
     juce::OwnedArray<ComboLink> combos_;

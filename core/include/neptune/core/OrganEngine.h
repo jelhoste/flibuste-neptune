@@ -31,12 +31,18 @@ struct OrganDescription
     double drumAcc = 4.127, drumDec = 1.371;            // 0.5..10
     double hornLevel = 0.7;                             // 0..1 : niveau du cornet
 
+    // Mode « étendu » du câblage (le mode classique est le portage de setBfree tel quel) : repli des graves et correction de niveau
+    // par tirette et par plage d'octave (dB). Fixé à la construction du moteur (comme l'accord).
+    bool extended = false;
+    bool foldback = true;                               // étendu seulement : repli des 12 notes graves du 16'
+    std::array<std::array<int, 5>, 9> taperDb {};       // -24..+12 dB ; plages : do 2, do 3, do 4, do 5, do 6 et au-dessus
+
     bool operator== (const OrganDescription& o) const noexcept
     {
         return channel == o.channel && splitLower == o.splitLower && splitUpper == o.splitUpper && transpose == o.transpose
             && tuningCents == o.tuningCents && hornSlowRpm == o.hornSlowRpm && hornFastRpm == o.hornFastRpm && drumSlowRpm == o.drumSlowRpm
             && drumFastRpm == o.drumFastRpm && hornAcc == o.hornAcc && hornDec == o.hornDec && drumAcc == o.drumAcc && drumDec == o.drumDec
-            && hornLevel == o.hornLevel;
+            && hornLevel == o.hornLevel && extended == o.extended && foldback == o.foldback && taperDb == o.taperDb;
     }
     bool operator!= (const OrganDescription& o) const noexcept { return ! (*this == o); }
 };
@@ -80,9 +86,9 @@ public:
     bool reserved() const noexcept { return reserved_.load (std::memory_order_acquire); }
     // Description adoptée (nulle : celle par défaut). Thread audio : elle sert au routage des notes et au Leslie.
     void setDescription (const OrganDescription* d) noexcept { desc_ = d; leslieDirty_ = true; }
-    // Thread de message : l'accord (cents) fixe les tables d'ondes. Un autre accord construit un nouvel orgue, que l'audio adopte au
-    // bloc suivant (les touches tenues sont rejouées) ; l'ancien est libéré par collect().
-    void requestTuning (int cents);
+    // Thread de message : l'accord et le câblage (mode étendu) fixent les tables d'ondes. Un autre accord ou câblage construit un nouvel
+    // orgue, que l'audio adopte au bloc suivant (les touches tenues sont rejouées) ; l'ancien est libéré par collect().
+    void requestBuild (const OrganDescription&);
     void collect();                                  // thread de message : libère l'orgue remplacé
 
     void noteOn (int channel, int note) noexcept;    // canal 0..15 (hôte), note 0..127
