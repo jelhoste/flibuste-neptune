@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "PluginProcessor.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
@@ -803,12 +804,12 @@ void NeptuneProcessor::seedHostParameters (const std::vector<std::pair<neptune::
         const double v = params_.spec (index).clamp (raw);
         if (params_.getAt (index) == v) continue;
         params_.set (pid, v);
-        if (! notifyHostOnSeed_ || index >= static_cast<std::size_t> (getParameters().size())) continue; // état en cours de chargement : l'hôte relit tout après
-        if (auto* hostParam = getParameters()[static_cast<int> (index)])
+        if (! notifyHostOnSeed_) continue; // état en cours de chargement : l'hôte relit tout après
+        if (auto* hp = hostParam (index))
         {
-            hostParam->beginChangeGesture();
-            hostParam->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
-            hostParam->endChangeGesture();
+            hp->beginChangeGesture();
+            hp->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+            hp->endChangeGesture();
         }
     }
 }
@@ -920,10 +921,12 @@ bool NeptuneProcessor::loadPreset (const std::string& id)
         const double v = params_.spec (index).clamp (raw);
         if (params_.getAt (index) == v) continue;
         undo_.setParameter (params_, pid, v);
-        auto* hostParam = getParameters()[static_cast<int> (index)];
-        hostParam->beginChangeGesture();
-        hostParam->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
-        hostParam->endChangeGesture();
+        if (auto* hp = hostParam (index))
+        {
+            hp->beginChangeGesture();
+            hp->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+            hp->endChangeGesture();
+        }
     }
     undo_.endTransaction();
     control_.resetPickup(); // les assignations « reprise » attendent de nouveau le passage de la source
@@ -1173,13 +1176,13 @@ NeptuneProcessor::NeptuneProcessor()
     jassert (samplerOk);
     const bool mixerOk = neptune::core::mixer::addParams (params_, probeTracks_, neptune::core::mixer::numBuses, &error);
     jassert (mixerOk);
-    juce::ignoreUnused (ok, samplerOk, mixerOk);
+    const bool macrosOk = neptune::core::control::addMacroParams (params_, &error);
+    jassert (macrosOk);
+    juce::ignoreUnused (ok, samplerOk, mixerOk, macrosOk);
+    macroFirst_ = params_.indexOf (neptune::core::control::macroParamId (0));
     engine_.attachParameters (&params_);
     mixer_ = neptune::core::MixerState::freshProject(); // projet neuf : une seule piste, un synthé
     pushMixerSettingsToEngine();
-
-    for (std::size_t i = 0; i < params_.size(); ++i)
-        addParameter (new NeptuneParameter (params_, i, hostProbe_)); // l'AudioProcessor en prend la propriété
 
     // Réglages globaux : lus une fois au démarrage ; le fichier est créé avec les valeurs par défaut s'il manque.
     const auto configDir = configDirectory();
@@ -1188,6 +1191,15 @@ NeptuneProcessor::NeptuneProcessor()
     settings_ = neptune::core::settings::loadFile (settingsFile_, &warnings);
     for (const auto& w : warnings)
         DBG ("Neptune settings: " << juce::String (w));
+
+    // Paramètres déclarés à l'hôte (il lit la liste une fois) : tous, ou seulement les bandes et les macros (réglage global, lu ici).
+    hostIndex_.assign (params_.size(), -1);
+    for (std::size_t i = 0; i < params_.size(); ++i)
+    {
+        if (settings_.reducedHostList && ! neptune::core::control::isBandOrMacroParam (params_.spec (i).id)) continue;
+        hostIndex_[i] = getParameters().size();
+        addParameter (new NeptuneParameter (params_, i, hostProbe_)); // l'AudioProcessor en prend la propriété
+    }
     loader_ = std::make_unique<InstrumentLoader> (*this);
     {
         // Presets de synthé : la même bibliothèque qu'AnalogSynth (dossier choisi dans les réglages, sinon <config>/AnalogSynth).
@@ -1277,6 +1289,62 @@ void NeptuneProcessor::uiClearControllers()
 
 // Relais du thread de message : actions demandées par une source (preset suivant, panique...) et paramètres modifiés par une source
 // externe, signalés à l'hôte (regroupés : une notification par paramètre et par tic).
+bool NeptuneProcessor::canAssignMacro (neptune::core::ParamId id) const
+{
+    using namespace neptune::core;
+    return params_.find (id) != nullptr && ! (id >= control::kMacroBase && id < control::kMacroBase + static_cast<ParamId> (control::kMacros));
+}
+
+std::vector<int> NeptuneProcessor::macrosOf (neptune::core::ParamId id) const
+{
+    using namespace neptune::core::control;
+    std::vector<int> out;
+    for (const auto& b : control_.config().bindings)
+        if (b.source.kind == SourceKind::Macro && ! b.target.isAction && b.target.param == id) out.push_back (b.source.number);
+    return out;
+}
+
+void NeptuneProcessor::uiToggleMacro (neptune::core::ParamId id, int macro)
+{
+    using namespace neptune::core::control;
+    if (! canAssignMacro (id) || macro < 0 || macro >= kMacros) return;
+    auto c = control_.config();
+    const auto before = c.bindings.size();
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
+                      { return b.source.kind == SourceKind::Macro && b.source.number == macro && ! b.target.isAction && b.target.param == id; }), c.bindings.end());
+    if (c.bindings.size() == before)
+    {
+        Binding b;
+        b.source.kind = SourceKind::Macro;
+        b.source.number = macro;
+        b.target.param = id;
+        c.bindings.push_back (std::move (b));
+    }
+    uiSetControlConfig (std::move (c));
+}
+
+void NeptuneProcessor::uiClearMacros (neptune::core::ParamId id)
+{
+    using namespace neptune::core::control;
+    auto c = control_.config();
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(), [&] (const Binding& b)
+                      { return b.source.kind == SourceKind::Macro && ! b.target.isAction && b.target.param == id; }), c.bindings.end());
+    uiSetControlConfig (std::move (c));
+}
+
+std::string NeptuneProcessor::uiText (std::string_view key) const
+{
+    return std::string (neptune::core::i18n::Translator (settings_.language).tr (key));
+}
+
+void NeptuneProcessor::uiSetReducedHostList (bool on)
+{
+    if (settings_.reducedHostList == on) return;
+    settings_.reducedHostList = on;
+    std::string error;
+    neptune::core::settings::saveFile (settingsFile_, settings_, &error);   // lu au prochain chargement du plugin
+}
+
 void NeptuneProcessor::syncOsc()
 {
     const auto now = control_.settings();
@@ -1336,9 +1404,8 @@ void NeptuneProcessor::controlTick()
     std::vector<std::size_t> changed;
     if (control_.drainChanges (changed) == 0) return;
     for (const auto index : changed)
-        if (index < static_cast<std::size_t> (getParameters().size()))
+        if (auto* p = hostParam (index))
         {
-            auto* p = getParameters()[static_cast<int> (index)];
             p->beginChangeGesture();
             p->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
             p->endChangeGesture();
@@ -1363,7 +1430,7 @@ void NeptuneProcessor::uiBeginEdit (neptune::core::ParamId id)
 {
     const auto index = params_.indexOf (id);
     if (index == neptune::core::ParameterSet::npos) return;
-    getParameters()[static_cast<int> (index)]->beginChangeGesture();
+    if (auto* hp = hostParam (index)) hp->beginChangeGesture();
     undo_.beginGesture();
 }
 
@@ -1373,7 +1440,7 @@ void NeptuneProcessor::uiSetNormalised (neptune::core::ParamId id, double normal
     if (index == neptune::core::ParameterSet::npos) return;
     // D'abord le cœur par la pile d'annulation (elle lit l'ancienne valeur), puis l'hôte est prévenu.
     undo_.setParameter (params_, id, params_.spec (index).fromNormalized (normalised));
-    getParameters()[static_cast<int> (index)]->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+    if (auto* hp = hostParam (index)) hp->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
 }
 
 void NeptuneProcessor::uiEndEdit (neptune::core::ParamId id)
@@ -1381,7 +1448,7 @@ void NeptuneProcessor::uiEndEdit (neptune::core::ParamId id)
     const auto index = params_.indexOf (id);
     if (index == neptune::core::ParameterSet::npos) return;
     undo_.endGesture();
-    getParameters()[static_cast<int> (index)]->endChangeGesture();
+    if (auto* hp = hostParam (index)) hp->endChangeGesture();
 }
 
 void NeptuneProcessor::uiResetToDefault (neptune::core::ParamId id)
@@ -1489,6 +1556,7 @@ void NeptuneProcessor::restoreRecovered()
     else
     {
         profile_.setLocked (result.profileLock);
+        macroResync_.store (true);
         control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
         adoptMixerFromState (result.mixer);
     }
@@ -1554,6 +1622,19 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             control_.controlChange (msg.getChannel() - 1, msg.getControllerNumber(), msg.getControllerValue(), params_); // désactivé par défaut
     }
 
+    // Macros : une macro dont la valeur a changé (automation de l'hôte, interface, OSC) écrit les cibles qui lui sont assignées. Après le
+    // chargement d'un état, on mémorise les valeurs sans rien appliquer (les cibles ont déjà leurs valeurs enregistrées).
+    {
+        const bool resync = macroResync_.exchange (false, std::memory_order_acq_rel);
+        for (int m = 0; m < neptune::core::control::kMacros; ++m)
+        {
+            const double v = params_.getNormalizedAt (macroFirst_ + static_cast<std::size_t> (m));
+            if (v == macroSeen_[static_cast<std::size_t> (m)]) continue;
+            macroSeen_[static_cast<std::size_t> (m)] = v;
+            if (! resync) control_.macroChanged (m, v, params_);
+        }
+    }
+
     engine_.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
 }
 
@@ -1579,6 +1660,7 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
     undo_.clear(); // l'historique d'un autre état ne s'applique plus (il restaurerait un ancien instrument)
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
     // couche de contrôle : absente des projets d'avant (tout désactivé)
+    macroResync_.store (true);
     control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
     notifyHostOnSeed_ = false; // le rescan ci-dessous prévient l'hôte des valeurs d'enveloppe recopiées depuis les descriptions
     adoptMixerFromState (result.mixer);

@@ -69,6 +69,7 @@ std::string toJson (const GlobalSettings& s)
     o["export_dir"] = s.exportDir;
     o["autosave_interval_seconds"] = s.autosaveIntervalSeconds;
     o["autosave_keep_days"] = s.autosaveKeepDays;
+    o["reduced_host_list"] = s.reducedHostList;
     return o.dump (2);
 }
 
@@ -121,6 +122,7 @@ GlobalSettings fromJson (std::string_view text, std::vector<std::string>* warnin
     }
     s.autosaveIntervalSeconds = interval;
     s.autosaveKeepDays = readInt (doc, "autosave_keep_days", s.autosaveKeepDays, 1, 365, warnings);
+    if (const auto it = doc.find ("reduced_host_list"); it != doc.end() && it->is_boolean()) s.reducedHostList = it->get<bool>();
     return s;
 }
 

@@ -20,6 +20,7 @@ void buildFullPool (ParameterSet& set)
     REQUIRE (probe::buildPool (set, mixer::numTracks, &error));
     REQUIRE (sampler::addParams (set, &error));
     REQUIRE (mixer::addParams (set, mixer::numTracks, mixer::numBuses, &error));
+    REQUIRE (control::addMacroParams (set, &error));
 }
 
 osc::Message msg (const std::string& address, double value, char type = 'f')
@@ -122,6 +123,8 @@ TEST_CASE ("osc: the address table is frozen (golden addresses)", "[osc]")
     CHECK (osc::addressFor (9220) == "/neptune/track/3/organ/percussion/on");
     CHECK (osc::addressFor (9227) == "/neptune/track/3/organ/leslie/speed");
     CHECK (osc::addressFor (12000 + 16 * 2 + 3) == "/neptune/track/3/slot/4");
+    CHECK (osc::addressFor (13000) == "/neptune/macro/1");
+    CHECK (osc::addressFor (13031) == "/neptune/macro/32");
     CHECK (osc::addressFor (424242).empty());
     ParamId id = 0;
     CHECK_FALSE (osc::paramForAddress ("/neptune/track/99/volume", id));

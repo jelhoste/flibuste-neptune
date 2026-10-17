@@ -1339,8 +1339,11 @@ void NeptuneEditor::showControlMenu()
     menu.addSeparator();
     menu.addItem (2, text ("control.assign_organ"), organ);
     menu.addItem (3, text ("control.clear") + " (" + juce::String (static_cast<int> (cfg.bindings.size())) + ")", ! cfg.bindings.empty());
+    menu.addSeparator();
+    const bool reduced = processor_.reducedHostList();
+    menu.addItem (4, text ("macro.reduced"), true, reduced);
     juce::Component::SafePointer<NeptuneEditor> safe (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlButton_), [safe, on] (int choice)
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlButton_), [safe, on, reduced] (int choice)
     {
         if (safe == nullptr) return;
         if (choice == 1) safe->processor_.uiSetCcEnabled (! on);
@@ -1350,6 +1353,7 @@ void NeptuneEditor::showControlMenu()
             safe->processor_.uiSetCcEnabled (true); // assigner sans activer n'aurait pas d'effet audible : on active
         }
         else if (choice == 3) safe->processor_.uiClearControllers();
+        else if (choice == 4) safe->processor_.uiSetReducedHostList (! reduced);
     });
 }
 

@@ -48,6 +48,7 @@ public:
 
 private:
     void timerCallback() override;
+    void showMacroMenu();
     static double nowMs() { return juce::Time::getMillisecondCounterHiRes(); }
     juce::Colour colour (neptune::core::theme::Token t) const;
     neptune::core::uistate::Terminal terminal() const

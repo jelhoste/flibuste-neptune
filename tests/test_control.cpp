@@ -220,7 +220,6 @@ TEST_CASE ("control: configuration round trips, is sanitised and everything is o
     Config empty;
     CHECK_FALSE (empty.settings.ccEnabled);
     CHECK_FALSE (empty.settings.oscEnabled);
-    CHECK_FALSE (empty.settings.reducedHostList);
     CHECK (configFromJson ("pas du json") == Config {});
     CHECK_FALSE (configFromJson ("{}").settings.ccEnabled);
 
@@ -229,7 +228,6 @@ TEST_CASE ("control: configuration round trips, is sanitised and everything is o
     c.settings.oscPort = 9100;
     c.settings.feedbackHost = "192.168.1.20";
     c.settings.feedbackPort = 9001;
-    c.settings.reducedHostList = true;
     auto b = cc (2, 74, kCutoff);
     b.lo = 0.1; b.hi = 0.9; b.curve = 2.0; b.invert = true; b.mode = Mode::Pickup;
     c.bindings.push_back (b);
@@ -277,4 +275,47 @@ TEST_CASE ("control: reconfiguring while the audio side is running is safe and t
     r.engine.collectGarbage();
     r.engine.controlChange (0, 8, 127, r.set);
     CHECK (r.set.get (kCutoff) == Approx (20000.0));
+}
+
+TEST_CASE ("control: the macro pool declares 32 parameters and a macro moves its targets", "[control]")
+{
+    ParameterSet set;
+    REQUIRE (addMacroParams (set));
+    CHECK (set.size() == static_cast<std::size_t> (kMacros));
+    CHECK (set.find (macroParamId (0)) != nullptr);
+    CHECK (set.find (macroParamId (31)) != nullptr);
+    CHECK (set.find (macroParamId (32)) == nullptr);
+    CHECK (set.find (macroParamId (5))->name == "Macro 6");
+    CHECK (set.get (macroParamId (3)) == Approx (0.0));
+
+    REQUIRE (set.add (ParamSpec::continuous (kVolume, "Volume", Unit::Decibel, -60.0, 6.0, 0.0)));
+    ControlEngine engine;
+    Config c;
+    Binding b;
+    b.source.kind = SourceKind::Macro;
+    b.source.number = 2;
+    b.target.param = kVolume;
+    c.bindings.push_back (b);
+    engine.configure (c, set);
+    engine.macroChanged (2, 1.0, set);
+    CHECK (set.get (kVolume) == Approx (6.0));
+    engine.macroChanged (3, 0.0, set);      // une autre macro ne touche rien
+    CHECK (set.get (kVolume) == Approx (6.0));
+}
+
+TEST_CASE ("control: the reduced host list keeps strips, master and macros only", "[control]")
+{
+    CHECK (isBandOrMacroParam (1));                  // volume du master
+    CHECK (isBandOrMacroParam (1000));               // volume de la piste 1
+    CHECK (isBandOrMacroParam (1010 + 100 * 3));     // bypass d'insert 1 de la piste 4
+    CHECK (isBandOrMacroParam (1027));               // niveau d'envoi 8
+    CHECK (isBandOrMacroParam (3100));               // volume du bus 2
+    CHECK (isBandOrMacroParam (5004 + 100 * 31));    // dernière piste parallèle
+    CHECK (isBandOrMacroParam (macroParamId (10)));
+    CHECK_FALSE (isBandOrMacroParam (100));          // gain du sampler (piste 1)
+    CHECK_FALSE (isBandOrMacroParam (1030));         // paramètre d'instrument
+    CHECK_FALSE (isBandOrMacroParam (1040));         // synthé
+    CHECK_FALSE (isBandOrMacroParam (9033));         // orgue
+    CHECK_FALSE (isBandOrMacroParam (12000));        // emplacements
+    CHECK_FALSE (isBandOrMacroParam (13032));
 }

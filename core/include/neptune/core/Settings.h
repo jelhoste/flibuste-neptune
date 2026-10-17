@@ -28,6 +28,10 @@ struct GlobalSettings
     int autosaveIntervalSeconds = 60; // 0 = autosave désactivé ; sinon 5..3600
     int autosaveKeepDays = 30;        // les autosaves orphelins plus vieux sont supprimés ; 1..365
 
+    // Neptune : ne déclare à l'hôte que les paramètres de bande et le pool de macros (voir control::isBandOrMacroParam). Lu à la création de
+    // l'instance (l'hôte lit la liste une fois) : un changement ne joue qu'au prochain chargement. Casse l'automation déjà enregistrée sur les autres.
+    bool reducedHostList = false;
+
 };
 
 std::string toJson (const GlobalSettings& s);

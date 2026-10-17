@@ -23,6 +23,15 @@ constexpr int kMaxBindings = 512;
 constexpr int kMacros = 32;           // taille du pool de macros assignables
 constexpr int kMaxAddressLength = 128;
 
+// Pool de macros : kMacros paramètres visibles de l'hôte (« Macro 1 » à « Macro 32 », 0..100 %), identifiants 13000 + indice. Quand une macro
+// change (automation de l'hôte, interface, OSC), les assignations dont elle est la source écrivent leurs cibles (ControlEngine::macroChanged).
+constexpr ParamId kMacroBase = 13000;
+constexpr ParamId macroParamId (int index) noexcept { return kMacroBase + static_cast<ParamId> (index); }
+bool addMacroParams (ParameterSet&, std::string* error = nullptr);
+// Paramètres de « bande » (volume, pan, mute, solo, inserts, envois du master, des pistes, bus et pistes parallèles) et macros : ce que garde
+// la liste réduite des paramètres visibles de l'hôte.
+bool isBandOrMacroParam (ParamId) noexcept;
+
 enum class SourceKind { CC, Osc, Macro };
 enum class Action { None = 0, PresetNext, PresetPrevious, Panic, TrackNext, TrackPrevious };
 constexpr int kNumActions = 6;
@@ -71,11 +80,10 @@ struct Settings
     bool oscAllInterfaces = false;   // écoute sur le réseau local ; sinon seulement sur cette machine (localhost)
     std::string feedbackHost;        // retour d'information OSC (vide : aucun)
     int feedbackPort = 0;
-    bool reducedHostList = false;    // ne montre à l'hôte que les paramètres de bande et le pool de macros
     bool operator== (const Settings& o) const noexcept
     {
         return ccEnabled == o.ccEnabled && oscEnabled == o.oscEnabled && oscPort == o.oscPort && oscAllInterfaces == o.oscAllInterfaces && feedbackHost == o.feedbackHost
-            && feedbackPort == o.feedbackPort && reducedHostList == o.reducedHostList;
+            && feedbackPort == o.feedbackPort;
     }
 };
 

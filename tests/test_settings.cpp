@@ -125,3 +125,13 @@ TEST_CASE ("atomic write replaces an existing file")
     REQUIRE (fileutil::readAll (file, text));
     CHECK (text == "two");
 }
+
+TEST_CASE ("settings: the reduced host list is off by default and round trips", "[settings]")
+{
+    using namespace neptune::core::settings;
+    GlobalSettings s;
+    CHECK_FALSE (s.reducedHostList);
+    CHECK_FALSE (fromJson ("{}").reducedHostList);
+    s.reducedHostList = true;
+    CHECK (fromJson (toJson (s)).reducedHostList);
+}

@@ -43,6 +43,24 @@ double mapValue (const Binding& b, double s) noexcept
 
 // ---------------------------------------------------------------------------------------------------- configuration
 
+bool addMacroParams (ParameterSet& set, std::string* error)
+{
+    for (int i = 0; i < kMacros; ++i)
+        if (! set.add (ParamSpec::continuous (macroParamId (i), "Macro " + std::to_string (i + 1), Unit::Percent, 0.0, 100.0, 0.0), error)) return false;
+    return true;
+}
+
+bool isBandOrMacroParam (ParamId id) noexcept
+{
+    if (id >= kMacroBase && id < kMacroBase + static_cast<ParamId> (kMacros)) return true;
+    if (id >= 1 && id <= 14) return true;                          // master
+    // pistes (1000 + 100.t), bus (3000 + 100.b), pistes parallèles (5000 + 100.p) : décalages 0..4 et 10..27 (volume... type, inserts, envois)
+    const bool strip = (id >= 1000 && id < 2600) || (id >= 3000 && id < 4600) || (id >= 5000 && id < 8200);
+    if (! strip) return false;
+    const auto off = id % 100;
+    return off <= 4 || (off >= 10 && off <= 27);
+}
+
 Config sanitised (Config c)
 {
     c.settings.oscPort = std::clamp (c.settings.oscPort, 1024, 65535);
@@ -99,7 +117,6 @@ std::string toJson (const Config& c)
     doc["osc_port"] = c.settings.oscPort;
     if (c.settings.oscAllInterfaces) doc["osc_all_interfaces"] = true;
     if (! c.settings.feedbackHost.empty()) { doc["feedback_host"] = c.settings.feedbackHost; doc["feedback_port"] = c.settings.feedbackPort; }
-    if (c.settings.reducedHostList) doc["reduced_host_list"] = true;
     json list = json::array();
     for (const auto& b : c.bindings)
     {
@@ -135,7 +152,6 @@ Config configFromJson (std::string_view text)
     flag ("cc_enabled", c.settings.ccEnabled);
     flag ("osc_enabled", c.settings.oscEnabled);
     flag ("osc_all_interfaces", c.settings.oscAllInterfaces);
-    flag ("reduced_host_list", c.settings.reducedHostList);
     integer ("osc_port", c.settings.oscPort);
     integer ("feedback_port", c.settings.feedbackPort);
     if (const auto it = doc.find ("feedback_host"); it != doc.end() && it->is_string()) c.settings.feedbackHost = it->get<std::string>();

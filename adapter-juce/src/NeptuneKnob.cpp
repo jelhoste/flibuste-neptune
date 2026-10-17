@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "NeptuneKnob.h"
 #include <cmath>
 
@@ -90,11 +91,31 @@ void NeptuneKnob::mouseDrag (const juce::MouseEvent& e)
     interaction_.pointerMove (e.mods.isShiftDown(), e.position.x, e.position.y, nowMs());
 }
 
-void NeptuneKnob::mouseUp (const juce::MouseEvent&)
+void NeptuneKnob::mouseUp (const juce::MouseEvent& e)
 {
     interaction_.pointerUp (nowMs());
     if (index_ != neptune::core::ParameterSet::npos) interaction_.setValue (processor_.parameters().getNormalizedAt (index_));
     repaint();
+    // Clic droit sans déplacement : menu des macros (le glissement avec le bouton droit reste le réglage fin).
+    if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && processor_.canAssignMacro (id_)) showMacroMenu();
+}
+
+void NeptuneKnob::showMacroMenu()
+{
+    const auto assigned = processor_.macrosOf (id_);
+    juce::PopupMenu sub;
+    for (int m = 0; m < 32; ++m)
+        sub.addItem (100 + m, "Macro " + juce::String (m + 1), true, std::find (assigned.begin(), assigned.end(), m) != assigned.end());
+    juce::PopupMenu menu;
+    menu.addSubMenu (juce::String::fromUTF8 (processor_.uiText ("macro.assign").c_str()), sub);
+    menu.addItem (1, juce::String::fromUTF8 (processor_.uiText ("macro.clear").c_str()), ! assigned.empty());
+    juce::Component::SafePointer<NeptuneKnob> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int choice)
+    {
+        if (safe == nullptr || choice == 0) return;
+        if (choice == 1) safe->processor_.uiClearMacros (safe->id_);
+        else safe->processor_.uiToggleMacro (safe->id_, choice - 100);
+    });
 }
 
 void NeptuneKnob::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)

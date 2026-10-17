@@ -1,6 +1,6 @@
 # Couche de contrôle : CC, OSC, paramètres de l'hôte (proposition de conception)
 
-Statut : **étapes 1, 2 et 3 faites (cœur testé, CC et OSC branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
+Statut : **étapes 1 à 4 faites (cœur testé, CC, OSC et macros branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
 n'importe quel paramètre, par CC, par OSC ou par l'hôte, et de l'assigner à ce dont on a besoin ? ». Réponse : oui.
 
 ## 1. Ce qui existe déjà
@@ -155,4 +155,17 @@ Règle : **l'audio ne parle jamais à l'hôte**.
     `127.0.0.1` sauf case « réseau local » ; bouton « OSC » (à droite de « CC ») : interrupteur, réseau local, port affiché. Enregistré avec le projet
     (`osc_enabled`, `osc_all_interfaces`). Les paramètres modifiés par OSC sont signalés à l'hôte comme ceux des CC (~30 Hz, gestes begin/end).
   - Pas encore : choix du port de base dans l'interface (seulement dans la section `control` du projet), Orgamon et les autres plugins, retour d'information.
+- **Étape 4 faite (à valider dans Reaper ; adaptateur contrôlé à la syntaxe seulement)** :
+  - **Pool de 32 macros** : paramètres « Macro 1 » à « Macro 32 » (0..100 %, ids 13000 + n, `control::addMacroParams`), visibles de l'hôte, enregistrés comme
+    les autres paramètres, adressables en OSC (`/neptune/macro/N`). Le thread audio compare leurs valeurs à chaque bloc et appelle `macroChanged` quand
+    l'une a bougé ; après le chargement d'un état, les valeurs sont mémorisées sans rien appliquer (les cibles ont déjà leurs valeurs enregistrées ;
+    très petite fenêtre de course si un bloc passe entre le chargement des paramètres et le drapeau de resynchronisation).
+  - **Assignation** : clic droit SANS déplacement sur un potard (le glissement au bouton droit reste le réglage fin) -> « Assigner à une macro » (sous-menu 1..32,
+    coché si assignée ; plusieurs macros possibles) et « Retirer les assignations de macro ». Seuls les potards (`NeptuneKnob`) ont ce menu pour l'instant, pas
+    encore les faders du mixeur. Une macro ne peut pas viser une macro (pas de cycle). Assignation : plage 0..100 %, linéaire, absolue.
+  - **Liste réduite pour l'hôte** : CONFLIT avec la conception initiale (réglage du projet). L'hôte lit la liste des paramètres une seule fois, à la création,
+    avant le chargement du projet : le réglage est donc **global** (`reduced_host_list` dans `settings.json`, case dans le menu « CC ») et ne joue qu'au
+    prochain chargement du plugin. Il garde le master, les bandes (volume, pan, mute, solo, type, bypass d'inserts, envois des pistes, bus, pistes parallèles)
+    et les macros (`control::isBandOrMacroParam`). Les autres paramètres restent dans le moteur, l'état du projet, l'interface, les CC et l'OSC, mais
+    l'hôte ne les voit plus : l'automation déjà enregistrée dessus ne s'applique plus.
 - Limite connue : le suivi des changements couvre 32768 paramètres au plus (Neptune en déclare environ 3000).

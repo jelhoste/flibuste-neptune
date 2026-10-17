@@ -86,6 +86,13 @@ public:
     void uiSetNormalised (neptune::core::ParamId, double normalised) override;
     void uiEndEdit (neptune::core::ParamId) override;
     void uiResetToDefault (neptune::core::ParamId) override;
+    bool canAssignMacro (neptune::core::ParamId) const override;
+    std::vector<int> macrosOf (neptune::core::ParamId) const override;
+    void uiToggleMacro (neptune::core::ParamId, int macro) override;
+    void uiClearMacros (neptune::core::ParamId) override;
+    std::string uiText (std::string_view key) const override;
+    bool reducedHostList() const { return settings_.reducedHostList; }   // lu à la création de l'instance
+    void uiSetReducedHostList (bool on);                                 // écrit settings.json ; joue au prochain chargement
     bool uiUndo() override;
     bool uiRedo() override;
     const neptune::core::UndoManager& undoManager() const { return undo_; }
@@ -323,6 +330,14 @@ private:
     // Couche de contrôle : le moteur est lu par le thread audio (CC) ; le relais ci-dessous (thread de message, ~30 Hz) exécute les actions
     // demandées et prévient l'hôte des paramètres modifiés par une source externe.
     neptune::core::control::ControlEngine control_;
+    std::vector<int> hostIndex_;   // indice du paramètre du cœur -> indice de l'hôte (-1 : non déclaré à l'hôte, liste réduite)
+    juce::AudioProcessorParameter* hostParam (std::size_t index) const
+    {
+        return index < hostIndex_.size() && hostIndex_[index] >= 0 ? getParameters()[hostIndex_[index]] : nullptr;
+    }
+    std::array<double, neptune::core::control::kMacros> macroSeen_ {};   // thread audio : dernière valeur appliquée de chaque macro
+    std::size_t macroFirst_ = 0;                                         // indice du cœur de la macro 1 (les 32 sont consécutives)
+    std::atomic<bool> macroResync_ { true };                             // vrai : au prochain bloc, mémoriser sans appliquer (chargement d'un état)
     OscServer osc_ { control_, params_ };
     void syncOsc();   // thread de message : démarre, arrête ou redémarre le serveur selon les réglages
     neptune::core::control::Settings oscApplied_;
