@@ -44,6 +44,8 @@ private:
     std::unique_ptr<PresetManager> presetManager_;
     std::unique_ptr<MidiFilterEditor> midiFilterEditor_;
     juce::TextButton midiFilterButton_; // filtre MIDI avancé de la piste sélectionnée
+    juce::TextButton controlButton_;    // contrôleurs MIDI (CC) : interrupteur et assignations par défaut
+    void showControlMenu();
     void openMidiFilter();
     juce::Rectangle<int> rootBounds() const noexcept { return { 0, 0, lw_, lh_ }; } // taille logique (avant mise à l'échelle)
     ScaledRoot root_;

@@ -42,7 +42,7 @@ OrganLive liveFromParams (const ParameterSet& set, int track)
     return liveFromValues (v);
 }
 
-std::string stateToJson (const ParameterSet& set, const OrganDescription& d, const std::string& currentPresetId)
+std::string stateToJson (const ParameterSet& set, const OrganDescription& d, const std::string& currentPresetId, bool ccEnabled)
 {
     json doc;
     doc["format"] = kFormat;
@@ -53,10 +53,11 @@ std::string stateToJson (const ParameterSet& set, const OrganDescription& d, con
     const auto o = json::parse (toJson (d), nullptr, false);
     if (! o.is_discarded()) doc["organ"] = o;
     if (! currentPresetId.empty()) doc["preset_id"] = currentPresetId;
+    if (ccEnabled) doc["cc_enabled"] = true;
     return doc.dump (2);
 }
 
-bool stateFromJson (std::string_view text, ParameterSet& set, OrganDescription& d, std::string& currentPresetId)
+bool stateFromJson (std::string_view text, ParameterSet& set, OrganDescription& d, std::string& currentPresetId, bool* ccEnabled)
 {
     const auto doc = json::parse (text.begin(), text.end(), nullptr, false);
     if (doc.is_discarded() || ! doc.is_object()) return false;
@@ -75,6 +76,11 @@ bool stateFromJson (std::string_view text, ParameterSet& set, OrganDescription& 
     currentPresetId.clear();
     if (const auto p = doc.find ("preset_id"); p != doc.end() && p->is_string() && p->get<std::string>().size() <= 64)
         currentPresetId = p->get<std::string>();
+    if (ccEnabled != nullptr)
+    {
+        const auto c = doc.find ("cc_enabled");
+        *ccEnabled = c != doc.end() && c->is_boolean() && c->get<bool>();
+    }
     return true;
 }
 
@@ -126,6 +132,57 @@ bool applyControlChange (const OrganDescription& d, ParameterSet& set, int chann
         case 93: put (mixer::kOrgDriveCharacter, value * 100.0 / 127.0); return true;
         default: return false;
     }
+}
+
+bool isOrganParam (ParamId id, int track) noexcept
+{
+    const ParamId first = mixer::organParam (track, 0);
+    return id >= first && id < first + static_cast<ParamId> (mixer::kOrganKinds);
+}
+
+std::vector<control::Binding> organControlBindings (const OrganDescription& d, int track)
+{
+    std::vector<control::Binding> out;
+    auto add = [&] (int channel, int cc, int kind, bool invert = false, double lo = 0.0, double hi = 1.0)
+    {
+        control::Binding b;
+        b.source.kind = control::SourceKind::CC;
+        b.source.channel = channel;
+        b.source.number = cc;
+        b.target.param = mixer::organParam (track, kind);
+        b.invert = invert;
+        b.lo = lo;
+        b.hi = hi;
+        out.push_back (std::move (b));
+    };
+    const int upper = d.channel[0], lower = d.channel[1], pedal = d.channel[2];
+    for (int i = 0; i < 9; ++i)
+    {
+        if (upper != 0) add (upper, 70 + i, mixer::kOrgUpper0 + i, true);   // 127 = rentrée, 0 = sortie à fond
+        if (lower != 0) add (lower, 70 + i, mixer::kOrgLower0 + i, true);
+    }
+    if (pedal != 0)
+    {
+        add (pedal, 70, mixer::kOrgPedal16, true);
+        add (pedal, 72, mixer::kOrgPedal8, true);
+    }
+    // communs à tous les claviers (voie 0 = toutes)
+    add (0, 1, mixer::kOrgLeslieSpeed, false, 0.0, 0.5);   // molette : bas = chorale, haut = tremolo
+    add (0, 66, mixer::kOrgPercOn);
+    add (0, 65, mixer::kOrgDriveOn);
+    if (upper != 0)
+    {
+        add (upper, 91, mixer::kOrgReverb);
+        add (upper, 80, mixer::kOrgPercOn);
+        add (upper, 81, mixer::kOrgPercSoft);
+        add (upper, 82, mixer::kOrgPercFast);
+        add (upper, 83, mixer::kOrgPercThird, true);
+        add (upper, 92, mixer::kOrgVibMode, false, 1.0 / 6.0, 1.0);   // V1 .. C3
+        add (upper, 30, mixer::kOrgVibLower);
+        add (upper, 31, mixer::kOrgVibUpper);
+        add (upper, 93, mixer::kOrgDriveCharacter);
+    }
+    return out;
 }
 
 OrganSynthEngine::OrganSynthEngine()

@@ -1,6 +1,6 @@
 # Couche de contrôle : CC, OSC, paramètres de l'hôte (proposition de conception)
 
-Statut : **étape 1 faite (cœur testé), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
+Statut : **étapes 1 et 2 faites (cœur testé, CC branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
 n'importe quel paramètre, par CC, par OSC ou par l'hôte, et de l'assigner à ce dont on a besoin ? ». Réponse : oui.
 
 ## 1. Ce qui existe déjà
@@ -135,6 +135,13 @@ Règle : **l'audio ne parle jamais à l'hôte**.
   reconfigure en boucle ; lancé aussi sous ThreadSanitizer : aucune course signalée). Contient : assignations (CC, OSC, macro) vers un paramètre ou une
   action, plage / courbe / inversion / reprise, apprentissage du dernier CC, file d'actions sans verrou, signalement groupé des paramètres modifiés par une
   source (`drainChanges`), enregistrement JSON tolérant, tout désactivé par défaut.
-- **Pas encore branché** à Neptune ni à Orgamon : ni les CC, ni l'interrupteur (Orgamon réagit encore à tous les CC), ni le relais vers l'hôte, ni
-  le pool de macros déclaré à l'hôte, ni l'écran de gestion, ni le serveur OSC.
+- **Étape 2 faite (en attente de validation sur Windows/Linux)** :
+  - Neptune : les CC des pistes passent par le moteur de contrôle (`NeptuneProcessor::processBlock`), **aucune assignation et tout désactivé par défaut**.
+    Bouton « CC » dans la barre du haut : interrupteur, « assigner les contrôleurs de setBfree à la piste Orgue sélectionnée »
+    (drawbars 70–78, pédale, réverb, percussion, vibrato, Leslie sur la molette...), « effacer toutes les assignations ». Enregistré avec le projet
+    (section `control`). Les actions en file (preset suivant/précédent, panique, piste suivante/précédente) sont exécutées sur le thread de message ;
+    les paramètres modifiés par un CC sont signalés à l'hôte à ~30 Hz (gestes begin/end). Les assignations « reprise » sont réarmées au chargement d'un preset.
+  - Orgamon : les CC (sauf banque 0 et notes) sont **ignorés par défaut** (la molette ne touche plus le Leslie) ; bouton « CC » en haut pour les activer,
+    état enregistré (`cc_enabled`).
+  - Pas encore : apprentissage MIDI dans l'interface, écran de gestion des assignations, pool de macros déclaré à l'hôte, serveur OSC.
 - Limite connue : le suivi des changements couvre 32768 paramètres au plus (Neptune en déclare environ 3000).

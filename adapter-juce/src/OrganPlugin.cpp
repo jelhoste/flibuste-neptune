@@ -85,7 +85,7 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         else if (m.isAllNotesOff()) engine_.allNotesOff();
         else if (m.isAllSoundOff()) engine_.panic();
         else if (m.isController() && m.getControllerNumber() == 0) midiBank_.store (juce::jlimit (0, 127, m.getControllerValue()));
-        else if (m.isController()) engine_.controlChange (m.getChannel() - 1, m.getControllerNumber(), m.getControllerValue());
+        else if (m.isController() && ccEnabled_.load (std::memory_order_relaxed)) engine_.controlChange (m.getChannel() - 1, m.getControllerNumber(), m.getControllerValue());
         else if (m.isProgramChange())
         {
             pendingBank_.store (midiBank_.load());
@@ -107,7 +107,7 @@ void OrganProcessor::handleAsyncUpdate()
 
 void OrganProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    const auto text = organ::stateToJson (engine_.params(), engine_.description(), currentPresetId_);
+    const auto text = organ::stateToJson (engine_.params(), engine_.description(), currentPresetId_, ccEnabled_.load());
     dest.append (text.data(), text.size());
 }
 
@@ -117,7 +117,9 @@ void OrganProcessor::setStateInformation (const void* data, int size)
     organ::OrganDescription d;
     std::string presetId;
     const std::string text (static_cast<const char*> (data), static_cast<std::size_t> (size));
-    if (! organ::stateFromJson (text, engine_.params(), d, presetId)) return;
+    bool cc = false;
+    if (! organ::stateFromJson (text, engine_.params(), d, presetId, &cc)) return;
+    ccEnabled_.store (cc);
     engine_.setDescription (d);
     currentPresetId_ = presetId;
     undo_.clear();
@@ -338,7 +340,12 @@ OrganEditor::OrganEditor (OrganProcessor& p)
     redoButton_.onClick = [this] { processor_.uiRedo(); };
     panicButton_.setButtonText (text ("panic.button"));
     panicButton_.onClick = [this] { processor_.uiPanic(); view_->releaseKeys(); };
-    for (auto* b : { &undoButton_, &redoButton_, &panicButton_ }) addAndMakeVisible (b);
+    ccButton_.setButtonText (text ("control.button"));
+    ccButton_.setTooltip (text ("control.title"));
+    ccButton_.setClickingTogglesState (true);
+    ccButton_.setToggleState (processor_.ccEnabled(), juce::dontSendNotification);
+    ccButton_.onClick = [this] { processor_.uiSetCcEnabled (ccButton_.getToggleState()); };
+    for (auto* b : { &undoButton_, &redoButton_, &panicButton_, &ccButton_ }) addAndMakeVisible (b);
 
     startTimerHz (15);
 
@@ -366,6 +373,7 @@ void OrganEditor::resized()
     redoButton_.setBounds (top.removeFromRight (64).reduced (2));
     undoButton_.setBounds (top.removeFromRight (64).reduced (2));
     panicButton_.setBounds (top.removeFromRight (120).reduced (2));
+    ccButton_.setBounds (top.removeFromRight (52).reduced (2));
     presetBar_->setBounds (top.removeFromLeft (juce::jmin (560, top.getWidth() - 120)));
     infoLabel_.setBounds (top);
     r.removeFromTop (8);

@@ -926,6 +926,7 @@ bool NeptuneProcessor::loadPreset (const std::string& id)
         hostParam->endChangeGesture();
     }
     undo_.endTransaction();
+    control_.resetPickup(); // les assignations « reprise » attendent de nouveau le passage de la source
     setTrackPresetId (track, id);
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withParameterInfoChanged (false).withNonParameterStateChanged (true));
     return true;
@@ -1224,18 +1225,100 @@ NeptuneProcessor::NeptuneProcessor()
         autosaveTimer_.onTick = [this] { autosaveNow(); };
         autosaveTimer_.startTimer (settings_.autosaveIntervalSeconds * 1000);
     }
+
+    control_.configure (neptune::core::control::Config {}, params_); // CC et OSC désactivés tant que l'utilisateur ne les active pas
+    controlTimer_.onTick = [this] { controlTick(); };
+    controlTimer_.startTimer (33);
 }
 
 NeptuneProcessor::~NeptuneProcessor()
 {
+    controlTimer_.stopTimer();
     autosaveTimer_.stopTimer();
     autosave_->discard(); // fermeture propre : il n'y a rien à récupérer
+}
+
+void NeptuneProcessor::uiSetControlConfig (neptune::core::control::Config c)
+{
+    control_.configure (c, params_);
+    notifyStateChanged();
+}
+
+void NeptuneProcessor::uiSetCcEnabled (bool on)
+{
+    auto c = control_.config();
+    if (c.settings.ccEnabled == on) return;
+    c.settings.ccEnabled = on;
+    uiSetControlConfig (std::move (c));
+}
+
+bool NeptuneProcessor::uiAssignOrganControllers()
+{
+    using namespace neptune::core;
+    const int track = selectedTrack();
+    if (trackType (track) != TrackType::Organ) return false;
+    auto c = control_.config();
+    // les assignations de cette piste d'orgue sont remplacées, celles des autres pistes et des autres cibles restent
+    c.bindings.erase (std::remove_if (c.bindings.begin(), c.bindings.end(),
+                                      [track] (const control::Binding& b) { return ! b.target.isAction && organ::isOrganParam (b.target.param, track); }),
+                      c.bindings.end());
+    for (auto& b : organ::organControlBindings (organDescription (track), track)) c.bindings.push_back (std::move (b));
+    uiSetControlConfig (std::move (c));
+    return true;
+}
+
+void NeptuneProcessor::uiClearControllers()
+{
+    auto c = control_.config();
+    c.bindings.clear();
+    uiSetControlConfig (std::move (c));
+}
+
+// Relais du thread de message : actions demandées par une source (preset suivant, panique...) et paramètres modifiés par une source
+// externe, signalés à l'hôte (regroupés : une notification par paramètre et par tic).
+void NeptuneProcessor::controlTick()
+{
+    using neptune::core::control::Action;
+    control_.collectGarbage();
+    for (Action a = Action::None; control_.popAction (a);)
+    {
+        switch (a)
+        {
+            case Action::PresetNext: stepPreset (1); break;
+            case Action::PresetPrevious: stepPreset (-1); break;
+            case Action::Panic: uiPanic(); break;
+            case Action::TrackNext:
+            case Action::TrackPrevious:
+            {
+                const int step = a == Action::TrackNext ? 1 : -1;
+                const int n = neptune::core::mixer::numTracks;
+                for (int k = 1; k < n; ++k)
+                {
+                    const int t = ((selectedTrack() + step * k) % n + n) % n;
+                    if (trackActive (t)) { selectTrack (t); break; }
+                }
+                break;
+            }
+            default: break;
+        }
+    }
+    std::vector<std::size_t> changed;
+    if (control_.drainChanges (changed) == 0) return;
+    for (const auto index : changed)
+        if (index < static_cast<std::size_t> (getParameters().size()))
+        {
+            auto* p = getParameters()[static_cast<int> (index)];
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+            p->endChangeGesture();
+        }
 }
 
 std::string NeptuneProcessor::currentStateText() const
 {
     const auto mixer = mixerState();
-    return neptune::core::state::save (params_, autosave_->id(), profile_.locked(), &mixer);
+    const auto control = neptune::core::control::toJson (control_.config());
+    return neptune::core::state::save (params_, autosave_->id(), profile_.locked(), &mixer, control);
 }
 
 // Changement d'état qui n'est pas un paramètre (le verrou de profil) : le wrapper CLAP le traduit en
@@ -1375,6 +1458,7 @@ void NeptuneProcessor::restoreRecovered()
     else
     {
         profile_.setLocked (result.profileLock);
+        control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
         adoptMixerFromState (result.mixer);
     }
     autosave_->resolveRecovered();
@@ -1435,6 +1519,8 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             engine_.noteOn (msg.getChannel() - 1, msg.getNoteNumber(), msg.getFloatVelocity());
         else if (msg.isNoteOff())
             engine_.noteOff (msg.getChannel() - 1, msg.getNoteNumber());
+        else if (msg.isController())
+            control_.controlChange (msg.getChannel() - 1, msg.getControllerNumber(), msg.getControllerValue(), params_); // désactivé par défaut
     }
 
     engine_.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
@@ -1461,6 +1547,8 @@ void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     undo_.clear(); // l'historique d'un autre état ne s'applique plus (il restaurerait un ancien instrument)
     profile_.setLocked (result.profileLock); // avant adoptStateIdentity : la référence de l'autosave le contient
+    // couche de contrôle : absente des projets d'avant (tout désactivé)
+    control_.configure (result.controlJson.empty() ? neptune::core::control::Config {} : neptune::core::control::configFromJson (result.controlJson), params_);
     notifyHostOnSeed_ = false; // le rescan ci-dessous prévient l'hôte des valeurs d'enveloppe recopiées depuis les descriptions
     adoptMixerFromState (result.mixer);
     notifyHostOnSeed_ = true;

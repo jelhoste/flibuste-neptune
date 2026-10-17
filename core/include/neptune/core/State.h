@@ -36,6 +36,7 @@ struct LoadResult
     int ignored = 0;     // entrées ignorées : id inconnu du pool, ou valeur non numérique
     std::string instanceId; // identifiant d'instance enregistré dans l'état (vide si absent) ; non validé, voir AutosaveStore::isValidId
     std::optional<PerformanceProfile> profileLock; // verrou de profil de l'instance ; absent ou illisible = non verrouillé
+    std::string controlJson;         // couche de contrôle (Control.h), tel quel ; vide si absente (projets d'avant : CC et OSC désactivés)
     std::optional<MixerState> mixer; // pistes (instrument + bande), bus, master ; absent du document = inchangé par le plugin
 
     bool ok() const noexcept { return status == Status::Ok; }
@@ -46,8 +47,9 @@ struct LoadResult
 // `instanceId` (optionnel) est inscrit dans le document : il relie l'état du projet à l'autosave de l'instance (Autosave.h).
 // `profileLock` : profil sur lequel l'instance est verrouillée (absent du document si non verrouillée).
 // `mixer` : instruments des pistes (chemins et réglages de zone, sans audio), réglages de bande, bus, master.
+// `controlJson` : couche de contrôle (assignations CC / OSC / macros, interrupteurs), enregistrée telle quelle.
 std::string save (const ParameterSet& set, std::string_view instanceId = {}, std::optional<PerformanceProfile> profileLock = std::nullopt,
-                  const MixerState* mixer = nullptr);
+                  const MixerState* mixer = nullptr, std::string_view controlJson = {});
 
 // Charge un état complet. Tout ou rien : si le statut n'est pas Ok, `set` n'est pas modifié.
 // Les paramètres absents du fichier reviennent à leur valeur par défaut.

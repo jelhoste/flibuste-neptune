@@ -78,6 +78,8 @@ public:
     const neptune::core::preset::Preset* currentPreset() const override { return currentPresetId_.empty() ? nullptr : library_->find (currentPresetId_); }
     std::uint32_t presetRevision() const override { return presetRevision_; }
     void touchPresets() override { ++presetRevision_; }
+    bool ccEnabled() const noexcept { return ccEnabled_.load(); }
+    void uiSetCcEnabled (bool on) { ccEnabled_.store (on); }
     bool loadPreset (const std::string& id) override;
     bool stepPreset (int direction) override;
     bool isModified() const override;
@@ -114,6 +116,7 @@ private:
     std::string currentPresetId_;
     std::uint32_t presetRevision_ = 1;
     std::atomic<int> midiBank_ { 0 };
+    std::atomic<bool> ccEnabled_ { false }; // contrôleurs MIDI (hors banque et notes) : désactivés par défaut
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)
@@ -147,7 +150,7 @@ private:
     std::unique_ptr<PresetBar> presetBar_;
     std::unique_ptr<PresetManager> manager_;
     juce::Label brandLabel_, infoLabel_;
-    juce::TextButton undoButton_, redoButton_, panicButton_;
+    juce::TextButton undoButton_, redoButton_, panicButton_, ccButton_;
     std::unique_ptr<KnobModal> modal_;
     std::uint32_t lastUndoRevision_ = 0;
 

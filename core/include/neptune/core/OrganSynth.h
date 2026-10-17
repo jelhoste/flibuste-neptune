@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "neptune/core/Control.h"
 #include "neptune/core/HandoffSlot.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/OrganEngine.h"
@@ -31,9 +32,18 @@ OrganLive liveFromParams (const ParameterSet&, int track = 0);
 // Retourne faux si le message ne concerne pas l'orgue.
 bool applyControlChange (const OrganDescription&, ParameterSet&, int channel, int cc, int value, int track = 0);
 
+// Assignations de la couche de contrôle (Control.h) qui reproduisent les CC de setBfree pour la piste `track`, avec les voies des
+// claviers de `d` : tirettes 70..78 (sur la voie du clavier concerné), réverb 91, percussion 66 / 80..83, vibrato 92 / 30 / 31,
+// overdrive 65 / 93, Leslie sur la molette (1 : bas = chorale, haut = tremolo). Mêmes conventions que applyControlChange, sauf le routage
+// du vibrato (95) et la pédale du Leslie (64), qui ont besoin d'une logique propre à setBfree et ne sont pas des assignations simples.
+std::vector<control::Binding> organControlBindings (const OrganDescription&, int track = 0);
+// Vrai si `id` est un paramètre d'orgue de la piste `track` (pour remplacer les assignations d'une piste sans toucher aux autres).
+bool isOrganParam (ParamId id, int track) noexcept;
+
 // État du plugin (getStateInformation) : JSON versionné.
-std::string stateToJson (const ParameterSet&, const OrganDescription&, const std::string& currentPresetId);
-bool stateFromJson (std::string_view text, ParameterSet&, OrganDescription&, std::string& currentPresetId);
+// `ccEnabled` : réaction aux contrôleurs MIDI (désactivée par défaut ; absent de l'état = désactivé).
+std::string stateToJson (const ParameterSet&, const OrganDescription&, const std::string& currentPresetId, bool ccEnabled = false);
+bool stateFromJson (std::string_view text, ParameterSet&, OrganDescription&, std::string& currentPresetId, bool* ccEnabled = nullptr);
 
 class OrganSynthEngine
 {

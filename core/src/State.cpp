@@ -74,7 +74,7 @@ bool migrate (nlohmann::json& doc, int from, int to, const MigrationTable& table
 }
 
 std::string save (const ParameterSet& set, std::string_view instanceId, std::optional<PerformanceProfile> profileLock,
-                 const MixerState* mixer)
+                 const MixerState* mixer, std::string_view controlJson)
 {
     nlohmann::json params = nlohmann::json::object();
     for (std::size_t i = 0; i < set.size(); ++i)
@@ -89,6 +89,11 @@ std::string save (const ParameterSet& set, std::string_view instanceId, std::opt
         doc["profile_lock"] = toString (*profileLock);
     if (mixer != nullptr)
         doc["mixer"] = nlohmann::json::parse (toJson (*mixer));
+    if (! controlJson.empty())
+    {
+        auto c = nlohmann::json::parse (controlJson.begin(), controlJson.end(), nullptr, false);
+        if (c.is_object()) doc["control"] = std::move (c);
+    }
     doc["parameters"] = std::move (params);
     return doc.dump (2);
 }
@@ -138,6 +143,8 @@ LoadResult load (ParameterSet& set, std::string_view text)
         result.profileLock = profileFromString (lk->get<std::string>()); // valeur inconnue : non verrouillé
     if (const auto mx = doc.find ("mixer"); mx != doc.end() && mx->is_object())
         result.mixer = mixerFromJson (mx->dump());
+    if (const auto ct = doc.find ("control"); ct != doc.end() && ct->is_object())
+        result.controlJson = ct->dump();
 
     for (const auto& [key, value] : params->items())
     {

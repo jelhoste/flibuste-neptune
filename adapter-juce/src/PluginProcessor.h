@@ -17,6 +17,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/Autosave.h"
+#include "neptune/core/Control.h"
+#include "neptune/core/OrganSynth.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/Mixer.h"
@@ -99,6 +101,16 @@ public:
         double sampleRate = 0.0, seconds = 0.0, megabytes = 0.0;
     };
     // Piste sélectionnée : toutes les fonctions « instrument » ci-dessous agissent sur elle (sauf mention d'une piste).
+    // ---- couche de contrôle (docs/couche-controle.md) : CC MIDI, plus tard OSC et macros ----
+    neptune::core::control::Config controlConfig() const { return control_.config(); }
+    void uiSetControlConfig (neptune::core::control::Config);          // enregistré avec le projet
+    bool ccEnabled() const { return control_.config().settings.ccEnabled; }
+    void uiSetCcEnabled (bool on);
+    // Remplace les assignations de la piste sélectionnée (si c'est un orgue) par les CC de setBfree, avec les voies de ses claviers.
+    bool uiAssignOrganControllers();
+    void uiClearControllers();
+    neptune::core::control::ControlEngine& control() { return control_; }
+
     int selectedTrack() const noexcept { return selectedTrack_.load(); }
     void selectTrack (int track); // thread de message ; pas annulable ; n'altère ni l'instrument ni l'audio
     neptune::core::InstrumentDescription instrumentDescription() const { return instrumentDescription (selectedTrack()); }
@@ -302,6 +314,12 @@ private:
         std::function<void()> onTick;
         void timerCallback() override { if (onTick) onTick(); }
     } autosaveTimer_;
+
+    // Couche de contrôle : le moteur est lu par le thread audio (CC) ; le relais ci-dessous (thread de message, ~30 Hz) exécute les actions
+    // demandées et prévient l'hôte des paramètres modifiés par une source externe.
+    neptune::core::control::ControlEngine control_;
+    AutosaveTimer controlTimer_;
+    void controlTick();
 
     // Notes terminées à signaler à l'hôte (NOTE_END). Écrit et lu sur le thread audio uniquement.
     struct PendingNoteEnd { std::int32_t noteId; std::int16_t port, channel, key; };

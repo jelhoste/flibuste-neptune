@@ -187,6 +187,14 @@ TEST_CASE ("organ synth: parameters, playing through the queue, state round trip
     CHECK (liveFromParams (f.params()).drawbars[1][2] == 5);
     CHECK (stateToJson (f.params(), back, id) == text);
     CHECK_FALSE (stateFromJson ("{\"format\":\"other\"}", f.params(), back, id));
+
+    // Contrôleurs MIDI : désactivés par défaut, et l'état les ramène tels qu'ils étaient.
+    bool cc = true;
+    REQUIRE (stateFromJson (text, f.params(), back, id, &cc));
+    CHECK_FALSE (cc);
+    const auto withCc = stateToJson (f.params(), back, id, true);
+    REQUIRE (stateFromJson (withCc, f.params(), back, id, &cc));
+    CHECK (cc);
 }
 
 TEST_CASE ("organ parameters exist for every Neptune track with distinct ids", "[organ][synth]")
@@ -431,4 +439,51 @@ TEST_CASE ("organ synth: several wiring changes in a row are all taken into acco
     d.foldback = true;
     e.setDescription (d);            // 3e : retour au repli
     CHECK (frequency (e) > 75.0);
+}
+
+TEST_CASE ("organ control bindings give the same values as the direct setBfree CC handler", "[organ][cc][control]")
+{
+    using namespace neptune::core;
+    const OrganDescription d;
+    const auto bindings = organControlBindings (d, 0);
+    CHECK (isOrganParam (mixer::organParam (0, mixer::kOrgReverb), 0));
+    CHECK_FALSE (isOrganParam (mixer::organParam (1, mixer::kOrgReverb), 0));
+
+    struct Probe { int channel0; int cc; };
+    const Probe probes[] = { { 0, 70 }, { 0, 72 }, { 0, 78 }, { 1, 70 }, { 1, 75 }, { 2, 70 }, { 2, 72 }, { 0, 91 }, { 0, 66 }, { 0, 80 }, { 0, 81 },
+                             { 0, 82 }, { 0, 83 }, { 0, 30 }, { 0, 31 }, { 0, 65 }, { 0, 93 } };
+    // CC 92 (type de vibrato) : setBfree coupe par tranches de 23, l'assignation par tranches égales ; les extrémités sont les mêmes
+    {
+        control::ControlEngine e;
+        control::Config cfg;
+        cfg.settings.ccEnabled = true;
+        cfg.bindings = bindings;
+        ParameterSet set;
+        REQUIRE (mixer::addOrganParams (set, 0, ""));
+        e.configure (cfg, set);
+        e.controlChange (0, 92, 0, set);
+        CHECK (set.get (mixer::organParam (0, mixer::kOrgVibMode)) == 1.0);
+        e.controlChange (0, 92, 127, set);
+        CHECK (set.get (mixer::organParam (0, mixer::kOrgVibMode)) == 6.0);
+    }
+    for (const auto& p : probes)
+        for (const int value : { 0, 10, 40, 63, 64, 100, 127 })
+        {
+            ParameterSet viaCc, viaLayer;
+            REQUIRE (mixer::addOrganParams (viaCc, 0, ""));
+            REQUIRE (mixer::addOrganParams (viaLayer, 0, ""));
+            applyControlChange (d, viaCc, p.channel0, p.cc, value);
+            control::ControlEngine engine;
+            control::Config cfg;
+            cfg.settings.ccEnabled = true;
+            cfg.bindings = bindings;
+            engine.configure (cfg, viaLayer);
+            engine.controlChange (p.channel0, p.cc, value, viaLayer);
+            for (int k = 0; k < mixer::kOrganKinds; ++k)
+            {
+                INFO ("voie " << p.channel0 + 1 << " CC " << p.cc << " valeur " << value << " paramètre " << k);
+                // la molette (CC 1) est volontairement différente : elle n'est pas dans cette liste
+                CHECK (viaLayer.get (mixer::organParam (0, k)) == Catch::Approx (viaCc.get (mixer::organParam (0, k))).margin (1.0e-9));
+            }
+        }
 }

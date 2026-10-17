@@ -64,6 +64,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     midiFilterButton_.setTooltip (text ("midi.title"));
     midiFilterButton_.onClick = [this] { openMidiFilter(); };
     addAndMakeVisible (midiFilterButton_);
+    controlButton_.setButtonText (text ("control.button"));
+    controlButton_.setTooltip (text ("control.title"));
+    controlButton_.onClick = [this] { showControlMenu(); };
+    addAndMakeVisible (controlButton_);
     voiceCountButton_.setTooltip (text ("voices.global_limit"));
     voiceCountButton_.onClick = [this]
     {
@@ -1320,6 +1324,31 @@ bool NeptuneEditor::keyPressed (const juce::KeyPress& k)
     return false;
 }
 
+// Contrôleurs MIDI : désactivés par défaut. L'interrupteur et les assignations sont enregistrés avec le projet.
+void NeptuneEditor::showControlMenu()
+{
+    const bool on = processor_.ccEnabled();
+    const auto cfg = processor_.controlConfig();
+    const bool organ = processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Organ;
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("control.enable"), true, on);
+    menu.addSeparator();
+    menu.addItem (2, text ("control.assign_organ"), organ);
+    menu.addItem (3, text ("control.clear") + " (" + juce::String (static_cast<int> (cfg.bindings.size())) + ")", ! cfg.bindings.empty());
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlButton_), [safe, on] (int choice)
+    {
+        if (safe == nullptr) return;
+        if (choice == 1) safe->processor_.uiSetCcEnabled (! on);
+        else if (choice == 2)
+        {
+            safe->processor_.uiAssignOrganControllers();
+            safe->processor_.uiSetCcEnabled (true); // assigner sans activer n'aurait pas d'effet audible : on active
+        }
+        else if (choice == 3) safe->processor_.uiClearControllers();
+    });
+}
+
 void NeptuneEditor::updateProfileControls()
 {
     using neptune::core::PerformanceProfile;
@@ -1330,6 +1359,7 @@ void NeptuneEditor::updateProfileControls()
                                { name (p.shared().get()), name (p.effective()), locked ? tr_.tr ("profile.locked_suffix") : std::string_view() }).c_str()),
                            juce::dontSendNotification);
     profileLockButton_.setButtonText (text (locked ? "profile.unlock" : "profile.lock"));
+    controlButton_.setToggleState (processor_.ccEnabled(), juce::dontSendNotification); // allumé : les CC agissent
 }
 
 void NeptuneEditor::timerCallback()
@@ -1413,6 +1443,7 @@ void NeptuneEditor::resized()
     mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 150) });
     voiceCountButton_.setBounds (416, 32, 150, 36);
     midiFilterButton_.setBounds (570, 32, 48, 36);
+    controlButton_.setBounds (622, 32, 48, 36);
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
