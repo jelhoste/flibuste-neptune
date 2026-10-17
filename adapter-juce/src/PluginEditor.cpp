@@ -1338,6 +1338,7 @@ void NeptuneEditor::showControlMenu()
     menu.addItem (1, text ("control.enable"), true, on);
     menu.addSeparator();
     menu.addItem (2, text ("control.assign_organ"), organ);
+    menu.addItem (5, text ("cpanel.manage"));
     menu.addItem (3, text ("control.clear") + " (" + juce::String (static_cast<int> (cfg.bindings.size())) + ")", ! cfg.bindings.empty());
     menu.addSeparator();
     const bool reduced = processor_.reducedHostList();
@@ -1354,6 +1355,11 @@ void NeptuneEditor::showControlMenu()
         }
         else if (choice == 3) safe->processor_.uiClearControllers();
         else if (choice == 4) safe->processor_.uiSetReducedHostList (! reduced);
+        else if (choice == 5)
+        {
+            auto panel = std::make_unique<ControlPanel> (safe->processor_, safe->palette_, safe->tr_);
+            juce::CallOutBox::launchAsynchronously (std::move (panel), safe->controlButton_.getScreenBounds(), nullptr);
+        }
     });
 }
 

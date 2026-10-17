@@ -6,6 +6,7 @@
 #include "VelocityPanel.h"
 #include "PolyphonyPanel.h"
 #include "SlotsPanel.h"
+#include "ControlPanel.h"
 #include "ChokePanel.h"
 #include "VoicesView.h"
 #include "FilterEditor.h"

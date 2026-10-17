@@ -47,6 +47,8 @@ struct Source
     bool operator== (const Source& o) const noexcept { return kind == o.kind && channel == o.channel && number == o.number && address == o.address; }
 };
 
+std::string sourceLabel (const Source&);       // « CC 74 », « CC 74 ch 2 », « Macro 3 », « OSC /a/b » (indépendant de la langue)
+
 struct Target
 {
     bool isAction = false;

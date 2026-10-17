@@ -43,6 +43,17 @@ double mapValue (const Binding& b, double s) noexcept
 
 // ---------------------------------------------------------------------------------------------------- configuration
 
+std::string sourceLabel (const Source& s)
+{
+    switch (s.kind)
+    {
+        case SourceKind::CC: return "CC " + std::to_string (s.number) + (s.channel > 0 ? " ch " + std::to_string (s.channel) : std::string());
+        case SourceKind::Macro: return "Macro " + std::to_string (s.number + 1);
+        case SourceKind::Osc: return "OSC " + s.address;
+    }
+    return {};
+}
+
 bool addMacroParams (ParameterSet& set, std::string* error)
 {
     for (int i = 0; i < kMacros; ++i)

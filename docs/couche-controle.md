@@ -1,6 +1,6 @@
 # Couche de contrôle : CC, OSC, paramètres de l'hôte (proposition de conception)
 
-Statut : **étapes 1 à 4 faites (cœur testé, CC, OSC et macros branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
+Statut : **étapes 1 à 5 faites (cœur testé, CC, OSC, macros et écran de gestion branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
 n'importe quel paramètre, par CC, par OSC ou par l'hôte, et de l'assigner à ce dont on a besoin ? ». Réponse : oui.
 
 ## 1. Ce qui existe déjà
@@ -168,4 +168,10 @@ Règle : **l'audio ne parle jamais à l'hôte**.
     prochain chargement du plugin. Il garde le master, les bandes (volume, pan, mute, solo, type, bypass d'inserts, envois des pistes, bus, pistes parallèles)
     et les macros (`control::isBandOrMacroParam`). Les autres paramètres restent dans le moteur, l'état du projet, l'interface, les CC et l'OSC, mais
     l'hôte ne les voit plus : l'automation déjà enregistrée dessus ne s'applique plus.
+- **Étape 5 faite (à valider dans Reaper ; adaptateur contrôlé à la syntaxe seulement)** : menu « CC » -> « Gérer les assignations... » ouvre une fenêtre flottante
+  (`ControlPanel`). Une ligne par assignation : source (bouton : apprendre un CC, macro 1..32, adresse OSC saisie), cible (menu hiérarchique construit sur les
+  adresses OSC, ou action), min / max (%), courbe, inversion, mode Absolu / Reprise, suppression. « Nouvelle assignation » apprend tout de suite : bouger
+  un contrôleur capte son numéro de CC (toutes les voies ; la voie précise se règle dans le JSON du projet), même si les CC sont désactivés. Une assignation
+  n'est enregistrée qu'une fois sa cible choisie (le moteur ignore celles sans cible). Pas d'export / import de jeux (décision), pas d'apprentissage par clic droit
+  sur un potard, voie MIDI non éditable dans l'écran.
 - Limite connue : le suivi des changements couvre 32768 paramètres au plus (Neptune en déclare environ 3000).

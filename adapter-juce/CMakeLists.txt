@@ -26,6 +26,7 @@ target_sources(Neptune PRIVATE
   src/PluginEditor.cpp
   src/SlotsPanel.cpp
   src/OscServer.cpp
+  src/ControlPanel.cpp
   src/OrganView.cpp
   src/EnvelopeEditor.cpp
   src/ImportWizard.cpp

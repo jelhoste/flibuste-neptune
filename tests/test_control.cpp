@@ -319,3 +319,16 @@ TEST_CASE ("control: the reduced host list keeps strips, master and macros only"
     CHECK_FALSE (isBandOrMacroParam (12000));        // emplacements
     CHECK_FALSE (isBandOrMacroParam (13032));
 }
+
+TEST_CASE ("control: source labels are short and language independent", "[control]")
+{
+    Source s;
+    s.kind = SourceKind::CC; s.number = 74;
+    CHECK (sourceLabel (s) == "CC 74");
+    s.channel = 2;
+    CHECK (sourceLabel (s) == "CC 74 ch 2");
+    s.kind = SourceKind::Macro; s.number = 2;
+    CHECK (sourceLabel (s) == "Macro 3");
+    s.kind = SourceKind::Osc; s.address = "/a/b";
+    CHECK (sourceLabel (s) == "OSC /a/b");
+}
