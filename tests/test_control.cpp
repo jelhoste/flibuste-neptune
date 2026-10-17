@@ -1,0 +1,280 @@
+// Couche de contrôle : assignations (CC, OSC, macros) -> paramètres et actions, reprise, apprentissage, enregistrement, temps réel.
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include <set>
+#include <thread>
+#include <vector>
+
+#include "neptune/core/Control.h"
+
+using namespace neptune::core;
+using namespace neptune::core::control;
+using Catch::Approx;
+
+namespace
+{
+constexpr ParamId kVolume = 10, kCutoff = 20, kToggle = 30, kStep = 40, kUnknown = 999;
+
+struct Rig
+{
+    ParameterSet set;
+    ControlEngine engine;
+    Rig()
+    {
+        REQUIRE (set.add (ParamSpec::continuous (kVolume, "Volume", Unit::Decibel, -60.0, 6.0, 0.0)));
+        REQUIRE (set.add (ParamSpec::continuous (kCutoff, "Cutoff", Unit::Hertz, 20.0, 20000.0, 1000.0, Curve::Exponential)));
+        REQUIRE (set.add (ParamSpec::toggle (kToggle, "Toggle")));
+        REQUIRE (set.add (ParamSpec::stepped (kStep, "Step", Unit::None, 0, 8, 0)));
+    }
+    void configure (std::vector<Binding> b, bool cc = true)
+    {
+        Config c;
+        c.settings.ccEnabled = cc;
+        c.bindings = std::move (b);
+        engine.configure (c, set);
+    }
+};
+
+Binding cc (int channel, int number, ParamId target)
+{
+    Binding b;
+    b.source.kind = SourceKind::CC;
+    b.source.channel = channel;
+    b.source.number = number;
+    b.target.param = target;
+    return b;
+}
+} // namespace
+
+TEST_CASE ("control: values are inverted, curved and confined to a sub-range", "[control]")
+{
+    Binding b;
+    CHECK (mapValue (b, 0.25) == Approx (0.25));
+    b.invert = true;
+    CHECK (mapValue (b, 0.25) == Approx (0.75));
+    b.invert = false;
+    b.curve = 2.0;
+    CHECK (mapValue (b, 0.5) == Approx (0.25));
+    b.curve = 1.0;
+    b.lo = 0.2;
+    b.hi = 0.6;
+    CHECK (mapValue (b, 0.0) == Approx (0.2));
+    CHECK (mapValue (b, 1.0) == Approx (0.6));
+    CHECK (mapValue (b, 0.5) == Approx (0.4));
+    b.lo = 0.8;
+    b.hi = 0.2;        // sous-intervalle à l'envers : la course est inversée
+    CHECK (mapValue (b, 0.0) == Approx (0.8));
+    CHECK (mapValue (b, 1.0) == Approx (0.2));
+    CHECK (mapValue (b, 5.0) == Approx (0.2)); // valeur de source hors plage : bornée
+}
+
+TEST_CASE ("control: CC does nothing until enabled, then moves the target parameter", "[control]")
+{
+    Rig r;
+    r.configure ({ cc (0, 7, kVolume) }, false);
+    r.engine.controlChange (0, 7, 127, r.set);
+    CHECK (r.set.get (kVolume) == Approx (0.0));      // désactivé par défaut : aucun effet
+
+    r.configure ({ cc (0, 7, kVolume) }, true);
+    r.engine.controlChange (0, 7, 127, r.set);
+    CHECK (r.set.get (kVolume) == Approx (6.0));
+    r.engine.controlChange (0, 7, 0, r.set);
+    CHECK (r.set.get (kVolume) == Approx (-60.0));
+    r.engine.controlChange (0, 8, 127, r.set);        // un autre numéro : rien
+    CHECK (r.set.get (kVolume) == Approx (-60.0));
+}
+
+TEST_CASE ("control: channel filter, omni, several targets and several sources", "[control]")
+{
+    Rig r;
+    r.configure ({ cc (3, 1, kVolume), cc (0, 2, kVolume), cc (0, 2, kCutoff), cc (1, 5, kStep) });
+    r.engine.controlChange (0, 1, 127, r.set);        // voie 1 : l'assignation est sur la voie 3
+    CHECK (r.set.get (kVolume) == Approx (0.0));
+    r.engine.controlChange (2, 1, 127, r.set);        // voie 3 (indice 2)
+    CHECK (r.set.get (kVolume) == Approx (6.0));
+    r.engine.controlChange (15, 2, 0, r.set);         // omni : n'importe quelle voie, et vise deux paramètres
+    CHECK (r.set.get (kVolume) == Approx (-60.0));
+    CHECK (r.set.get (kCutoff) == Approx (20.0));
+    r.engine.controlChange (0, 5, 127, r.set);
+    CHECK (r.set.get (kStep) == 8.0);                 // paramètre discret : arrondi
+}
+
+TEST_CASE ("control: pickup waits for the source to reach the parameter", "[control]")
+{
+    Rig r;
+    auto b = cc (0, 7, kVolume);
+    b.mode = Mode::Pickup;
+    r.configure ({ b });
+    r.set.set (kVolume, 0.0);                          // à 90,9 % de la course (-60..+6)
+    r.engine.controlChange (0, 7, 10, r.set);          // le fader est loin en bas : le paramètre ne bouge pas
+    CHECK (r.set.get (kVolume) == Approx (0.0));
+    r.engine.controlChange (0, 7, 100, r.set);         // encore loin (78 %)
+    CHECK (r.set.get (kVolume) == Approx (0.0));
+    r.engine.controlChange (0, 7, 116, r.set);         // 91,3 % : à la hauteur du paramètre -> il suit
+    CHECK (r.set.getNormalized (kVolume) == Approx (116.0 / 127.0).margin (0.005));
+    r.engine.controlChange (0, 7, 20, r.set);          // une fois repris, il suit partout
+    CHECK (r.set.getNormalized (kVolume) == Approx (20.0 / 127.0).margin (0.005));
+    r.engine.resetPickup();                            // changement de preset : on attend de nouveau
+    r.set.set (kVolume, 0.0);
+    r.engine.controlChange (0, 7, 5, r.set);
+    CHECK (r.set.get (kVolume) == Approx (0.0));
+}
+
+TEST_CASE ("control: macros fan out to their targets", "[control]")
+{
+    Rig r;
+    Binding a;
+    a.source.kind = SourceKind::Macro;
+    a.source.number = 3;
+    a.target.param = kCutoff;
+    Binding b = a;
+    b.target.param = kVolume;
+    b.invert = true;
+    r.configure ({ a, b }, false);                     // les macros ne dépendent pas de l'interrupteur des CC
+    r.engine.macroChanged (3, 1.0, r.set);
+    CHECK (r.set.get (kCutoff) == Approx (20000.0));
+    CHECK (r.set.get (kVolume) == Approx (-60.0));
+    r.engine.macroChanged (4, 0.0, r.set);              // une autre macro : rien
+    CHECK (r.set.get (kCutoff) == Approx (20000.0));
+}
+
+TEST_CASE ("control: OSC addresses reach their targets without touching the audio path", "[control]")
+{
+    Rig r;
+    Binding b;
+    b.source.kind = SourceKind::Osc;
+    b.source.address = "/neptune/volume";
+    b.target.param = kVolume;
+    r.configure ({ b }, false);
+    CHECK (r.engine.oscValue ("/neptune/volume", 1.0, r.set) == 1);
+    CHECK (r.set.get (kVolume) == Approx (6.0));
+    CHECK (r.engine.oscValue ("/neptune/other", 1.0, r.set) == 0);
+    CHECK (r.engine.oscAddresses() == std::vector<std::string> { "/neptune/volume" });
+}
+
+TEST_CASE ("control: actions fire once per press, in order, on the message thread side", "[control]")
+{
+    Rig r;
+    Binding next = cc (0, 20, 0), prev = cc (0, 21, 0), panic = cc (0, 22, 0);
+    for (auto* b : { &next, &prev, &panic }) { b->target.isAction = true; b->target.param = 0; }
+    next.target.action = Action::PresetNext;
+    prev.target.action = Action::PresetPrevious;
+    panic.target.action = Action::Panic;
+    r.configure ({ next, prev, panic });
+    r.engine.controlChange (0, 20, 127, r.set);
+    r.engine.controlChange (0, 20, 127, r.set);        // toujours appuyé : pas de second déclenchement
+    r.engine.controlChange (0, 20, 0, r.set);          // relâché
+    r.engine.controlChange (0, 20, 100, r.set);        // nouvel appui
+    r.engine.controlChange (0, 22, 127, r.set);
+    Action a;
+    REQUIRE (r.engine.popAction (a));
+    CHECK (a == Action::PresetNext);
+    REQUIRE (r.engine.popAction (a));
+    CHECK (a == Action::PresetNext);
+    REQUIRE (r.engine.popAction (a));
+    CHECK (a == Action::Panic);
+    CHECK_FALSE (r.engine.popAction (a));
+    r.engine.controlChange (0, 21, 127, r.set);
+    REQUIRE (r.engine.popAction (a));
+    CHECK (a == Action::PresetPrevious);
+}
+
+TEST_CASE ("control: learning remembers the last CC, changes are reported once and grouped", "[control]")
+{
+    Rig r;
+    r.configure ({ cc (0, 7, kVolume), cc (0, 8, kCutoff) });
+    int ch = 0, num = 0;
+    r.engine.controlChange (4, 99, 10, r.set);
+    CHECK_FALSE (r.engine.takeLearnedCc (ch, num));   // l'apprentissage n'est pas actif
+    r.engine.setLearning (true);
+    r.engine.controlChange (4, 99, 10, r.set);
+    REQUIRE (r.engine.takeLearnedCc (ch, num));
+    CHECK (ch == 5);
+    CHECK (num == 99);
+    CHECK_FALSE (r.engine.takeLearnedCc (ch, num));
+
+    std::vector<std::size_t> changed;
+    r.engine.drainChanges (changed);                  // rien n'a changé jusqu'ici
+    CHECK (changed.empty());
+    for (int v = 0; v < 100; ++v) r.engine.controlChange (0, 7, v, r.set); // un balayage : un seul signalement pour le paramètre
+    r.engine.controlChange (0, 8, 127, r.set);
+    r.engine.drainChanges (changed);
+    CHECK (std::set<std::size_t> (changed.begin(), changed.end()) == std::set<std::size_t> { r.set.indexOf (kVolume), r.set.indexOf (kCutoff) });
+    CHECK (changed.size() == 2);
+    changed.clear();
+    CHECK (r.engine.drainChanges (changed) == 0);
+}
+
+TEST_CASE ("control: assignments on unknown parameters are kept but inert", "[control]")
+{
+    Rig r;
+    r.configure ({ cc (0, 7, kUnknown), cc (0, 7, kVolume) });
+    r.engine.controlChange (0, 7, 127, r.set);
+    CHECK (r.set.get (kVolume) == Approx (6.0));
+    CHECK (r.engine.config().bindings.size() == 2);    // l'assignation orpheline reste dans le projet
+}
+
+TEST_CASE ("control: configuration round trips, is sanitised and everything is off by default", "[control]")
+{
+    Config empty;
+    CHECK_FALSE (empty.settings.ccEnabled);
+    CHECK_FALSE (empty.settings.oscEnabled);
+    CHECK_FALSE (empty.settings.reducedHostList);
+    CHECK (configFromJson ("pas du json") == Config {});
+    CHECK_FALSE (configFromJson ("{}").settings.ccEnabled);
+
+    Config c;
+    c.settings.ccEnabled = true;
+    c.settings.oscPort = 9100;
+    c.settings.feedbackHost = "192.168.1.20";
+    c.settings.feedbackPort = 9001;
+    c.settings.reducedHostList = true;
+    auto b = cc (2, 74, kCutoff);
+    b.lo = 0.1; b.hi = 0.9; b.curve = 2.0; b.invert = true; b.mode = Mode::Pickup;
+    c.bindings.push_back (b);
+    Binding m;
+    m.source.kind = SourceKind::Macro; m.source.number = 31; m.target.param = kVolume;
+    c.bindings.push_back (m);
+    Binding o;
+    o.source.kind = SourceKind::Osc; o.source.address = "/a/b"; o.target.isAction = true; o.target.action = Action::TrackNext;
+    c.bindings.push_back (o);
+    CHECK (configFromJson (toJson (c)) == c);
+
+    // assignations invalides ignorées, bornes appliquées
+    const char* bad = R"({"bindings":[
+        {"source":{"type":"cc","channel":0,"number":200},"target":{"param":10}},
+        {"source":{"type":"macro","index":99},"target":{"param":10}},
+        {"source":{"type":"osc","address":"sans-barre"},"target":{"param":10}},
+        {"source":{"type":"cc","channel":0,"number":1},"target":{"action":"inconnue"}},
+        {"source":{"type":"cc","channel":0,"number":1},"target":{"param":0}},
+        {"source":{"type":"cc","channel":99,"number":5},"target":{"param":10},"curve":-4,"min":-1,"max":7}
+    ],"osc_port":22})";
+    const auto s = configFromJson (bad);
+    REQUIRE (s.bindings.size() == 1);
+    CHECK (s.bindings[0].source.channel == 16);
+    CHECK (s.bindings[0].curve == Approx (0.1));
+    CHECK (s.bindings[0].lo == 0.0);
+    CHECK (s.bindings[0].hi == 1.0);
+    CHECK (s.settings.oscPort == 1024);
+}
+
+TEST_CASE ("control: reconfiguring while the audio side is running is safe and takes effect", "[control]")
+{
+    Rig r;
+    r.configure ({ cc (0, 7, kVolume) });
+    std::atomic<bool> stop { false };
+    std::thread audio ([&] { int v = 0; while (! stop.load()) { r.engine.controlChange (0, 7, (v++) & 127, r.set); r.engine.controlChange (0, 8, 5, r.set); } });
+    for (int i = 0; i < 300; ++i)
+    {
+        r.configure ({ cc (0, 7, kVolume), cc (0, 8, kCutoff) });
+        r.engine.collectGarbage();
+        std::vector<std::size_t> changed;
+        r.engine.drainChanges (changed);
+    }
+    stop.store (true);
+    audio.join();
+    r.engine.collectGarbage();
+    r.engine.controlChange (0, 8, 127, r.set);
+    CHECK (r.set.get (kCutoff) == Approx (20000.0));
+}
