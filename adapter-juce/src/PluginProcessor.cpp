@@ -1234,6 +1234,7 @@ NeptuneProcessor::NeptuneProcessor()
 NeptuneProcessor::~NeptuneProcessor()
 {
     controlTimer_.stopTimer();
+    osc_.stop();
     autosaveTimer_.stopTimer();
     autosave_->discard(); // fermeture propre : il n'y a rien à récupérer
 }
@@ -1276,10 +1277,40 @@ void NeptuneProcessor::uiClearControllers()
 
 // Relais du thread de message : actions demandées par une source (preset suivant, panique...) et paramètres modifiés par une source
 // externe, signalés à l'hôte (regroupés : une notification par paramètre et par tic).
+void NeptuneProcessor::syncOsc()
+{
+    const auto now = control_.settings();
+    const bool wanted = now.oscEnabled;
+    if (wanted == oscRunning_ && (! wanted || (now.oscPort == oscApplied_.oscPort && now.oscAllInterfaces == oscApplied_.oscAllInterfaces))) return;
+    if (! wanted) osc_.stop();
+    else osc_.start (now.oscPort, now.oscAllInterfaces);   // 0 si aucun port libre : le menu l'indique
+    oscRunning_ = wanted;
+    oscApplied_ = now;
+}
+
+void NeptuneProcessor::uiSetOscEnabled (bool on)
+{
+    auto c = control_.config();
+    if (c.settings.oscEnabled == on) return;
+    c.settings.oscEnabled = on;
+    uiSetControlConfig (std::move (c));
+    syncOsc();
+}
+
+void NeptuneProcessor::uiSetOscAllInterfaces (bool on)
+{
+    auto c = control_.config();
+    if (c.settings.oscAllInterfaces == on) return;
+    c.settings.oscAllInterfaces = on;
+    uiSetControlConfig (std::move (c));
+    syncOsc();
+}
+
 void NeptuneProcessor::controlTick()
 {
     using neptune::core::control::Action;
     control_.collectGarbage();
+    syncOsc();   // un état chargé par l'hôte peut avoir activé ou arrêté le serveur
     for (Action a = Action::None; control_.popAction (a);)
     {
         switch (a)

@@ -1,6 +1,6 @@
 # Couche de contrôle : CC, OSC, paramètres de l'hôte (proposition de conception)
 
-Statut : **étapes 1 et 2 faites (cœur testé, CC branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
+Statut : **étapes 1, 2 et 3 faites (cœur testé, CC et OSC branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
 n'importe quel paramètre, par CC, par OSC ou par l'hôte, et de l'assigner à ce dont on a besoin ? ». Réponse : oui.
 
 ## 1. Ce qui existe déjà
@@ -144,4 +144,15 @@ Règle : **l'audio ne parle jamais à l'hôte**.
   - Orgamon : les CC (sauf banque 0 et notes) sont **ignorés par défaut** (la molette ne touche plus le Leslie) ; bouton « CC » en haut pour les activer,
     état enregistré (`cc_enabled`).
   - Pas encore : apprentissage MIDI dans l'interface, écran de gestion des assignations, pool de macros déclaré à l'hôte, serveur OSC.
+- **Étape 3 faite (à valider dans Reaper, jamais lancée ; compilation de l'adaptateur contrôlée à la syntaxe seulement)** :
+  - Cœur (`Osc.h/.cpp`, 10 tests) : codec OSC (messages, paquets groupés, types i f d h s T F N ; paquets malformés refusés), table figée des adresses
+    (`/neptune/master/...`, `/neptune/track/N/...`, `/bus/N`, `/parallel/N`, orgue, synthé, FM, sampler, emplacements ; numéros comptés à partir de 1 ;
+    chaque paramètre du pool complet en a une, test), répartiteur (valeur normalisée, variante `/real` en unités réelles, `/neptune/id/<id>[/real]`,
+    adresses assignées dans la table des assignations, catalogue `/neptune/list [préfixe]`), plafond de messages par fenêtre de 100 ms.
+  - Catalogue : réponse en paquets groupés (< 1,1 Ko) renvoyés à l'expéditeur : `/neptune/list/item` (adresse, id, nom, type, min, max, défaut) puis
+    `/neptune/list/done` (nombre).
+  - Adaptateur (`OscServer`) : thread UDP, désactivé par défaut, port de base 9000 puis le premier libre jusqu'à +99 (pas de partage de port),
+    `127.0.0.1` sauf case « réseau local » ; bouton « OSC » (à droite de « CC ») : interrupteur, réseau local, port affiché. Enregistré avec le projet
+    (`osc_enabled`, `osc_all_interfaces`). Les paramètres modifiés par OSC sont signalés à l'hôte comme ceux des CC (~30 Hz, gestes begin/end).
+  - Pas encore : choix du port de base dans l'interface (seulement dans la section `control` du projet), Orgamon et les autres plugins, retour d'information.
 - Limite connue : le suivi des changements couvre 32768 paramètres au plus (Neptune en déclare environ 3000).

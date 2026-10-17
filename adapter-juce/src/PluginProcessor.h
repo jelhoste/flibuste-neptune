@@ -18,6 +18,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Control.h"
+#include "OscServer.h"
 #include "neptune/core/OrganSynth.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
@@ -106,6 +107,10 @@ public:
     void uiSetControlConfig (neptune::core::control::Config);          // enregistré avec le projet
     bool ccEnabled() const { return control_.config().settings.ccEnabled; }
     void uiSetCcEnabled (bool on);
+    bool oscEnabled() const { return control_.settings().oscEnabled; }
+    void uiSetOscEnabled (bool on);
+    void uiSetOscAllInterfaces (bool on);
+    int oscPort() const { return osc_.port(); }   // 0 : n'écoute pas
     // Remplace les assignations de la piste sélectionnée (si c'est un orgue) par les CC de setBfree, avec les voies de ses claviers.
     bool uiAssignOrganControllers();
     void uiClearControllers();
@@ -318,6 +323,10 @@ private:
     // Couche de contrôle : le moteur est lu par le thread audio (CC) ; le relais ci-dessous (thread de message, ~30 Hz) exécute les actions
     // demandées et prévient l'hôte des paramètres modifiés par une source externe.
     neptune::core::control::ControlEngine control_;
+    OscServer osc_ { control_, params_ };
+    void syncOsc();   // thread de message : démarre, arrête ou redémarre le serveur selon les réglages
+    neptune::core::control::Settings oscApplied_;
+    bool oscRunning_ = false;
     AutosaveTimer controlTimer_;
     void controlTick();
 

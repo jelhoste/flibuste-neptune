@@ -68,6 +68,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     controlButton_.setTooltip (text ("control.title"));
     controlButton_.onClick = [this] { showControlMenu(); };
     addAndMakeVisible (controlButton_);
+    oscButton_.setButtonText (text ("osc.button"));
+    oscButton_.setTooltip (text ("osc.title"));
+    oscButton_.onClick = [this] { showOscMenu(); };
+    addAndMakeVisible (oscButton_);
     voiceCountButton_.setTooltip (text ("voices.global_limit"));
     voiceCountButton_.onClick = [this]
     {
@@ -1349,6 +1353,31 @@ void NeptuneEditor::showControlMenu()
     });
 }
 
+// Serveur OSC : désactivé par défaut, enregistré avec le projet. Écoute sur cet ordinateur seulement, sauf case « réseau local ».
+void NeptuneEditor::showOscMenu()
+{
+    const bool on = processor_.oscEnabled();
+    const auto settings = processor_.controlConfig().settings;
+    const int port = processor_.oscPort();
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("osc.enable"), true, on);
+    menu.addItem (2, text ("osc.network"), true, settings.oscAllInterfaces);
+    if (on)
+    {
+        menu.addSeparator();
+        const auto status = port > 0 ? tr_.format ("osc.listening", { std::to_string (port) }) : tr_.format ("osc.busy", { std::to_string (settings.oscPort) });
+        menu.addItem (3, juce::String::fromUTF8 (status.c_str()), false, false);
+    }
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&oscButton_), [safe, on, settings] (int choice)
+    {
+        if (safe == nullptr) return;
+        if (choice == 1) safe->processor_.uiSetOscEnabled (! on);
+        else if (choice == 2) safe->processor_.uiSetOscAllInterfaces (! settings.oscAllInterfaces);
+        safe->updateProfileControls();
+    });
+}
+
 void NeptuneEditor::updateProfileControls()
 {
     using neptune::core::PerformanceProfile;
@@ -1360,6 +1389,7 @@ void NeptuneEditor::updateProfileControls()
                            juce::dontSendNotification);
     profileLockButton_.setButtonText (text (locked ? "profile.unlock" : "profile.lock"));
     controlButton_.setToggleState (processor_.ccEnabled(), juce::dontSendNotification); // allumé : les CC agissent
+    oscButton_.setToggleState (processor_.oscEnabled(), juce::dontSendNotification);     // allumé : le serveur OSC est demandé
 }
 
 void NeptuneEditor::timerCallback()
@@ -1439,11 +1469,12 @@ void NeptuneEditor::resized()
     mappingButton_.setBounds (lw_ - 32 - 100 - 4 - 100, 32, 100, 36);
     mixerButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
     panicButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
-    trackBox_.setBounds (190, 32, 220, 36);
+    trackBox_.setBounds (190, 32, 180, 36);
     mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 150) });
-    voiceCountButton_.setBounds (416, 32, 150, 36);
-    midiFilterButton_.setBounds (570, 32, 48, 36);
-    controlButton_.setBounds (622, 32, 48, 36);
+    voiceCountButton_.setBounds (376, 32, 150, 36);
+    midiFilterButton_.setBounds (530, 32, 44, 36);
+    controlButton_.setBounds (578, 32, 44, 36);
+    oscButton_.setBounds (626, 32, 44, 36);
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });

@@ -97,6 +97,7 @@ std::string toJson (const Config& c)
     doc["cc_enabled"] = c.settings.ccEnabled;
     doc["osc_enabled"] = c.settings.oscEnabled;
     doc["osc_port"] = c.settings.oscPort;
+    if (c.settings.oscAllInterfaces) doc["osc_all_interfaces"] = true;
     if (! c.settings.feedbackHost.empty()) { doc["feedback_host"] = c.settings.feedbackHost; doc["feedback_port"] = c.settings.feedbackPort; }
     if (c.settings.reducedHostList) doc["reduced_host_list"] = true;
     json list = json::array();
@@ -133,6 +134,7 @@ Config configFromJson (std::string_view text)
     auto integer = [&doc] (const char* key, int& out) { if (const auto it = doc.find (key); it != doc.end() && it->is_number_integer()) out = it->get<int>(); };
     flag ("cc_enabled", c.settings.ccEnabled);
     flag ("osc_enabled", c.settings.oscEnabled);
+    flag ("osc_all_interfaces", c.settings.oscAllInterfaces);
     flag ("reduced_host_list", c.settings.reducedHostList);
     integer ("osc_port", c.settings.oscPort);
     integer ("feedback_port", c.settings.feedbackPort);
@@ -254,6 +256,12 @@ Config ControlEngine::config() const
     return config_;
 }
 
+Settings ControlEngine::settings() const
+{
+    const std::lock_guard<std::mutex> lock (mutex_);
+    return config_.settings;
+}
+
 void ControlEngine::collectGarbage() { slot_.collect(); }
 
 void ControlEngine::resetPickup()
@@ -369,6 +377,14 @@ int ControlEngine::oscValue (const std::string& address, double normalized, Para
     if (it == rt->osc.end()) return 0;
     for (const auto i : it->second) apply (*rt, i, normalized, set);
     return static_cast<int> (it->second.size());
+}
+
+bool ControlEngine::setParameter (ParamId id, double value, bool real, ParameterSet& set) noexcept
+{
+    const auto index = set.indexOf (id);
+    if (index == ParameterSet::npos || ! std::isfinite (value)) return false;
+    if (set.setAt (index, real ? value : set.spec (index).fromNormalized (std::clamp (value, 0.0, 1.0)))) markChanged (index);
+    return true;
 }
 
 std::vector<std::string> ControlEngine::oscAddresses() const

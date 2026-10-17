@@ -68,12 +68,13 @@ struct Settings
     bool ccEnabled = false;          // les contrôleurs MIDI agissent sur les paramètres
     bool oscEnabled = false;         // le serveur OSC écoute
     int oscPort = 9000;              // port de base (le premier libre à partir de lui est pris)
+    bool oscAllInterfaces = false;   // écoute sur le réseau local ; sinon seulement sur cette machine (localhost)
     std::string feedbackHost;        // retour d'information OSC (vide : aucun)
     int feedbackPort = 0;
     bool reducedHostList = false;    // ne montre à l'hôte que les paramètres de bande et le pool de macros
     bool operator== (const Settings& o) const noexcept
     {
-        return ccEnabled == o.ccEnabled && oscEnabled == o.oscEnabled && oscPort == o.oscPort && feedbackHost == o.feedbackHost
+        return ccEnabled == o.ccEnabled && oscEnabled == o.oscEnabled && oscPort == o.oscPort && oscAllInterfaces == o.oscAllInterfaces && feedbackHost == o.feedbackHost
             && feedbackPort == o.feedbackPort && reducedHostList == o.reducedHostList;
     }
 };
@@ -105,6 +106,7 @@ public:
     // assignations qui visent un paramètre inconnu sont gardées dans la configuration mais n'agissent pas.
     void configure (const Config&, const ParameterSet&);
     Config config() const;
+    Settings settings() const;                   // les réglages seuls (léger : sans les assignations)
     void collectGarbage();                       // libère les tables remplacées
     void resetPickup();                 // les assignations « reprise » attendent de nouveau le passage de la source (changement de preset)
 
@@ -123,6 +125,9 @@ public:
     int oscValue (const std::string& address, double normalized, ParameterSet&) noexcept;
     // Adresses OSC des assignations (pour l'abonnement ou le catalogue).
     std::vector<std::string> oscAddresses() const;
+    // Écrit directement un paramètre (sans assignation) : valeur normalisée 0..1, ou réelle si `real`. Le paramètre est signalé comme
+    // modifié par une source (relais vers l'hôte). Retourne false si l'identifiant est inconnu ou si la valeur n'est pas finie.
+    bool setParameter (ParamId, double value, bool real, ParameterSet&) noexcept;
 
 private:
     struct Runtime;
