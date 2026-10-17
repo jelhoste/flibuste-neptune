@@ -102,7 +102,7 @@ public:
             line.removeFromLeft (8);
             r->invert.setBounds (line.removeFromLeft (30).reduced (0, 3));
             line.removeFromLeft (4);
-            r->mode.setBounds (line.removeFromLeft (96).reduced (0, 3));
+            r->mode.setBounds (line.removeFromLeft (130).reduced (0, 3));
             line.removeFromLeft (6);
             r->remove.setBounds (line.removeFromLeft (28).reduced (0, 2));
             y += kRowH;
@@ -206,8 +206,18 @@ void ControlPanel::rebuild()
         row->invert.onClick = [this, i, row] { edit (i, [row] (ctl::Binding& x) { x.invert = row->invert.getToggleState(); }); };
         row->mode.addItem (text ("cpanel.absolute"), 1);
         row->mode.addItem (text ("cpanel.pickup"), 2);
-        row->mode.setSelectedId (b.mode == ctl::Mode::Pickup ? 2 : 1, juce::dontSendNotification);
-        row->mode.onChange = [this, i, row] { if (! updating_) edit (i, [row] (ctl::Binding& x) { x.mode = row->mode.getSelectedId() == 2 ? ctl::Mode::Pickup : ctl::Mode::Absolute; }); };
+        row->mode.addItem (text ("cpanel.relative_twos"), 3);
+        row->mode.addItem (text ("cpanel.relative_offset"), 4);
+        row->mode.addItem (text ("cpanel.relative_sign"), 5);
+        const bool relativeOk = b.source.kind == ctl::SourceKind::CC && ! b.target.isAction;   // les encodeurs relatifs : CC vers un paramètre
+        for (int id = 3; id <= 5; ++id) row->mode.setItemEnabled (id, relativeOk);
+        row->mode.setSelectedId (1 + static_cast<int> (b.mode), juce::dontSendNotification);   // Absolute, Pickup, RelativeTwos, RelativeOffset, RelativeSign
+        row->mode.onChange = [this, i, row]
+        {
+            if (updating_) return;
+            const auto id = row->mode.getSelectedId();
+            edit (i, [id] (ctl::Binding& x) { x.mode = static_cast<ctl::Mode> (id - 1); });
+        };
         for (juce::Component* c : std::initializer_list<juce::Component*> { &row->source, &row->target, &row->lo, &row->hi, &row->curve, &row->invert, &row->mode, &row->remove })
             content_->addAndMakeVisible (c);
     }
@@ -264,7 +274,8 @@ void ControlPanel::startLearning (int index)
 {
     learning_ = index;
     int c = 0, n = 0;
-    processor_.control().takeLearnedCc (c, n);   // vide un éventuel ancien CC
+    processor_.control().takeLearnedCc (c, n);   // vide un éventuel ancien CC ou NRPN
+    processor_.control().takeLearnedNrpn (c, n);
     processor_.control().setLearning (index >= 0);
     rebuild();
 }
@@ -348,7 +359,16 @@ void ControlPanel::timerCallback()
     if (learning_ >= 0)
     {
         int channel = 0, number = 0;
-        if (processor_.control().takeLearnedCc (channel, number))
+        int nrpnChannel = 0, nrpnNumber = 0;
+        if (processor_.control().takeLearnedNrpn (nrpnChannel, nrpnNumber))
+        {
+            const int row = learning_;
+            learning_ = -1;
+            processor_.control().setLearning (false);
+            edit (static_cast<std::size_t> (row), [nrpnNumber] (ctl::Binding& b) { b.source = {}; b.source.kind = ctl::SourceKind::Nrpn; b.source.number = nrpnNumber; });
+            rebuild();
+        }
+        else if (processor_.control().takeLearnedCc (channel, number))
         {
             const int row = learning_;
             learning_ = -1;

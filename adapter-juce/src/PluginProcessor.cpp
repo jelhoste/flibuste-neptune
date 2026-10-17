@@ -1356,6 +1356,79 @@ void NeptuneProcessor::syncOsc()
     oscApplied_ = now;
 }
 
+// Retour d'information OSC : toute valeur qui change (interface, hôte, CC, OSC) est renvoyée au destinataire, regroupée à ~30 Hz. Un « /neptune/sync »
+// reçu, ou un nouveau destinataire, renvoie l'état complet (par tranches, pour ne pas saturer le réseau).
+void NeptuneProcessor::feedbackTick()
+{
+    const auto settings = control_.settings();
+    if (oscRunning_)
+    {
+        const juce::String manual = settings.feedbackPort > 0 ? juce::String (settings.feedbackHost) : juce::String();
+        osc_.setManualDestination (manual, settings.feedbackPort);
+    }
+    if (! oscRunning_ || ! osc_.hasDestination())
+    {
+        feedbackVersions_.clear();
+        feedbackPending_.clear();
+        feedbackHead_ = 0;
+        osc_.takeFullSendRequest();
+        return;
+    }
+    const bool full = osc_.takeFullSendRequest();
+    if (feedbackVersions_.empty() || full)
+    {
+        // première activation ou demande de synchronisation : tout l'état part
+        feedbackVersions_.assign (params_.size(), 0);
+        for (std::size_t i = 0; i < params_.size(); ++i) feedbackVersions_[i] = params_.versionAt (i);
+        feedbackPending_.clear();
+        feedbackHead_ = 0;
+        for (std::size_t i = 0; i < params_.size(); ++i) feedbackPending_.push_back (i);
+    }
+    else
+        for (std::size_t i = 0; i < params_.size(); ++i)
+        {
+            const auto v = params_.versionAt (i);
+            if (v == feedbackVersions_[i]) continue;
+            feedbackVersions_[i] = v;
+            feedbackPending_.push_back (i);
+        }
+    if (feedbackHead_ >= feedbackPending_.size())
+    {
+        feedbackPending_.clear();
+        feedbackHead_ = 0;
+        return;
+    }
+    constexpr std::size_t kPerTick = 400;
+    const auto end = std::min (feedbackPending_.size(), feedbackHead_ + kPerTick);
+    const std::vector<std::size_t> chunk (feedbackPending_.begin() + static_cast<std::ptrdiff_t> (feedbackHead_), feedbackPending_.begin() + static_cast<std::ptrdiff_t> (end));
+    feedbackHead_ = end;
+    osc_.send (neptune::core::osc::buildFeedback (params_, chunk));
+}
+
+bool NeptuneProcessor::uiSetOscFeedback (const juce::String& hostAndPort)
+{
+    auto c = control_.config();
+    const auto text = hostAndPort.trim();
+    if (text.isEmpty())
+    {
+        c.settings.feedbackHost.clear();
+        c.settings.feedbackPort = 0;
+        osc_.stopFeedback();
+    }
+    else
+    {
+        const int colon = text.lastIndexOfChar (':');
+        const auto host = colon > 0 ? text.substring (0, colon).trim() : juce::String();
+        const int port = colon > 0 ? text.substring (colon + 1).trim().getIntValue() : 0;
+        if (host.isEmpty() || host.length() > 253 || port < 1 || port > 65535) return false;
+        c.settings.feedbackHost = host.toStdString();
+        c.settings.feedbackPort = port;
+    }
+    uiSetControlConfig (std::move (c));
+    syncOsc();
+    return true;
+}
+
 void NeptuneProcessor::uiSetOscEnabled (bool on)
 {
     auto c = control_.config();
@@ -1379,6 +1452,7 @@ void NeptuneProcessor::controlTick()
     using neptune::core::control::Action;
     control_.collectGarbage();
     syncOsc();   // un état chargé par l'hôte peut avoir activé ou arrêté le serveur
+    feedbackTick();
     for (Action a = Action::None; control_.popAction (a);)
     {
         switch (a)

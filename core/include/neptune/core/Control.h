@@ -32,7 +32,7 @@ bool addMacroParams (ParameterSet&, std::string* error = nullptr);
 // la liste réduite des paramètres visibles de l'hôte.
 bool isBandOrMacroParam (ParamId) noexcept;
 
-enum class SourceKind { CC, Osc, Macro };
+enum class SourceKind { CC, Osc, Macro, Nrpn };
 enum class Action { None = 0, PresetNext, PresetPrevious, Panic, TrackNext, TrackPrevious };
 constexpr int kNumActions = 6;
 const char* toString (Action) noexcept;                 // "none" / "preset_next" / "preset_previous" / "panic" / "track_next" / "track_previous"
@@ -42,7 +42,7 @@ struct Source
 {
     SourceKind kind = SourceKind::CC;
     int channel = 0;          // CC : 0 = toutes les voies, 1..16
-    int number = 0;           // CC : 0..127 ; macro : 0..kMacros-1
+    int number = 0;           // CC : 0..127 ; macro : 0..kMacros-1 ; NRPN : 0..16383 (MSB x 128 + LSB), 14 bits, voie comme pour un CC
     std::string address;      // OSC : « /neptune/... »
     bool operator== (const Source& o) const noexcept { return kind == o.kind && channel == o.channel && number == o.number && address == o.address; }
 };
@@ -57,7 +57,14 @@ struct Target
     bool operator== (const Target& o) const noexcept { return isAction == o.isAction && param == o.param && action == o.action; }
 };
 
-enum class Mode { Absolute, Pickup };  // Pickup : le paramètre ne bouge que lorsque la source passe par sa valeur actuelle (pas de saut)
+// Pickup : le paramètre ne bouge que lorsque la source passe par sa valeur actuelle (pas de saut).
+// Relatifs (encodeurs sans fin, sources CC et paramètres seulement) : la valeur reçue est un incrément ajouté à la valeur du paramètre, 1/127 de la
+// course (min..max) par cran. RelativeTwos : 1..63 monte, 65..127 descend (complément à deux) ; RelativeOffset : 64 = repos, au-dessus monte, en dessous
+// descend ; RelativeSign : bit 6 = signe, bits 0..5 = amplitude.
+enum class Mode { Absolute, Pickup, RelativeTwos, RelativeOffset, RelativeSign };
+inline bool isRelative (Mode m) noexcept { return m == Mode::RelativeTwos || m == Mode::RelativeOffset || m == Mode::RelativeSign; }
+// Incrément signé (en crans) d'une valeur de CC (0..127) pour un mode relatif.
+int relativeDelta (Mode, int value) noexcept;
 
 struct Binding
 {
@@ -122,6 +129,7 @@ public:
 
     void setLearning (bool on) noexcept { learning_.store (on, std::memory_order_relaxed); }
     bool takeLearnedCc (int& channel, int& number) noexcept; // dernier CC reçu pendant l'apprentissage (channel 1..16)
+    bool takeLearnedNrpn (int& channel, int& number) noexcept; // dernier NRPN complet reçu pendant l'apprentissage (channel 1..16, number 0..16383)
     bool popAction (Action& out) noexcept;       // action demandée par une source ; à exécuter sur ce thread
     // Indices des paramètres modifiés par une source depuis le dernier appel (à signaler à l'hôte, regroupés). Retourne leur nombre.
     std::size_t drainChanges (std::vector<std::size_t>& out);
@@ -142,6 +150,7 @@ public:
 private:
     struct Runtime;
     void apply (const Runtime&, int item, double s, ParameterSet&) noexcept;
+    void nrpnValue (int channel0, int number, int value14, ParameterSet&) noexcept;
     void post (Action) noexcept;
     void markChanged (std::size_t index) noexcept;
 
@@ -152,6 +161,9 @@ private:
     std::atomic<bool> ccEnabled_ { false };
     std::atomic<bool> learning_ { false };
     std::atomic<std::uint32_t> learned_ { 0 };   // 1 << 24 | canal (1..16) << 8 | numéro ; 0 : rien
+    std::atomic<std::uint32_t> learnedNrpn_ { 0 }; // 1 << 24 | canal (1..16) << 16 | numéro de 14 bits ; 0 : rien
+    struct NrpnState { int msb = -1, lsb = -1, dataMsb = 0, dataLsb = 0; };
+    std::array<NrpnState, 16> nrpn_ {};          // thread audio seulement : sélection et données en cours, par voie
 
     static constexpr std::size_t kDirtyWords = 512;       // 32768 paramètres au plus
     std::unique_ptr<std::atomic<std::uint64_t>[]> dirty_;

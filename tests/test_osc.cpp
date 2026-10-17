@@ -256,3 +256,44 @@ TEST_CASE ("osc: server settings are off by default and survive JSON", "[osc]")
     CHECK (back.settings.oscPort == 9100);
     CHECK_FALSE (control::configFromJson (control::toJson (control::Config {})).settings.oscAllInterfaces);
 }
+
+TEST_CASE ("osc: feedback bundles carry the normalised value at the parameter address", "[osc]")
+{
+    ParameterSet set;
+    buildFullPool (set);
+    set.set (probe::trackParam (0, probe::kPan), 50.0);
+    std::vector<std::size_t> all;
+    for (std::size_t i = 0; i < set.size(); ++i) all.push_back (i);
+    const auto packets = osc::buildFeedback (set, all);
+    REQUIRE (packets.size() > 5);
+    std::vector<osc::Message> msgs;
+    for (const auto& p : packets)
+    {
+        CHECK (p.size() <= 1300);
+        REQUIRE (osc::parsePacket (p.data(), p.size(), msgs, 100000));
+    }
+    CHECK (msgs.size() == set.size());          // tout le pool a une adresse
+    bool found = false;
+    for (const auto& m : msgs)
+        if (m.address == "/neptune/track/1/pan") { found = true; CHECK (m.args[0].number == Approx (0.75)); }
+    CHECK (found);
+    CHECK (osc::buildFeedback (set, { set.size() + 5 }).empty());
+}
+
+TEST_CASE ("osc: /neptune/sync is reported once with its optional port", "[osc]")
+{
+    ParameterSet set;
+    buildFullPool (set);
+    control::ControlEngine engine;
+    osc::Dispatcher d (engine, set);
+    std::vector<std::vector<std::uint8_t>> replies;
+    int port = -1;
+    CHECK_FALSE (d.takeSync (port));
+    d.handleMessage (osc::Message { "/neptune/sync", {} }, replies);
+    REQUIRE (d.takeSync (port));
+    CHECK (port == 0);
+    CHECK_FALSE (d.takeSync (port));
+    d.handleMessage (msg ("/neptune/sync", 9100, 'i'), replies);
+    REQUIRE (d.takeSync (port));
+    CHECK (port == 9100);
+}

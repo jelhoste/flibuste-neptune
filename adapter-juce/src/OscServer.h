@@ -21,10 +21,24 @@ public:
     void stop();
     int port() const noexcept { return port_.load(); }
 
+    // ---- retour d'information (thread de message) ----
+    // Destinataire réglé à la main (« hôte:port », vide : aucun) ; celui d'un « /neptune/sync » reçu le remplace jusqu'à l'arrêt.
+    void setManualDestination (const juce::String& host, int port);
+    void stopFeedback();                                  // efface les deux destinataires
+    bool hasDestination() const;
+    juce::String destinationText() const;                 // « hôte:port » ou vide
+    void send (const std::vector<std::vector<std::uint8_t>>& datagrams);
+    bool takeFullSendRequest() noexcept { return fullSend_.exchange (false); }   // un « /neptune/sync » demande l'état complet
+
 private:
     void run() override;
 
     neptune::core::osc::Dispatcher dispatcher_;
     std::unique_ptr<juce::DatagramSocket> socket_;
     std::atomic<int> port_ { 0 };
+    struct Destination { juce::String host; int port = 0; };
+    mutable juce::CriticalSection destinationLock_;
+    Destination manual_, dynamic_;
+    juce::DatagramSocket sender_ { false };
+    std::atomic<bool> fullSend_ { false };
 };

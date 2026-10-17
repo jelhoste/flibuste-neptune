@@ -185,13 +185,13 @@ TEST_CASE ("control: learning remembers the last CC, changes are reported once a
     Rig r;
     r.configure ({ cc (0, 7, kVolume), cc (0, 8, kCutoff) });
     int ch = 0, num = 0;
-    r.engine.controlChange (4, 99, 10, r.set);
+    r.engine.controlChange (4, 75, 10, r.set);
     CHECK_FALSE (r.engine.takeLearnedCc (ch, num));   // l'apprentissage n'est pas actif
     r.engine.setLearning (true);
-    r.engine.controlChange (4, 99, 10, r.set);
+    r.engine.controlChange (4, 75, 10, r.set);
     REQUIRE (r.engine.takeLearnedCc (ch, num));
     CHECK (ch == 5);
-    CHECK (num == 99);
+    CHECK (num == 75);
     CHECK_FALSE (r.engine.takeLearnedCc (ch, num));
 
     std::vector<std::size_t> changed;
@@ -331,4 +331,117 @@ TEST_CASE ("control: source labels are short and language independent", "[contro
     CHECK (sourceLabel (s) == "Macro 3");
     s.kind = SourceKind::Osc; s.address = "/a/b";
     CHECK (sourceLabel (s) == "OSC /a/b");
+}
+
+TEST_CASE ("control: NRPN selects a 14-bit parameter and moves its target", "[control]")
+{
+    Rig r;
+    Binding b;
+    b.source.kind = SourceKind::Nrpn;
+    b.source.channel = 0;
+    b.source.number = 1 * 128 + 5;      // MSB 1, LSB 5
+    b.target.param = kVolume;
+    r.configure ({ b }, true);
+    r.engine.controlChange (0, 99, 1, r.set);
+    r.engine.controlChange (0, 98, 5, r.set);
+    r.engine.controlChange (0, 6, 127, r.set);
+    r.engine.controlChange (0, 38, 127, r.set);       // 127 * 128 + 127 = 16383
+    CHECK (r.set.getNormalized (kVolume) == Approx (1.0));
+    r.engine.controlChange (0, 6, 64, r.set);         // 64 * 128 = 8192
+    r.engine.controlChange (0, 38, 0, r.set);
+    CHECK (r.set.getNormalized (kVolume) == Approx (8192.0 / 16383.0).margin (1e-6));
+
+    r.engine.controlChange (0, 99, 1, r.set);         // un autre paramètre : pas d'effet
+    r.engine.controlChange (0, 98, 6, r.set);
+    r.engine.controlChange (0, 6, 0, r.set);
+    r.engine.controlChange (0, 38, 0, r.set);
+    CHECK (r.set.getNormalized (kVolume) == Approx (8192.0 / 16383.0).margin (1e-6));
+
+    r.engine.controlChange (0, 101, 0, r.set);        // RPN : la sélection NRPN est annulée
+    r.engine.controlChange (0, 6, 100, r.set);
+    CHECK (r.set.getNormalized (kVolume) == Approx (8192.0 / 16383.0).margin (1e-6));
+
+    r.configure ({ b }, false);                        // désactivé : aucun effet
+    r.engine.controlChange (0, 99, 1, r.set);
+    r.engine.controlChange (0, 98, 5, r.set);
+    r.engine.controlChange (0, 6, 0, r.set);
+    r.engine.controlChange (0, 38, 0, r.set);
+    CHECK (r.set.getNormalized (kVolume) == Approx (8192.0 / 16383.0).margin (1e-6));
+}
+
+TEST_CASE ("control: NRPN can be learned even while controllers are disabled", "[control]")
+{
+    Rig r;
+    r.configure ({}, false);
+    r.engine.setLearning (true);
+    r.engine.controlChange (2, 99, 3, r.set);
+    r.engine.controlChange (2, 98, 9, r.set);
+    r.engine.controlChange (2, 6, 10, r.set);
+    int ch = 0, n = 0;
+    CHECK (r.engine.takeLearnedNrpn (ch, n));
+    CHECK (ch == 3);
+    CHECK (n == 3 * 128 + 9);
+    CHECK_FALSE (r.engine.takeLearnedCc (ch, n));      // les CC 99/98/6 ne sont pas appris comme des CC simples
+    r.engine.controlChange (2, 74, 10, r.set);
+    CHECK (r.engine.takeLearnedCc (ch, n));
+    CHECK (n == 74);
+}
+
+TEST_CASE ("control: relative encoders add increments to the parameter", "[control]")
+{
+    CHECK (relativeDelta (Mode::RelativeTwos, 1) == 1);
+    CHECK (relativeDelta (Mode::RelativeTwos, 127) == -1);
+    CHECK (relativeDelta (Mode::RelativeTwos, 65) == -63);
+    CHECK (relativeDelta (Mode::RelativeTwos, 0) == 0);
+    CHECK (relativeDelta (Mode::RelativeOffset, 64) == 0);
+    CHECK (relativeDelta (Mode::RelativeOffset, 66) == 2);
+    CHECK (relativeDelta (Mode::RelativeOffset, 61) == -3);
+    CHECK (relativeDelta (Mode::RelativeSign, 5) == 5);
+    CHECK (relativeDelta (Mode::RelativeSign, 0x40 | 5) == -5);
+
+    Rig r;
+    auto b = cc (0, 16, kVolume);
+    b.mode = Mode::RelativeTwos;
+    r.configure ({ b }, true);
+    CHECK (r.set.getNormalized (kVolume) == Approx (60.0 / 66.0));    // défaut 0 dB sur -60..+6
+    const double start = r.set.getNormalized (kVolume);
+    r.engine.controlChange (0, 16, 127, r.set);                        // -1 cran
+    CHECK (r.set.getNormalized (kVolume) == Approx (start - 1.0 / 127.0));
+    for (int i = 0; i < 400; ++i) r.engine.controlChange (0, 16, 1, r.set);
+    CHECK (r.set.getNormalized (kVolume) == Approx (1.0));             // borné
+    b.lo = 0.2; b.hi = 0.6;
+    r.configure ({ b }, true);
+    for (int i = 0; i < 400; ++i) r.engine.controlChange (0, 16, 1, r.set);
+    CHECK (r.set.getNormalized (kVolume) == Approx (0.6));             // borné au sous-intervalle
+    std::vector<std::size_t> changed;
+    CHECK (r.engine.drainChanges (changed) >= 1);
+}
+
+TEST_CASE ("control: relative mode and NRPN round trip in JSON, relative is limited to CC and parameters", "[control]")
+{
+    Config c;
+    auto b = cc (3, 16, kVolume);
+    b.mode = Mode::RelativeOffset;
+    c.bindings.push_back (b);
+    Binding n;
+    n.source.kind = SourceKind::Nrpn; n.source.channel = 2; n.source.number = 16383; n.target.param = kCutoff;
+    c.bindings.push_back (n);
+    Binding bad = cc (0, 1, kVolume);
+    bad.source.kind = SourceKind::Macro; bad.source.number = 1; bad.mode = Mode::RelativeSign;
+    c.bindings.push_back (bad);
+    Binding act = cc (0, 2, kVolume);
+    act.target.isAction = true; act.target.action = Action::Panic; act.target.param = 0; act.mode = Mode::RelativeTwos;
+    c.bindings.push_back (act);
+    const auto back = configFromJson (toJson (c));
+    REQUIRE (back.bindings.size() == 4);
+    CHECK (back.bindings[0].mode == Mode::RelativeOffset);
+    CHECK (back.bindings[1].source.kind == SourceKind::Nrpn);
+    CHECK (back.bindings[1].source.number == 16383);
+    CHECK (back.bindings[2].mode == Mode::Absolute);
+    CHECK (back.bindings[3].mode == Mode::Absolute);
+    CHECK (sourceLabel (back.bindings[1].source) == "NRPN 16383 ch 2");
+    Binding out = n;
+    out.source.number = 16384;
+    Config c2; c2.bindings.push_back (out);
+    CHECK (sanitised (c2).bindings.empty());
 }

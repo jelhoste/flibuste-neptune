@@ -362,6 +362,13 @@ int Dispatcher::handleMessage (const Message& m, std::vector<std::vector<std::ui
     double value = 0.0;
     const bool hasValue = numericArg (m, value);
 
+    if (address == "/neptune/sync")
+    {
+        syncRequested_ = true;
+        syncPort_ = hasValue && value >= 1.0 && value <= 65535.0 ? static_cast<int> (value) : 0;
+        return 1;
+    }
+
     if (address == "/neptune/list")
     {
         std::string_view prefix;
@@ -390,6 +397,40 @@ int Dispatcher::handleMessage (const Message& m, std::vector<std::vector<std::ui
     // Adresses assignées explicitement (table des assignations) : en plus de l'accès direct.
     if (hasValue) applied += control_.oscValue (m.address, std::clamp (value, 0.0, 1.0), set_);
     return applied;
+}
+
+bool Dispatcher::takeSync (int& port) noexcept
+{
+    if (! syncRequested_) return false;
+    syncRequested_ = false;
+    port = syncPort_;
+    return true;
+}
+
+std::vector<std::vector<std::uint8_t>> buildFeedback (const ParameterSet& set, const std::vector<std::size_t>& indices)
+{
+    std::vector<std::vector<std::uint8_t>> out, batch;
+    std::size_t bytes = 0;
+    for (const auto index : indices)
+    {
+        if (index >= set.size()) continue;
+        const auto& address = addressFor (set.spec (index).id);
+        if (address.empty()) continue;
+        Message m;
+        m.address = address;
+        m.args.push_back ({ 'f', set.getNormalizedAt (index), {} });
+        auto encoded = encode (m);
+        if (bytes + encoded.size() + 4 > 1100 && ! batch.empty())
+        {
+            out.push_back (encodeBundle (batch));
+            batch.clear();
+            bytes = 0;
+        }
+        bytes += encoded.size() + 4;
+        batch.push_back (std::move (encoded));
+    }
+    if (! batch.empty()) out.push_back (encodeBundle (batch));
+    return out;
 }
 
 void Dispatcher::catalogue (std::string_view prefix, std::vector<std::vector<std::uint8_t>>& replies)

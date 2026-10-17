@@ -24,12 +24,54 @@ int OscServer::start (int basePort, bool allInterfaces)
 
 void OscServer::stop()
 {
+    {
+        const juce::ScopedLock lock (destinationLock_);
+        dynamic_ = {};   // un destinataire appris ne survit pas à l'arrêt du serveur
+    }
     if (socket_ == nullptr) return;
     signalThreadShouldExit();
     socket_->shutdown();               // réveille la lecture bloquée
     stopThread (2000);
     socket_.reset();
     port_.store (0);
+}
+
+void OscServer::setManualDestination (const juce::String& host, int port)
+{
+    const juce::ScopedLock lock (destinationLock_);
+    manual_ = { host, port };
+}
+
+void OscServer::stopFeedback()
+{
+    const juce::ScopedLock lock (destinationLock_);
+    manual_ = {};
+    dynamic_ = {};
+}
+
+bool OscServer::hasDestination() const
+{
+    const juce::ScopedLock lock (destinationLock_);
+    return (dynamic_.port > 0 && dynamic_.host.isNotEmpty()) || (manual_.port > 0 && manual_.host.isNotEmpty());
+}
+
+juce::String OscServer::destinationText() const
+{
+    const juce::ScopedLock lock (destinationLock_);
+    const auto& d = dynamic_.port > 0 && dynamic_.host.isNotEmpty() ? dynamic_ : manual_;
+    return d.port > 0 && d.host.isNotEmpty() ? d.host + ":" + juce::String (d.port) : juce::String();
+}
+
+void OscServer::send (const std::vector<std::vector<std::uint8_t>>& datagrams)
+{
+    Destination d;
+    {
+        const juce::ScopedLock lock (destinationLock_);
+        d = dynamic_.port > 0 && dynamic_.host.isNotEmpty() ? dynamic_ : manual_;
+    }
+    if (d.port <= 0 || d.host.isEmpty()) return;
+    for (const auto& datagram : datagrams)
+        sender_.write (d.host, d.port, datagram.data(), static_cast<int> (datagram.size()));
 }
 
 void OscServer::run()
@@ -51,5 +93,14 @@ void OscServer::run()
         if (senderPort > 0)
             for (const auto& r : replies)
                 socket_->write (senderIp, senderPort, r.data(), static_cast<int> (r.size()));
+        int syncPort = 0;
+        if (dispatcher_.takeSync (syncPort) && senderPort > 0)
+        {
+            {
+                const juce::ScopedLock lock (destinationLock_);
+                dynamic_ = { senderIp, syncPort > 0 ? syncPort : senderPort };
+            }
+            fullSend_.store (true);   // le thread de message envoie tout l'état
+        }
     }
 }

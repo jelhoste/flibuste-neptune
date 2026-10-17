@@ -43,11 +43,24 @@ double mapValue (const Binding& b, double s) noexcept
 
 // ---------------------------------------------------------------------------------------------------- configuration
 
+int relativeDelta (Mode mode, int v) noexcept
+{
+    v = std::clamp (v, 0, 127);
+    switch (mode)
+    {
+        case Mode::RelativeTwos: return v == 0 ? 0 : (v < 64 ? v : v - 128);
+        case Mode::RelativeOffset: return v - 64;
+        case Mode::RelativeSign: return (v & 0x3F) * ((v & 0x40) != 0 ? -1 : 1);
+        default: return 0;
+    }
+}
+
 std::string sourceLabel (const Source& s)
 {
     switch (s.kind)
     {
         case SourceKind::CC: return "CC " + std::to_string (s.number) + (s.channel > 0 ? " ch " + std::to_string (s.channel) : std::string());
+        case SourceKind::Nrpn: return "NRPN " + std::to_string (s.number) + (s.channel > 0 ? " ch " + std::to_string (s.channel) : std::string());
         case SourceKind::Macro: return "Macro " + std::to_string (s.number + 1);
         case SourceKind::Osc: return "OSC " + s.address;
     }
@@ -88,6 +101,11 @@ Config sanitised (Config c)
                 if (b.source.number < 0 || b.source.number > 127) continue;
                 b.source.address.clear();
                 break;
+            case SourceKind::Nrpn:
+                b.source.channel = std::clamp (b.source.channel, 0, 16);
+                if (b.source.number < 0 || b.source.number > 16383) continue;
+                b.source.address.clear();
+                break;
             case SourceKind::Macro:
                 if (b.source.number < 0 || b.source.number >= kMacros) continue;
                 b.source.channel = 0;
@@ -109,6 +127,7 @@ Config sanitised (Config c)
             if (b.target.param == 0) continue;
             b.target.action = Action::None;
         }
+        if (isRelative (b.mode) && (b.source.kind != SourceKind::CC || b.target.isAction)) b.mode = Mode::Absolute;   // relatif : CC vers un paramètre seulement
         b.lo = std::clamp (b.lo, 0.0, 1.0);
         b.hi = std::clamp (b.hi, 0.0, 1.0);
         b.curve = std::isfinite (b.curve) ? std::clamp (b.curve, 0.1, 10.0) : 1.0;
@@ -136,6 +155,7 @@ std::string toJson (const Config& c)
         switch (b.source.kind)
         {
             case SourceKind::CC: s["type"] = "cc"; s["channel"] = b.source.channel; s["number"] = b.source.number; break;
+            case SourceKind::Nrpn: s["type"] = "nrpn"; s["channel"] = b.source.channel; s["number"] = b.source.number; break;
             case SourceKind::Macro: s["type"] = "macro"; s["index"] = b.source.number; break;
             case SourceKind::Osc: s["type"] = "osc"; s["address"] = b.source.address; break;
         }
@@ -146,7 +166,14 @@ std::string toJson (const Config& c)
         if (b.hi != 1.0) o["max"] = b.hi;
         if (b.curve != 1.0) o["curve"] = b.curve;
         if (b.invert) o["invert"] = true;
-        if (b.mode == Mode::Pickup) o["mode"] = "pickup";
+        switch (b.mode)
+        {
+            case Mode::Pickup: o["mode"] = "pickup"; break;
+            case Mode::RelativeTwos: o["mode"] = "relative_twos"; break;
+            case Mode::RelativeOffset: o["mode"] = "relative_offset"; break;
+            case Mode::RelativeSign: o["mode"] = "relative_sign"; break;
+            default: break;
+        }
         list.push_back (std::move (o));
     }
     doc["bindings"] = std::move (list);
@@ -178,6 +205,7 @@ Config configFromJson (std::string_view text)
             const auto ty = type->get<std::string>();
             auto num = [] (const json& j, const char* key, int fallback) { const auto i = j.find (key); return i != j.end() && i->is_number_integer() ? i->get<int>() : fallback; };
             if (ty == "cc") { b.source.kind = SourceKind::CC; b.source.channel = num (*s, "channel", 0); b.source.number = num (*s, "number", -1); }
+            else if (ty == "nrpn") { b.source.kind = SourceKind::Nrpn; b.source.channel = num (*s, "channel", 0); b.source.number = num (*s, "number", -1); }
             else if (ty == "macro") { b.source.kind = SourceKind::Macro; b.source.number = num (*s, "index", -1); }
             else if (ty == "osc")
             {
@@ -198,7 +226,14 @@ Config configFromJson (std::string_view text)
             real ("max", b.hi);
             real ("curve", b.curve);
             if (const auto i = o.find ("invert"); i != o.end() && i->is_boolean()) b.invert = i->get<bool>();
-            if (const auto i = o.find ("mode"); i != o.end() && i->is_string() && i->get<std::string>() == "pickup") b.mode = Mode::Pickup;
+            if (const auto i = o.find ("mode"); i != o.end() && i->is_string())
+            {
+                const auto m = i->get<std::string>();
+                if (m == "pickup") b.mode = Mode::Pickup;
+                else if (m == "relative_twos") b.mode = Mode::RelativeTwos;
+                else if (m == "relative_offset") b.mode = Mode::RelativeOffset;
+                else if (m == "relative_sign") b.mode = Mode::RelativeSign;
+            }
             c.bindings.push_back (std::move (b));
             if (static_cast<int> (c.bindings.size()) >= kMaxBindings) break;
         }
@@ -222,6 +257,7 @@ struct ControlEngine::Runtime
     std::vector<std::uint16_t> ccItems;
     std::array<std::vector<std::uint16_t>, kMacros> macroItems;
     std::map<std::string, std::vector<std::uint16_t>> osc;
+    std::vector<std::pair<std::uint32_t, std::uint16_t>> nrpn;   // (voie x 16384 + numéro, assignation), trié : recherche sans allocation
 };
 
 ControlEngine::ControlEngine() : dirty_ (new std::atomic<std::uint64_t>[kDirtyWords]())
@@ -257,9 +293,16 @@ void ControlEngine::configure (const Config& config, const ParameterSet& set)
             const int first = b.source.channel == 0 ? 0 : b.source.channel - 1, last = b.source.channel == 0 ? 15 : b.source.channel - 1;
             for (int ch = first; ch <= last; ++ch) byCc[static_cast<std::size_t> (ch * 128 + b.source.number)].push_back (static_cast<std::uint16_t> (i));
         }
+        else if (b.source.kind == SourceKind::Nrpn)
+        {
+            const int first = b.source.channel == 0 ? 0 : b.source.channel - 1, last = b.source.channel == 0 ? 15 : b.source.channel - 1;
+            for (int ch = first; ch <= last; ++ch)
+                rt->nrpn.emplace_back (static_cast<std::uint32_t> (ch * 16384 + b.source.number), static_cast<std::uint16_t> (i));
+        }
         else if (b.source.kind == SourceKind::Macro) rt->macroItems[static_cast<std::size_t> (b.source.number)].push_back (static_cast<std::uint16_t> (i));
         else rt->osc[b.source.address].push_back (static_cast<std::uint16_t> (i));
     }
+    std::sort (rt->nrpn.begin(), rt->nrpn.end());
     rt->ccStart.assign (16 * 128 + 1, 0);
     for (std::size_t k = 0; k < byCc.size(); ++k)
     {
@@ -311,6 +354,15 @@ bool ControlEngine::takeLearnedCc (int& channel, int& number) noexcept
     return true;
 }
 
+bool ControlEngine::takeLearnedNrpn (int& channel, int& number) noexcept
+{
+    const auto v = learnedNrpn_.exchange (0, std::memory_order_acq_rel);
+    if (v == 0) return false;
+    channel = static_cast<int> ((v >> 16) & 0xFF);
+    number = static_cast<int> (v & 0xFFFF);
+    return true;
+}
+
 bool ControlEngine::popAction (Action& out) noexcept
 {
     const int v = queue_[qTail_ % kQueue].load (std::memory_order_acquire);
@@ -354,6 +406,16 @@ void ControlEngine::apply (const Runtime& rt, int item, double s, ParameterSet& 
 {
     const auto& it = rt.items[static_cast<std::size_t> (item)];
     const auto& b = it.binding;
+    if (isRelative (b.mode) && ! b.target.isAction)
+    {
+        const int delta = relativeDelta (b.mode, static_cast<int> (std::lround (s * 127.0)));
+        if (delta == 0) return;
+        const double lo = std::min (b.lo, b.hi), hi = std::max (b.lo, b.hi);
+        const double step = (hi - lo) / 127.0 * (b.invert ? -1.0 : 1.0);
+        const double next = std::clamp (set.getNormalizedAt (it.paramIndex) + delta * step, lo, hi);
+        if (set.setNormalizedAt (it.paramIndex, next)) markChanged (it.paramIndex);
+        return;
+    }
     if (b.target.isAction)
     {
         const bool high = s >= 0.5;
@@ -371,14 +433,47 @@ void ControlEngine::apply (const Runtime& rt, int item, double s, ParameterSet& 
     if (set.setNormalizedAt (it.paramIndex, n)) markChanged (it.paramIndex);
 }
 
+void ControlEngine::nrpnValue (int channel0, int number, int value14, ParameterSet& set) noexcept
+{
+    slot_.adoptPending();
+    const Runtime* rt = slot_.current();
+    if (rt == nullptr) return;
+    const auto key = static_cast<std::uint32_t> (channel0 * 16384 + number);
+    auto it = std::lower_bound (rt->nrpn.begin(), rt->nrpn.end(), std::make_pair (key, std::uint16_t (0)));
+    for (; it != rt->nrpn.end() && it->first == key; ++it) apply (*rt, it->second, std::clamp (value14, 0, 16383) / 16383.0, set);
+}
+
 void ControlEngine::controlChange (int channel0, int number, int value, ParameterSet& set) noexcept
 {
-    if (learning_.load (std::memory_order_relaxed))
+    if (channel0 < 0 || channel0 > 15 || number < 0 || number > 127) return;
+    const bool learning = learning_.load (std::memory_order_relaxed);
+    // NRPN : 99/98 choisissent le paramètre, 6/38 portent la valeur sur 14 bits, 100/101 (RPN) désélectionnent.
+    const bool nrpnCc = number == 6 || number == 38 || number == 98 || number == 99 || number == 100 || number == 101;
+    if (learning && ! nrpnCc)
         learned_.store ((1u << 24) | (static_cast<std::uint32_t> (channel0 + 1) << 8) | static_cast<std::uint32_t> (number & 0x7F), std::memory_order_release);
+    if (nrpnCc)
+    {
+        auto& st = nrpn_[static_cast<std::size_t> (channel0)];
+        switch (number)
+        {
+            case 99: st.msb = value; st.lsb = -1; st.dataMsb = st.dataLsb = 0; break;
+            case 98: st.lsb = value; st.dataMsb = st.dataLsb = 0; break;
+            case 100: case 101: st.msb = st.lsb = -1; break;
+            default:
+                if (number == 6) { st.dataMsb = value; st.dataLsb = 0; } else st.dataLsb = value;
+                if (st.msb >= 0 && st.lsb >= 0 && ! (st.msb == 127 && st.lsb == 127))
+                {
+                    const int n = st.msb * 128 + st.lsb, v = st.dataMsb * 128 + st.dataLsb;
+                    if (learning) learnedNrpn_.store ((1u << 24) | (static_cast<std::uint32_t> (channel0 + 1) << 16) | static_cast<std::uint32_t> (n), std::memory_order_release);
+                    if (ccEnabled_.load (std::memory_order_relaxed)) nrpnValue (channel0, n, v, set);
+                }
+                break;
+        }
+    }
     if (! ccEnabled_.load (std::memory_order_relaxed)) return;
     slot_.adoptPending();
     const Runtime* rt = slot_.current();
-    if (rt == nullptr || channel0 < 0 || channel0 > 15 || number < 0 || number > 127) return;
+    if (rt == nullptr) return;
     const auto key = static_cast<std::size_t> (channel0 * 128 + number);
     const double s = std::clamp (value, 0, 127) / 127.0;
     for (auto i = rt->ccStart[key]; i < rt->ccStart[key + 1]; ++i) apply (*rt, rt->ccItems[i], s, set);

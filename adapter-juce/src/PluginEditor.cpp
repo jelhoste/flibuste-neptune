@@ -1372,11 +1372,18 @@ void NeptuneEditor::showOscMenu()
     juce::PopupMenu menu;
     menu.addItem (1, text ("osc.enable"), true, on);
     menu.addItem (2, text ("osc.network"), true, settings.oscAllInterfaces);
+    const auto feedback = processor_.oscFeedbackDestination();
     if (on)
     {
         menu.addSeparator();
         const auto status = port > 0 ? tr_.format ("osc.listening", { std::to_string (port) }) : tr_.format ("osc.busy", { std::to_string (settings.oscPort) });
         menu.addItem (3, juce::String::fromUTF8 (status.c_str()), false, false);
+        menu.addItem (4, text ("osc.feedback"));
+        if (feedback.isNotEmpty())
+        {
+            menu.addItem (5, text ("osc.feedback_to") + " " + feedback, false, false);
+            menu.addItem (6, text ("osc.feedback_stop"));
+        }
     }
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&oscButton_), [safe, on, settings] (int choice)
@@ -1384,6 +1391,18 @@ void NeptuneEditor::showOscMenu()
         if (safe == nullptr) return;
         if (choice == 1) safe->processor_.uiSetOscEnabled (! on);
         else if (choice == 2) safe->processor_.uiSetOscAllInterfaces (! settings.oscAllInterfaces);
+        else if (choice == 6) safe->processor_.uiSetOscFeedback ({});
+        else if (choice == 4)
+        {
+            auto* w = new juce::AlertWindow (safe->text ("osc.feedback"), safe->text ("osc.feedback_prompt"), juce::MessageBoxIconType::NoIcon);
+            w->addTextEditor ("dest", settings.feedbackPort > 0 ? juce::String (settings.feedbackHost) + ":" + juce::String (settings.feedbackPort) : juce::String ("192.168.1.20:9001"), "");
+            w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result)
+            {
+                if (safe != nullptr && result == 1) safe->processor_.uiSetOscFeedback (w->getTextEditorContents ("dest"));
+            }), true);
+        }
         safe->updateProfileControls();
     });
 }

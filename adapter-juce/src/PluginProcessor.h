@@ -19,6 +19,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Control.h"
 #include "OscServer.h"
+#include "neptune/core/Osc.h"
 #include "neptune/core/OrganSynth.h"
 #include "neptune/core/Engine.h"
 #include "neptune/core/Instrument.h"
@@ -118,6 +119,8 @@ public:
     void uiSetOscEnabled (bool on);
     void uiSetOscAllInterfaces (bool on);
     int oscPort() const { return osc_.port(); }   // 0 : n'écoute pas
+    juce::String oscFeedbackDestination() const { return osc_.hasDestination() ? osc_.destinationText() : juce::String(); }
+    bool uiSetOscFeedback (const juce::String& hostAndPort);   // « hôte:port » ; vide : arrête le retour. Retourne false si le texte est invalide
     // Remplace les assignations de la piste sélectionnée (si c'est un orgue) par les CC de setBfree, avec les voies de ses claviers.
     bool uiAssignOrganControllers();
     void uiClearControllers();
@@ -341,6 +344,10 @@ private:
     OscServer osc_ { control_, params_ };
     void syncOsc();   // thread de message : démarre, arrête ou redémarre le serveur selon les réglages
     neptune::core::control::Settings oscApplied_;
+    void feedbackTick();                          // thread de message : envoie les paramètres modifiés au destinataire du retour OSC
+    std::vector<std::uint32_t> feedbackVersions_; // dernière version envoyée de chaque paramètre ; vide : retour inactif
+    std::vector<std::size_t> feedbackPending_;
+    std::size_t feedbackHead_ = 0;
     bool oscRunning_ = false;
     AutosaveTimer controlTimer_;
     void controlTick();

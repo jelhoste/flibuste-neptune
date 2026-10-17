@@ -7,6 +7,8 @@
 //   /neptune/track/3/organ/reverb/real     valeur en unités réelles (dB, Hz, %, pas...)
 //   /neptune/id/9033  et  /neptune/id/9033/real
 //   /neptune/list [préfixe]                catalogue, renvoyé à l'expéditeur
+//   /neptune/sync [port]                   l'expéditeur devient le destinataire du retour d'information (port donné, sinon celui d'où il écrit) ;
+//                                          tout l'état lui est renvoyé, puis chaque changement (valeurs normalisées 0..1, mêmes adresses)
 // Les numéros de pistes, bus, pistes parallèles, inserts, envois et emplacements sont comptés à partir de 1 (comme à l'écran).
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +49,10 @@ bool paramForAddress (std::string_view address, ParamId& out);      // adresse h
 const std::vector<ParamId>& catalogIds();                           // tous les identifiants adressables, dans l'ordre
 
 // ---- répartiteur ----
+// Retour d'information : un message « adresse, flottant normalisé » par paramètre de `indices` (indices dans `set`) qui a une adresse, regroupés en
+// paquets groupés de moins de 1,1 Ko (un datagramme chacun).
+std::vector<std::vector<std::uint8_t>> buildFeedback (const ParameterSet& set, const std::vector<std::size_t>& indices);
+
 // Plafond de messages traités par fenêtre de temps (un envoi trop rapide ne sature rien) : `now` en millisecondes, croissant.
 class RateLimiter
 {
@@ -70,10 +76,14 @@ public:
     // (un datagramme chacune, à renvoyer à l'expéditeur). `limiter` facultatif.
     int handlePacket (const std::uint8_t* data, std::size_t size, std::vector<std::vector<std::uint8_t>>& replies, RateLimiter* limiter = nullptr, std::int64_t nowMs = 0);
     int handleMessage (const Message&, std::vector<std::vector<std::uint8_t>>& replies);
+    // Vrai (une seule fois) si un « /neptune/sync » a été reçu depuis le dernier appel ; `port` : celui donné en argument, 0 si absent.
+    bool takeSync (int& port) noexcept;
 
 private:
     void catalogue (std::string_view prefix, std::vector<std::vector<std::uint8_t>>& replies);
     control::ControlEngine& control_;
     ParameterSet& set_;
+    bool syncRequested_ = false;
+    int syncPort_ = 0;
 };
 } // namespace neptune::core::osc

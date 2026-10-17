@@ -1,6 +1,6 @@
 # Couche de contrôle : CC, OSC, paramètres de l'hôte (proposition de conception)
 
-Statut : **étapes 1 à 5 faites (cœur testé, CC, OSC, macros et écran de gestion branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
+Statut : **étapes 1 à 6 faites (cœur testé, CC, OSC, macros, écran de gestion, retour OSC, NRPN et relatif branchés), le reste à faire** (2026-10-17). Voir « Avancement » en fin de document. Elle répond à la question : « une couche d'abstraction qui permette de commander
 n'importe quel paramètre, par CC, par OSC ou par l'hôte, et de l'assigner à ce dont on a besoin ? ». Réponse : oui.
 
 ## 1. Ce qui existe déjà
@@ -174,4 +174,15 @@ Règle : **l'audio ne parle jamais à l'hôte**.
   un contrôleur capte son numéro de CC (toutes les voies ; la voie précise se règle dans le JSON du projet), même si les CC sont désactivés. Une assignation
   n'est enregistrée qu'une fois sa cible choisie (le moteur ignore celles sans cible). Pas d'export / import de jeux (décision), pas d'apprentissage par clic droit
   sur un potard, voie MIDI non éditable dans l'écran.
+- **Étape 6 faite (à valider dans Reaper et avec une vraie surface ; adaptateur contrôlé à la syntaxe seulement)** :
+  - **Retour d'information OSC** : menu « OSC » -> « Retour d'information vers une surface... » (saisie `hôte:port`, enregistrée avec le projet) ; ou une surface
+    envoie `/neptune/sync [port]` : l'expéditeur devient le destinataire (non enregistré, effacé à l'arrêt du serveur) et reçoit tout l'état. Ensuite chaque
+    paramètre qui change, quelle qu'en soit l'origine (interface, hôte, CC, OSC), est renvoyé à son adresse, valeur normalisée 0..1, regroupé à ~30 Hz
+    (400 messages au plus par tic ; l'état complet part par tranches). Le changement venu de la surface est aussi renvoyé (écho) : sans effet, la valeur étant la même.
+    Entrée de la surface et sortie du retour utilisent deux sockets distincts : la surface voit le retour arriver d'un autre port que celui où elle écrit.
+  - **NRPN 14 bits** : nouvelle source (CC 99/98 choisissent, 6/38 portent la valeur ; CC 100/101 désélectionnent), par voie ou toutes les voies, apprise comme un
+    CC (les CC 99/98/6/38/100/101 ne sont plus appris comme CC simples). Pas de NRPN relatif.
+  - **Encodeurs relatifs** (sources CC vers un paramètre) : trois codages (complément à deux, décalé 64, bit de signe), 1/127 de la course min..max par cran,
+    borné au sous-intervalle ; inversion respectée. Choix dans la colonne « Mode » de l'écran de gestion (grisé pour les autres sources).
+  - Pas fait : sensibilité réglable des encodeurs relatifs, retour vers plusieurs destinataires, retour des actions.
 - Limite connue : le suivi des changements couvre 32768 paramètres au plus (Neptune en déclare environ 3000).
