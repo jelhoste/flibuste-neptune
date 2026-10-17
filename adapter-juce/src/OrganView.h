@@ -81,6 +81,9 @@ private:
     juce::OwnedArray<SpeedSquare> squares_;
     juce::OwnedArray<LeslieSlider> leslieSliders_;
     juce::Slider tuneSlider_;
+    juce::Slider clickLevelSlider_, clickLengthSlider_, clickReleaseSlider_;   // clic des touches : appliqués au relâchement du curseur (reconstruction)
+    juce::Label clickLevelLabel_, clickLengthLabel_, clickReleaseLabel_, clickHint_;
+    void applyClick();
     juce::ComboBox wiringMode_;                       // Classique (portage de setBfree) / Étendu
     juce::ToggleButton foldbackToggle_;
     juce::OwnedArray<juce::Slider> taperSliders_;     // 9 tirettes x 5 plages d'octave, rangés par tirette

@@ -58,6 +58,9 @@ OrganDescription sanitised (OrganDescription d)
     d.splitUpper = std::clamp (d.splitUpper, 0, 127);
     for (auto& t : d.transpose) t = std::clamp (t, -24, 24);
     d.tuningCents = std::clamp (d.tuningCents, -100, 100);
+    d.clickLevel = std::clamp (d.clickLevel, 0, 100);
+    d.clickLength = std::clamp (d.clickLength, 25, 400);
+    d.clickRelease = std::clamp (d.clickRelease, 0, 100);
     d.hornSlowRpm = std::clamp (d.hornSlowRpm, 5.0, 200.0);
     d.hornFastRpm = std::clamp (d.hornFastRpm, 100.0, 900.0);
     d.drumSlowRpm = std::clamp (d.drumSlowRpm, 5.0, 100.0);
@@ -80,6 +83,7 @@ std::string toJson (const OrganDescription& d)
     o["split_upper"] = d.splitUpper;
     o["transpose"] = d.transpose;
     o["tuning_cents"] = d.tuningCents;
+    o["key_click"] = { { "level", d.clickLevel }, { "length", d.clickLength }, { "release", d.clickRelease } };
     o["wiring"] = { { "extended", d.extended }, { "foldback", d.foldback }, { "taper_db", d.taperDb } };
     o["leslie"] = { { "horn_slow_rpm", d.hornSlowRpm }, { "horn_fast_rpm", d.hornFastRpm }, { "drum_slow_rpm", d.drumSlowRpm },
                     { "drum_fast_rpm", d.drumFastRpm }, { "horn_acc", d.hornAcc }, { "horn_dec", d.hornDec }, { "drum_acc", d.drumAcc },
@@ -109,6 +113,13 @@ OrganDescription organFromJson (std::string_view text)
     d.splitUpper = num ("split_upper", d.splitUpper);
     arr ("transpose", d.transpose);
     d.tuningCents = num ("tuning_cents", d.tuningCents);
+    if (const auto k = o.find ("key_click"); k != o.end() && k->is_object())
+    {
+        auto whole = [&k] (const char* key, int& out) { if (const auto it = k->find (key); it != k->end() && it->is_number()) out = it->get<int>(); };
+        whole ("level", d.clickLevel);
+        whole ("length", d.clickLength);
+        whole ("release", d.clickRelease);
+    }
     if (const auto w = o.find ("wiring"); w != o.end() && w->is_object())
     {
         if (const auto it = w->find ("extended"); it != w->end() && it->is_boolean()) d.extended = it->get<bool>();
@@ -171,6 +182,7 @@ struct OrganVoices::Impl
     int tuningCents = 0;                            // accord de l'orgue en cours ou en attente (thread de message)
     bool extended = false, foldback = true;         // câblage idem
     std::array<std::array<int, 5>, 9> taperDb {};
+    int clickLevel = 50, clickLength = 100, clickRelease = 0; // clic des touches idem
 
     nb3_engine* build (double rate) const
     {
@@ -179,7 +191,12 @@ struct OrganVoices::Impl
         w.taperOn = extended ? 1 : 0;
         for (std::size_t b = 0; b < 9; ++b)
             for (std::size_t k = 0; k < 5; ++k) w.taperDb[b][k] = extended ? static_cast<float> (taperDb[b][k]) : 0.0f;
-        return nb3_create_ex (rate, 440.0 * std::pow (2.0, tuningCents / 1200.0), &w);
+        nb3_click c {};
+        c.attackLevel = static_cast<float> (clickLevel) / 100.0f;
+        c.burstScale = static_cast<float> (clickLength) / 100.0f;
+        c.releaseLevel = static_cast<float> (clickRelease) / 100.0f;
+        const bool defaults = clickLevel == 50 && clickLength == 100 && clickRelease == 0;
+        return nb3_create_full (rate, 440.0 * std::pow (2.0, tuningCents / 1200.0), &w, defaults ? nullptr : &c);   // d'origine : setBfree tel quel
     }
     double sampleRate = 0.0;
     std::array<std::int16_t, 16 * 128> held; // clavier de setBfree par (canal, note) ; -1 : aucune
@@ -272,7 +289,12 @@ void OrganVoices::requestBuild (const OrganDescription& d)
     const bool ext = d.extended;
     const bool fold = d.foldback;
     const auto taper = d.taperDb;
-    if (cents == impl_->tuningCents && ext == impl_->extended && (! ext || (fold == impl_->foldback && taper == impl_->taperDb))) return;
+    const int clickLevel = std::clamp (d.clickLevel, 0, 100), clickLength = std::clamp (d.clickLength, 25, 400), clickRelease = std::clamp (d.clickRelease, 0, 100);
+    if (cents == impl_->tuningCents && ext == impl_->extended && (! ext || (fold == impl_->foldback && taper == impl_->taperDb))
+        && clickLevel == impl_->clickLevel && clickLength == impl_->clickLength && clickRelease == impl_->clickRelease) return;
+    impl_->clickLevel = clickLevel;
+    impl_->clickLength = clickLength;
+    impl_->clickRelease = clickRelease;
     impl_->tuningCents = cents;
     impl_->extended = ext;
     impl_->foldback = fold;

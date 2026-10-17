@@ -37,11 +37,19 @@ struct OrganDescription
     bool foldback = true;                               // étendu seulement : repli des 12 notes graves du 16'
     std::array<std::array<int, 5>, 9> taperDb {};       // -24..+12 dB ; plages : do 2, do 3, do 4, do 5, do 6 et au-dessus
 
+    // Clic des touches (bruit des contacts). Fixé à la construction du moteur (comme l'accord) : le changer reconstruit l'orgue. Les valeurs
+    // d'origine (50 / 100 / 0) donnent exactement le son de setBfree.
+    int clickLevel = 50;                                // 0..100 % : niveau du clic à l'attaque
+    int clickLength = 100;                              // 25..400 % : durée du bruit (100 : d'origine)
+    int clickRelease = 0;                               // 0..100 % : clic au relâchement (0 : relâchement linéaire, d'origine)
+    bool clickIsDefault() const noexcept { return clickLevel == 50 && clickLength == 100 && clickRelease == 0; }
+
     bool operator== (const OrganDescription& o) const noexcept
     {
         return channel == o.channel && splitLower == o.splitLower && splitUpper == o.splitUpper && transpose == o.transpose
             && tuningCents == o.tuningCents && hornSlowRpm == o.hornSlowRpm && hornFastRpm == o.hornFastRpm && drumSlowRpm == o.drumSlowRpm
             && drumFastRpm == o.drumFastRpm && hornAcc == o.hornAcc && hornDec == o.hornDec && drumAcc == o.drumAcc && drumDec == o.drumDec
+            && clickLevel == o.clickLevel && clickLength == o.clickLength && clickRelease == o.clickRelease
             && hornLevel == o.hornLevel && extended == o.extended && foldback == o.foldback && taperDb == o.taperDb;
     }
     bool operator!= (const OrganDescription& o) const noexcept { return ! (*this == o); }

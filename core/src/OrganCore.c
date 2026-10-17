@@ -400,7 +400,7 @@ nb3_free_parts (nb3_engine* e)
 }
 
 static nb3_engine*
-nb3_create_impl (double sampleRate, double refA_Hz, const nb3_wiring* wiring)
+nb3_create_impl (double sampleRate, double refA_Hz, const nb3_wiring* wiring, const nb3_click* click)
 {
 	nb3_engine* e = (nb3_engine*)calloc (1, sizeof (nb3_engine));
 	if (e == NULL) return NULL;
@@ -426,6 +426,28 @@ nb3_create_impl (double sampleRate, double refA_Hz, const nb3_wiring* wiring)
 		for (b = 0; b < 9; ++b)
 			for (o = 0; o < 5; ++o) e->inst.synth->userTaperDb[b][o] = wiring->taperDb[b][o];
 	}
+	if (click != NULL)
+	{
+		/* les durées d'origine (8 et 40 échantillons à 22050 Hz) sont calculées par initToneGenerator quand elles valent -1 ; ici on les fixe d'avance */
+		const double fs = SampleRateD > 0.0 ? SampleRateD : 48000.0;
+		double scale = click->burstScale;
+		int lo, hi;
+		if (scale < 0.1) scale = 0.1;
+		if (scale > 4.0) scale = 4.0;
+		lo = (int)floor (fs * 8.0 / 22050.0 * scale);
+		hi = (int)ceil (fs * 40.0 / 22050.0 * scale);
+		if (hi > BUFFER_SIZE_SAMPLES) hi = BUFFER_SIZE_SAMPLES;
+		if (lo > hi - 1) lo = hi - 1;
+		if (lo < 0) lo = 0;
+		setEnvAttackClickLevel (e->inst.synth, click->attackLevel);
+		e->inst.synth->envAtkClkMinLength = lo;
+		e->inst.synth->envAtkClkMaxLength = hi;
+		if (click->releaseLevel > 0.0f)
+		{
+			setEnvReleaseModel (e->inst.synth, ENV_CLICK);
+			setEnvReleaseClickLevel (e->inst.synth, click->releaseLevel);
+		}
+	}
 	/* équivalent de initSynth() de setBfree (b_synth/lv2.c) sans le module MIDI, les programmes ni l'état courant */
 	initToneGenerator (e->inst.synth, e);
 	initVibrato (e->inst.synth, e);
@@ -442,9 +464,10 @@ nb3_create_impl (double sampleRate, double refA_Hz, const nb3_wiring* wiring)
 	return e;
 }
 
-nb3_engine* nb3_create (double sampleRate) { return nb3_create_impl (sampleRate, 0.0, NULL); }
-nb3_engine* nb3_create_tuned (double sampleRate, double refA_Hz) { return nb3_create_impl (sampleRate, refA_Hz, NULL); }
-nb3_engine* nb3_create_ex (double sampleRate, double refA_Hz, const nb3_wiring* wiring) { return nb3_create_impl (sampleRate, refA_Hz, wiring); }
+nb3_engine* nb3_create (double sampleRate) { return nb3_create_impl (sampleRate, 0.0, NULL, NULL); }
+nb3_engine* nb3_create_tuned (double sampleRate, double refA_Hz) { return nb3_create_impl (sampleRate, refA_Hz, NULL, NULL); }
+nb3_engine* nb3_create_ex (double sampleRate, double refA_Hz, const nb3_wiring* wiring) { return nb3_create_impl (sampleRate, refA_Hz, wiring, NULL); }
+nb3_engine* nb3_create_full (double sampleRate, double refA_Hz, const nb3_wiring* wiring, const nb3_click* click) { return nb3_create_impl (sampleRate, refA_Hz, wiring, click); }
 
 void
 nb3_destroy (nb3_engine* e)

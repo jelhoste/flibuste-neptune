@@ -348,6 +348,36 @@ OrganView::OrganView (ParamHost& host, const theme::Palette& palette, const i18n
     tuneLabel_.setText (text ("organ.tune"), juce::dontSendNotification);
     tuneLabel_.setColour (juce::Label::textColourId, colour (Token::Text));
     addChildComponent (tuneLabel_);
+    // clic des touches : le niveau, la durée du bruit et le clic au relâchement fixent les enveloppes à la construction (comme l'accord)
+    {
+        struct Item { juce::Slider* s; juce::Label* l; const char* key; double lo, hi, step; const char* suffix; };
+        const Item items[] = { { &clickLevelSlider_, &clickLevelLabel_, "organ.click_level", 0.0, 100.0, 1.0, " %" },
+                               { &clickLengthSlider_, &clickLengthLabel_, "organ.click_length", 25.0, 400.0, 5.0, " %" },
+                               { &clickReleaseSlider_, &clickReleaseLabel_, "organ.click_release", 0.0, 100.0, 1.0, " %" } };
+        for (const auto& it : items)
+        {
+            it.s->setRange (it.lo, it.hi, it.step);
+            it.s->setSliderStyle (juce::Slider::LinearBar);
+            it.s->setTextValueSuffix (it.suffix);
+            it.s->setColour (juce::Slider::trackColourId, colour (Token::Accent));
+            it.s->setColour (juce::Slider::backgroundColourId, colour (Token::Grid));
+            it.s->setColour (juce::Slider::textBoxTextColourId, colour (Token::Text));
+            it.s->onValueChange = [this, s = it.s] { if (! updating_ && ! s->isMouseButtonDown()) applyClick(); };
+            it.s->onDragEnd = [this] { if (! updating_) applyClick(); };
+            addChildComponent (*it.s);
+            it.l->setText (text (it.key), juce::dontSendNotification);
+            it.l->setColour (juce::Label::textColourId, colour (Token::Text));
+            addChildComponent (*it.l);
+        }
+        clickLevelSlider_.setDoubleClickReturnValue (true, 50.0);
+        clickLengthSlider_.setDoubleClickReturnValue (true, 100.0);
+        clickReleaseSlider_.setDoubleClickReturnValue (true, 0.0);
+        clickHint_.setText (text ("organ.click_hint"), juce::dontSendNotification);
+        clickHint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+        clickHint_.setFont (juce::FontOptions (11.0f));
+        clickHint_.setJustificationType (juce::Justification::topLeft);
+        addChildComponent (clickHint_);
+    }
     tuneHint_.setText (text ("organ.tune_hint"), juce::dontSendNotification);
     tuneHint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     tuneHint_.setFont (juce::FontOptions (11.0f));
@@ -426,6 +456,17 @@ void OrganView::setPage (Page p)
     repaint();
 }
 
+void OrganView::applyClick()
+{
+    auto d = description_;
+    d.clickLevel = static_cast<int> (clickLevelSlider_.getValue());
+    d.clickLength = static_cast<int> (clickLengthSlider_.getValue());
+    d.clickRelease = static_cast<int> (clickReleaseSlider_.getValue());
+    if (d == description_) return;
+    description_ = d;
+    if (onChange) onChange (d);
+}
+
 void OrganView::updateVisibility()
 {
     const bool main = page_ == Page::Drawbars, live = page_ == Page::Live, les = page_ == Page::Leslie, set = page_ == Page::Settings;
@@ -443,6 +484,8 @@ void OrganView::updateVisibility()
     for (auto* l : leslieSliders_) l->slider.setVisible (les);
     tuneSlider_.setVisible (set);
     tuneLabel_.setVisible (set);
+    for (auto* c : std::initializer_list<juce::Component*> { &clickLevelSlider_, &clickLengthSlider_, &clickReleaseSlider_, &clickLevelLabel_, &clickLengthLabel_, &clickReleaseLabel_, &clickHint_ })
+        c->setVisible (set);
     tuneHint_.setVisible (set);
     midiHint_.setVisible (set);
     wiringMode_.setVisible (set);
@@ -485,6 +528,9 @@ void OrganView::setDescription (const organ::OrganDescription& d)
     splitUpper_.setValue (d.splitUpper, juce::dontSendNotification);
     for (auto* l : leslieSliders_) l->slider.setValue (d.*(l->field), juce::dontSendNotification);
     tuneSlider_.setValue (d.tuningCents, juce::dontSendNotification);
+    if (! clickLevelSlider_.isMouseButtonDown()) clickLevelSlider_.setValue (d.clickLevel, juce::dontSendNotification);
+    if (! clickLengthSlider_.isMouseButtonDown()) clickLengthSlider_.setValue (d.clickLength, juce::dontSendNotification);
+    if (! clickReleaseSlider_.isMouseButtonDown()) clickReleaseSlider_.setValue (d.clickRelease, juce::dontSendNotification);
     wiringMode_.setSelectedId (d.extended ? 2 : 1, juce::dontSendNotification);
     foldbackToggle_.setToggleState (d.foldback, juce::dontSendNotification);
     for (int b = 0; b < 9; ++b)
@@ -685,6 +731,20 @@ void OrganView::layoutSettings (juce::Rectangle<int> r)
     tuneLabel_.setBounds (a.removeFromTop (22));
     tuneSlider_.setBounds (a.removeFromTop (28).withWidth (juce::jmin (330, a.getWidth())));
     tuneHint_.setBounds (a.removeFromTop (36));
+    left.removeFromTop (10);
+    auto clickBox = left.removeFromTop (190);
+    sections_.push_back ({ text ("organ.click_section"), clickBox });
+    {
+        auto c = clickBox.withTrimmedTop (28).reduced (12, 2);
+        for (auto pair : { std::make_pair (&clickLevelLabel_, &clickLevelSlider_), std::make_pair (&clickLengthLabel_, &clickLengthSlider_),
+                            std::make_pair (&clickReleaseLabel_, &clickReleaseSlider_) })
+        {
+            pair.first->setBounds (c.removeFromTop (20));
+            pair.second->setBounds (c.removeFromTop (24).withWidth (juce::jmin (330, c.getWidth())));
+            c.removeFromTop (4);
+        }
+        clickHint_.setBounds (c);
+    }
     left.removeFromTop (10);
     auto midi = left;
     sections_.push_back ({ "MIDI", midi });

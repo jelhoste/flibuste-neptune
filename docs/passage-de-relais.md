@@ -353,3 +353,12 @@ Décisions de l'utilisateur : le signal vient des envois des autres pistes ET de
 - **Interface** : la pastille de type du mixeur propose « Entrée audio » (abréviation IN) ; la vue Mapping d'une telle piste est remplacée par `AudioInView` (interrupteur « Entrée audio de l'hôte », liste des envois reçus avec leur niveau). Le menu de destination des envois (panneau de routage d'une piste) propose « Entrée audio, piste N » pour les pistes de ce type (grisé si impossible). Les potards du bas restent ceux de l'instrument (seul le gain agit).
 - **Pas fait** : enregistrement audio direct dans le Sampler (spec §21), sidechain, sélection d'un sous-ensemble de canaux de l'entrée de l'hôte (stéréo ou mono dupliqué), destination « Entrée audio » pour la sortie principale d'une piste (envois seulement, comme la spec).
 - **Test instable corrigé au passage** : `organ engine: any block size gives the same sound` (tolérance 10 % trop juste à cause des phases aléatoires du Leslie, passée à 25 %).
+
+## Orgue : clic des touches (2026-10-17, à écouter dans Reaper)
+
+Décisions de l'utilisateur : seulement le key click pour l'instant (diaphonie, clavier à l'écran au choix, rayons et micros du Leslie restent à faire) ; réglages dans la description de l'orgue (page Réglages), enregistrés avec la piste, non automatisables.
+
+- `OrganDescription::clickLevel` (0..100 %, 50 = setBfree), `clickLength` (25..400 %, 100 = setBfree : multiplie la durée du bruit, 8 à 40 échantillons à 22,05 kHz d'origine), `clickRelease` (0..100 %, 0 = relâchement linéaire de setBfree ; > 0 : le relâchement clique aussi). JSON `key_click`. Avec les valeurs d'origine, `nb3_create_full` reçoit NULL : setBfree tel quel.
+- Fixé à la construction (les enveloppes sont calculées une fois dans `initToneGenerator`) : comme l'accord, un changement reconstruit l'orgue (`OrganVoices::requestBuild`) ; l'interface applique au relâchement du curseur. Niveau = atténuation aléatoire des contacts : un niveau plus haut donne un attaque plus bruitée (début moins fort), pas « plus de clic » au sens du volume.
+- Interface : page Réglages, boîte « Clic des touches » (3 curseurs, double-clic = valeur d'origine). Mesure (24 touches, énergie des 128 premiers échantillons) : niveau 0 -> 100 divise l'énergie par ~2, durée 25 % -> 400 % la multiplie par ~3 : l'effet est réel, le goût reste à juger à l'oreille.
+- Pas repris : modèle d'attaque (cosinus, linéaire, étagé), longueur minimale séparée.

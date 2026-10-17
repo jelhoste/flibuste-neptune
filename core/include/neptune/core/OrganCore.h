@@ -26,6 +26,17 @@ typedef struct
 	float taperDb[9][5];
 } nb3_wiring;
 nb3_engine* nb3_create_ex (double sampleRate, double refA_Hz, const nb3_wiring* wiring);
+
+// Clic des touches (bruit d'étincelle des contacts, setBfree : « osc.attack.click.* », « osc.release.* »). Se fixe à la construction : les enveloppes
+// sont calculées une fois. attackLevel 0..1 (0,5 : réglage d'origine), burstScale : multiplie la durée du bruit (1 : d'origine), releaseLevel > 0 :
+// le relâchement clique aussi (0 : relâchement linéaire, d'origine).
+typedef struct
+{
+	float attackLevel;
+	float burstScale;
+	float releaseLevel;
+} nb3_click;
+nb3_engine* nb3_create_full (double sampleRate, double refA_Hz, const nb3_wiring* wiring, const nb3_click* click);
 void nb3_destroy (nb3_engine*);
 
 // Touche du clavier de setBfree : 0..60 manuel supérieur, 64..124 inférieur, 128..159 pédalier.

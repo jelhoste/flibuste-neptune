@@ -487,3 +487,51 @@ TEST_CASE ("organ control bindings give the same values as the direct setBfree C
             }
         }
 }
+
+TEST_CASE ("organ: key click settings are clamped, round trip in JSON and default to setBfree", "[organ]")
+{
+    OrganDescription d;
+    CHECK (d.clickIsDefault());
+    d.clickLevel = 900; d.clickLength = 3; d.clickRelease = -4;
+    const auto s = sanitised (d);
+    CHECK (s.clickLevel == 100);
+    CHECK (s.clickLength == 25);
+    CHECK (s.clickRelease == 0);
+    OrganDescription e;
+    e.clickLevel = 80; e.clickLength = 150; e.clickRelease = 30;
+    const auto back = organFromJson (toJson (e));
+    CHECK (back == e);
+    CHECK (back.clickLevel == 80);
+    CHECK_FALSE (back.clickIsDefault());
+    CHECK (organFromJson ("{}").clickIsDefault());
+    OrganDescription f = e;
+    f.clickRelease = 31;
+    CHECK (f != e);
+}
+
+TEST_CASE ("organ engine: the key click settings change the attack (more attenuation noise, longer burst)", "[organ][engine]")
+{
+    // moyenne sur plusieurs touches : le bruit est aléatoire. Énergie des 128 premiers échantillons.
+    auto attackEnergy = [] (int level, int length)
+    {
+        double total = 0.0;
+        for (int trial = 0; trial < 24; ++trial)
+        {
+            OrganVoices v;
+            OrganDescription d;
+            d.clickLevel = level;
+            d.clickLength = length;
+            v.requestBuild (d);
+            REQUIRE (v.reserve (kRate));
+            OrganLive live;
+            v.noteOn (0, 60 + trial % 12);
+            std::vector<float> l (128), r (128);
+            v.render (l.data(), r.data(), 128, 1.0f, 1.0f, live, false);
+            for (const float x : l) total += static_cast<double> (x) * x;
+        }
+        return total / 24.0;
+    };
+    CHECK (attackEnergy (0, 100) > attackEnergy (100, 100) * 1.3);   // un contact plus bruité atténue davantage le début
+    CHECK (attackEnergy (50, 400) > attackEnergy (50, 25) * 1.5);    // un bruit plus long retarde l'établissement du son
+    CHECK (std::isfinite (attackEnergy (50, 100)));
+}
