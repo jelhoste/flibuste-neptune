@@ -379,6 +379,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
             processor_.uiNoteOffTrack (synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))], key, channel);
         };
         addChildComponent (*organView_);
+        audioInView_ = std::make_unique<AudioInView> (processor_, palette_, tr_);
+        addChildComponent (*audioInView_);
     }
 
     presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
@@ -1191,7 +1193,10 @@ void NeptuneEditor::updateViewVisibility()
     const bool synth = mapping && selectedIsSynth();
     const bool fmMode = mapping && selectedIsFm();
     const bool organMode = mapping && selectedIsOrgan();
-    const bool sampler = mapping && ! synth && ! fmMode && ! organMode;
+    const bool audioIn = mapping && selectedIsAudioIn();
+    const bool sampler = mapping && ! synth && ! fmMode && ! organMode && ! audioIn;
+    audioInShown_ = audioIn;
+    audioInView_->setVisible (audioIn);
     synthShown_ = synth;
     fmShown_ = fmMode;
     organShown_ = organMode;
@@ -1269,7 +1274,7 @@ void NeptuneEditor::updateTrackBox()
         if (! processor_.trackActive (t)) continue;
         const auto s = processor_.trackSettings (t);
         const auto tt = processor_.trackType (t);
-        const auto kind = tt == neptune::core::TrackType::Organ ? "mix.type_short_organ" : tt == neptune::core::TrackType::Fm ? "mix.type_short_fm"
+        const auto kind = tt == neptune::core::TrackType::AudioIn ? "mix.type_short_audio" : tt == neptune::core::TrackType::Organ ? "mix.type_short_organ" : tt == neptune::core::TrackType::Fm ? "mix.type_short_fm"
                         : tt == neptune::core::TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
         const auto label = juce::String (t + 1) + "  " + text (kind) + (s.name.empty() ? juce::String() : "  " + juce::String::fromUTF8 (s.name.c_str()));
         trackBox_.addItem (label, t + 1);
@@ -1286,6 +1291,7 @@ void NeptuneEditor::rebindKnobs()
     synthView_->setTrack (track);
     fmView_->setTrack (track);
     organView_->setTrack (track);
+    audioInView_->setTrack (track);
     organView_->releaseKeys();
     fmView_->releaseKeys();
     synthView_->releaseKeys(); // touches tenues à l'écran : relâchées sur la piste où elles ont démarré
@@ -1429,7 +1435,9 @@ void NeptuneEditor::timerCallback()
     rebindKnobs();
     if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())
         || fmShown_ != (! showProbe_ && ! showMixer_ && selectedIsFm())
-        || organShown_ != (! showProbe_ && ! showMixer_ && selectedIsOrgan())) { updateViewVisibility(); resized(); } // type de la piste changé
+        || organShown_ != (! showProbe_ && ! showMixer_ && selectedIsOrgan())
+        || audioInShown_ != (! showProbe_ && ! showMixer_ && selectedIsAudioIn())) { updateViewVisibility(); resized(); } // type de la piste changé
+    if (audioInView_->isVisible()) audioInView_->refresh();
     updateSynthView();
     if (fmView_->isVisible()) fmView_->setDescription (processor_.fmDescription());
     if (organView_->isVisible())
@@ -1509,6 +1517,7 @@ void NeptuneEditor::resized()
     synthView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
     fmView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38) });
     organView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 80 - 38 - 160) });
+    audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 160) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
     {
         auto r = juce::Rectangle<int> (32, 80, lw_ - 64, 36);

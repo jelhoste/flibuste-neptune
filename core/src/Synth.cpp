@@ -10,7 +10,7 @@
 
 namespace neptune::core
 {
-const char* toString (TrackType t) noexcept { return t == TrackType::Organ ? "organ" : t == TrackType::Fm ? "fm" : t == TrackType::Synth ? "synth" : "sampler"; }
+const char* toString (TrackType t) noexcept { return t == TrackType::AudioIn ? "audio_in" : t == TrackType::Organ ? "organ" : t == TrackType::Fm ? "fm" : t == TrackType::Synth ? "synth" : "sampler"; }
 
 bool trackTypeFromString (std::string_view s, TrackType& out)
 {
@@ -18,6 +18,7 @@ bool trackTypeFromString (std::string_view s, TrackType& out)
     if (s == "synth") { out = TrackType::Synth; return true; }
     if (s == "fm") { out = TrackType::Fm; return true; }
     if (s == "organ") { out = TrackType::Organ; return true; }
+    if (s == "audio_in") { out = TrackType::AudioIn; return true; }
     return false;
 }
 

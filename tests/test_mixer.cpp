@@ -301,7 +301,7 @@ TEST_CASE ("an idle engine with no instrument stays silent and cheap, and settin
     CHECK (clean.midiChannel == 16);
     CHECK (clean.routing.directOut == mixer::numOutputs);
     CHECK (clean.routing.mainDest == 0);
-    CHECK (clean.sends[0].destination == mixer::numBuses);
+    CHECK (clean.sends[0].destination == mixer::numBuses + mixer::numTracks);   // au-delà des bus : une piste Entrée audio (jugée au traitement)
     CHECK (clean.sends[0].pan == 0.0);
 
     // un bus ne peut cibler qu'un bus d'indice supérieur

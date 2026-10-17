@@ -74,6 +74,7 @@ json stripToJson (const mixer::StripSettings& s)
     o["routing"] = std::move (r);
     if (s.panMode != mixer::PanMode::Balance) o["pan_mode"] = "true";
     if (s.slim) o["slim"] = true;
+    if (! s.hostInput) o["host_input"] = false;
     json sends = json::array();
     for (const auto& x : s.sends)
     {
@@ -116,6 +117,7 @@ mixer::StripSettings stripFromJson (const json& o, mixer::StripSettings s, bool 
     }
     if (const auto it = o.find ("pan_mode"); it != o.end() && it->is_string() && it->get<std::string>() == "true") s.panMode = mixer::PanMode::True;
     s.slim = boolOf (o, "slim", s.slim);
+    s.hostInput = boolOf (o, "host_input", s.hostInput);
     if (const auto it = o.find ("sends"); it != o.end() && it->is_array())
         for (std::size_t i = 0; i < it->size() && i < s.sends.size(); ++i)
         {

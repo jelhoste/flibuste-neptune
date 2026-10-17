@@ -29,6 +29,7 @@ constexpr int numBuses = 16;
 constexpr int numSends = 8;
 constexpr int numOutputs = 32; // sorties stéréo physiques déclarées à l'hôte
 constexpr int numInserts = 8;  // emplacements d'inserts par piste, par bus et sur le Master
+constexpr int firstTrackDestination = numBuses + 1; // destination d'envoi : 1..numBuses = bus ; firstTrackDestination.. = piste « Entrée audio » (piste n -> firstTrackDestination + n)
 constexpr int numParallels = 32; // pistes parallèles (pool propre, réparties librement dans l'arbre)
 constexpr int parentOfParallelBase = numTracks; // identifiant de parent : 0..15 piste, 16..47 piste parallèle
 
@@ -200,10 +201,11 @@ struct StripSettings
     std::array<SendSettings, numSends> sends;
     std::array<InsertState, numInserts> inserts;
     bool slim = false;
+    bool hostInput = true;               // piste « Entrée audio » : l'entrée audio du plugin (hôte) alimente la piste
 
     bool operator== (const StripSettings& o) const noexcept
     {
-        return name == o.name && color == o.color && midiChannel == o.midiChannel && midiFilter == o.midiFilter && routing == o.routing
+        return hostInput == o.hostInput && name == o.name && color == o.color && midiChannel == o.midiChannel && midiFilter == o.midiFilter && routing == o.routing
             && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim;
     }
 };

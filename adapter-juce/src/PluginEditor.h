@@ -7,6 +7,7 @@
 #include "PolyphonyPanel.h"
 #include "SlotsPanel.h"
 #include "ControlPanel.h"
+#include "AudioInView.h"
 #include "ChokePanel.h"
 #include "VoicesView.h"
 #include "FilterEditor.h"
@@ -125,9 +126,11 @@ private:
     std::unique_ptr<InsertOverlay> insertOverlay_;
     void openInsert (NeptuneProcessor::StripKind, int index, int slot);
     void closeInsert();
-    bool synthShown_ = false, fmShown_ = false, organShown_ = false;
+    bool synthShown_ = false, fmShown_ = false, organShown_ = false, audioInShown_ = false;
     // Vue Orgue : remplace la vue Mapping quand la piste sélectionnée est de type Orgue.
     std::unique_ptr<OrganView> organView_;
+    std::unique_ptr<AudioInView> audioInView_;
+    bool selectedIsAudioIn() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::AudioIn; }
     bool selectedIsOrgan() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Organ; }
     // Vue FM : remplace la vue Mapping quand la piste sélectionnée est de type FM.
     std::unique_ptr<FmView> fmView_;

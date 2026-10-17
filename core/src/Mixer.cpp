@@ -176,8 +176,9 @@ StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
         if (in.type.size() > 32) in = InsertState {};
     for (auto& send : s.sends)
     {
-        send.destination = std::clamp (send.destination, 0, numBuses);
-        if (isBus && send.destination != 0 && send.destination <= index + 1) send.destination = 0;
+        // 1..numBuses : bus ; au-delà : piste « Entrée audio » (la validité - type, cycles - se juge au traitement). Un bus n'envoie qu'à un bus supérieur.
+        send.destination = std::clamp (send.destination, 0, numBuses + numTracks);
+        if (isBus && send.destination != 0 && (send.destination <= index + 1 || send.destination > numBuses)) send.destination = 0;
         const int tap = std::clamp (static_cast<int> (send.tap), 0, 3);
         send.tap = static_cast<TapPoint> (tap);
         send.pan = std::isfinite (send.pan) ? std::clamp (send.pan, -1.0, 1.0) : 0.0;

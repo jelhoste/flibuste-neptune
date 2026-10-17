@@ -1159,6 +1159,7 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
 NeptuneProcessor::BusesProperties NeptuneProcessor::makeBuses (int numOutputs)
 {
     BusesProperties props;
+    props = props.withInput ("Input", juce::AudioChannelSet::stereo(), true);   // alimente les pistes « Entrée audio » (réglage par piste)
     for (int i = 0; i < numOutputs; ++i)
         props = props.withOutput ("Out " + juce::String (i + 1), juce::AudioChannelSet::stereo(), true);
     return props;
@@ -1651,6 +1652,9 @@ void NeptuneProcessor::discardRecovered()
 void NeptuneProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine_.prepare (sampleRate, samplesPerBlock);
+    const auto capacity = static_cast<std::size_t> (juce::jmax (samplesPerBlock, 8192));
+    hostIn_[0].assign (capacity, 0.0f);
+    hostIn_[1].assign (capacity, 0.0f);
 }
 
 void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -1658,6 +1662,20 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     juce::ScopedNoDenormals noDenormals;
 
     engine_.setProfile (profile_.effective()); // lecture atomique, sans verrou
+    // Entrée audio de l'hôte : copiée avant tout (les canaux 0 et 1 du tampon sont aussi la première sortie, que le moteur va écrire)
+    {
+        const auto* inBus = getBus (true, 0);
+        const int frames = buffer.getNumSamples();
+        if (inBus != nullptr && inBus->isEnabled() && inBus->getNumberOfChannels() >= 1 && frames > 0
+            && static_cast<std::size_t> (frames) <= hostIn_[0].size() && hostIn_[1].size() >= hostIn_[0].size())
+        {
+            const int channels = inBus->getNumberOfChannels();
+            std::copy (buffer.getReadPointer (0), buffer.getReadPointer (0) + frames, hostIn_[0].begin());
+            const float* right = buffer.getReadPointer (channels >= 2 ? 1 : 0);   // entrée mono : dupliquée
+            std::copy (right, right + frames, hostIn_[1].begin());
+            engine_.setHostInput (hostIn_[0].data(), hostIn_[1].data(), frames);
+        }
+    }
     ++hostProbe_.blocks;
     hostProbe_.lastBlockSize = buffer.getNumSamples();
     hostProbe_.outputChannels = buffer.getNumChannels();

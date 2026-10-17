@@ -51,6 +51,9 @@ public:
     void releaseAll() noexcept; // MIDI All Notes Off
     void setParameter (std::uint32_t id, double value) noexcept;
     void process (float* const* out, int numChannels, int numFrames) noexcept;
+    // Entrée audio de l'hôte (stéréo) pour le prochain appel à process() : pointeurs valides pendant cet appel seulement, `frames` échantillons ;
+    // nuls : pas d'entrée. Alimente les pistes de type Entrée audio dont le réglage « entrée de l'hôte » est actif.
+    void setHostInput (const float* left, const float* right, int frames) noexcept { hostL_ = left; hostR_ = right; hostFrames_ = frames; }
     // Profil Live/Studio effectif de l'instance ; appelé par l'adaptateur avant chaque bloc (sans coût). Aucun effet audible pour l'instant.
     void setProfile (PerformanceProfile p) noexcept { profile_ = p; }
     PerformanceProfile profile() const noexcept { return profile_; }
@@ -160,7 +163,7 @@ private:
     };
     struct AtomicStrip
     {
-        std::atomic<int> midiChannel { 0 }, mainDest { 0 }, mainEnabled { 1 }, directOut { 0 }, panMode { 0 };
+        std::atomic<int> midiChannel { 0 }, mainDest { 0 }, mainEnabled { 1 }, directOut { 0 }, panMode { 0 }, hostInput { 1 };
         std::array<AtomicSend, mixer::numSends> sends;
         void load (const mixer::StripSettings&) noexcept;
     };
@@ -299,6 +302,14 @@ private:
     Stereo raw_, inserted_, postFader_, final_, sum0_, master_; // niveau 0 : la piste
     std::vector<Level> levels_;                                 // niveau d >= 1 : levels_[d - 1], pour les pistes parallèles
     std::array<Stereo, kBuses> busIn_;
+    std::array<Stereo, kTracks> trackIn_;                       // envois reçus par les pistes « Entrée audio »
+    std::array<bool, kTracks> trackHasInput_ {};
+    std::array<bool, kTracks> audioInNow_ {};                   // types lus une fois par bloc (un changement de type en cours de bloc ne double rien)
+    const float *hostL_ = nullptr, *hostR_ = nullptr;           // entrée de l'hôte (appel en cours)
+    int hostFrames_ = 0;
+    const float *chunkHostL_ = nullptr, *chunkHostR_ = nullptr; // idem, décalée au bloc en cours
+    int currentRoot_ = -1;                                      // piste en cours de traitement (ses pistes parallèles comprises)
+    bool currentRootAudioIn_ = false;
     std::array<Parallel, kParallels> parallels_;
     // contexte du bloc en cours
     float* const* chunkOut_ = nullptr;

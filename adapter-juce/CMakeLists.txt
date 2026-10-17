@@ -27,6 +27,7 @@ target_sources(Neptune PRIVATE
   src/SlotsPanel.cpp
   src/OscServer.cpp
   src/ControlPanel.cpp
+  src/AudioInView.cpp
   src/OrganView.cpp
   src/EnvelopeEditor.cpp
   src/ImportWizard.cpp

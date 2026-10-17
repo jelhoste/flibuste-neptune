@@ -333,6 +333,7 @@ private:
     // Couche de contrôle : le moteur est lu par le thread audio (CC) ; le relais ci-dessous (thread de message, ~30 Hz) exécute les actions
     // demandées et prévient l'hôte des paramètres modifiés par une source externe.
     neptune::core::control::ControlEngine control_;
+    std::vector<float> hostIn_[2];   // copie de l'entrée audio de l'hôte (pistes « Entrée audio »)
     std::vector<int> hostIndex_;   // indice du paramètre du cœur -> indice de l'hôte (-1 : non déclaré à l'hôte, liste réduite)
     juce::AudioProcessorParameter* hostParam (std::size_t index) const
     {

@@ -23,7 +23,7 @@
 namespace neptune::core
 {
 // Type de génération d'une piste (spec §1). L'Entrée audio viendra plus tard.
-enum class TrackType { Sampler = 0, Synth = 1, Fm = 2, Organ = 3 };
+enum class TrackType { Sampler = 0, Synth = 1, Fm = 2, Organ = 3, AudioIn = 4 };   // AudioIn : pas d'instrument, reçoit des envois et l'entrée audio de l'hôte
 const char* toString (TrackType) noexcept;                         // "sampler" / "synth" / "fm" / "organ"
 bool trackTypeFromString (std::string_view, TrackType& out);
 

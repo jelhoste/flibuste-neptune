@@ -9,6 +9,7 @@ namespace neptune::core
 void Engine::AtomicStrip::load (const mixer::StripSettings& s) noexcept
 {
     midiChannel.store (s.midiChannel, std::memory_order_relaxed);
+    hostInput.store (s.hostInput ? 1 : 0, std::memory_order_relaxed);
     mainDest.store (s.routing.mainDest, std::memory_order_relaxed);
     mainEnabled.store (s.routing.mainEnabled ? 1 : 0, std::memory_order_relaxed);
     directOut.store (s.routing.directOut, std::memory_order_relaxed);
@@ -60,6 +61,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
     for (auto& l : levels_) l.resize (n);
     for (auto& p : parallels_) { p.lastFader = 1.0f; p.lastPanL = p.lastPanR = 1.0f; }
     for (auto& b : busIn_) b.resize (n);
+    for (auto& b : trackIn_) b.resize (n);
     // les inserts déjà posés suivent la nouvelle configuration (prepare n'est jamais concurrent du traitement audio)
     adoptInserts();
     auto prepareInserts = [this] (Inserts& ins)
@@ -295,7 +297,7 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
 {
     if (track < 0 || track >= kTracks) return;
     auto& t = tracks_[static_cast<std::size_t> (track)];
-    if (t.active.load (std::memory_order_relaxed) == 0) return;
+    if (t.active.load (std::memory_order_relaxed) == 0 || t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn)) return;
     enforceGlobalVoiceLimit();
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
     ++activeNotes_;
@@ -359,8 +361,9 @@ void Engine::enforceGlobalVoiceLimit() noexcept
 void Engine::noteOffTrack (int track, int channel, int key) noexcept
 {
     if (track < 0 || track >= kTracks) return;
-    activeNotes_ = std::max (0, activeNotes_ - 1);
     auto& t = tracks_[static_cast<std::size_t> (track)];
+    if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn)) return;   // pas de notes sur une entrée audio
+    activeNotes_ = std::max (0, activeNotes_ - 1);
     if (key >= 0 && key < 128) t.held[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
     const int type = t.type.load (std::memory_order_relaxed);
     if (type == static_cast<int> (TrackType::Organ)) t.organ.noteOff (channel, key);
@@ -501,7 +504,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     }
     if (insertsDirty_.exchange (false, std::memory_order_acq_rel)) adoptInserts();
     drainUiEvents();
-    if (numChannels < 1 || out[0] == nullptr || numFrames <= 0) return;
+    if (numChannels < 1 || out[0] == nullptr || numFrames <= 0) { hostL_ = hostR_ = nullptr; hostFrames_ = 0; return; }
 
     if (maxBlockSize_ <= 0) prepare (sampleRate_ > 0.0 ? sampleRate_ : 48000.0, numFrames); // sécurité : prepare() manquant
 
@@ -512,8 +515,13 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     {
         const int frames = std::min (maxBlockSize_, numFrames - offset);
         for (int c = 0; c < channels; ++c) shifted[static_cast<std::size_t> (c)] = out[c] != nullptr ? out[c] + offset : nullptr;
+        const bool hostOk = hostL_ != nullptr && hostR_ != nullptr && offset + frames <= hostFrames_;
+        chunkHostL_ = hostOk ? hostL_ + offset : nullptr;
+        chunkHostR_ = hostOk ? hostR_ + offset : nullptr;
         processChunk (shifted.data(), channels, frames);
     }
+    hostL_ = hostR_ = nullptr;   // l'entrée de l'hôte n'est valable que pour cet appel
+    hostFrames_ = 0;
     totalVoices_.store (activeVoices(), std::memory_order_relaxed);
     publishVoices();
 }
@@ -605,12 +613,23 @@ void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::a
         const double levelDb = param (idx.sendLevel[s], -100.0);
         const float target = (dest <= 0 || muted) ? 0.0f : dbToGain (levelDb);
         float& last = lastSend[static_cast<std::size_t> (s)];
-        if (dest <= 0 || dest > kBuses || (isBus && dest - 1 <= busIndex) || (target == 0.0f && last == 0.0f)) { last = target; continue; }
+        // destination : bus 1..kBuses, ou piste « Entrée audio » (traitée après les pistes ordinaires, donc aucune boucle ; une Entrée audio n'alimente
+        // qu'une Entrée audio d'indice supérieur ; jamais sa propre piste ni depuis un bus)
+        const bool toTrack = dest > kBuses;
+        const int destTrack = dest - kBuses - 1;
+        bool valid = dest > 0 && ! (target == 0.0f && last == 0.0f);
+        if (valid && toTrack)
+            valid = ! isBus && destTrack >= 0 && destTrack < kTracks && destTrack != currentRoot_ && (! currentRootAudioIn_ || destTrack > currentRoot_)
+                 && tracks_[static_cast<std::size_t> (destTrack)].active.load (std::memory_order_relaxed) != 0
+                 && audioInNow_[static_cast<std::size_t> (destTrack)];
+        else if (valid)
+            valid = ! (isBus && dest - 1 <= busIndex);
+        if (! valid) { last = target; continue; }
         const int tap = cfg.sends[static_cast<std::size_t> (s)].tap.load (std::memory_order_relaxed);
         const Stereo& src = tap == 0 ? pre : (tap == 1 ? post : (tap == 2 ? postFader : out));
         float spl = 1.0f, spr = 1.0f;
         panGains (static_cast<PanMode> (cfg.panMode.load (std::memory_order_relaxed)), cfg.sends[static_cast<std::size_t> (s)].pan.load (std::memory_order_relaxed), spl, spr);
-        Stereo& bus = busIn_[static_cast<std::size_t> (dest - 1)];
+        Stereo& bus = toTrack ? trackIn_[static_cast<std::size_t> (destTrack)] : busIn_[static_cast<std::size_t> (dest - 1)];
         const float step = (target - last) / static_cast<float> (n);
         float g = last;
         for (int i = 0; i < n; ++i)
@@ -620,7 +639,8 @@ void Engine::routeStrip (const AtomicStrip& cfg, const ParamIndices& idx, std::a
             g += step;
         }
         last = target;
-        buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
+        if (toTrack) trackHasInput_[static_cast<std::size_t> (destTrack)] = true;
+        else buses_[static_cast<std::size_t> (dest - 1)].hasInput = true;
     }
     if (! sumIntoParent && cfg.mainEnabled.load (std::memory_order_relaxed) != 0)
     {
@@ -731,6 +751,13 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     zero (master_);
     for (auto& b : busIn_) zero (b);
     for (auto& b : buses_) b.hasInput = false;
+    trackHasInput_.fill (false);
+    for (int ti = 0; ti < kTracks; ++ti)
+    {
+        const auto k = static_cast<std::size_t> (ti);
+        audioInNow_[k] = tracks_[k].type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn);
+        if (audioInNow_[k]) zero (trackIn_[k]);
+    }
 
     // --- arbre des pistes parallèles (reconstruit à chaque bloc : 32 entrées). Seules les pistes sont des racines : une boucle ou un
     // parent inactif rend une parallèle inatteignable, donc jamais traitée.
@@ -778,17 +805,26 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     busSolo_ = busSolo;
 
     // ---- pistes
-    for (int ti = 0; ti < kTracks; ++ti)
+    // Deux passes : les pistes ordinaires d'abord, puis les pistes « Entrée audio » dans l'ordre (elles ont reçu leurs envois entre-temps).
+    for (int visit = 0; visit < 2 * kTracks; ++visit)
     {
+        const int ti = visit % kTracks;
         auto& t = tracks_[static_cast<std::size_t> (ti)];
+        const bool audioInTrack = audioInNow_[static_cast<std::size_t> (ti)];
+        if (audioInTrack != (visit >= kTracks)) continue;
+        currentRoot_ = ti;
+        currentRootAudioIn_ = audioInTrack;
         if (t.active.load (std::memory_order_relaxed) == 0) { t.lastSend.fill (0.0f); continue; }
-        const bool synthTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Synth);
-        const bool fmTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Fm);
-        const bool organTrack = t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
+        const int typeNow = t.type.load (std::memory_order_relaxed);
+        const bool synthTrack = ! audioInTrack && typeNow == static_cast<int> (TrackType::Synth);
+        const bool fmTrack = ! audioInTrack && typeNow == static_cast<int> (TrackType::Fm);
+        const bool organTrack = ! audioInTrack && typeNow == static_cast<int> (TrackType::Organ);
         const bool wasSilent = t.peakL.load (std::memory_order_relaxed) == 0.0f && t.peakR.load (std::memory_order_relaxed) == 0.0f;
         // piste sans instrument, ou au repos et déjà silencieuse (elle et ses pistes parallèles) : rien à faire
         // l'orgue (Leslie, réverb) a une queue : au repos seulement quand aucune touche n'est tenue ET que la piste est déjà muette
-        const bool idle = organTrack ? t.organ.heldKeys() == 0
+        const bool hostFeeds = audioInTrack && chunkHostL_ != nullptr && t.config.hostInput.load (std::memory_order_relaxed) != 0;
+        const bool idle = audioInTrack ? (! trackHasInput_[static_cast<std::size_t> (ti)] && ! hostFeeds)
+                        : organTrack ? t.organ.heldKeys() == 0
                         : fmTrack ? t.fm.activeVoices() == 0
                         : synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
         if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0) { t.lastSend.fill (0.0f); continue; }
@@ -810,7 +846,27 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             if (s[kFilter2Cutoff] != ParameterSet::npos) fp.cutoffHz[1] = params_->getAt (s[kFilter2Cutoff]);
             if (s[kFilter2Resonance] != ParameterSet::npos) fp.resonance[1] = params_->getAt (s[kFilter2Resonance]) / 100.0;
         }
-        if (organTrack)
+        if (audioInTrack)
+        {
+            // entrée audio : les envois reçus + l'entrée de l'hôte, avec le trim de la piste (le « gain » de l'instrument)
+            const auto& in = trackIn_[static_cast<std::size_t> (ti)];
+            std::copy (in.l.begin(), in.l.begin() + n, raw_.l.begin());
+            std::copy (in.r.begin(), in.r.begin() + n, raw_.r.begin());
+            if (hostFeeds)
+                for (int i = 0; i < n; ++i)
+                {
+                    raw_.l[static_cast<std::size_t> (i)] += chunkHostL_[i];
+                    raw_.r[static_cast<std::size_t> (i)] += chunkHostR_[i];
+                }
+            const float step = (gain - t.lastGain) / static_cast<float> (n);
+            float g = t.lastGain;
+            for (int i = 0; i < n; ++i, g += step)
+            {
+                raw_.l[static_cast<std::size_t> (i)] *= g;
+                raw_.r[static_cast<std::size_t> (i)] *= g;
+            }
+        }
+        else if (organTrack)
         {
             double values[organ::kOrganValues];
             // valeurs par défaut de mixer::addOrganParams quand aucun jeu de paramètres n'est attaché

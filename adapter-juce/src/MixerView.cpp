@@ -171,6 +171,19 @@ public:
                 r.dest.addItem ("Bus " + juce::String (b), b + 1);
                 if (isBus_ && b <= index_ + 1) r.dest.setItemEnabled (b + 1, false);
             }
+            // pistes « Entrée audio » : destinations d'envoi supplémentaires (identifiant = destination + 1, après les bus)
+            if (! isBus_)
+                for (int t = 0; t < mixer::numTracks; ++t)
+                {
+                    const bool isAudioIn = proc_.trackActive (t) && proc_.trackType (t) == TrackType::AudioIn;
+                    const bool current = s_.sends[static_cast<std::size_t> (i)].destination == mixer::firstTrackDestination + t;
+                    if (! isAudioIn && ! current) continue;
+                    r.dest.addItem (text ("mix.send_to_audio_in") + " " + juce::String (t + 1), mixer::firstTrackDestination + t + 1);
+                    // pas vers soi-même, ni (depuis une Entrée audio) vers une piste d'indice inférieur ; l'origine d'une piste parallèle se juge au traitement
+                    const bool fromAudioIn = ! isPar_ && proc_.trackType (index_) == TrackType::AudioIn;
+                    if (! isPar_ && (t == index_ || (fromAudioIn && t < index_))) r.dest.setItemEnabled (mixer::firstTrackDestination + t + 1, false);
+                    if (! isAudioIn) r.dest.setItemEnabled (mixer::firstTrackDestination + t + 1, false);
+                }
             r.dest.setSelectedId (s_.sends[static_cast<std::size_t> (i)].destination + 1, juce::dontSendNotification);
             r.dest.onChange = [this, i] { s_.sends[static_cast<std::size_t> (i)].destination = rows_[static_cast<std::size_t> (i)].dest.getSelectedId() - 1; push(); };
             addAndMakeVisible (r.dest);
@@ -552,7 +565,7 @@ public:
         if (! isBus_ && ! isPar_)
         {
             const auto type = owner_.processor_.trackType (index_);
-            const char* key = type == TrackType::Organ ? "mix.type_short_organ" : type == TrackType::Fm ? "mix.type_short_fm" : type == TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
+            const char* key = type == TrackType::AudioIn ? "mix.type_short_audio" : type == TrackType::Organ ? "mix.type_short_organ" : type == TrackType::Fm ? "mix.type_short_fm" : type == TrackType::Synth ? "mix.type_short_synth" : "mix.type_short_sampler";
             typeButton_.setButtonText (u8 (std::string (owner_.tr_.tr (key))));
         }
         const auto s = settings();
@@ -667,12 +680,12 @@ private:
         menu.addSeparator();
         menu.addItem (3, u8 (std::string (owner_.tr_.tr ("mix.type_fm"))), true, current == TrackType::Fm);
         menu.addItem (5, u8 (std::string (owner_.tr_.tr ("mix.type_organ"))), true, current == TrackType::Organ);
-        menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), false);       // plus tard
+        menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), true, current == TrackType::AudioIn);
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (160),
                             [safe = juce::Component::SafePointer<Strip> (this)] (int choice)
                             {
                                 if (safe == nullptr || choice == 0) return;
-                                safe->owner_.requestTypeChange (safe->index_, choice == 5 ? TrackType::Organ : choice == 3 ? TrackType::Fm : choice == 2 ? TrackType::Synth : TrackType::Sampler);
+                                safe->owner_.requestTypeChange (safe->index_, choice == 4 ? TrackType::AudioIn : choice == 5 ? TrackType::Organ : choice == 3 ? TrackType::Fm : choice == 2 ? TrackType::Synth : TrackType::Sampler);
                             });
     }
 
