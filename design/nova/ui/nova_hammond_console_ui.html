@@ -1,0 +1,3160 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>NOVA — Tonewheel Organ</title>
+<link rel="stylesheet" href="nova-controls.css">
+<style>
+  :root{
+    --bg-app: var(--app-bg2); --bg-card: var(--bakelite); --border: var(--panel-border); --pink: var(--gold); --pink-2: var(--gold-dim); --header-bg: var(--header-bg1); --knob-face: var(--knob-face-2);
+    --handle:#fff; --hring:rgba(0,0,0,.35);
+    --wood-dark: #1a120c;
+    --wood-mid: #2a1e14;
+    --wood-light: #3d2c1c;
+    --bakelite: #2c241c;
+    --cream: #e8dcc8;
+    --cream-dim: #c4b49a;
+    --ivory: #f0e6d4;
+    --accent: #c45c26;
+    --accent-2: #e07a3a;
+    --gold: #c9a86c;
+    --gold-dim: #a88b52;
+    --text: #f0e8da;
+    --text-dim: #a89880;
+    --text-dim2: #7a6c58;
+    --grid: #2e241c;
+    --meter-green: #4a8c4a;
+    --meter-amber: #c9a03a;
+    --meter-red: #b84838;
+    --app-bg1: #221810;
+    --app-bg2: #1a120c;
+    --app-bg3: #140e0a;
+    --stage-bg: #080604;
+    --header-bg1: #2e2218;
+    --header-bg2: #221810;
+    --panel-bg: rgba(32,24,18,0.65);
+    --panel-border: #1a140e;
+    --frame-ring: #3a2c20;
+    --frame-edge: #0c0906;
+
+    /* jetons dédiés au rendu des potards (canvas), lus par drawKnob() */
+    --knob-face-1: #4a3c30;
+    --knob-face-2: #2a2218;
+    --knob-face-3: #1a140e;
+    --knob-ring: #0e0b08;
+    --knob-pointer: #e8dcc8;
+    --knob-center: #1a140e;
+
+    /* ---- style de conteneur "bezel" (natif Hammond) ----
+       Voir aussi le style "glass" dans le thème html.theme-modern plus bas :
+       ces 7 jetons + THEME_KNOB_STYLE forment une "identité" de conteneur complète. */
+    --container-radius: 10px;
+    --frame-radius: 14px;
+    --container-shadow: inset 0 1px 0 rgba(255,220,180,0.04), 0 6px 16px rgba(0,0,0,0.2);
+    --frame-shadow-full: 0 0 0 1px var(--frame-edge), 0 0 0 3px var(--frame-ring), 0 28px 70px rgba(0,0,0,0.35);
+    --frame-texture: repeating-linear-gradient(92deg, transparent 0px, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 3px);
+    
+    --header-bg-css: linear-gradient(180deg, var(--header-bg1), var(--header-bg2));
+    --bottombar-bg-css: linear-gradient(180deg, #2a1e14, #1e1610);
+    --pill-radius: 4px;
+    --icon-btn-radius: 6px;
+  }
+  /* —— Thème clair classe —— */
+  html.theme-light{
+    --wood-dark: #d8cbb0;
+    --wood-mid: #e4d8c4;
+    --wood-light: #ede2cc;
+    --bakelite: #e9dfc9;
+    --cream: #362d20;
+    --cream-dim: #7a6f5c;
+    --ivory: #241d15;
+    --accent: #c97b4a;
+    --accent-2: #d99566;
+    --gold: #c9a09b;
+    --gold-dim: #b98883;
+    --text: #362d20;
+    --text-dim: #7a6f5c;
+    --text-dim2: #a89b83;
+    --grid: #d8cbb0;
+    --meter-green: #3a7a3a;
+    --meter-amber: #b89030;
+    --meter-red: #a83828;
+    --app-bg1: #ede2cc;
+    --app-bg2: #e4d8c4;
+    --app-bg3: #d8cbb0;
+    --stage-bg: #d8cbb0;
+    --header-bg1: #ede2cc;
+    --header-bg2: #e9dfc9;
+    --panel-bg: rgba(233,223,201,0.92);
+    --panel-border: #cfc0a2;
+    --frame-ring: #d3c4a4;
+    --frame-edge: #b3a280;
+    
+    
+
+    --knob-face-1: #fdf8ee;
+    --knob-face-2: #ede2cc;
+    --knob-face-3: #d8cbb0;
+    --knob-ring: #b3a280;
+    --knob-pointer: #362d20;
+    --knob-center: #362d20;
+   --container-radius:14px; --frame-radius:18px; --frame-texture:none; --pill-radius:20px; --icon-btn-radius:50%;
+    --container-shadow: inset 0 1px 0 rgba(255,248,230,0.25), 0 8px 24px rgba(90,74,50,0.10);
+    --frame-shadow-full: 0 0 0 1px #d3c4a4, 0 30px 80px rgba(90,74,50,0.18);
+    --header-bg-css: rgba(233,223,201,0.5); --bottombar-bg-css: rgba(228,216,190,0.7);
+    --recess:#e4dccf; --stage-label:#8a7e70; --logo-stroke:#f0e6d4;
+    --block-bg:#e4dccf; --block-bd:#c8bba8; --block-sh:inset 0 1px 0 rgba(255,255,255,0.5);
+    --tile-bg:rgba(250,245,235,0.98); --tile-bd:rgba(180,160,130,0.35); --tile-sh:0 2px 8px rgba(80,60,40,0.06);
+    --tile-hov-bg:#fffaf3; --tile-hov-bd:var(--accent); --tile-act-bg:linear-gradient(160deg,var(--acc-12),rgba(255,245,230,0.95)); --tile-empty-bg:rgba(228,220,208,0.55);
+    --hdr-sh:inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 0 rgba(0,0,0,0.04);
+  }
+  /* —— Thème haut contraste (malvoyants / WCAG AAA) —— */
+  html.theme-hc{
+    --wood-dark: #000000;
+    --wood-mid: #000000;
+    --wood-light: #000000;
+    --bakelite: #000000;
+    --cream: #ffffff;
+    --cream-dim: #e6e6e6;
+    --ivory: #ffffff;
+    --accent: #ffd400;
+    --accent-2: #ffe066;
+    --gold: #33c7ff;
+    --gold-dim: #7fe0ff;
+    --text: #ffffff;
+    --text-dim: #e6e6e6;
+    --text-dim2: #cfcfcf;
+    --grid: #ffffff;
+    --meter-green: #00ff00;
+    --meter-amber: #ffd400;
+    --meter-red: #ff0000;
+    --app-bg1: #000000;
+    --app-bg2: #000000;
+    --app-bg3: #000000;
+    --stage-bg: #000000;
+    --header-bg1: #000000;
+    --header-bg2: #000000;
+    --panel-bg: #000000;
+    --panel-border: #ffffff;
+    --frame-ring: #ffffff;
+    --frame-edge: #ffd400;
+
+    --knob-face-1: #ffffff;
+    --knob-face-2: #ffffff;
+    --knob-face-3: #ffffff;
+    --knob-ring: #000000;
+    --knob-pointer: #000000;
+    --knob-center: #000000;
+   --container-radius:14px; --frame-radius:18px; --frame-texture:none; --pill-radius:20px; --icon-btn-radius:50%;
+    --container-shadow:none; --frame-shadow-full:none; --header-bg-css:#000; --bottombar-bg-css:#000;
+    --recess:#000; --stage-label:var(--text-dim2); --logo-stroke:var(--accent); --tile-act-bg:#1a1a00;
+  }
+  /* —— Thème sombre "Compresseur" (skin alternatif, EQ/compresseur NOVA) —— */
+  html.theme-modern{
+    --wood-dark: #050505;
+    --wood-mid: #0c0b0a;
+    --wood-light: #171513;
+    --bakelite: #1a1815;
+    --cream: #f1ede6;
+    --cream-dim: #9a9088;
+    --ivory: #f1ede6;
+    --accent: #e8823f;
+    --accent-2: #f0a06a;
+    --gold: #e39a94;
+    --gold-dim: #d97e78;
+    --text: #f1ede6;
+    --text-dim: #9a9088;
+    --text-dim2: #6f665f;
+    --grid: #322d28;
+    --meter-green: #4a8c4a;
+    --meter-amber: #c9a03a;
+    --meter-red: #b84838;
+    --app-bg1: #171513;
+    --app-bg2: #0c0b0a;
+    --app-bg3: #050505;
+    --stage-bg: #050505;
+    --header-bg1: #1c1a17;
+    --header-bg2: #171513;
+    --panel-bg: rgba(28,25,22,0.62);
+    --panel-border: #2c2823;
+    --frame-ring: #2c2823;
+    --frame-edge: #1c1a17;
+
+    --knob-face: #0f0d0c;
+    --knob-track: #3a3530;
+    --knob-dot: #ffffff;
+    --knob-hot: #d9483e;
+    --knob-hot-2: #e0645a;
+
+    /* ---- style de conteneur "glass" (natif compresseur/EQ) ---- */
+    --container-radius: 14px;
+    --frame-radius: 18px;
+    --container-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.25);
+    --frame-shadow-full: 0 0 0 1px #1c1a17, 0 30px 80px rgba(0,0,0,0.7);
+    --frame-texture: none;
+    
+    --header-bg-css: rgba(23,21,19,0.5);
+    --bottombar-bg-css: rgba(23,21,19,0.7);
+    --pill-radius: 20px;
+    --icon-btn-radius: 50%;
+  
+    --recess:#1c1a17; --stage-label:#6f665f; --logo-stroke:#f1ede6;
+    --block-bg:#171513; --block-bd:#2c2823; --block-sh:inset 0 1px 0 rgba(255,255,255,0.04);
+    --tile-bg:rgba(23,21,19,0.7); --tile-bd:rgba(255,255,255,0.08); --tile-hov-bg:rgba(28,25,22,0.85); --tile-hov-bd:var(--accent);
+    --tile-act-bg:linear-gradient(160deg,var(--acc-18),rgba(28,25,22,0.85)); --tile-empty-bg:rgba(12,11,10,0.5);
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; min-height:100%; width:100%;
+    background:var(--stage-bg);
+    font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    color:var(--text);
+    overflow-x:hidden; overflow-y:auto;
+    transition: background .25s, color .25s;
+  }
+  #stage{
+    width:100vw; min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; gap:32px;
+    padding:32px 0 50px;
+  }
+  .stage-label{
+    width:1180px; font-size:10px; letter-spacing:2.4px; color:var(--stage-label);
+    font-weight:700; margin-bottom:-18px; text-transform:uppercase;
+  }
+
+  /* ========== APP FRAME (mêmes proportions / marges que la version moderne) ========== */
+  .app-frame{
+    width:1180px; height:1020px;
+    background:
+      radial-gradient(circle at 8% 6%, var(--acc-07), transparent 42%),
+      radial-gradient(circle at 92% 90%, var(--brn-08), transparent 48%),
+      linear-gradient(165deg, var(--app-bg1) 0%, var(--app-bg2) 50%, var(--app-bg3) 100%);
+    border-radius:var(--frame-radius);
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    box-shadow: var(--frame-shadow-full);
+    position:relative;
+  }
+  .app-frame::before{
+    content:'';
+    position:absolute; inset:0; pointer-events:none; z-index:0;
+    background: var(--frame-texture);
+    border-radius:inherit;
+  }
+  .app-frame > *{ position:relative; z-index:1; }
+
+  /* ---------- HEADER ---------- */
+  .header{
+    height:68px; padding:0 20px;
+    display:flex; align-items:center; justify-content:space-between;
+    background: var(--header-bg-css);
+    border-bottom:1px solid var(--panel-border);
+    box-shadow:var(--hdr-sh);
+    gap:16px;
+  }
+  .theme-toggle{
+    display:flex; align-items:center; justify-content:center;
+    width:36px; height:32px;
+    background: var(--bakelite);
+    border:1px solid var(--panel-border);
+    border-radius:var(--icon-btn-radius);
+    cursor:pointer; user-select:none;
+    font-size:14px;
+    color:var(--text-dim);
+    box-shadow: var(--ctl-sh);
+  }
+  .theme-toggle:hover{ color:var(--accent-2); border-color:var(--accent); }
+  .header-brand{ display:flex; align-items:center; gap:11px; }
+  .logo-icon{
+    width:34px; height:34px; border-radius:6px;
+    background: var(--logo-bg);
+    border:1px solid var(--logo-bd);
+    box-shadow: inset 0 1px 0 var(--hl-12), 0 2px 4px var(--blk-b);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .logo-word{ font-weight:800; font-size:16px; letter-spacing:3.5px; color:var(--cream); }
+  .logo-sub{ font-size:7.5px; color:var(--gold-dim); letter-spacing:1.5px; font-weight:600; margin-top:1px; }
+
+  .preset-pill{
+    display:flex; align-items:center; gap:9px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    padding:7px 14px; border-radius:var(--pill-radius);
+    font-size:12.5px; color:var(--cream);
+    box-shadow: var(--ctl-sh);
+    width:200px;
+    min-width:200px;
+    max-width:200px;
+    box-sizing:border-box;
+    overflow:hidden;
+  }
+  .preset-pill #headerPresetName{
+    flex:1;
+    min-width:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .header-right{ display:flex; align-items:center; gap:12px; }
+  .leslie-pill{
+    display:flex; align-items:center; justify-content:center; gap:7px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    padding:6px 12px; border-radius:var(--pill-radius);
+    font-size:11px; font-weight:700; letter-spacing:0.6px; color:var(--cream-dim);
+    box-shadow: var(--ctl-sh);
+    width:118px;
+    box-sizing:border-box;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .leslie-pill #leslieText{
+    display:inline-block;
+    min-width:72px;
+    text-align:center;
+    flex:1;
+  }
+  .leslie-lamp{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--led-off);
+    box-shadow: inset 0 1px 2px var(--blk-a);
+  }
+  .leslie-lamp.on{
+    background:var(--accent-2);
+    box-shadow:0 0 6px 2px var(--acc2-50);
+  }
+  .leslie-lamp.fast{
+    background:var(--led-warn);
+    box-shadow:0 0 6px 2px var(--warn-50);
+  }
+
+  /* ---------- BODY GRID ---------- */
+  /* row1 VU↔Drawbars | row2 Presets↔Keyboards | row3 Leslie↔Percussion | row4 Menu↔Knobs */
+  .app-body{
+    flex:1; display:grid;
+    grid-template-columns:170px 1fr;
+    grid-template-rows:auto 1fr auto auto;
+    column-gap:14px;
+    row-gap:14px;
+    min-height:0;
+    padding:14px 14px 0 14px;
+  }
+
+  /* ---------- SIDEBAR BOXES ---------- */
+  .sidebar-box{
+    background: var(--panel-bg);
+    border:1px solid var(--panel-border);
+    border-radius:var(--container-radius);
+    box-shadow: var(--container-shadow);
+    padding:12px 10px;
+    min-height:0;
+  }
+  .sidebar-meters{
+    grid-column:1; grid-row:1;
+    display:flex; flex-direction:row; align-items:stretch; justify-content:center;
+    gap:8px; min-height:0;
+  }
+  .meters-classic{
+    display:flex; flex-direction:row; align-items:stretch; justify-content:center;
+    gap:8px; width:100%; flex:1; min-height:0;
+  }
+  .meters-live-layout{ display:none; }
+  .sidebar-meters .meter-col{
+    flex:1; display:flex; flex-direction:column; align-items:center; min-height:0; gap:6px;
+  }
+  .meter-foot{ margin-top:5px; height:18px; flex-shrink:0; }
+  .midi-ch-col{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:5px; flex:0 0 auto; padding:0 2px;
+  }
+  .midi-ch-item{ display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .midi-ch-btn{
+    min-width:52px; height:28px; padding:0 6px;
+    background: var(--bakelite); border:1px solid var(--ctl-bd); border-radius:4px;
+    color:var(--cream); font-size:11px; font-weight:800;
+    display:flex; align-items:center; justify-content:center;
+    cursor:ns-resize; user-select:none;
+    box-shadow: var(--ctl-sh);
+    font-variant-numeric: tabular-nums;
+    white-space:nowrap;
+  }
+  .midi-ch-btn:hover{ border-color:var(--pl-hov-bd); color:var(--accent-2); }
+  .midi-ch-label{ display:none; }
+  /* LIVE-only meters (when docked next to UPPER) */
+  .page-live .sidebar-meters.live-docked{
+    flex-direction:column;
+  }
+  .page-live .sidebar-meters.live-docked .meters-classic{ display:none; }
+  .page-live .sidebar-meters.live-docked .meters-live-layout{
+    display:flex; flex-direction:column; justify-content:space-between;
+    gap:8px; height:100%; min-height:0; width:100%;
+  }
+  .meters-out-block{ display:flex; flex-direction:column; gap:5px; flex-shrink:0; }
+  .meters-out-block .m-title{ font-size:8px; letter-spacing:1.2px; color:var(--text-dim2); font-weight:700; }
+  .hbar-row{ display:flex; flex-direction:column; gap:4px; }
+  .hbar-track{
+    height:10px; width:100%;
+    background:var(--recess); border:1px solid var(--ctl-bd); border-radius:2px;
+    position:relative; overflow:hidden;
+    box-shadow: inset 0 1px 3px var(--blk-a);
+  }
+  .hbar-fill{
+    position:absolute; left:0; top:0; bottom:0; border-radius:1px 0 0 1px;
+    background: linear-gradient(90deg, var(--vu-1), var(--vu-2));
+  }
+  .hbar-peak{
+    position:absolute; top:0; bottom:0; width:2px;
+    background:var(--peak-line); left:0%;
+  }
+  .midi-activity-row{
+    display:flex; align-items:center; justify-content:center; gap:10px; flex:1;
+  }
+  .midi-led{
+    width:28px; height:28px; border-radius:8px;
+    background:var(--lamp-off); border:1px solid var(--lamp-off-bd);
+    box-shadow: inset 0 2px 4px var(--blk-a);
+    transition: background .08s, box-shadow .08s;
+  }
+  .midi-led.on{
+    background: linear-gradient(145deg, var(--accent-2), var(--accent));
+    border-color: var(--acc-60);
+    box-shadow: 0 0 8px 2px var(--acc2-45), inset 0 1px 0 var(--hl-20);
+  }
+  .meters-live-layout .midi-ch-col{ flex-direction:row; gap:6px; }
+  .meters-live-layout .midi-ch-btn{ height:22px; font-size:10px; }
+  .meters-out-row{
+    display:flex; flex-direction:row; align-items:stretch; gap:6px;
+  }
+  .meters-out-row .peak-btn{
+    margin-top:0; writing-mode:horizontal-tb;
+    align-self:stretch; height:auto; min-height:0;
+    padding:2px 5px; display:flex; align-items:center; justify-content:center;
+  }
+  .meters-out-row .hbar-row{ flex:1; min-width:0; }
+  /* LIVE-only refinements */
+  .page-live{
+    --live-sidebar: 255px; /* 170 × 1.5 */
+  }
+  .page-live.app-body,
+  .app-body.page-live{
+    grid-template-columns: 255px 1fr;
+  }
+  .page-live .midi-led{
+    width:21px; height:21px; border-radius:6px; /* −25% */
+  }
+  .page-live .midi-led.on{
+    background: linear-gradient(145deg, var(--gold-hi), var(--gold));
+    border-color: var(--gold-65);
+    box-shadow: 0 0 8px 2px var(--gold-40), inset 0 1px 0 var(--hl2-25);
+  }
+  .page-live .meters-live-layout .midi-ch-btn{
+    min-width:0; width:36px; height:36px; font-size:10px; border-radius:6px;
+    padding:0; aspect-ratio:1;
+  }
+  .page-live .meters-live-layout .midi-ch-col{
+    gap:5px; flex-wrap:nowrap;
+  }
+  .page-live .perc-opt{
+    padding:14px 6px;
+    font-size:20px;
+    display:flex; align-items:center; justify-content:center;
+    min-height:36px;
+  }
+  .page-live .mid-meter-panel{
+    padding:8px 14px;
+    align-items:stretch;
+  }
+  .page-live .perc-group{
+    justify-content:center;
+  }
+  .page-live .perc-seg{
+    flex:1;
+    min-height:0;
+  }
+  /* BANK / PRESET + pots — both DRAWBARS and LIVE */
+  .knob-card .pot-zone,
+  .knob-card .k-meta,
+  .knob-card .drive-extras,
+  .knob-card .reverb-extras,
+  .knob-card .vibe-sw-stack,
+  .knob-card .preset-stepper-card{
+    transform: translateY(6px);
+  }
+  .bank-label-classic{ display:none; }
+  .bank-name-live{
+    display:block;
+    text-align:center;
+    font-size:13px; font-weight:800; letter-spacing:1px;
+    color:var(--cream);
+    padding:4px 0 6px;
+  }
+  .bank-stepper{
+    gap:10px;
+  }
+  .bank-stepper .stepper-field{ display:none; }
+  .bank-stepper .stepper-btn{
+    flex:1;
+    height:44px;
+    font-size:26px;
+    border-radius:7px;
+  }
+  .preset-scroll-stepper .stepper-field{ display:none; }
+  .preset-scroll-stepper{
+    gap:10px;
+  }
+  .preset-scroll-stepper .stepper-btn{
+    flex:1;
+    height:40px;
+    font-size:24px;
+    border-radius:7px;
+  }
+  .preset-list-item{
+    justify-content:center;
+    font-size:15px;
+    padding:9px 8px;
+    border:1px solid var(--hl-12);
+  }
+  .preset-list-item .pl-num{ display:none; }
+  .preset-list-item .pl-name{
+    text-align:center;
+    font-size:15px;
+    font-weight:700;
+  }
+  .preset-list-item.active{
+    border-color: var(--acc-45);
+  }
+  /* LIVE: PEAK vertical + clip LED full width */
+  .page-live #peakBtnLive{
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+    letter-spacing:1px;
+    min-width:22px;
+    padding:6px 2px;
+    align-self:stretch;
+    height:auto;
+  }
+  .page-live .meters-out-row{
+    align-items:stretch;
+  }
+  .page-live .meters-out-row .hbar-row{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    gap:5px;
+    align-self:stretch;
+    min-height:0;
+  }
+  .page-live .meters-out-row .hbar-track{
+    flex:1;
+    height:auto !important;
+    min-height:16px;
+  }
+  .page-live .preset-list-item .pl-name{
+    font-size:16px;
+  }
+  .page-live .clip-led{
+    display:block;
+    width:100%;
+    height:22px;
+    margin-top:6px;
+    border-radius:5px;
+    background:var(--lamp-off);
+    border:1px solid var(--lamp-off-bd);
+    box-shadow: inset 0 2px 4px var(--blk-a);
+    cursor:default;
+  }
+  .page-live .clip-led.on{
+    background: linear-gradient(90deg, var(--clip-dk), var(--clip));
+    border-color: var(--clip-70);
+    box-shadow: 0 0 10px 2px var(--clip-45), inset 0 1px 0 var(--hl3-20);
+  }
+  .clip-led{ display:none; }
+  /* LIVE: leslie three big squares */
+  .leslie-live-squares{ display:none; }
+  .page-live .sidebar-leslie .leslie-speed-seg,
+  .page-live .sidebar-leslie .leslie-break-btn{ display:none; }
+  .page-live .leslie-live-squares{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:8px;
+    width:100%;
+    height:100%;
+    align-items:stretch;
+  }
+  .page-live .leslie-sq{
+    aspect-ratio:1;
+    min-height:0;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:8px;
+    color:var(--text-dim);
+    font-size:14px; font-weight:800; letter-spacing:0.6px;
+    cursor:pointer; user-select:none;
+    padding:4px;
+    box-shadow: var(--ctl-sh);
+  }
+  .page-live .leslie-sq:hover{ color:var(--cream); border-color:var(--pl-hov-bd); }
+  .page-live .leslie-sq.active{
+    background: linear-gradient(135deg, var(--acc-35), var(--brn-30));
+    color:var(--cream);
+    border-color: var(--acc-45);
+  }
+  .sidebar-extra{
+    grid-column:1; grid-row:2;
+    display:flex; flex-direction:column; gap:8px;
+    min-height:0; overflow:hidden;
+  }
+  .preset-section-label{
+    font-size:8px; letter-spacing:1.2px; color:var(--text-dim2); font-weight:700;
+  }
+  .bank-stepper, .stepper-row{
+    display:flex; align-items:center; gap:6px;
+    width:100%;
+  }
+  .stepper-btn{
+    flex:0 0 28px; height:28px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:4px;
+    color:var(--cream);
+    font-size:14px; font-weight:800;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; user-select:none;
+    box-shadow: var(--ctl-sh);
+  }
+  .stepper-btn:hover{ border-color:var(--pl-hov-bd); color:var(--accent-2); }
+  .stepper-field{
+    flex:1;
+    height:28px;
+    background:var(--recess);
+    border:1px solid var(--ctl-bd);
+    border-radius:4px;
+    color:var(--cream);
+    font-size:14px; font-weight:800;
+    text-align:center;
+    display:flex; align-items:center; justify-content:center;
+    letter-spacing:1px;
+    box-shadow: inset 0 1px 3px var(--blk-a);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Bank stepper: equal wide buttons (field hidden) */
+  .bank-stepper .stepper-btn{
+    flex:1 1 0; height:44px; font-size:26px; border-radius:7px;
+  }
+  .bank-stepper .stepper-field{ display:none !important; }
+  .preset-list{
+    display:flex; flex-direction:column; gap:3px;
+    flex:1; min-height:0;
+  }
+  .preset-list-item{
+    display:flex; align-items:center; gap:6px;
+    padding:7px 8px;
+    border-radius:6px;
+    color:var(--text-dim);
+    font-size:11px; font-weight:600;
+    cursor:pointer; user-select:none;
+    border:1px solid transparent;
+    min-height:0;
+  }
+  .preset-list-item:hover{ color:var(--cream); }
+  .preset-list-item.active{
+    background: linear-gradient(135deg, var(--acc-22), var(--brn-18));
+    color:var(--cream);
+    border-color: var(--acc-30);
+  }
+  .preset-list-item .pl-num{
+    font-size:9px; color:var(--text-dim2); font-weight:700;
+    min-width:14px;
+  }
+  .preset-list-item.active .pl-num{ color:var(--accent-2); }
+  .preset-list-item .pl-name{
+    flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .preset-scroll-stepper{
+    display:flex; align-items:center; gap:10px;
+    margin-bottom:4px;
+    width:100%;
+  }
+  .preset-scroll-stepper .stepper-btn{
+    flex:1 1 0; height:40px; font-size:24px; border-radius:7px;
+  }
+  .preset-scroll-stepper .stepper-field{ display:none !important; }
+  .oct-stepper{
+    display:flex; align-items:center; gap:4px;
+  }
+  .oct-stepper .stepper-btn{
+    flex:0 0 22px; height:22px; font-size:12px;
+  }
+  .oct-stepper .stepper-field{
+    min-width:72px; height:22px; font-size:10px;
+    padding:0 6px;
+  }
+  .page-live .keyboards-panel{ display:none !important; }
+  .page-live .drawbars-panel{ grid-row: 1 / 3; }
+  .page-live .drawbars-panel .manuals-grid{ flex:1; min-height:0; }
+  .page-live .drawbars-panel .drawbars-row{ min-height:120px; }
+  .preset-stepper-card{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:10px; width:100%; padding:4px 2px;
+  }
+  .preset-stepper-card .ps-title{
+    font-size:9px; letter-spacing:1px; color:var(--text-dim); font-weight:700;
+  }
+  .preset-stepper-card .ps-row{
+    display:flex; flex-direction:column; gap:3px; width:100%;
+  }
+  .preset-stepper-card .ps-label{
+    font-size:8px; letter-spacing:0.8px; color:var(--text-dim2); font-weight:700;
+    text-align:center;
+  }
+  .preset-stepper-card .stepper-btn{ flex:0 0 24px; height:26px; font-size:13px; }
+  .preset-stepper-card .stepper-field{ height:26px; font-size:13px; }
+  .chain-banks-row{
+    display:flex; align-items:center; justify-content:center; gap:7px;
+    margin-top:4px; width:100%;
+  }
+  .chain-banks-row .ps-label{ margin:0; }
+  .sidebar-leslie{
+    grid-column:1; grid-row:3;
+    display:flex; flex-direction:column; align-items:stretch; gap:8px;
+    justify-content:center;
+  }
+  .leslie-speed-seg{
+    display:flex; width:100%; gap:0;
+    border:1px solid var(--ctl-bd);
+    border-radius:var(--pill-radius);
+    overflow:hidden;
+    box-shadow: var(--ctl-sh);
+  }
+  .leslie-speed-opt{
+    flex:1 1 50%;
+    background: var(--bakelite);
+    border:none;
+    border-right:1px solid var(--ctl-bd);
+    color:var(--text-dim);
+    font-size:9px; font-weight:700; letter-spacing:0.3px;
+    padding:8px 4px;
+    cursor:pointer; user-select:none;
+    text-align:center;
+  }
+  .leslie-speed-opt:last-child{ border-right:none; }
+  .leslie-speed-opt:hover{ color:var(--cream); }
+  .leslie-speed-opt.active{
+    background: linear-gradient(135deg, var(--acc-35), var(--brn-30));
+    color:var(--cream);
+  }
+  .perc-group-label .hb,.ms-section-label .hb,.preset-section-label .hb,.split-name .hb{width:11px;height:11px;font-size:7px;margin-left:4px}
+  .sidebar-leslie>.hb.c{top:3px;right:3px;width:12px;height:12px;font-size:7px}
+  .leslie-break-btn{
+    width:100%;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:var(--pill-radius);
+    color:var(--text-dim);
+    font-size:9px; font-weight:700; letter-spacing:0.6px;
+    padding:8px 10px;
+    cursor:pointer; user-select:none;
+    box-shadow: var(--ctl-sh);
+    text-align:center;
+  }
+  .leslie-break-btn:hover{ color:var(--cream); border-color:var(--pl-hov-bd); }
+  .leslie-break-btn.active{
+    background: linear-gradient(135deg, var(--acc-40), var(--red-35));
+    color:var(--cream);
+    border-color: var(--acc-50);
+  }
+  .sidebar-nav{
+    grid-column:1; grid-row:4;
+    display:flex; flex-direction:column;
+    gap:4px;
+    margin-bottom:14px;
+    justify-content:center;
+  }
+  .vib-sw-group{
+    display:flex; align-items:center; gap:5px;
+  }
+  .vib-sw-label{
+    font-size:8.5px; letter-spacing:0.7px; color:var(--text-dim2); font-weight:700;
+  }
+  .num-pot{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:36px; height:26px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:4px;
+    color:var(--cream);
+    font-size:11px; font-weight:800;
+    cursor:ns-resize; user-select:none;
+    box-shadow: var(--ctl-sh);
+    font-variant-numeric: tabular-nums;
+  }
+  .num-pot:hover{ border-color:var(--pl-hov-bd); color:var(--accent-2); }
+  .split-controls{
+    display:flex; align-items:center; gap:14px;
+  }
+  .split-group{
+    display:flex; align-items:center; gap:6px;
+  }
+  .split-name{
+    font-size:9px; letter-spacing:0.8px; color:var(--text-dim2); font-weight:700;
+  }
+  .drive-extras{
+    display:flex; flex-direction:column; gap:4px; margin-top:4px;
+    width:100%; align-items:stretch;
+  }
+  .drive-extras-row{
+    display:grid;
+    grid-template-columns:32px 26px 32px;
+    align-items:center;
+    justify-content:center;
+    column-gap:5px;
+  }
+  .drive-extras .mini-label{
+    font-size:8px; letter-spacing:0.6px; color:var(--text-dim2); font-weight:700;
+    text-align:left;
+  }
+  .drive-extras .num-pot{ width:32px; min-width:32px; height:22px; font-size:10px; }
+  .drive-extras .sw-slot{
+    width:26px; display:flex; align-items:center; justify-content:center;
+  }
+  .reverb-extras{
+    display:flex; flex-direction:column; gap:4px; margin-top:4px; width:100%;
+  }
+  .reverb-extras-row{
+    display:grid;
+    grid-template-columns:32px 32px;
+    align-items:center;
+    justify-content:center;
+    column-gap:5px;
+  }
+  .reverb-extras .mini-label{
+    font-size:8px; letter-spacing:0.6px; color:var(--text-dim2); font-weight:700;
+    text-align:left;
+  }
+  .reverb-extras .num-pot{ width:32px; min-width:32px; height:22px; font-size:10px; }
+  .knob-card .pot-zone{
+    height:76px;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .vibe-wrap{
+    position:relative;
+    width:79px; height:79px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .vibe-wrap canvas{ position:relative; z-index:1; }
+  .vibe-tick{
+    position:absolute;
+    font-size:7.5px; font-weight:700; color:var(--text-dim2);
+    letter-spacing:0.2px;
+    pointer-events:none;
+    z-index:2;
+  }
+  .vibe-tick.on{ color:var(--accent-2); }
+  .mini-sw, .rocker-switch{ width:var(--sw-w); height:var(--sw-h); box-sizing:border-box; border:var(--sw-bw) solid var(--sw-bd); border-radius:var(--sw-r); background:var(--sw-off); position:relative; cursor:pointer; box-shadow:var(--sw-sh); flex-shrink:0; }
+  .mini-sw{ zoom:.76; } .rocker-switch{ zoom:.88; }
+  .mini-sw.on, .rocker-switch.on{ background:var(--sw-on); }
+  .mini-sw .thumb, .rocker-switch .thumb{ position:absolute; top:var(--sw-th-y); left:var(--sw-th-x0); width:var(--sw-th-w); height:var(--sw-th-h); border-radius:var(--sw-th-r); background:var(--sw-th-off); box-shadow:var(--sw-th-sh); transition:left .15s; }
+  .mini-sw.on .thumb, .rocker-switch.on .thumb{ left:var(--sw-th-x1); background:var(--sw-th-on); }
+  .nav-item{
+    display:flex; align-items:center; gap:10px;
+    padding:8px 10px; border-radius:7px;
+    color:var(--text-dim); font-size:11.5px; font-weight:600; letter-spacing:0.3px;
+    cursor:pointer; user-select:none;
+    border:1px solid transparent;
+  }
+  .nav-item svg{ opacity:0.7; flex-shrink:0; }
+  .nav-item.active{
+    background: linear-gradient(135deg, var(--acc-22), var(--brn-18));
+    color:var(--cream);
+    border-color: var(--acc-30);
+  }
+  .nav-item.active svg{ opacity:1; stroke:var(--accent-2); }
+
+  .m-title{ font-size:8px; letter-spacing:1.2px; color:var(--text-dim2); font-weight:700; }
+  .meters-row{ display:flex; gap:8px; flex:1; min-height:0; align-items:stretch; }
+  .meter-group{ display:flex; flex-direction:column; align-items:center; min-height:0; flex:1; }
+  .bars-row{ display:flex; gap:3px; flex:1; min-height:0; align-items:stretch; }
+  .vbar-track{
+    width:12px; height:100%;
+    background:var(--recess);
+    border:1px solid var(--ctl-bd);
+    border-radius:2px;
+    position:relative; overflow:hidden;
+    box-shadow: inset 0 2px 4px var(--blk-a);
+  }
+  .vbar-fill{ position:absolute; left:0; bottom:0; width:100%; border-radius:0 0 1px 1px; }
+  .vbar-peak{ position:absolute; left:0; width:100%; height:2px; background:var(--peak-line); bottom:0%; }
+  .peak-btn{
+    margin-top:5px; background:var(--bakelite); border:1px solid var(--ctl-bd);
+    padding:2px 7px; border-radius:3px; color:var(--text-dim2); font-weight:700;
+    font-size:8px; letter-spacing:0.6px; cursor:pointer;
+    height:18px; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .peak-btn.on{ color:var(--accent-2); border-color:var(--acc-40); }
+
+  /* ---------- MAIN CONTENT ---------- */
+  .drawbars-panel{
+    grid-column:2; grid-row:1;
+    display:flex; flex-direction:column; min-height:0;
+    overflow:hidden;
+  }
+  .keyboards-panel{
+    grid-column:2; grid-row:2;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .mid-meter-panel{
+    grid-column:2; grid-row:3;
+    display:flex; flex-direction:row; align-items:center; justify-content:space-between;
+    gap:12px;
+    padding:10px 14px;
+    min-height:0;
+  }
+  .perc-group{
+    flex:1;
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    min-width:0;
+  }
+  .perc-group-label{
+    font-size:8.5px; letter-spacing:1.2px; color:var(--text-dim2); font-weight:700;
+    text-align:center;
+  }
+  .perc-seg{
+    display:flex; gap:0; width:100%;
+    border:1px solid var(--ctl-bd);
+    border-radius:var(--pill-radius);
+    overflow:hidden;
+    box-shadow: var(--ctl-sh);
+  }
+  .perc-opt{
+    flex:1;
+    background: var(--bakelite);
+    border:none;
+    border-right:1px solid var(--ctl-bd);
+    color:var(--text-dim);
+    font-size:10px; font-weight:700; letter-spacing:0.4px;
+    padding:8px 6px;
+    cursor:pointer; user-select:none;
+    text-align:center;
+  }
+  .perc-opt:last-child{ border-right:none; }
+  .perc-opt:hover{ color:var(--cream); }
+  .perc-opt.active{
+    background: linear-gradient(135deg, var(--acc-35), var(--brn-30));
+    color:var(--cream);
+  }
+
+  .panel{
+    background: var(--panel-bg);
+    border:1px solid var(--panel-border);
+    border-radius:var(--container-radius);
+    padding:10px 12px;
+    box-shadow: var(--container-shadow);
+  }
+  .panel-title-row{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:8px;
+  }
+  .drawbars-panel .panel-title-row{
+    display:grid;
+    grid-template-columns:1fr auto 1fr;
+    align-items:center;
+  }
+  .drawbars-panel .panel-title{ justify-self:start; }
+  .drawbars-panel .split-controls-slot{
+    justify-self:center;
+    grid-column:2;
+  }
+  .page-live .drawbars-panel .split-controls{
+    justify-self:center;
+  }
+  #manualsTitleRow{
+    display:flex; align-items:center; gap:10px;
+  }
+  #manualsTitleRow .split-controls-slot{ flex:1; display:flex; justify-content:center; }
+  #manualsTitleRow .oct-stepper{ margin-left:auto; }
+  .page-live #manualsTitleRow .split-controls-slot{ display:none; }
+  .panel-title{
+    display:flex; align-items:center; gap:6px;
+    font-size:10px; letter-spacing:1.3px; color:var(--gold-dim); font-weight:700;
+  }
+  .dot{ width:5px; height:5px; border-radius:50%; background:var(--accent); display:inline-block; }
+  .panel-meta{ font-size:10px; color:var(--text-dim2); }
+
+  /* ---- DRAWBARS page: Upper | Lower | Pedal side by side ---- */
+  .manuals-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr 120px;
+    gap:12px;
+    min-height:0;
+    width:100%;
+    align-items:stretch;
+  }
+  .manual-block{
+    background: var(--block-bg);
+    border:1px solid var(--block-bd); box-shadow:var(--block-sh);
+    border-radius:7px;
+    padding:6px 8px 5px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    overflow:hidden;
+    box-sizing:border-box;
+    min-height:0;
+    max-height:100%;
+  }
+  .manual-block.upper,
+  .manual-block.lower,
+  .manual-block.pedal{
+    grid-column:auto;
+    grid-row:auto;
+  }
+  .manual-label{
+    font-size:9px; letter-spacing:1.4px; color:var(--text-dim2); font-weight:700;
+    margin-bottom:4px; text-align:center;
+    width:100%;
+    flex-shrink:0;
+    line-height:1.2;
+  }
+  .drawbars-row{
+    display:flex; gap:4px; align-items:stretch; justify-content:center;
+    height:128px;
+    max-height:128px;
+    width:100%;
+    min-height:0;
+    overflow:hidden;
+    box-sizing:border-box;
+  }
+  /* LIVE page only: Upper|VU / Lower|Pedal — VU & Pedal same width, stacked */
+  .page-live .manuals-grid{
+    grid-template-columns: 1fr minmax(120px, 140px);
+    grid-template-rows: 1fr 1fr;
+    gap:10px;
+    flex:1;
+    min-height:0;
+  }
+  .page-live .manual-block{
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+  }
+  .page-live .manual-block.upper{ grid-column:1; grid-row:1; }
+  .page-live .manual-block.lower{ grid-column:1; grid-row:2; }
+  .page-live .manual-block.pedal{
+    grid-column:2; grid-row:2;
+    width:100%;
+  }
+  .page-live .sidebar-meters.live-docked{
+    grid-column:2; grid-row:1;
+    width:100%;
+    height:100%;
+    min-height:0;
+    margin:0;
+    align-self:stretch;
+  }
+  .page-live .sidebar-extra{
+    grid-row:1 / 3;
+  }
+  .page-live .drawbars-row{
+    flex:1;
+    height:auto;
+    min-height:120px;
+    gap:0; /* −50% again ≈ no gap */
+  }
+  /* LIVE: 3× width then −30% → 46px */
+  .page-live .db-body{
+    max-width:46px;
+  }
+  .db{
+    flex:1; display:flex; flex-direction:column; align-items:center;
+    min-width:0;
+    min-height:0;
+    height:100%;
+    max-height:100%;
+    overflow:hidden;
+  }
+  .db-footage{
+    font-size:8px; font-weight:700; letter-spacing:0.2px;
+    color:var(--cream-dim); margin-bottom:2px;
+    flex-shrink:0;
+    line-height:1;
+  }
+  .db-body{
+    flex:1 1 auto; width:100%; max-width:22px;
+    min-height:0;
+    background:var(--slot-bg);
+    border:1px solid var(--ctl-bd);
+    border-radius:2px;
+    position:relative; overflow:hidden;
+    cursor:ns-resize;
+    box-shadow: inset 0 2px 6px var(--blk-a);
+  }
+  .db-segments{
+    position:absolute; inset:0;
+    background: repeating-linear-gradient(180deg, transparent 0%, transparent 11.5%, var(--db-seg) 11.5%, var(--db-seg) 12.5%);
+    pointer-events:none;
+  }
+  .db-fill{ position:absolute; left:0; top:0; width:100%; }
+  .db.white .db-fill{ background: linear-gradient(90deg, var(--dbw-1), var(--dbw-2) 45%, var(--dbw-1)); }
+  .db.brown .db-fill{ background: linear-gradient(90deg, var(--dbb-1), var(--dbb-2) 45%, var(--dbb-1)); }
+  .db.black .db-fill{ background: linear-gradient(90deg, var(--dbk-1), var(--dbk-2) 45%, var(--dbk-1)); }
+  .db-handle{
+    position:absolute; left:50%; transform:translateX(-50%);
+    width:calc(100% + 3px); height:9px;
+    border-radius:1px;
+    background: linear-gradient(180deg, var(--dbh-1), var(--dbh-2));
+    border:1px solid var(--ctl-bd);
+    box-shadow:0 1px 2px var(--blk-b);
+    pointer-events:none;
+  }
+  .db.brown .db-handle{ background: linear-gradient(180deg, var(--dbhb-1), var(--dbhb-2)); }
+  .db.black .db-handle{ background: linear-gradient(180deg, var(--dbhk-1), var(--dbhk-2)); }
+  .db-value{
+    margin-top:2px; font-size:10px; font-weight:800; color:var(--cream);
+    font-variant-numeric: tabular-nums;
+    flex-shrink:0;
+    line-height:1;
+  }
+
+  /* ---- KEYBOARDS ---- */
+  .kb-row{
+    display:flex; flex-direction:column;
+  }
+  .kb-label{
+    font-size:8.5px; letter-spacing:1.2px; color:var(--text-dim2); font-weight:700;
+    margin-bottom:3px;
+  }
+  .keyboard{
+    position:relative;
+    background:var(--slot-bg);
+    border:1px solid var(--ctl-bd);
+    border-radius:5px;
+    overflow:hidden;
+    box-shadow: inset 0 2px 8px var(--blk-a);
+    height:122px;
+  }
+  .keys-white{
+    display:flex; height:100%; width:100%;
+    position:relative; z-index:1;
+  }
+  .key-w{
+    flex:1; height:100%;
+    background: linear-gradient(180deg, var(--kw-1) 0%, var(--kw-2) 70%, var(--kw-3) 92%, var(--kw-4) 100%);
+    border-right:1px solid var(--kw-bd);
+    border-radius:0 0 2.5px 2.5px;
+    position:relative;
+    cursor:pointer;
+    box-shadow: inset 0 -2px 0 var(--kw-sh);
+  }
+  .key-w:last-child{ border-right:none; }
+  .key-w.active, .key-w:active{
+    background: linear-gradient(180deg, var(--kwa-1) 0%, var(--kwa-2) 100%);
+    box-shadow: inset 0 4px 8px var(--blk-b);
+  }
+  .keys-black{
+    position:absolute; top:0; left:0; right:0; height:62%;
+    pointer-events:none;
+    z-index:2;
+  }
+  .key-b{
+    position:absolute; top:0;
+    height:100%;
+    background: linear-gradient(180deg, var(--kb-1) 0%, var(--kb-2) 75%, var(--kb-3) 100%);
+    border-radius:0 0 2px 2px;
+    border:1px solid var(--kb-bd);
+    border-top:none;
+    box-shadow:
+      0 2px 4px var(--blk-a),
+      inset 1px 0 0 var(--kb-hl),
+      inset -1px 0 0 var(--blk-b);
+    pointer-events:auto; cursor:pointer;
+  }
+  .key-b.active, .key-b:active{
+    background: linear-gradient(180deg, var(--kba-1) 0%, var(--kba-2) 100%);
+    box-shadow: inset 0 3px 6px var(--blk-a);
+  }
+
+  /* ---------- KNOB ROW ---------- */
+  .matrix-panel{
+    display:none;
+    grid-column:2; grid-row:1 / -1;
+    flex-direction:column;
+    min-height:0;
+    height:100%;
+    overflow:hidden;
+  }
+  .matrix-grid{
+    flex:1 1 auto;
+    min-height:0;
+    overflow:hidden;
+    display:grid;
+    gap:10px;
+    padding:4px 2px 8px;
+    width:100%;
+    height:100%;
+    align-content:stretch;
+    justify-content:stretch;
+  }
+  .matrix-tile{
+    background: var(--tile-bg);
+    border:1px solid var(--tile-bd);
+    border-radius:10px;
+    padding:12px 12px 10px;
+    cursor:pointer;
+    user-select:none;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    min-height:0;
+    min-width:0;
+    height:100%;
+    width:100%;
+    overflow:hidden;
+    transition: border-color .12s, background .12s;
+    box-shadow:var(--tile-sh);
+  }
+  .matrix-tile.empty{
+    cursor:default;
+    opacity:0.35; background:var(--tile-empty-bg);
+    pointer-events:none;
+  }
+  .matrix-tile:hover{
+    border-color:var(--tile-hov-bd);
+    background: var(--tile-hov-bg);
+  }
+  .matrix-tile.active{
+    border-color: var(--tile-act-bd);
+    background:var(--tile-act-bg);
+  }
+  .matrix-tile .mt-preset{
+    font-size:14px; font-weight:800; color:var(--cream);
+    letter-spacing:0.3px;
+    line-height:1.25;
+  }
+  .matrix-tile .mt-bank{
+    font-size:11px; font-weight:700; color:var(--accent-2);
+    letter-spacing:0.8px;
+  }
+  .matrix-tile .mt-meta{
+    margin-top:auto;
+    font-size:10px; color:var(--text-dim2);
+    line-height:1.35;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .matrix-tile .mt-meta span{ display:block; }
+  .page-matrix .matrix-panel{ display:flex; }
+  .page-matrix .drawbars-panel,
+  .page-matrix .keyboards-panel,
+  .page-matrix .mid-meter-panel,
+  .page-matrix .knob-row,
+  .page-matrix .sidebar-meters,
+  .page-matrix .sidebar-extra,
+  .page-matrix .sidebar-leslie{ display:none !important; }
+  /* Menu stays in row 4 like other pages */
+  .page-matrix .sidebar-nav{ grid-row:4; align-self:stretch; }
+  .matrix-sidebar{
+    display:none;
+    grid-column:1; grid-row:1 / 4;
+    flex-direction:column;
+    min-height:0;
+    position:relative;
+    overflow:hidden;
+  }
+  .ms-scroll{ flex:1; min-height:0; overflow-y:auto; scrollbar-width:none; display:flex; flex-direction:column; gap:10px; }
+  .matrix-sidebar:has(.nsb.on) .ms-scroll{ padding-right:16px; }
+  .ms-scroll::-webkit-scrollbar{ display:none; }
+  .matrix-sidebar .nsb{ top:10px; bottom:10px; right:4px; }
+  .page-matrix .matrix-sidebar{ display:flex; }
+  .matrix-sidebar .ms-section-label{
+    font-size:8px; letter-spacing:1.2px; color:var(--text-dim2); font-weight:700;
+  }
+  .matrix-sidebar .ms-vu{
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .matrix-sidebar .ms-vu .hbar-track{ height:8px; }
+  .matrix-sidebar .ms-ctrl-row{
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .matrix-sidebar .ms-stepper{
+    display:flex; align-items:center; gap:6px; width:100%;
+    opacity:0.45;
+    transition: opacity .15s;
+  }
+  .matrix-sidebar .ms-stepper.unlocked{
+    opacity:1;
+  }
+  .matrix-sidebar .ms-stepper .stepper-btn{
+    flex:0 0 28px; height:28px; font-size:16px;
+  }
+  .matrix-sidebar .ms-stepper .stepper-field{
+    flex:1; height:28px; font-size:12px;
+  }
+  .matrix-sidebar .ms-stepper-label{
+    font-size:9px; color:var(--text-dim2); font-weight:700; letter-spacing:0.6px;
+  }
+  .matrix-sidebar .ms-field-list{
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .matrix-sidebar .ms-field-item{
+    display:flex; align-items:center; gap:6px;
+    padding:6px 8px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:5px;
+    color:var(--text-dim);
+    font-size:10px; font-weight:700;
+    cursor:pointer; user-select:none;
+  }
+  .matrix-sidebar .ms-field-item.primary{
+    color:var(--cream);
+    border-color: var(--acc-40);
+    background: linear-gradient(135deg, var(--acc-25), var(--brn-20));
+  }
+  .matrix-sidebar .ms-field-item .ms-rank{
+    width:16px; text-align:center; color:var(--accent-2); font-size:9px;
+  }
+  .matrix-sidebar .ms-field-item .ms-up,
+  .matrix-sidebar .ms-field-item .ms-dn{
+    margin-left:auto;
+    width:20px; height:20px;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--recess); border-radius:3px; border:1px solid var(--ctl-bd);
+    font-size:11px; cursor:pointer;
+  }
+  .matrix-tile .mt-primary{
+    font-size:15px; font-weight:800; color:var(--cream);
+    letter-spacing:0.3px; line-height:1.25;
+  }
+  .matrix-tile .mt-secondary{
+    font-size:11px; color:var(--text-dim);
+    line-height:1.35;
+  }
+  .matrix-tile .mt-tertiary{
+    font-size:10px; color:var(--text-dim2);
+    line-height:1.3;
+    margin-top:auto;
+  }
+
+  .knob-row{
+    grid-column:2; grid-row:4;
+    display:flex; gap:14px;
+    padding:0 0 14px 0;
+    min-height:0;
+    align-items:stretch;
+  }
+  .knob-card{
+    flex:1; border-radius:var(--container-radius);
+    background: var(--panel-bg);
+    border:1px solid var(--panel-border);
+    box-shadow: var(--container-shadow);
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    padding:8px 5px 6px;
+  }
+  .knob-card .k-title{
+    font-size:9.5px; letter-spacing:1px; color:var(--text-dim); font-weight:700;
+    margin-bottom:-4px; line-height:1;
+  }
+  .knob-card canvas{ width:53px; height:53px; cursor:ns-resize; display:block; }
+  .knob-pill{ display:none; }
+  /* LIVE: big cyclic / % pills instead of pots */
+  .page-live .knob-card .pot-zone,
+  .page-live .knob-card .k-meta,
+  .page-live .knob-card .vibe-wrap{ display:none !important; }
+  .page-live .knob-card .knob-pill{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    min-height:48px;
+    margin:16px 0 4px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:10px;
+    color:var(--cream);
+    font-size:24px;
+    font-weight:800;
+    letter-spacing:0.5px;
+    cursor:ns-resize;
+    user-select:none;
+    box-shadow: var(--ctl-sh);
+  }
+  .page-live .knob-card .knob-pill:hover{
+    border-color:var(--pl-hov-bd);
+    color:var(--accent-2);
+  }
+  .knob-card .k-meta{
+    display:grid;
+    grid-template-columns:1fr auto 1fr;
+    align-items:center;
+    width:100%;
+    margin-top:-4px;
+    column-gap:1px;
+  }
+  .vibe-sw-stack{
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    margin-top:2px;
+  }
+  .vibe-sw-stack .vib-sw-group{ gap:6px; }
+  .knob-card .k-meta .k-lo{
+    font-size:8px; color:var(--text-dim2); text-align:right; justify-self:end;
+  }
+  .knob-card .k-meta .k-value{
+    font-size:13px; font-weight:700; color:var(--cream);
+    text-align:center; min-width:30px;
+  }
+  .knob-card .k-meta .k-hi{
+    font-size:8px; color:var(--text-dim2); text-align:left; justify-self:start;
+  }
+
+  /* ---------- BOTTOM BAR ---------- */
+  .bottom-bar{
+    height:56px;
+    border-top:1px solid var(--panel-border);
+    background: var(--bottombar-bg-css);
+    box-shadow: inset 0 1px 0 var(--hl-05);
+    display:flex; align-items:center; padding:0 18px; gap:14px;
+    flex-wrap:nowrap;
+  }
+  .rocker{
+    display:flex; align-items:center; gap:7px;
+    font-size:10px; font-weight:700; letter-spacing:0.7px; color:var(--text-dim);
+  }
+  .mode-chip{
+    padding:4px 11px;
+    font-size:10px; font-weight:700; letter-spacing:0.6px;
+    background: var(--bakelite);
+    border:1px solid var(--ctl-bd);
+    border-radius:var(--pill-radius);
+    color:var(--cream-dim);
+    cursor:pointer;
+    box-shadow: var(--ctl-sh);
+  }
+  .mode-chip:hover{ color:var(--cream); }
+  .spacer{ flex:1; }
+  .power-lamp{
+    width:9px; height:9px; border-radius:50%;
+    background:var(--accent-2);
+    box-shadow:0 0 7px 2px var(--acc2-45);
+  }
+  html.theme-light .drawbars-row{
+    justify-content:center;
+  }
+  html.theme-light .nav-item.active{
+    color: var(--accent-2);
+  }
+  html.theme-modern .nav-item.active{ color: var(--accent-2); }
+
+  /* Haut contraste */
+  html.theme-hc .app-frame{
+    box-shadow: 0 0 0 3px var(--accent), 0 0 0 6px var(--bg-app);
+  }
+  html.theme-hc .panel,
+  html.theme-hc .knob-card,
+  html.theme-hc .sidebar-box,
+  html.theme-hc .manual-block{
+    background: var(--bg-app) !important;
+    border: 2px solid var(--text) !important;
+    box-shadow: none !important;
+  }
+  html.theme-hc .matrix-tile{
+    background: var(--bg-app);
+    border: 2px solid var(--text);
+  }
+  html.theme-hc .matrix-tile.active{
+    border-color: var(--accent);
+    background: var(--tile-act-bg);
+  }
+  html.theme-hc .matrix-tile .mt-primary{ color:var(--accent); }
+  html.theme-hc .nav-item.active{
+    outline: 2px solid var(--accent);
+    color: var(--accent);
+  }
+  html.theme-hc .header,
+  html.theme-hc .bottom-bar{
+    border-color: var(--text) !important;
+    background: var(--bg-app) !important;
+  }
+  html.theme-hc .hbar-track,
+  html.theme-hc .vbar-track,
+  html.theme-hc .db-body,
+  html.theme-hc .stepper-field{
+    background: var(--bg-app) !important;
+    border: 2px solid var(--text) !important;
+  }
+  html.theme-hc .hbar-fill{ background: var(--meter-green) !important; }
+  html.theme-hc .peak-btn.on,
+  html.theme-hc .perc-opt.active,
+  html.theme-hc .leslie-sq.active{
+    outline: 2px solid var(--accent);
+    color: var(--accent) !important;
+  }
+  html.theme-hc .theme-toggle{
+    border: 2px solid var(--accent);
+    color: var(--accent);
+  }
+  html.theme-hc *:focus-visible{
+    outline: 3px solid var(--accent) !important;
+    outline-offset: 2px;
+  }
+  .cpill{ display:flex; align-items:center; gap:2px; height:32px; padding:2px; background:var(--bg-card); border:1px solid var(--ctl-bd); border-radius:var(--pill-radius); box-shadow:var(--ctl-sh); }
+  .cpill button{ width:24px; height:26px; border:none; background:none; color:var(--text-dim); font-size:15px; font-weight:700; cursor:pointer; border-radius:var(--icon-btn-radius); font-family:inherit; }
+  .cpill button:hover{ color:var(--accent-2); } .cpill button:disabled{ opacity:.35; cursor:default; }
+  .cpill .cl{ min-width:34px; display:flex; align-items:center; justify-content:center; gap:5px; font-size:11px; font-weight:700; color:var(--cream); }
+  .cpill.dis{ opacity:.4; pointer-events:none; }
+  .nsb{ position:absolute; top:0; bottom:0; right:0; width:12px; border-radius:var(--sbr,5px); background:var(--panel-bg); border:1px solid var(--ctl-bd); display:none; }
+  .nsb.on{ display:block; }
+  .nst{ position:absolute; left:2px; right:2px; top:0; border-radius:var(--sbr,5px); background:var(--text-dim); cursor:grab; touch-action:none; }
+  .nsb:hover .nst{ background:var(--accent-2); } .nsb.drag .nst{ background:var(--accent); cursor:grabbing; }
+  html.theme-hc .nsb{ background:var(--bg-app); border:2px solid var(--text); } html.theme-hc .nst{ background:var(--text); }
+  html.theme-hc .nsb:hover .nst, html.theme-hc .nsb.drag .nst{ background:var(--accent); }
+
+  /* ========== JETONS COMPLÉMENTAIRES (plus aucune couleur écrite en dur dans les règles) ========== */
+  :root{
+    /* teintes dérivées : elles suivent --accent & co, donc le thème et le réglage de contraste */
+    --hl:#ffdcb4; --hl2:#fff0c8; --hl3:#ffc8b4; --brown:#5a3c1e;
+    --acc-07: color-mix(in srgb, var(--accent) 7%, transparent); --acc-12: color-mix(in srgb, var(--accent) 12%, transparent); --acc-18: color-mix(in srgb, var(--accent) 18%, transparent); --acc-22: color-mix(in srgb, var(--accent) 22%, transparent); --acc-25: color-mix(in srgb, var(--accent) 25%, transparent); --acc-30: color-mix(in srgb, var(--accent) 30%, transparent); --acc-35: color-mix(in srgb, var(--accent) 35%, transparent); --acc-40: color-mix(in srgb, var(--accent) 40%, transparent); --acc-45: color-mix(in srgb, var(--accent) 45%, transparent); --acc-50: color-mix(in srgb, var(--accent) 50%, transparent); --acc-60: color-mix(in srgb, var(--accent) 60%, transparent);
+    --acc2-45: color-mix(in srgb, var(--accent-2) 45%, transparent); --acc2-50: color-mix(in srgb, var(--accent-2) 50%, transparent); --gold-40: color-mix(in srgb, var(--gold) 40%, transparent); --gold-65: color-mix(in srgb, var(--gold) 65%, transparent); --clip-45: color-mix(in srgb, var(--clip) 45%, transparent); --clip-70: color-mix(in srgb, var(--clip) 70%, transparent);
+    --brn-08: color-mix(in srgb, var(--brown) 8%, transparent); --brn-12: color-mix(in srgb, var(--brown) 12%, transparent); --brn-18: color-mix(in srgb, var(--brown) 18%, transparent); --brn-20: color-mix(in srgb, var(--brown) 20%, transparent); --brn-30: color-mix(in srgb, var(--brown) 30%, transparent); --hl-04: color-mix(in srgb, var(--hl) 4%, transparent); --hl-05: color-mix(in srgb, var(--hl) 5%, transparent); --hl-08: color-mix(in srgb, var(--hl) 8%, transparent); --hl-10: color-mix(in srgb, var(--hl) 10%, transparent); --hl-12: color-mix(in srgb, var(--hl) 12%, transparent); --hl-20: color-mix(in srgb, var(--hl) 20%, transparent);
+    --hl2-25: color-mix(in srgb, var(--hl2) 25%, transparent); --hl3-20: color-mix(in srgb, var(--hl3) 20%, transparent);
+    --warn-50: color-mix(in srgb, var(--led-warn) 50%, transparent);
+    /* fonds creux, voyants, mesures */
+    --recess:#0e0b08; --slot-bg:#0c0a07; --lamp-off:#1a140e; --lamp-off-bd:#2a2218; --led-off:#3a3028; --led-warn:#e0a030;
+    --gold-hi:#e0c98a; --clip:#e05030; --clip-dk:#a03020; --red-35:rgba(180,60,40,0.35);
+    --vu-1:#3a6a3a; --vu-2:#6aaa5a; --peak-line:rgba(255,240,200,0.75);
+    --blk-a:rgba(0,0,0,0.55); --blk-b:rgba(0,0,0,0.4); --stage-label:#5a4c3c;
+    /* logo, en-tête, panneaux, dalles de la matrice */
+    --logo-bg:linear-gradient(145deg,#4a3424,#2a1c12); --logo-bd:#5c4030; --logo-stroke:#e8dcc8;
+    --hdr-sh:inset 0 1px 0 var(--hl-08);
+    --block-bg:rgba(14,11,8,0.45); --block-bd:rgba(255,220,180,0.05); --block-sh:none;
+    --tile-bg:rgba(14,11,8,0.55); --tile-bd:rgba(255,220,180,0.1); --tile-sh:inset 0 1px 0 var(--hl-04);
+    --tile-hov-bg:rgba(30,22,16,0.7); --tile-hov-bd:#5c4030;
+    --tile-act-bd:var(--acc-50); --tile-act-bg:linear-gradient(160deg,var(--acc-18),var(--brn-12)); --tile-empty-bg:var(--tile-bg);
+    /* instrument : tirettes et claviers (identiques dans tous les thèmes) */
+    --dbw-1:#d0c8b8; --dbw-2:#f0e8d8; --dbb-1:#5c4030; --dbb-2:#8a6540; --dbk-1:#2a241c; --dbk-2:#3d342c;
+    --dbh-1:#e8e0d0; --dbh-2:#c0b8a8; --dbhb-1:#a08060; --dbhb-2:#7a5c40; --dbhk-1:#4a443c; --dbhk-2:#2e2a24; --db-seg:rgba(255,255,255,0.035);
+    --kw-1:#f7f2e8; --kw-2:#ebe3d4; --kw-3:#d4ccbc; --kw-4:#c0b8a8; --kw-bd:#9a9282; --kw-sh:rgba(0,0,0,0.06); --kwa-1:#c8c0b0; --kwa-2:#b0a890;
+    --kb-1:#2e2820; --kb-2:#1c1814; --kb-3:#12100c; --kb-bd:#0a0806; --kb-hl:rgba(255,255,255,0.06); --kba-1:#3a342c; --kba-2:#221e1a;
+  }
+  .logo-icon svg path{ stroke:var(--logo-stroke); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="stage-label">Tonewheel Organ — Full Console</div>
+
+  <div class="app-frame" id="app">
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="header-brand">
+        <div class="logo-icon">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <path d="M4 19V9l5-5h6l5 5v10" stroke="#e8dcc8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M9 19v-6h6v6" stroke="#e8dcc8" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="logo-word">NOVA</div>
+          <div class="logo-sub">TONEWHEEL ORGAN</div>
+        </div>
+      </div>
+
+      <div class="preset-pill" id="headerPresetPill">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2">
+          <path d="M4 19V9l5-5h6l5 5v10"/><path d="M9 19v-6h6v6"/>
+        </svg>
+        <span id="headerPresetName">Jazz Club B3</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+
+      <div class="header-right">
+        <div class="cpill" role="group" aria-label="Contraste"><button data-c="-1" aria-label="Diminuer le contraste">−</button><span class="cl"><svg width="12" height="12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg><span class="clv">0</span></span><button data-c="1" aria-label="Augmenter le contraste">+</button></div>
+        <div class="theme-toggle" id="themeToggle" title="Thème clair / sombre">☀</div>
+        <div class="leslie-pill">
+          <div class="leslie-lamp on" id="leslieLamp"></div>
+          <span id="leslieText">CHORALE</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="app-body">
+
+      <!-- LEFT COL: VU (align drawbars) · extra (align keyboards) · menu (align knobs) -->
+      <div class="sidebar-box sidebar-meters">
+        <!-- CLASSIC layout (DRAWBARS page) -->
+        <div class="meters-classic">
+          <div class="meter-col">
+            <div class="m-title">U</div>
+            <div class="meters-row">
+              <div class="meter-group">
+                <div class="bars-row">
+                  <div class="vbar-track">
+                    <div class="vbar-fill" id="midiU" style="background:linear-gradient(180deg,var(--gold),var(--gold-dim));height:18%;"></div>
+                    <div class="vbar-peak" id="midiUPeak"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="meter-foot"></div>
+          </div>
+          <div class="meter-col">
+            <div class="m-title">L</div>
+            <div class="meters-row">
+              <div class="meter-group">
+                <div class="bars-row">
+                  <div class="vbar-track">
+                    <div class="vbar-fill" id="midiL" style="background:linear-gradient(180deg,var(--gold),var(--gold-dim));height:12%;"></div>
+                    <div class="vbar-peak" id="midiLPeak"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="meter-foot"></div>
+          </div>
+          <div class="meter-col">
+            <div class="m-title">P</div>
+            <div class="meters-row">
+              <div class="meter-group">
+                <div class="bars-row">
+                  <div class="vbar-track">
+                    <div class="vbar-fill" id="midiP" style="background:linear-gradient(180deg,var(--gold),var(--gold-dim));height:8%;"></div>
+                    <div class="vbar-peak" id="midiPPeak"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="meter-foot"></div>
+          </div>
+          <div class="midi-ch-col" id="midiChColClassic">
+            <div class="midi-ch-item">
+              <div class="midi-ch-btn" id="midiChU" data-ch="1" data-letter="U" title="Canal MIDI Upper">U : 1</div>
+            </div>
+            <div class="midi-ch-item">
+              <div class="midi-ch-btn" id="midiChL" data-ch="2" data-letter="L" title="Canal MIDI Lower">L : 2</div>
+            </div>
+            <div class="midi-ch-item">
+              <div class="midi-ch-btn" id="midiChP" data-ch="3" data-letter="P" title="Canal MIDI Pedal">P : 3</div>
+            </div>
+          </div>
+          <div class="meter-col">
+            <div class="m-title">OUT</div>
+            <div class="meters-row">
+              <div class="meter-group">
+                <div class="bars-row">
+                  <div class="vbar-track">
+                    <div class="vbar-fill" id="outL" style="background:linear-gradient(180deg,var(--vu-2),var(--vu-1));height:38%;"></div>
+                    <div class="vbar-peak" id="outLPeak"></div>
+                  </div>
+                  <div class="vbar-track">
+                    <div class="vbar-fill" id="outR" style="background:linear-gradient(180deg,var(--vu-2),var(--vu-1));height:34%;"></div>
+                    <div class="vbar-peak" id="outRPeak"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="peak-btn on" id="peakBtn">PEAK</div>
+          </div>
+        </div>
+        <!-- LIVE-only layout -->
+        <div class="meters-live-layout">
+          <div class="meters-out-block">
+            <div class="m-title">OUT</div>
+            <div class="meters-out-row">
+              <div class="peak-btn on" id="peakBtnLive">PEAK</div>
+              <div class="hbar-row">
+                <div class="hbar-track">
+                  <div class="hbar-fill" id="outLh" style="width:38%;"></div>
+                  <div class="hbar-peak" id="outLPeakh" style="left:38%;"></div>
+                </div>
+                <div class="hbar-track">
+                  <div class="hbar-fill" id="outRh" style="width:34%;"></div>
+                  <div class="hbar-peak" id="outRPeakh" style="left:34%;"></div>
+                </div>
+              </div>
+            </div>
+            <div class="clip-led" id="clipLed" title="Saturation / clip"></div>
+          </div>
+          <div class="midi-activity-row">
+            <div class="midi-led" id="midiLedU" title="MIDI Upper activity"></div>
+            <div class="midi-led" id="midiLedL" title="MIDI Lower activity"></div>
+            <div class="midi-led" id="midiLedP" title="MIDI Pedal activity"></div>
+          </div>
+          <div class="midi-ch-col" id="midiChColLive"></div>
+        </div>
+      </div>
+
+      <!-- Presets — same height as keyboards -->
+      <div class="sidebar-box sidebar-extra">
+        <div class="preset-section-label bank-label-classic">BANK</div>
+        <div class="bank-name-live" id="bankNameLive">BANQUE A</div>
+        <div class="bank-stepper" id="bankStepper">
+          <div class="stepper-btn" id="bankPrev" title="Banque précédente">‹</div>
+          <div class="stepper-field" id="bankField">A</div>
+          <div class="stepper-btn" id="bankNext" title="Banque suivante">›</div>
+        </div>
+        <div class="preset-section-label" data-hid="ham_bank_preset">PRESET</div>
+        <div class="preset-scroll-stepper" id="presetScrollStepper">
+          <div class="stepper-btn" id="presetListPrev">‹</div>
+          <div class="stepper-field" id="presetScrollField">Jazz Club B3</div>
+          <div class="stepper-btn" id="presetListNext">›</div>
+        </div>
+        <div class="preset-list" id="presetList"></div>
+      </div>
+
+      <!-- Leslie speed + Break — same height as percussion selectors -->
+      <div class="sidebar-box sidebar-leslie" data-hid="ham_chorale" data-hpos="corner">
+        <div class="leslie-speed-seg" id="leslieSpeedSeg">
+          <div class="leslie-speed-opt active" data-val="chorale">CHORALE</div>
+          <div class="leslie-speed-opt" data-val="tremolo">TREMOLO</div>
+        </div>
+        <div class="leslie-break-btn" id="leslieBreakBtn">BREAK</div>
+        <!-- LIVE: three square buttons -->
+        <div class="leslie-live-squares" id="leslieLiveSquares">
+          <div class="leslie-sq active" data-val="chorale">CHOR</div>
+          <div class="leslie-sq" data-val="tremolo">TREM</div>
+          <div class="leslie-sq" data-val="break">BRK</div>
+        </div>
+      </div>
+
+      <!-- MATRIX page only: VU + matrix controls above menu -->
+      <div class="sidebar-box matrix-sidebar" id="matrixSidebar"><div class="ms-scroll" id="msScroll">
+        <div class="ms-section-label">OUT</div>
+        <div class="ms-vu">
+          <div class="hbar-track">
+            <div class="hbar-fill" id="matrixOutL" style="width:38%;"></div>
+          </div>
+          <div class="hbar-track">
+            <div class="hbar-fill" id="matrixOutR" style="width:34%;"></div>
+          </div>
+        </div>
+        <div class="ms-section-label" data-hid="ham_matrix">GRILLE</div>
+        <div class="ms-ctrl-row">
+          <div class="ms-stepper-label">COLONNES</div>
+          <div class="ms-stepper" id="matrixColsStepper" data-stepper="cols" title="Appui long pour déverrouiller">
+            <div class="stepper-btn" data-dir="-1">‹</div>
+            <div class="stepper-field" id="matrixColsField">4</div>
+            <div class="stepper-btn" data-dir="1">›</div>
+          </div>
+          <div class="ms-stepper-label">LIGNES</div>
+          <div class="ms-stepper" id="matrixRowsStepper" data-stepper="rows" title="Appui long pour déverrouiller">
+            <div class="stepper-btn" data-dir="-1">‹</div>
+            <div class="stepper-field" id="matrixRowsField">3</div>
+            <div class="stepper-btn" data-dir="1">›</div>
+          </div>
+        </div>
+        <div class="ms-section-label">AFFICHAGE DALLES</div>
+        <div class="ms-field-list" id="matrixFieldList"></div>
+        <div class="ms-section-label" style="margin-top:4px;">ASTUCE</div>
+        <div style="font-size:9px;color:var(--text-dim2);line-height:1.4;">
+          Le 1ᵉʳ champ est affiché en grand. Utilisez ▲▼ pour réordonner.
+        </div>
+      </div><div class="nsb" id="msBar"><div class="nst"></div></div>
+      </div>
+
+      <div class="sidebar-box sidebar-nav">
+        <div class="nav-item active" data-page="drawbars">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 20V11M10 20V5M15 20v-7M20 20v-4"/>
+          </svg>
+          DRAWBARS
+        </div>
+        <div class="nav-item" data-page="leslie">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="8"/><path d="M12 4v8l5 2.5"/>
+          </svg>
+          LESLIE
+        </div>
+        <div class="nav-item" data-page="live">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 14s1-1 4-1 5 2 8 2 4-1 4-1V5s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 20v-6"/>
+          </svg>
+          LIVE
+        </div>
+        <div class="nav-item" data-page="matrice">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+          MATRICE
+        </div>
+        <div class="nav-item" data-page="settings">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          SETTINGS
+        </div>
+      </div>
+
+      <!-- DRAWBARS -->
+      <div class="panel drawbars-panel">
+        <div class="panel-title-row" id="drawbarsTitleRow">
+          <div class="panel-title" data-hid="ham_drawbars"><span class="dot"></span> DRAWBARS</div>
+          <div class="split-controls-slot" id="splitSlotDrawbars"></div>
+        </div>
+        <div class="manuals-grid">
+          <div class="manual-block upper">
+            <div class="manual-label">UPPER</div>
+            <div class="drawbars-row" id="dbUpper"></div>
+          </div>
+          <div class="manual-block lower">
+            <div class="manual-label">LOWER</div>
+            <div class="drawbars-row" id="dbLower"></div>
+          </div>
+          <div class="manual-block pedal">
+            <div class="manual-label">PEDAL</div>
+            <div class="drawbars-row" id="dbPedal"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KEYBOARDS — same row as presets (hidden on LIVE) -->
+      <div class="panel keyboards-panel">
+        <div class="panel-title-row" id="manualsTitleRow" style="margin-bottom:4px;">
+          <div class="panel-title"><span class="dot"></span> MANUALS</div>
+          <div class="split-controls-slot" id="splitSlotManuals">
+            <div class="split-controls" id="splitControls">
+              <div class="split-group">
+                <div class="split-name" data-hid="ham_split">SPLIT UPPER</div>
+                <div class="num-pot" id="splitUpper" data-val="-1" title="Note split Upper − = off, 0–127">−</div>
+              </div>
+              <div class="split-group">
+                <div class="split-name">SPLIT LOWER</div>
+                <div class="num-pot" id="splitLower" data-val="-1" title="Note split Lower − = off, 0–127">−</div>
+              </div>
+              <div class="split-group">
+                <div class="split-name">TRANSP</div>
+                <div class="vib-sw-label">U</div>
+                <div class="num-pot" id="transpU" data-val="0" title="Transpose Upper ±24">−</div>
+                <div class="vib-sw-label">L</div>
+                <div class="num-pot" id="transpL" data-val="0" title="Transpose Lower ±24">−</div>
+                <div class="vib-sw-label">P</div>
+                <div class="num-pot" id="transpP" data-val="0" title="Transpose Pedal ±24">−</div>
+              </div>
+            </div>
+          </div>
+          <div class="oct-stepper" title="Nombre d'octaves affichés (appui long pour répéter)">
+            <div class="stepper-btn" id="octPrev">‹</div>
+            <div class="stepper-field" id="octField">5 octaves</div>
+            <div class="stepper-btn" id="octNext">›</div>
+          </div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-label">UPPER</div>
+          <div class="keyboard" id="kbUpper" data-manual="upper"></div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-label">LOWER</div>
+          <div class="keyboard" id="kbLower" data-manual="lower"></div>
+        </div>
+      </div>
+
+      <!-- PERCUSSION selectors — same row as Leslie/Break -->
+      <div class="panel mid-meter-panel">
+        <div class="perc-group">
+          <div class="perc-group-label">PERCUSSION</div>
+          <div class="perc-seg" data-group="percOn">
+            <div class="perc-opt active" data-val="off">OFF</div>
+            <div class="perc-opt" data-val="on">ON</div>
+          </div>
+        </div>
+        <div class="perc-group">
+          <div class="perc-group-label" data-hid="ham_perc_volume">VOLUME</div>
+          <div class="perc-seg" data-group="percVol">
+            <div class="perc-opt active" data-val="soft">SOFT</div>
+            <div class="perc-opt" data-val="normal">NORMAL</div>
+          </div>
+        </div>
+        <div class="perc-group">
+          <div class="perc-group-label" data-hid="ham_perc_decay">DECAY</div>
+          <div class="perc-seg" data-group="percDecay">
+            <div class="perc-opt active" data-val="fast">FAST</div>
+            <div class="perc-opt" data-val="slow">SLOW</div>
+          </div>
+        </div>
+        <div class="perc-group">
+          <div class="perc-group-label" data-hid="ham_perc_harmonic">HARMONIC</div>
+          <div class="perc-seg" data-group="percHarm">
+            <div class="perc-opt active" data-val="2nd">2nd</div>
+            <div class="perc-opt" data-val="3rd">3rd</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KNOBS — aligned with menu top -->
+      <div class="knob-row" id="knobRow"></div>
+
+      <!-- MATRICE page: preset tile grid -->
+      <div class="panel matrix-panel" id="matrixPanel">
+        <div class="panel-title-row">
+          <div class="panel-title"><span class="dot"></span> MATRICE PRESETS</div>
+        </div>
+        <div class="matrix-grid" id="matrixGrid"></div>
+      </div>
+    </div>
+
+    <!-- BOTTOM -->
+    <div class="bottom-bar">
+      <div class="rocker">
+        MOTOR NOISE
+        <div class="rocker-switch" id="swMotor"><div class="thumb"></div></div>
+      </div>
+      <div class="rocker" style="gap:6px;">
+        CTRL CH
+        <div class="num-pot" id="ctrlMidiCh" data-val="1" title="Canal MIDI contrôleur 1–16">1</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="rocker" style="gap:6px;">
+        TUNE (cents)
+        <div class="num-pot" id="masterTune" data-val="0" title="Accord général −100…+100 cents">−</div>
+      </div>
+      <div class="power-lamp"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="nova-knob-styles.js"></script>
+<script src="nova-contrast.js"></script>
+<script src="nova-scrollbar.js"></script>
+<script src="nova-resize.js"></script>
+<script>window.NOVA_HELP=/*HELP_BEGIN*/{"ham_drawbars": {"label": "DRAWBARS", "short": "Les tirettes règlent le mélange des harmoniques.", "long": "Chaque tirette ajoute une hauteur, nommée par sa longueur de tuyau en pieds (16', 8', 4'…). 8' est la note jouée ; 16' est une octave plus grave ; 4' une octave plus aiguë ; les autres (5⅓', 2⅔', 2', 1⅗', 1⅓', 1') ajoutent des harmoniques. Plus la tirette est sortie (0 à 8), plus la hauteur est présente.", "meta": "9 tirettes, 0…8 par manuel"}, "ham_perc_harmonic": {"label": "PERCUSSION HARMONIC", "short": "Harmonique ajoutée au début de la note.", "long": "La percussion ajoute un claquement bref qui s'éteint, sur une harmonique : 2nd (octave au-dessus) ou 3rd (octave + quinte au-dessus). La 3rd est plus brillante et plus pointue.", "meta": "Choix : 2nd, 3rd"}, "ham_perc_decay": {"label": "PERCUSSION DECAY", "short": "Durée du claquement percussif.", "long": "Fast : le claquement disparaît très vite, attaque sèche et rythmique. Slow : il dure davantage et sonne comme un son de cloche.", "meta": "Choix : Fast, Slow"}, "ham_perc_volume": {"label": "PERCUSSION VOLUME", "short": "Niveau du claquement percussif.", "long": "Soft : percussion plus discrète. Normal : percussion bien présente. Elle s'active avec le sélecteur OFF / ON de PERCUSSION.", "meta": "Choix : Soft, Normal"}, "ham_chorale": {"label": "CHORALE / CHOR · TREM · BRK", "short": "Réglages de la cabine Leslie.", "long": "CHOR (Chorale) : rotation lente des rotors, effet d'ensemble doux. TREM (Tremolo) : rotation rapide, vibrato intense. BRK (Break) : la Leslie s'arrête de tourner ; le son devient fixe, comme un haut-parleur ordinaire. Le passage d'une vitesse à l'autre est progressif, comme l'inertie des rotors.", "meta": "Choix : Chor, Trem, Brk"}, "ham_split": {"label": "SPLIT UPPER / SPLIT LOWER / TRANSP", "short": "Partage du clavier et transposition par manuel.", "long": "SPLIT UPPER et SPLIT LOWER sont des numéros de note MIDI (0 à 127, « − » = désactivé) qui délimitent la zone de chaque manuel. TRANSP décale chaque manuel (Upper, Lower, Pedal) de −24 à +24 demi-tons, par exemple pour jouer une ligne de basse à la main gauche.", "meta": "Split : 0…127 ou off · Transposition : ±24 demi-tons"}, "ham_matrix": {"label": "GRILLE / COLONNES / LIGNES", "short": "Taille de la matrice de presets.", "long": "La matrice affiche les presets sous forme de dalles. COLONNES et LIGNES règlent combien de dalles sont visibles : plus il y en a, plus chacune est petite. Cela ne change que l'affichage, pas le son. Un appui long sur les flèches les déverrouille.", "meta": "Affichage uniquement"}, "ham_bank_preset": {"label": "BANK / PRESET", "short": "Banques et presets de sons.", "long": "Un preset mémorise tous les réglages (tirettes, percussion, Leslie…). Les presets sont rangés en banques : les flèches de BANK changent de banque, PRESET charge un son de la banque courante. Charger un preset remplace les réglages en cours.", "meta": "Sélection par banque puis preset"}}/*HELP_END*/;</script>
+<script src="nova-help.js"></script>
+<script>
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let currentTheme = 'dark';
+// chaque thème choisit un style de rendu de potard (voir nova-knob-styles.js) :
+// les thèmes natifs du Hammond gardent le potard physique, le skin "modern"
+// (Compresseur) bascule sur l'anneau LED.
+const THEME_KNOB_STYLE = { dark:'pot', modern:'led', light:'pot', hc:'pot' };
+const THEME_CTL = { dark:'bezel', modern:'glass', light:'glass', hc:'hc' };
+
+/* ========== STATE ========== */
+const dbColors = ['brown','brown','white','white','black','white','black','black','white'];
+const footage = ['16′','5⅓′','8′','4′','2⅔′','2′','1⅗′','1⅓′','1′'];
+const pedalFootage = ['16′','8′'];
+
+const regs = {
+  upper: [8,3,8,0,0,0,0,0,0],
+  lower: [0,0,8,8,0,0,0,0,0],
+  pedal: [8,0]
+};
+
+const vibModes = ['−','V1','C1','V2','C2','V3','C3'];
+const state = {
+  vibeMode:0, drive:0.25, reverb:0.35, leakage:0.16,
+  vibDepth:0.42, leslie:0.68, volume:0.72,
+  reverbSize:40, reverbDamp:50
+};
+let chainBanks = false;
+
+/* ========== DRAWBARS ========== */
+function buildManual(containerId, values, labels, colors){
+  const cont = document.getElementById(containerId);
+  cont.innerHTML = '';
+  values.forEach((v,i) => {
+    const color = colors ? colors[i] : (i===0?'brown':'brown');
+    const el = document.createElement('div');
+    el.className = 'db ' + color;
+    el.innerHTML = `
+      <div class="db-footage">${labels[i]}</div>
+      <div class="db-body">
+        <div class="db-segments"></div>
+        <div class="db-fill"></div>
+        <div class="db-handle"></div>
+      </div>
+      <div class="db-value">${v}</div>
+    `;
+    cont.appendChild(el);
+    const body = el.querySelector('.db-body');
+    const fill = el.querySelector('.db-fill');
+    const handle = el.querySelector('.db-handle');
+    const valEl = el.querySelector('.db-value');
+
+    const apply = (val) => {
+      const pct = (val/8)*100;
+      fill.style.height = pct+'%';
+      handle.style.top = `calc(${pct}% - 4px)`;
+      valEl.textContent = val;
+      values[i] = val;
+    };
+    apply(v);
+
+    let drag = false;
+    const fromY = y => {
+      const r = body.getBoundingClientRect();
+      // top = 0, bottom = 8 (drawbar pulls downward)
+      let p = (y - r.top)/r.height;
+      p = Math.max(0, Math.min(1, p));
+      apply(Math.round(p*8));
+    };
+    body.addEventListener('mousedown', e => { drag=true; fromY(e.clientY); e.preventDefault(); });
+    window.addEventListener('mousemove', e => { if(drag) fromY(e.clientY); });
+    window.addEventListener('mouseup', () => drag=false);
+    body.addEventListener('touchstart', e => { drag=true; fromY(e.touches[0].clientY); e.preventDefault(); }, {passive:false});
+    window.addEventListener('touchmove', e => { if(drag&&e.touches.length) fromY(e.touches[0].clientY); }, {passive:false});
+    window.addEventListener('touchend', () => drag=false);
+  });
+}
+
+buildManual('dbUpper', regs.upper, footage, dbColors);
+buildManual('dbLower', regs.lower, footage, dbColors);
+buildManual('dbPedal', regs.pedal, pedalFootage, ['brown','brown']);
+
+/* ========== KEYBOARDS (variable octaves, realistic black-key placement) ========== */
+const WHITE_SEMITONES = [0,2,4,5,7,9,11]; // C D E F G A B
+const BLACK_AFTER_WHITE = [0, 1, 3, 4, 5];
+const BLACK_SEMITONES   = [1, 3, 6, 8, 10];
+let kbOctaves = 5;
+const KB_START = { upper: 36, lower: 24 }; // C2 / C1
+
+function buildKeyboard(el, startMidi, nOctaves){
+  if(nOctaves == null) nOctaves = kbOctaves;
+  nOctaves = Math.max(1, Math.min(10, nOctaves|0));
+  const nWhite = nOctaves * 7 + 1; // include final C
+
+  // white keys container
+  let whites = el.querySelector('.keys-white');
+  if(!whites){
+    whites = document.createElement('div');
+    whites.className = 'keys-white';
+    el.appendChild(whites);
+  }
+  whites.innerHTML = '';
+
+  // black keys container
+  let blacks = el.querySelector('.keys-black');
+  if(!blacks){
+    blacks = document.createElement('div');
+    blacks.className = 'keys-black';
+    el.appendChild(blacks);
+  }
+  blacks.innerHTML = '';
+
+  // --- White keys ---
+  for(let i = 0; i < nWhite; i++){
+    const k = document.createElement('div');
+    k.className = 'key-w';
+    const oct = Math.floor(i / 7);
+    const deg = i % 7;
+    const midi = (i === nWhite - 1)
+      ? startMidi + nOctaves * 12
+      : startMidi + oct * 12 + WHITE_SEMITONES[deg];
+    k.dataset.midi = midi;
+    whites.appendChild(k);
+  }
+
+  // --- Black keys with realistic centering ---
+  const wPct = 100 / nWhite;
+  const bPct = wPct * 0.62;
+
+  for(let oct = 0; oct < nOctaves; oct++){
+    for(let b = 0; b < 5; b++){
+      const whiteIdx = oct * 7 + BLACK_AFTER_WHITE[b];
+      const centerPct = (whiteIdx + 1) * wPct;
+      const leftPct = centerPct - bPct / 2;
+
+      const k = document.createElement('div');
+      k.className = 'key-b';
+      k.dataset.midi = startMidi + oct * 12 + BLACK_SEMITONES[b];
+      k.style.left = leftPct + '%';
+      k.style.width = bPct + '%';
+      blacks.appendChild(k);
+    }
+  }
+
+  // --- Interaction ---
+  let activeKeys = new Set();
+  const noteOn = (keyEl) => {
+    if(!keyEl || activeKeys.has(keyEl)) return;
+    activeKeys.add(keyEl);
+    keyEl.classList.add('active');
+  };
+  const noteOff = (keyEl) => {
+    if(!keyEl) return;
+    activeKeys.delete(keyEl);
+    keyEl.classList.remove('active');
+  };
+  const allKeys = () => [...whites.children, ...blacks.children];
+  el._noteOn = noteOn;
+  el._noteOff = noteOff;
+  el._allKeys = allKeys;
+
+  // Bind interaction only once per keyboard element
+  if(!el._kbBound){
+    el._kbBound = true;
+    el.addEventListener('mousedown', e => {
+      const key = e.target.closest('.key-w, .key-b');
+      if(key){ el._noteOn(key); e.preventDefault(); }
+    });
+    el.addEventListener('mouseover', e => {
+      if(e.buttons !== 1) return;
+      const key = e.target.closest('.key-w, .key-b');
+      if(key) el._noteOn(key);
+    });
+    window.addEventListener('mouseup', () => {
+      if(el._allKeys) el._allKeys().forEach(el._noteOff);
+    });
+    el.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      const target = document.elementFromPoint(t.clientX, t.clientY);
+      const key = target && target.closest('.key-w, .key-b');
+      if(key){ el._noteOn(key); e.preventDefault(); }
+    }, {passive:false});
+    el.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      const target = document.elementFromPoint(t.clientX, t.clientY);
+      const key = target && target.closest('.key-w, .key-b');
+      el._allKeys().forEach(k => { if(k !== key) el._noteOff(k); });
+      if(key) el._noteOn(key);
+    }, {passive:false});
+    el.addEventListener('touchend', () => el._allKeys().forEach(el._noteOff));
+  }
+}
+
+function rebuildKeyboards(){
+  buildKeyboard(document.getElementById('kbUpper'), KB_START.upper, kbOctaves);
+  buildKeyboard(document.getElementById('kbLower'), KB_START.lower, kbOctaves);
+  const f = document.getElementById('octField');
+  if(f) f.textContent = kbOctaves + (kbOctaves === 1 ? ' octave' : ' octaves');
+}
+
+function bindLongPress(btn, fn){
+  if(!btn) return;
+  let t = null, rep = null;
+  const start = e => {
+    e.preventDefault();
+    fn();
+    t = setTimeout(() => {
+      rep = setInterval(fn, 120);
+    }, 400);
+  };
+  const stop = () => {
+    clearTimeout(t); clearInterval(rep); t = null; rep = null;
+  };
+  btn.addEventListener('mousedown', start);
+  btn.addEventListener('mouseup', stop);
+  btn.addEventListener('mouseleave', stop);
+  btn.addEventListener('touchstart', start, {passive:false});
+  btn.addEventListener('touchend', stop);
+  btn.addEventListener('touchcancel', stop);
+}
+
+rebuildKeyboards();
+bindLongPress(document.getElementById('octPrev'), () => {
+  if(kbOctaves > 1){ kbOctaves--; rebuildKeyboards(); }
+});
+bindLongPress(document.getElementById('octNext'), () => {
+  if(kbOctaves < 10){ kbOctaves++; rebuildKeyboards(); }
+});
+
+/* ========== KNOBS ========== */
+const knobDefs = [
+  {key:'vibeMode',label:'VIBE', min:0, max:6, fmt:v=>vibModes[Math.round(v)], range:['−','C3'], discrete:true, vibeSwitches:true},
+  {key:'drive',   label:'DRIVE',   min:0, max:1, fmt:v=>Math.round(v*100), range:['CLEAN','HOT'], extras:true},
+  {key:'_presetStepper', label:'PRESET STEPPER', custom:'presetStepper'},
+  {key:'vibDepth',label:'VIB DEPTH',min:0, max:1, fmt:v=>Math.round(v*100), range:['0','100']},
+  {key:'leslie',  label:'LESLIE',  min:0, max:1, fmt:v=>Math.round(v*100), range:['DRY','WET']},
+  {key:'reverb',  label:'REVERB',  min:0, max:1, fmt:v=> v<=0.001 ? 'OFF' : Math.round(v*100)+'%', range:['OFF','100%'], reverbExtras:true},
+  {key:'volume',  label:'VOLUME',  min:0, max:1, fmt:v=>Math.round(v*100), range:['0','100']},
+];
+
+const knobRow = document.getElementById('knobRow');
+const knobEntries = [];
+let activeK = null;
+
+knobDefs.forEach(def => {
+  const card = document.createElement('div');
+  card.className = 'knob-card';
+  if(def.custom === 'presetStepper'){
+    card.innerHTML = `<div class="preset-stepper-card"></div>`;
+    knobRow.appendChild(card);
+    return;
+  }
+  let extrasHtml = '';
+  if(def.extras){
+    extrasHtml = `
+      <div class="drive-extras">
+        <div class="drive-extras-row">
+          <span class="mini-label">CHAR</span>
+          <div class="sw-slot"><div class="mini-sw on" id="driveOnSw" title="Drive on/off"><div class="thumb"></div></div></div>
+          <div class="num-pot" id="driveChar" data-val="50" title="Character">50</div>
+        </div>
+        <div class="drive-extras-row">
+          <span class="mini-label">GAIN</span>
+          <div class="sw-slot"></div>
+          <div class="num-pot" id="driveGain" data-val="50" title="Drive output gain">50</div>
+        </div>
+      </div>`;
+  }
+  if(def.reverbExtras){
+    extrasHtml = `
+      <div class="reverb-extras">
+        <div class="reverb-extras-row">
+          <span class="mini-label">SIZE</span>
+          <div class="num-pot" id="reverbSize" data-val="40" title="Reverb size">40</div>
+        </div>
+        <div class="reverb-extras-row">
+          <span class="mini-label">DAMP</span>
+          <div class="num-pot" id="reverbDamp" data-val="50" title="Reverb damping">50</div>
+        </div>
+      </div>`;
+  }
+  if(def.vibeSwitches){
+    extrasHtml = `
+      <div class="vibe-sw-stack">
+        <div class="vib-sw-group">
+          <div class="vib-sw-label">VIB U</div>
+          <div class="mini-sw on" id="vibSwUpper"><div class="thumb"></div></div>
+        </div>
+        <div class="vib-sw-group">
+          <div class="vib-sw-label">VIB L</div>
+          <div class="mini-sw" id="vibSwLower"><div class="thumb"></div></div>
+        </div>
+      </div>`;
+  }
+  let knobBody;
+  if(def.key === 'vibeMode'){
+    // Align ticks with pot pointer angles (canvas: 135° → 405°, clockwise, y-down)
+    // 7 states: − V1 C1 V2 C2 V3 C3
+    const ticks = vibModes.map((m,i) => {
+      const deg = 135 + i * (270/6);
+      const ang = deg * Math.PI/180;
+      const r = 36;
+      const x = 39.5 + Math.cos(ang)*r;
+      const y = 39.5 + Math.sin(ang)*r;
+      return `<span class="vibe-tick" data-i="${i}" style="left:${x}px;top:${y}px;transform:translate(-50%,-50%)">${m}</span>`;
+    }).join('');
+    knobBody = `
+      <div class="pot-zone">
+        <div class="vibe-wrap" id="vibeWrap">
+          ${ticks}
+          <canvas width="53" height="53"></canvas>
+        </div>
+      </div>
+      <div class="k-meta">
+        <span class="k-lo"></span>
+        <span class="k-value">0</span>
+        <span class="k-hi"></span>
+      </div>`;
+  } else {
+    knobBody = `
+      <div class="pot-zone">
+        <canvas width="53" height="53"></canvas>
+      </div>
+      <div class="k-meta">
+        <span class="k-lo">${def.range[0]}</span>
+        <span class="k-value">0</span>
+        <span class="k-hi">${def.range[1]}</span>
+      </div>`;
+  }
+  const pillLabel = def.discrete ? 'VIBE' : def.label;
+  card.innerHTML = `
+    <div class="k-title">${def.label}</div>
+    ${knobBody}
+    <div class="knob-pill" data-key="${def.key}" title="${def.label}">—</div>
+    ${extrasHtml}
+  `;
+  knobRow.appendChild(card);
+  const canvas = card.querySelector('canvas');
+  const valEl = card.querySelector('.k-value');
+  const pill = card.querySelector('.knob-pill');
+  const entry = {def, canvas, valEl, pill, card};
+  knobEntries.push(entry);
+
+  function setFromDelta(dy, scale){
+    if(def.discrete){
+      entry._acc = (entry._acc || 0) + dy;
+      while(entry._acc >= 14){ entry._acc -= 14; state[def.key] = Math.min(def.max, Math.round(state[def.key])+1); drawKnob(entry); }
+      while(entry._acc <= -14){ entry._acc += 14; state[def.key] = Math.max(def.min, Math.round(state[def.key])-1); drawKnob(entry); }
+    } else {
+      const n0 = (entry._v0 - def.min)/(def.max - def.min);
+      const n = Math.max(0, Math.min(1, n0 - dy * scale));
+      state[def.key] = def.min + n*(def.max-def.min);
+      drawKnob(entry);
+    }
+  }
+  // LIVE pill interaction
+  if(pill){
+    pill.addEventListener('mousedown', e => {
+      activeK = entry;
+      entry._y0 = e.clientY;
+      entry._v0 = state[def.key];
+      entry._acc = 0;
+      entry._fromPill = true;
+      e.preventDefault();
+    });
+    pill.addEventListener('click', e => {
+      if(def.discrete && Math.abs(entry._acc||0) < 3){
+        state[def.key] = state[def.key] >= def.max ? def.min : Math.round(state[def.key])+1;
+        drawKnob(entry);
+      }
+    });
+    pill.addEventListener('wheel', e => {
+      e.preventDefault();
+      if(def.discrete){
+        state[def.key] = e.deltaY < 0
+          ? Math.min(def.max, Math.round(state[def.key])+1)
+          : Math.max(def.min, Math.round(state[def.key])-1);
+      } else {
+        const step = (def.max-def.min) * 0.02;
+        state[def.key] = Math.max(def.min, Math.min(def.max, state[def.key] + (e.deltaY < 0 ? step : -step)));
+      }
+      drawKnob(entry);
+    }, {passive:false});
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    activeK = entry;
+    entry._y0 = e.clientY;
+    entry._v0 = state[def.key];
+    entry._acc = 0;
+    entry._fromPill = false;
+  });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    if(def.discrete){
+      const step = e.deltaY < 0 ? 1 : -1;
+      state[def.key] = Math.max(def.min, Math.min(def.max, Math.round(state[def.key]) + step));
+      syncVibeChip();
+    } else {
+      let n = (state[def.key]-def.min)/(def.max-def.min) + (e.deltaY<0?0.03:-0.03);
+      n = Math.max(0,Math.min(1,n));
+      state[def.key] = def.min + n*(def.max-def.min);
+    }
+    drawKnob(entry);
+  });
+});
+window.addEventListener('mousemove', e => {
+  if(!activeK) return;
+  const d = activeK.def;
+  if(d.discrete){
+    activeK._acc = (activeK._acc||0) + (activeK._y0 - e.clientY);
+    activeK._y0 = e.clientY;
+    while(activeK._acc >= 14){
+      activeK._acc -= 14;
+      state[d.key] = Math.min(d.max, Math.round(state[d.key]) + 1);
+      syncVibeChip();
+      drawKnob(activeK);
+    }
+    while(activeK._acc <= -14){
+      activeK._acc += 14;
+      state[d.key] = Math.max(d.min, Math.round(state[d.key]) - 1);
+      syncVibeChip();
+      drawKnob(activeK);
+    }
+    return;
+  }
+  const delta = (activeK._y0 - e.clientY)*0.005;
+  let n = (activeK._v0 - d.min)/(d.max-d.min) + delta;
+  n = Math.max(0,Math.min(1,n));
+  state[d.key] = d.min + n*(d.max-d.min);
+  drawKnob(activeK);
+});
+window.addEventListener('mouseup', () => activeK=null);
+
+function syncVibeChip(){
+  const i = Math.round(state.vibeMode);
+  const wrap = document.getElementById('vibeWrap');
+  if(wrap){
+    wrap.querySelectorAll('.vibe-tick').forEach(t => {
+      t.classList.toggle('on', parseInt(t.dataset.i,10) === i);
+    });
+  }
+}
+
+function drawKnob(entry){
+  const {def, canvas, valEl} = entry;
+  const ctx = canvas.getContext('2d');
+  const s=53, dpr=devicePixelRatio;
+  if(canvas.width !== s*dpr){ canvas.width=s*dpr; canvas.height=s*dpr; ctx.scale(dpr,dpr); }
+  ctx.clearRect(0,0,s,s);
+  const cx=s/2, cy=s/2, r=s/2-4;
+
+  const start=135*Math.PI/180, end=405*Math.PI/180;
+  const raw = def.discrete ? Math.round(state[def.key]) : state[def.key];
+  if(def.discrete) state[def.key] = raw;
+  const n = Math.max(0,Math.min(1,(raw-def.min)/(def.max-def.min)));
+  const ang = start + n*(end-start);
+
+  const styleName = THEME_KNOB_STYLE[currentTheme] || 'pot';
+  const renderer = NovaKnobStyles.get(styleName);
+  const colors = styleName === 'led'
+    ? {
+        face: cssVar('--knob-face'), track: cssVar('--knob-track'), dot: cssVar('--knob-dot'),
+        base1: cssVar('--accent'), base2: cssVar('--accent-2'), hot1: cssVar('--knob-hot'), hot2: cssVar('--knob-hot-2'),
+      }
+    : {
+        face1: cssVar('--knob-face-1'), face2: cssVar('--knob-face-2'), face3: cssVar('--knob-face-3'),
+        ring: cssVar('--knob-ring'), accent: cssVar('--accent'), pointer: cssVar('--knob-pointer'), center: cssVar('--knob-center'),
+      };
+  renderer(ctx, {cx, cy, radius:r, angleStart:start, angleEnd:end, angle:ang, n, colors});
+
+  if(valEl) valEl.textContent = def.fmt(raw);
+  if(entry.pill){
+    if(def.discrete) entry.pill.textContent = def.fmt(raw);
+    else if(def.key === 'reverb' && raw <= 0.001) entry.pill.textContent = 'OFF';
+    else entry.pill.textContent = String(Math.round(typeof raw === 'number' ? (def.max<=1 ? raw*100 : raw) : 0));
+  }
+  if(def.key === 'vibeMode') syncVibeChip();
+}
+knobEntries.forEach(drawKnob);
+syncVibeChip();
+
+/* ========== METERS ========== */
+let t = 0;
+const peakBtn = document.getElementById('peakBtn');
+peakBtn.addEventListener('click', () => peakBtn.classList.toggle('on'));
+const peakState = {l:0, r:0};
+
+const peakStateMidi = {u:0, l:0, p:0};
+
+/* Helper to pad a bank to 18 presets by cycling variations */
+function padBank(arr){
+  const out = arr.slice();
+  while(out.length < 18){
+    const src = arr[out.length % arr.length];
+    out.push({
+      u: src.u.map((v,i)=> Math.max(0, Math.min(8, v + ((out.length+i)%3)-1))),
+      l: src.l.map((v,i)=> Math.max(0, Math.min(8, v + ((out.length*2+i)%3)-1))),
+      p: src.p.slice()
+    });
+  }
+  return out;
+}
+
+/* Seed banks then expand to A–Z (26 banks × 16 presets) */
+const _seedBanks = [
+  padBank([
+    {u:[8,3,8,0,0,0,0,0,0], l:[0,0,8,8,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,8,8,0,0,0,0,0], l:[8,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[8,8,8,8,0,0,0,0,0], l:[8,0,0,0,0,0,0,0,0], p:[8,4,0]},
+    {u:[0,0,8,0,0,0,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[8,0,0,0,0,0,0,0,0], l:[0,0,0,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,0,0,0,0,0,0,8], l:[0,0,0,0,0,0,0,0,8], p:[0,0,0]},
+    {u:[8,4,8,4,0,0,0,0,0], l:[4,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,5,3,2,0,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+  ]),
+  padBank([
+    {u:[8,8,8,0,0,0,0,0,0], l:[8,8,0,0,0,0,0,0,0], p:[8,8,0]},
+    {u:[0,0,8,8,8,0,0,0,0], l:[0,0,0,8,8,0,0,0,0], p:[8,0,0]},
+    {u:[8,0,8,0,8,0,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,0,0,8,8,8,0,0], l:[0,0,8,0,0,0,0,0,0], p:[0,0,0]},
+    {u:[8,8,0,0,0,0,0,0,0], l:[8,0,0,0,0,0,0,0,0], p:[8,8,0]},
+    {u:[0,0,0,8,0,0,0,0,0], l:[0,0,0,8,0,0,0,0,0], p:[8,0,0]},
+    {u:[8,4,0,0,0,0,0,0,0], l:[4,0,0,0,0,0,0,0,0], p:[8,4,0]},
+    {u:[0,0,8,4,0,0,0,0,0], l:[0,0,4,0,0,0,0,0,0], p:[8,0,0]},
+  ]),
+  padBank([
+    {u:[8,7,6,5,4,3,2,1,0], l:[8,0,0,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,1,2,3,4,5,6,7,8], l:[0,0,8,0,0,0,0,0,0], p:[0,0,0]},
+    {u:[8,0,0,8,0,0,8,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,8,0,0,8,0,0,0], l:[8,0,0,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[8,8,0,8,0,0,0,0,0], l:[0,0,8,8,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,0,0,0,0,0,0,0], l:[0,0,0,0,0,0,0,0,0], p:[0,0,0]},
+    {u:[8,8,8,8,8,0,0,0,0], l:[8,8,8,0,0,0,0,0,0], p:[8,8,0]},
+    {u:[4,4,4,4,4,4,4,4,4], l:[4,4,4,4,0,0,0,0,0], p:[4,4,0]},
+  ]),
+  padBank([
+    {u:[8,0,8,0,0,0,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,0,8,8,0,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[8,4,2,0,0,0,0,0,0], l:[4,0,0,0,0,0,0,0,0], p:[8,4,0]},
+    {u:[0,0,6,4,2,0,0,0,0], l:[0,0,4,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[8,8,4,0,0,0,0,0,0], l:[8,0,4,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,0,8,0,8,0,8,0,0], l:[0,0,0,0,0,0,0,0,0], p:[0,0,0]},
+    {u:[8,0,0,0,8,0,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+    {u:[0,8,0,8,0,8,0,0,0], l:[0,0,8,0,0,0,0,0,0], p:[8,0,0]},
+  ]),
+];
+const dbBanks = [];
+for(let i=0;i<26;i++){
+  const src = _seedBanks[i % _seedBanks.length];
+  dbBanks.push(src.map((p,pi)=>({
+    u: p.u.map((v,j)=> Math.max(0, Math.min(8, v + ((i+j+pi)%3)-1))),
+    l: p.l.map((v,j)=> Math.max(0, Math.min(8, v + ((i*2+j)%3)-1))),
+    p: p.p.slice()
+  })));
+}
+let currentBank = 0;
+let currentPreset = 0;
+
+function bankLetter(i){ return String.fromCharCode(65 + (i%26)); }
+
+function syncBankUI(){
+  const letter = bankLetter(currentBank);
+  const bf = document.getElementById('bankField');
+  const psb = document.getElementById('psBankField');
+  const bn = document.getElementById('bankNameLive');
+  if(bf) bf.textContent = letter;
+  if(psb) psb.textContent = letter;
+  if(bn) bn.textContent = 'BANQUE ' + letter;
+}
+const PRESET_NAMES = [
+  'Jazz Club B3','Gospel Swell','Rock Comp','Soft Pads','Perc Lead',
+  'Full Organ','Whistle','Bass Pedal','Clean Jazz','Theatre',
+  'Dark Soul','Bright Top','Cathedral','Bar Blues','Funk Chop',
+  'Slow Ballad','Pipe Mix','Shimmer'
+];
+const PRESET_VISIBLE = 7;
+const PRESET_COUNT = 18;
+
+function presetName(i){
+  const idx = ((i % PRESET_COUNT) + PRESET_COUNT) % PRESET_COUNT;
+  return PRESET_NAMES[idx] || ('Preset ' + (idx + 1));
+}
+function syncPresetUI(){
+  const psp = document.getElementById('psPresetField');
+  if(psp) psp.textContent = String(currentPreset + 1);
+  const field = document.getElementById('presetScrollField');
+  if(field) field.textContent = presetName(currentPreset);
+  const headerName = document.getElementById('headerPresetName');
+  if(headerName) headerName.textContent = presetName(currentPreset);
+  renderPresetList();
+}
+function renderPresetList(){
+  const list = document.getElementById('presetList');
+  if(!list) return;
+  list.innerHTML = '';
+  // Highlight always on first row; list scrolls so selected is on top
+  for(let i = 0; i < PRESET_VISIBLE; i++){
+    const idx = (currentPreset + i) % PRESET_COUNT;
+    const item = document.createElement('div');
+    item.className = 'preset-list-item' + (i === 0 ? ' active' : '');
+    item.dataset.preset = idx;
+    item.innerHTML = `<span class="pl-num">${idx + 1}</span><span class="pl-name">${presetName(idx)}</span>`;
+    item.addEventListener('click', () => setPreset(idx));
+    list.appendChild(item);
+  }
+}
+function setBank(i){
+  currentBank = ((i % 26) + 26) % 26;
+  syncBankUI();
+  applyDrawbarPreset(currentBank, currentPreset);
+  refreshMatrixIfVisible();
+}
+function setPreset(i){
+  currentPreset = ((i % 18) + 18) % 18;
+  syncPresetUI();
+  applyDrawbarPreset(currentBank, currentPreset);
+  refreshMatrixIfVisible();
+}
+function stepPreset(dir){
+  if(chainBanks){
+    let idx = currentBank * 18 + currentPreset + dir;
+    const total = 26 * 18;
+    idx = ((idx % total) + total) % total;
+    currentBank = Math.floor(idx / 18);
+    currentPreset = idx % 18;
+    syncBankUI();
+    syncPresetUI();
+    applyDrawbarPreset(currentBank, currentPreset);
+    return;
+  }
+  setPreset(currentPreset + dir);
+}
+
+function applyDrawbarPreset(bank, preset){
+  const p = dbBanks[bank] && dbBanks[bank][preset];
+  if(!p) return;
+  p.u.forEach((v,i) => regs.upper[i] = v);
+  p.l.forEach((v,i) => regs.lower[i] = v);
+  regs.pedal[0] = p.p[0] ?? 0;
+  regs.pedal[1] = p.p[1] ?? 0;
+  buildManual('dbUpper', regs.upper, footage, dbColors);
+  buildManual('dbLower', regs.lower, footage, dbColors);
+  buildManual('dbPedal', regs.pedal, pedalFootage, ['brown','brown']);
+}
+
+document.getElementById('bankPrev')?.addEventListener('click', () => setBank(currentBank - 1));
+document.getElementById('bankNext')?.addEventListener('click', () => setBank(currentBank + 1));
+document.querySelectorAll('[data-ps]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const a = btn.dataset.ps;
+    if(a === 'bank-prev') setBank(currentBank - 1);
+    else if(a === 'bank-next') setBank(currentBank + 1);
+    else if(a === 'preset-prev') stepPreset(-1);
+    else if(a === 'preset-next') stepPreset(+1);
+  });
+});
+document.getElementById('chainBanksSw')?.addEventListener('click', function(){
+  this.classList.toggle('on');
+  chainBanks = this.classList.contains('on');
+});
+document.getElementById('presetListPrev')?.addEventListener('click', () => stepPreset(-1));
+document.getElementById('presetListNext')?.addEventListener('click', () => stepPreset(+1));
+syncBankUI();
+syncPresetUI();
+
+/* Page navigation: DRAWBARS / LIVE (keyboards hidden on LIVE) */
+const appBody = document.querySelector('.app-body');
+const metersEl = document.querySelector('.sidebar-meters');
+const metersHome = metersEl ? metersEl.parentElement : null;
+const manualsGrid = document.querySelector('.manuals-grid');
+
+function dockMetersLive(on){
+  if(!metersEl || !manualsGrid || !metersHome) return;
+  const chClassic = document.getElementById('midiChColClassic');
+  const chLive = document.getElementById('midiChColLive');
+  if(on){
+    manualsGrid.appendChild(metersEl);
+    metersEl.classList.add('live-docked');
+    // move channel controls into LIVE layout (same nodes)
+    if(chLive && chClassic){
+      [...chClassic.querySelectorAll('.midi-ch-item')].forEach(n => chLive.appendChild(n));
+    }
+  } else {
+    if(metersHome){
+      const extra = metersHome.querySelector('.sidebar-extra');
+      if(extra) metersHome.insertBefore(metersEl, extra);
+      else metersHome.insertBefore(metersEl, metersHome.firstChild);
+    }
+    metersEl.classList.remove('live-docked');
+    if(chLive && chClassic){
+      [...chLive.querySelectorAll('.midi-ch-item')].forEach(n => chClassic.appendChild(n));
+    }
+  }
+}
+function dockSplitControls(onLive){
+  const sc = document.getElementById('splitControls');
+  const slotDb = document.getElementById('splitSlotDrawbars');
+  const slotMan = document.getElementById('splitSlotManuals');
+  if(!sc || !slotDb || !slotMan) return;
+  if(onLive) slotDb.appendChild(sc);
+  else slotMan.appendChild(sc);
+}
+// sync PEAK buttons
+document.getElementById('peakBtnLive')?.addEventListener('click', () => {
+  const p = document.getElementById('peakBtn');
+  if(p){ p.classList.toggle('on'); document.getElementById('peakBtnLive').classList.toggle('on', p.classList.contains('on')); }
+});
+document.getElementById('peakBtn')?.addEventListener('click', () => {
+  const live = document.getElementById('peakBtnLive');
+  if(live) live.classList.toggle('on', document.getElementById('peakBtn').classList.contains('on'));
+});
+
+document.querySelectorAll('.nav-item[data-page]').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    const page = item.dataset.page;
+    const isLive = page === 'live';
+    const isMatrix = page === 'matrice';
+    if(appBody){
+      appBody.classList.toggle('page-live', isLive);
+      appBody.classList.toggle('page-matrix', isMatrix);
+      appBody.classList.toggle('page-drawbars', page === 'drawbars' || page === 'leslie' || page === 'settings');
+    }
+    dockMetersLive(isLive);
+    dockSplitControls(isLive);
+    if(isMatrix) renderMatrix();
+  });
+});
+
+/* ========== MATRIX page ========== */
+const MATRIX_STUDENTS = [
+  'Léa Martin','Hugo Bernard','Chloé Dubois','Nathan Petit','Emma Robert',
+  'Louis Richard','Inès Durand','Gabriel Moreau','Manon Simon','Arthur Laurent',
+  'Jade Lefebvre','Adam Michel','Louise Garcia','Raphaël David','Alice Bertrand',
+  'Paul Roux','Camille Vincent','Jules Fournier'
+];
+const MATRIX_SONGS = [
+  'Autumn Leaves','Blue Bossa','Misty','Take Five','Summertime',
+  'Fly Me to the Moon','Georgia on My Mind','The Entertainer','Claire de Lune','What a Wonderful World',
+  'Moon River','Over the Rainbow','All of Me','Stand by Me','Hallelujah',
+  'Imagine','La Vie en Rose','Yesterday'
+];
+const MATRIX_WORKSHOPS = [
+  'Atelier Orgue','Atelier Jazz','Atelier Gospel','Atelier Claviers','Atelier Ensemble',
+  'Atelier Blues','Atelier Impro','Atelier Harmonie','Atelier Solo','Atelier Duo',
+  'Atelier Rythme','Atelier Basse','Atelier Pads','Atelier Classique','Atelier Funk',
+  'Atelier Soul','Atelier Théâtre','Atelier Chorale'
+];
+const MATRIX_EVENT = 'Concert fin d\'année';
+const MATRIX_FIELD_DEFS = [
+  {id:'song', label:'Morceau'},
+  {id:'workshop', label:'Atelier'},
+  {id:'student', label:'Élève'},
+  {id:'preset', label:'Preset'},
+  {id:'bank', label:'Banque'},
+  {id:'event', label:'Événement'},
+];
+let matrixCols = 4;
+let matrixRows = 3;
+let matrixFieldOrder = ['song','workshop','student','preset','bank','event'];
+
+function matrixFieldValue(fieldId, presetIdx, bankLetterStr){
+  switch(fieldId){
+    case 'song': return MATRIX_SONGS[presetIdx % MATRIX_SONGS.length];
+    case 'workshop': return MATRIX_WORKSHOPS[presetIdx % MATRIX_WORKSHOPS.length];
+    case 'student': return MATRIX_STUDENTS[presetIdx % MATRIX_STUDENTS.length];
+    case 'preset': return presetName(presetIdx);
+    case 'bank': return 'BANQUE ' + bankLetterStr;
+    case 'event': return MATRIX_EVENT;
+    default: return '';
+  }
+}
+function renderMatrixFieldList(){
+  const list = document.getElementById('matrixFieldList');
+  if(!list) return;
+  list.innerHTML = '';
+  matrixFieldOrder.forEach((id, rank) => {
+    const def = MATRIX_FIELD_DEFS.find(d => d.id === id);
+    if(!def) return;
+    const row = document.createElement('div');
+    row.className = 'ms-field-item' + (rank === 0 ? ' primary' : '');
+    row.innerHTML = `
+      <span class="ms-rank">${rank + 1}</span>
+      <span>${def.label}</span>
+      <span class="ms-up" data-i="${rank}" title="Monter">▲</span>
+      <span class="ms-dn" data-i="${rank}" title="Descendre">▼</span>`;
+    row.querySelector('.ms-up').addEventListener('click', e => {
+      e.stopPropagation();
+      if(rank <= 0) return;
+      const t = matrixFieldOrder[rank-1];
+      matrixFieldOrder[rank-1] = matrixFieldOrder[rank];
+      matrixFieldOrder[rank] = t;
+      renderMatrixFieldList();
+      renderMatrix();
+    });
+    row.querySelector('.ms-dn').addEventListener('click', e => {
+      e.stopPropagation();
+      if(rank >= matrixFieldOrder.length-1) return;
+      const t = matrixFieldOrder[rank+1];
+      matrixFieldOrder[rank+1] = matrixFieldOrder[rank];
+      matrixFieldOrder[rank] = t;
+      renderMatrixFieldList();
+      renderMatrix();
+    });
+    list.appendChild(row);
+  });
+}
+function syncMatrixGridFields(){
+  const cf = document.getElementById('matrixColsField');
+  const rf = document.getElementById('matrixRowsField');
+  if(cf) cf.textContent = String(matrixCols);
+  if(rf) rf.textContent = String(matrixRows);
+}
+function renderMatrix(){
+  const grid = document.getElementById('matrixGrid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  const bank = currentBank;
+  const letter = bankLetter(bank);
+  const cols = Math.max(1, Math.min(8, matrixCols));
+  const rows = Math.max(1, Math.min(8, matrixRows));
+  const total = cols * rows; // always fill every cell
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  for(let i = 0; i < total; i++){
+    const tile = document.createElement('div');
+    if(i >= PRESET_COUNT){
+      tile.className = 'matrix-tile empty';
+      tile.innerHTML = `<div class="mt-primary" style="opacity:.35">—</div>`;
+      grid.appendChild(tile);
+      continue;
+    }
+    tile.className = 'matrix-tile' + (i === currentPreset ? ' active' : '');
+    tile.dataset.bank = bank;
+    tile.dataset.preset = i;
+    const order = matrixFieldOrder.slice();
+    const primary = matrixFieldValue(order[0], i, letter);
+    const secondary = order.slice(1, 3).map(id => matrixFieldValue(id, i, letter));
+    const tertiary = order.slice(3).map(id => matrixFieldValue(id, i, letter)).filter(Boolean);
+    tile.innerHTML = `
+      <div class="mt-primary">${primary}</div>
+      <div class="mt-secondary">${secondary.map(s => `<div>${s}</div>`).join('')}</div>
+      <div class="mt-tertiary">${tertiary.map(s => `<div>${s}</div>`).join('')}</div>`;
+    tile.addEventListener('click', () => {
+      setPreset(i);
+      renderMatrix();
+    });
+    grid.appendChild(tile);
+  }
+}
+function refreshMatrixIfVisible(){
+  if(appBody && appBody.classList.contains('page-matrix')) renderMatrix();
+}
+
+/* Matrix steppers: long-press to unlock, then short presses work for 10s */
+const MATRIX_UNLOCK_MS = 10000;
+const MATRIX_LONGPRESS_MS = 450;
+function bindMatrixLockedStepper(el, onStep){
+  if(!el) return;
+  let unlockedUntil = 0;
+  let pressTimer = null;
+  let longDone = false;
+  let startX = 0, startY = 0;
+
+  function isUnlocked(){ return Date.now() < unlockedUntil; }
+  function setUnlocked(on){
+    if(on){
+      unlockedUntil = Date.now() + MATRIX_UNLOCK_MS;
+      el.classList.add('unlocked');
+      clearTimeout(el._lockTimer);
+      el._lockTimer = setTimeout(() => {
+        el.classList.remove('unlocked');
+        unlockedUntil = 0;
+      }, MATRIX_UNLOCK_MS);
+    } else {
+      unlockedUntil = 0;
+      el.classList.remove('unlocked');
+      clearTimeout(el._lockTimer);
+    }
+  }
+  function tryStep(dir){
+    if(!isUnlocked()) return false;
+    onStep(dir);
+    // refresh unlock window on each successful short edit
+    setUnlocked(true);
+    return true;
+  }
+
+  el.querySelectorAll('.stepper-btn').forEach(btn => {
+    const dir = parseInt(btn.dataset.dir, 10) || 0;
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      longDone = false;
+      startX = e.clientX; startY = e.clientY;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => {
+        longDone = true;
+        setUnlocked(true);
+        // first step on unlock
+        onStep(dir);
+      }, MATRIX_LONGPRESS_MS);
+    });
+    btn.addEventListener('pointerup', e => {
+      clearTimeout(pressTimer);
+      if(longDone) return;
+      // short press: only if unlocked
+      tryStep(dir);
+    });
+    btn.addEventListener('pointerleave', () => clearTimeout(pressTimer));
+    btn.addEventListener('pointercancel', () => clearTimeout(pressTimer));
+  });
+}
+bindMatrixLockedStepper(document.getElementById('matrixColsStepper'), dir => {
+  matrixCols = Math.max(1, Math.min(8, matrixCols + dir));
+  syncMatrixGridFields();
+  renderMatrix();
+});
+bindMatrixLockedStepper(document.getElementById('matrixRowsStepper'), dir => {
+  matrixRows = Math.max(1, Math.min(8, matrixRows + dir));
+  syncMatrixGridFields();
+  renderMatrix();
+});
+renderMatrixFieldList();
+syncMatrixGridFields();
+
+/* MIDI channel selectors: − (omni) → 1..16, drag like a pot */
+function formatMidiCh(ch, letter){
+  const v = ch < 1 ? '−' : String(ch);
+  return letter ? (letter + ' : ' + v) : v;
+}
+function stepMidiCh(ch, dir){
+  // sequence: − (omni) ↔ 1…16 (no 0)
+  if(dir > 0){
+    if(ch < 1) return 1;
+    if(ch >= 16) return -1;
+    return ch + 1;
+  }
+  if(ch < 1) return 16;
+  if(ch <= 1) return -1;
+  return ch - 1;
+}
+function bindMidiChBtn(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  let ch = parseInt(el.dataset.ch, 10); // -1 = omni
+  if(ch === 0) ch = -1;
+  const letter = el.dataset.letter || '';
+  const apply = () => { el.dataset.ch = ch; el.textContent = formatMidiCh(ch, letter); };
+  apply();
+
+  let dragging = false, startY = 0, acc = 0;
+  el.addEventListener('mousedown', e => {
+    dragging = true; startY = e.clientY; acc = 0; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if(!dragging) return;
+    acc += (startY - e.clientY);
+    startY = e.clientY;
+    while(acc >= 12){ acc -= 12; ch = stepMidiCh(ch, +1); apply(); }
+    while(acc <= -12){ acc += 12; ch = stepMidiCh(ch, -1); apply(); }
+  });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  el.addEventListener('click', () => {
+    if(Math.abs(acc) < 2 && !dragging){
+      ch = stepMidiCh(ch, +1);
+      apply();
+    }
+  });
+  el.addEventListener('wheel', e => {
+    e.preventDefault();
+    ch = stepMidiCh(ch, e.deltaY < 0 ? +1 : -1);
+    apply();
+  }, {passive:false});
+}
+bindMidiChBtn('midiChU');
+bindMidiChBtn('midiChL');
+bindMidiChBtn('midiChP');
+
+/* Percussion segmented selectors */
+document.querySelectorAll('.perc-seg').forEach(seg => {
+  seg.querySelectorAll('.perc-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      seg.querySelectorAll('.perc-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+    });
+  });
+});
+
+/* Generic numbered pot: click/drag vertical, optional wheel. min can be -1 for "−" (off) */
+function bindNumPot(id, min, max, onChange){
+  const el = document.getElementById(id);
+  if(!el) return;
+  let val = parseInt(el.dataset.val, 10);
+  if(isNaN(val)) val = min;
+  const apply = () => {
+    el.dataset.val = val;
+    el.textContent = val === 0 || val < 0 ? '−' : String(val);
+    if(onChange) onChange(val);
+  };
+  apply();
+  let dragging = false, startY = 0, acc = 0;
+  el.addEventListener('mousedown', e => {
+    dragging = true; startY = e.clientY; acc = 0; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if(!dragging) return;
+    acc += (startY - e.clientY);
+    startY = e.clientY;
+    while(acc >= 8){ acc -= 8; val = Math.min(max, val + 1); apply(); }
+    while(acc <= -8){ acc += 8; val = Math.max(min, val - 1); apply(); }
+  });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  el.addEventListener('wheel', e => {
+    e.preventDefault();
+    val = e.deltaY < 0 ? Math.min(max, val + 1) : Math.max(min, val - 1);
+    apply();
+  }, {passive:false});
+}
+
+/* Mini switches */
+function bindMiniSw(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener('click', () => el.classList.toggle('on'));
+}
+bindMiniSw('vibSwUpper');
+bindMiniSw('vibSwLower');
+bindMiniSw('driveOnSw');
+
+/* Numbered pots — splits: − = off */
+bindNumPot('splitUpper', -1, 127);
+bindNumPot('splitLower', -1, 127);
+bindNumPot('transpU', -24, 24);
+bindNumPot('transpL', -24, 24);
+bindNumPot('transpP', -24, 24);
+bindNumPot('driveChar', 0, 100);
+bindNumPot('driveGain', 0, 100);
+bindNumPot('reverbSize', 0, 100);
+bindNumPot('reverbDamp', 0, 100);
+bindNumPot('ctrlMidiCh', 1, 16);
+bindNumPot('masterTune', -100, 100, v => {
+  const el = document.getElementById('masterTune');
+  if(el) el.textContent = v === 0 ? '−' : ((v > 0 ? '+' : '') + v);
+});
+
+/* Motor noise rocker */
+const swMotor = document.getElementById('swMotor');
+if(swMotor) swMotor.addEventListener('click', () => swMotor.classList.toggle('on'));
+
+/* Leslie: exclusive CHORALE | TREMOLO | BREAK */
+let leslieState = 'chorale';
+function setLeslieState(val){
+  leslieState = val;
+  const seg = document.getElementById('leslieSpeedSeg');
+  const brk = document.getElementById('leslieBreakBtn');
+  if(seg){
+    seg.querySelectorAll('.leslie-speed-opt').forEach(o => {
+      o.classList.toggle('active', o.dataset.val === val);
+    });
+  }
+  if(brk) brk.classList.toggle('active', val === 'break');
+  document.querySelectorAll('.leslie-sq').forEach(sq => {
+    sq.classList.toggle('active', sq.dataset.val === val);
+  });
+  const lamp = document.getElementById('leslieLamp');
+  const txt = document.getElementById('leslieText');
+  if(txt) txt.textContent = val.toUpperCase();
+  if(lamp){
+    if(val === 'break') lamp.className = 'leslie-lamp';
+    else if(val === 'tremolo') lamp.className = 'leslie-lamp on fast';
+    else lamp.className = 'leslie-lamp on';
+  }
+}
+const leslieSpeedSeg = document.getElementById('leslieSpeedSeg');
+if(leslieSpeedSeg){
+  leslieSpeedSeg.querySelectorAll('.leslie-speed-opt').forEach(opt => {
+    opt.addEventListener('click', () => setLeslieState(opt.dataset.val));
+  });
+}
+const leslieBreakBtn = document.getElementById('leslieBreakBtn');
+if(leslieBreakBtn){
+  leslieBreakBtn.addEventListener('click', () => setLeslieState('break'));
+}
+document.querySelectorAll('.leslie-sq').forEach(sq => {
+  sq.addEventListener('click', () => setLeslieState(sq.dataset.val));
+});
+
+function updateMeters(){
+  const a = 0.28 + 0.42*Math.abs(Math.sin(t*0.6));
+  const aR = a * 0.9;
+  // Classic vertical OUT
+  const outL = document.getElementById('outL');
+  const outR = document.getElementById('outR');
+  if(outL) outL.style.height = (a*100).toFixed(0)+'%';
+  if(outR) outR.style.height = (aR*100).toFixed(0)+'%';
+  peakState.l = Math.max(a, peakState.l*0.98);
+  peakState.r = Math.max(aR, peakState.r*0.98);
+  const outLPeak = document.getElementById('outLPeak');
+  const outRPeak = document.getElementById('outRPeak');
+  if(outLPeak) outLPeak.style.bottom = (peakState.l*100).toFixed(0)+'%';
+  if(outRPeak) outRPeak.style.bottom = (peakState.r*100).toFixed(0)+'%';
+  const show = peakBtn && peakBtn.classList.contains('on');
+  if(outLPeak) outLPeak.style.display = show?'block':'none';
+  if(outRPeak) outRPeak.style.display = show?'block':'none';
+  // LIVE horizontal OUT
+  const outLh = document.getElementById('outLh');
+  const outRh = document.getElementById('outRh');
+  if(outLh) outLh.style.width = (a*100).toFixed(0)+'%';
+  if(outRh) outRh.style.width = (aR*100).toFixed(0)+'%';
+  const outLPeakh = document.getElementById('outLPeakh');
+  const outRPeakh = document.getElementById('outRPeakh');
+  if(outLPeakh){ outLPeakh.style.left = (peakState.l*100).toFixed(0)+'%'; outLPeakh.style.display = show?'block':'none'; }
+  if(outRPeakh){ outRPeakh.style.left = (peakState.r*100).toFixed(0)+'%'; outRPeakh.style.display = show?'block':'none'; }
+  // Matrix sidebar VU
+  const mOutL = document.getElementById('matrixOutL');
+  const mOutR = document.getElementById('matrixOutR');
+  if(mOutL) mOutL.style.width = (a*100).toFixed(0)+'%';
+  if(mOutR) mOutR.style.width = (aR*100).toFixed(0)+'%';
+
+  // Classic vertical MIDI meters
+  const mu = 0.12 + 0.55*Math.abs(Math.sin(t*1.15)) * (0.3 + 0.7*Math.abs(Math.sin(t*0.22)));
+  const ml = 0.08 + 0.45*Math.abs(Math.sin(t*0.9 + 1.2)) * (0.2 + 0.8*Math.abs(Math.sin(t*0.31)));
+  const mp = 0.05 + 0.35*Math.abs(Math.sin(t*0.7 + 2.1)) * (0.15 + 0.85*Math.abs(Math.sin(t*0.18)));
+  const midiU = document.getElementById('midiU');
+  const midiL = document.getElementById('midiL');
+  const midiP = document.getElementById('midiP');
+  if(midiU) midiU.style.height = (mu*100).toFixed(0)+'%';
+  if(midiL) midiL.style.height = (ml*100).toFixed(0)+'%';
+  if(midiP) midiP.style.height = (mp*100).toFixed(0)+'%';
+  peakStateMidi.u = Math.max(mu, peakStateMidi.u*0.97);
+  peakStateMidi.l = Math.max(ml, peakStateMidi.l*0.97);
+  peakStateMidi.p = Math.max(mp, peakStateMidi.p*0.97);
+  const midiUPeak = document.getElementById('midiUPeak');
+  const midiLPeak = document.getElementById('midiLPeak');
+  const midiPPeak = document.getElementById('midiPPeak');
+  if(midiUPeak) midiUPeak.style.bottom = (peakStateMidi.u*100).toFixed(0)+'%';
+  if(midiLPeak) midiLPeak.style.bottom = (peakStateMidi.l*100).toFixed(0)+'%';
+  if(midiPPeak) midiPPeak.style.bottom = (peakStateMidi.p*100).toFixed(0)+'%';
+  // LIVE MIDI LEDs
+  const ledU = document.getElementById('midiLedU');
+  const ledL = document.getElementById('midiLedL');
+  const ledP = document.getElementById('midiLedP');
+  if(ledU) ledU.classList.toggle('on', mu > 0.35);
+  if(ledL) ledL.classList.toggle('on', ml > 0.32);
+  if(ledP) ledP.classList.toggle('on', mp > 0.28);
+  // LIVE clip / saturation lamp
+  const clip = document.getElementById('clipLed');
+  if(clip) clip.classList.toggle('on', a > 0.72 || aR > 0.72);
+}
+
+/* ========== CONTROLS ========== */
+/* Header leslie pill cycles exclusive states */
+document.getElementById('leslieText')?.parentElement?.addEventListener('click', function(){
+  const order = ['chorale','tremolo','break'];
+  const i = order.indexOf(leslieState);
+  setLeslieState(order[(i+1)%order.length]);
+});
+
+/* ========== LOOP ========== */
+function loop(){
+  t += 0.04;
+  updateMeters();
+  requestAnimationFrame(loop);
+}
+loop();
+
+/* Theme cycle: dark (Hammond) → modern (Compresseur) → light → high-contrast → dark */
+(function(){
+  const btn = document.getElementById('themeToggle');
+  const root = document.documentElement;
+  const themes = ['dark','modern','light','hc'];
+  const icons = { dark:'☀', modern:'◆', light:'☾', hc:'◐' };
+  const nextLabel = { dark:'sombre Compresseur', modern:'clair', light:'haut contraste', hc:'sombre Hammond' };
+  let cLvl = 0; try{ cLvl = Math.max(0, Math.min(4, parseInt(localStorage.getItem('nova-contrast')) || 0)); }catch(e){}
+  function syncContrastUI(){
+    document.querySelectorAll('.cpill').forEach(p=>{
+      p.querySelector('.clv').textContent = cLvl;
+      p.querySelector('[data-c="-1"]').disabled = cLvl <= 0; p.querySelector('[data-c="1"]').disabled = cLvl >= 4;
+      p.classList.toggle('dis', currentTheme === 'hc');
+      p.title = currentTheme === 'hc' ? 'Réglage indisponible avec le thème haut contraste' : 'Contraste : niveau ' + cLvl + ' sur 4';
+    });
+  }
+  function apply(theme){
+    root.classList.remove('theme-modern','theme-light','theme-hc');
+    if(theme === 'modern') root.classList.add('theme-modern');
+    if(theme === 'light') root.classList.add('theme-light');
+    if(theme === 'hc') root.classList.add('theme-hc');
+    currentTheme = theme;
+    root.setAttribute('data-ctl', THEME_CTL[theme]);
+    NovaContrast.apply(theme === 'hc' ? 0 : cLvl); syncContrastUI();
+    if(btn){
+      btn.textContent = icons[theme] || '☀';
+      btn.title = 'Thème actuel : ' + theme + ' — cliquer pour passer au thème ' + nextLabel[theme];
+    }
+    try{ localStorage.setItem('nova-theme', theme); }catch(e){}
+    // les couleurs des potards sont mises en cache dans le canvas au dessin : il faut
+    // les redessiner explicitement après un changement de thème.
+    if(typeof knobEntries !== 'undefined'){
+      knobEntries.forEach(drawKnob);
+      if(typeof syncVibeChip === 'function') syncVibeChip();
+    }
+  }
+  let theme = 'dark';
+  try{
+    const s = localStorage.getItem('nova-theme');
+    if(themes.includes(s)) theme = s;
+  }catch(e){}
+  apply(theme);
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.cpill button'); if(!b) return;
+    cLvl = Math.max(0, Math.min(4, cLvl + parseInt(b.dataset.c)));
+    try{ localStorage.setItem('nova-contrast', cLvl); }catch(_){}
+    apply(theme);
+  });
+  btn?.addEventListener('click', () => {
+    const i = themes.indexOf(theme);
+    theme = themes[(i + 1) % themes.length];
+    apply(theme);
+  });
+})();
+
+NovaScroll.attach(document.getElementById('msScroll'), document.getElementById('msBar'));
+
+/* responsive */
+const app = document.getElementById('app');
+const NR = NovaResize.attach({frames: [app], w: 1180, h: 1020, margin: 36});
+NovaHelp.init({root: app});
+</script>
+</body>
+</html>

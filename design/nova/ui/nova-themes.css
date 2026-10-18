@@ -1,0 +1,122 @@
+/*
+  NOVA — Design Tokens partagés
+  =============================================================
+  Définit les thèmes CLAIR et HAUT CONTRASTE communs à toutes les
+  UI d'effets NOVA (Compresseur, Hammond, et les prochaines).
+
+  Le thème SOMBRE n'est PAS centralisé ici : chaque plugin garde
+  son propre skin sombre (c'est ce qui fait son identité visuelle
+  — orange/rose moderne pour le compresseur, bois/bakélite pour
+  le Hammond). Seuls Clair et Haut Contraste sont communs.
+
+  -------------------------------------------------------------
+  UTILISATION DANS UNE NOUVELLE UI
+  -------------------------------------------------------------
+  1. Charger ce fichier avant le <style> du plugin :
+       <link rel="stylesheet" href="nova-themes.css">
+
+  2. Dans le <style> du plugin, faire pointer les variables
+     LOCALES (celles que le reste du CSS du plugin utilise déjà,
+     ex. --bg-app, --accent, --pink, --wood-dark, --gold…) vers
+     les jetons --nova-* ci-dessous, pour les thèmes clair et HC
+     uniquement :
+
+       [data-theme="light"]{            (ou html.theme-light)
+         --bg-app:   var(--nova-light-bg-2);
+         --accent:   var(--nova-light-accent);
+         --text:     var(--nova-light-text);
+         ...
+       }
+       [data-theme="hc"]{               (ou html.theme-hc)
+         --bg-app:   var(--nova-hc-bg);
+         --accent:   var(--nova-hc-accent);
+         --text:     var(--nova-hc-text);
+         ...
+       }
+
+     Le thème sombre (:root, sans attribut/classe) reste défini
+     en dur dans le CSS du plugin, avec ses propres couleurs.
+
+  3. Ce fichier ne prend pas parti sur le mécanisme d'activation
+     (attribut [data-theme] comme le compresseur, ou classe
+     html.theme-xxx comme le Hammond) : il fournit uniquement les
+     valeurs de couleur, à toi de les brancher sur ta convention.
+
+  -------------------------------------------------------------
+  TABLE DE CORRESPONDANCE (référence rapide)
+  -------------------------------------------------------------
+  Rôle                  | Compresseur      | Hammond
+  -----------------------+------------------+-------------------
+  fond clair (panneau)   | --bg-panel       | --wood-light / --app-bg1
+  fond applicatif        | --bg-app         | --wood-mid / --app-bg2
+  fond sombre (stage)    | --stage-bg       | --wood-dark / --app-bg3 / --stage-bg
+  carte / input          | --bg-card        | --bakelite
+  bordure                | --border         | --panel-border
+  accent principal        | --accent         | --accent
+  accent principal clair  | --accent-2       | --accent-2
+  accent secondaire       | --pink           | --gold
+  accent secondaire clair | --pink-2         | --gold-dim
+  texte                   | --text           | --text / --cream
+  texte atténué           | --text-dim       | --text-dim / --cream-dim
+  texte très atténué      | --text-dim2      | --text-dim2
+  grille / séparateurs    | --grid           | --grid
+  fond de panneau (verre) | --panel-bg       | --panel-bg
+  en-tête (haut/bas)      | --header-bg      | --header-bg1 / --header-bg2
+  bordure de cadre        | --frame-border   | --frame-ring
+=============================================================
+*/
+
+:root{
+
+  /* ===================== THÈME CLAIR ===================== */
+  --nova-light-bg-1: #ede2cc;        /* fond le plus clair (panneau) */
+  --nova-light-bg-2: #e4d8c4;        /* fond applicatif */
+  --nova-light-bg-3: #d8cbb0;        /* fond le plus sombre (stage) */
+  --nova-light-card: #e9dfc9;        /* cartes / champs */
+  --nova-light-border: #cfc0a2;
+  --nova-light-border-strong: #d3c4a4;
+  --nova-light-border-edge: #b3a280;
+
+  --nova-light-accent: #c97b4a;
+  --nova-light-accent-2: #d99566;
+  --nova-light-accent-secondary: #b98883;     /* rose (compresseur) / gold (Hammond) */
+  --nova-light-accent-secondary-2: #c9a09b;
+
+  --nova-light-text: #362d20;
+  --nova-light-text-dim: #7a6f5c;
+  --nova-light-text-dim2: #a89b83;
+  --nova-light-grid: #d8cbb0;
+
+  --nova-light-panel-bg: rgba(233,223,201,0.92);
+  --nova-light-header-bg-1: #ede2cc;
+  --nova-light-header-bg-2: #e9dfc9;
+  --nova-light-stage-bg: #d8cbb0;
+
+
+  /* ================ THÈME HAUT CONTRASTE =================
+     WCAG 2.1/2.2 — 1.4.6 contraste renforcé (≥ 7:1 texte),
+     1.4.11 contraste des composants (≥ 3:1), 1.4.1 ne pas coder
+     l'info uniquement par la couleur, 2.4.7 focus visible.
+     Noir pur / blanc pur, pas de transparence, deux teintes
+     d'accent (jaune = principal, cyan = secondaire) pour garder
+     une distinction entre deux contrôles liés sans dépendre
+     d'un seul et même jaune partout.
+  ========================================================= */
+  --nova-hc-bg: #000000;
+  --nova-hc-panel-bg: #000000;
+  --nova-hc-border: #ffffff;
+
+  --nova-hc-accent: #ffd400;              /* accent principal */
+  --nova-hc-accent-2: #ffe066;
+  --nova-hc-accent-secondary: #33c7ff;    /* accent secondaire (rose/gold) */
+  --nova-hc-accent-secondary-2: #7fe0ff;
+
+  --nova-hc-text: #ffffff;
+  --nova-hc-text-dim: #e6e6e6;
+  --nova-hc-text-dim2: #cfcfcf;
+  --nova-hc-grid: #ffffff;
+
+  --nova-hc-meter-green: #00ff00;
+  --nova-hc-meter-amber: #ffd400;
+  --nova-hc-meter-red: #ff0000;
+}

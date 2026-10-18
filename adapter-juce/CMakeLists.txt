@@ -48,6 +48,7 @@ target_sources(Neptune PRIVATE
   src/FmSysexIO.cpp
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
+  src/ShaperEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 
@@ -100,6 +101,46 @@ target_compile_definitions(Moussaillon PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(Moussaillon
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- La Flèche : le shaper de transitoires (série NOVA), plugin CLAP effet indépendant ---------------------------------------------
+# Même DSP (neptune_core : ShaperModule) et même interface (ShaperEditor) que l'insert de Neptune ; entrée sidechain de l'hôte.
+set(LAFLECHE_CLAP_ID "com.tournedosrossini.lafleche" CACHE STRING "Identifiant CLAP du shaper de transitoires")
+
+juce_add_plugin(LaFleche
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "LaFleche"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Flch
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        LaFleche
+  CLAP_ID       "${LAFLECHE_CLAP_ID}"
+  CLAP_FEATURES audio-effect transient-shaper stereo)
+
+target_sources(LaFleche PRIVATE
+  src/ShaperPlugin.cpp
+  src/ShaperEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(LaFleche PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(LaFleche
   PRIVATE
     neptune_core
     juce::juce_audio_utils

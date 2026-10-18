@@ -12,10 +12,21 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (handle_.instance == nullptr) return;
     bypassId_ = processor_.insertBypassParam (kind, index, slot);
 
-    UtilityEditor::Options opt;
-    opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
-    content_ = std::make_unique<UtilityEditor> (*handle_.host, &handle_.instance->runner.module(), palette_, tr_, knobStyle, opt);
-    addAndMakeVisible (*content_);
+    const bool isShaper = handle_.instance->type == "shaper";
+    if (isShaper)
+    {
+        ShaperEditor::Options opt;
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        shaperContent_ = std::make_unique<ShaperEditor> (*handle_.host, static_cast<const ShaperModule*> (&handle_.instance->runner.module()), palette_, tr_, knobStyle, opt);
+        addAndMakeVisible (*shaperContent_);
+    }
+    else
+    {
+        UtilityEditor::Options opt;
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        content_ = std::make_unique<UtilityEditor> (*handle_.host, &handle_.instance->runner.module(), palette_, tr_, knobStyle, opt);
+        addAndMakeVisible (*content_);
+    }
 
     juce::String where = kind == NeptuneProcessor::StripKind::Track
                              ? juce::String::fromUTF8 (tr_.format ("insert.where_track", { std::to_string (index + 1) }).c_str())
@@ -24,7 +35,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                                    : kind == NeptuneProcessor::StripKind::Parallel
                                          ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
                                          : text ("insert.where_master");
-    title_ = text ("module.utility") + "  -  " + where + "  -  "
+    title_ = text (isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 
     bypassButton_.setButtonText (text ("insert.bypass"));
@@ -70,6 +81,7 @@ void InsertOverlay::resized()
     bypassButton_.setBounds (head.removeFromRight (110).reduced (2));
     r.removeFromTop (4);
     if (content_ != nullptr) content_->setBounds (r);
+    if (shaperContent_ != nullptr) shaperContent_->setBounds (r);
 }
 
 void InsertOverlay::paint (juce::Graphics& g)
@@ -93,5 +105,6 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
 {
     if (k == juce::KeyPress::escapeKey) { if (onClose_) onClose_(); return true; }
     if (content_ != nullptr) return content_->keyPressed (k);
+    if (shaperContent_ != nullptr) return shaperContent_->keyPressed (k);
     return false;
 }

@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op et Orgamon)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon et La Flèche)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -88,6 +88,9 @@ jobs:
           ORG=$(find build/adapter-juce/Orgamon_artefacts -name 'Orgamon.clap' -print -quit)
           test -n "$ORG" || { echo "Orgamon.clap introuvable"; exit 1; }
           "$CV" validate "$ORG"
+          LAF=$(find build/adapter-juce/LaFleche_artefacts -name 'LaFleche.clap' -print -quit)
+          test -n "$LAF" || { echo "LaFleche.clap introuvable"; exit 1; }
+          "$CV" validate "$LAF"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -207,6 +210,30 @@ jobs:
         with:
           name: Orgamon-${{ matrix.name }}
           path: dist-org/*
+          if-no-files-found: error
+
+      # Le shaper de transitoires séparé (La Flèche), archivé à part.
+      - name: Archive LaFleche.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/LaFleche_artefacts -name 'LaFleche.clap' -print -quit)
+          test -n "$CLAP" || { echo "LaFleche.clap introuvable"; exit 1; }
+          mkdir -p dist-laf/stage
+          cp -R "$CLAP" dist-laf/stage/
+          cd dist-laf/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../LaFleche-${{ matrix.name }}.zip" LaFleche.clap
+          else
+            tar -czf "../LaFleche-${{ matrix.name }}.tar.gz" LaFleche.clap
+          fi
+          cd ../..
+          rm -rf dist-laf/stage
+          ls -la dist-laf
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: LaFleche-${{ matrix.name }}
+          path: dist-laf/*
           if-no-files-found: error
 
   release:

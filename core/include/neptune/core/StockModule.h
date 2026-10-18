@@ -41,8 +41,15 @@ public:
     virtual void reset() noexcept = 0;
     // Traite `n` échantillons en place. Aucune allocation.
     virtual void process (float* left, float* right, int n, const ParameterSet& params) noexcept = 0;
-    // Latence déclarée à l'hôte (échantillons) ; 0 si aucune.
+    // Latence déclarée à l'hôte (échantillons) ; 0 si aucune. Elle peut dépendre de réglages non automatisables (lookahead, oversampling).
     virtual int latencySamples (const ParameterSet&) const noexcept { return 0; }
+    // Borne supérieure de la latence à la cadence donnée (dimensionne le retard du signal sec du ModuleRunner).
+    virtual int maxLatencySamples (double /*sampleRate*/) const noexcept { return 0; }
+
+    // Entrée de clé externe (sidechain), pour les modules qui en ont une : appelée avant process(), valable pour ce bloc seulement ;
+    // nuls : pas de clé branchée.
+    virtual bool wantsKey() const noexcept { return false; }
+    virtual void setKey (const float* /*left*/, const float* /*right*/) noexcept {}
 
     // Valeurs d'affichage (vu-mètres, corrélateur...), lisibles depuis l'interface sans verrou.
     virtual int numMeters() const noexcept { return 0; }
@@ -70,6 +77,9 @@ public:
     void process (float* left, float* right, int n, bool bypassed) noexcept;
     // Idem, le bypass est lu dans le paramètre `stock::bypass` du module (plugin séparé).
     void process (float* left, float* right, int n) noexcept { process (left, right, n, params_.getAt (idxBypass_) >= 0.5); }
+    // Clé externe de ce bloc (n échantillons, ou nuls) : transmise au module juste avant son traitement.
+    void setKey (const float* left, const float* right) noexcept { keyL_ = left; keyR_ = right; }
+    bool wantsKey() const noexcept { return module_->wantsKey(); }
 
     int latencySamples() const noexcept { return module_->latencySamples (params_); }
 
@@ -81,6 +91,10 @@ private:
     double sampleRate_ = 0.0;
     int maxBlock_ = 0;
     std::vector<float> dryL_, dryR_;
+    std::vector<float> ringL_, ringR_;     // retard du signal sec : le module a une latence, le sec doit lui être aligné (mix, bypass)
+    std::size_t ringPos_ = 0;
+    int ringLatency_ = 0;
+    const float *keyL_ = nullptr, *keyR_ = nullptr;
     float lastIn_ = 1.0f, lastOut_ = 1.0f, lastMix_ = 1.0f;
     bool idle_ = false; // contourné depuis un moment : le module n'est plus traité
 };

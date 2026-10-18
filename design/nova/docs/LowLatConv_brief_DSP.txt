@@ -1,0 +1,112 @@
+NOVA LowLatConv - BRIEF POUR LA DISCUSSION DSP
+==============================================
+
+Contexte
+--------
+Plugin CLAP (DPF + NanoVG), convolution a basse latence, suite NOVA.
+L'UI est en cours de conception (base : UI du compresseur NOVA).
+J'ai besoin de plusieurs elements cote DSP pour brancher l'UI.
+Merci de me redonner, avec le code ou les extraits correspondants, ce qui suit.
+
+
+1. GESTION DU CHEMIN DU FICHIER IR (state)
+------------------------------------------
+Le chemin n'est PAS un parametre (un parametre DPF est un float) : c'est un state.
+Decision prise : state "ir_path", avec le flag kStateIsFilenamePath.
+
+Je voudrais :
+ a) Le code actuel de initState() (ou ce qu'il faut ajouter) pour declarer
+    le state "ir_path" avec kStateIsFilenamePath.
+ b) Le code de setState(key, value) et de getState(key) pour "ir_path".
+ c) Comment le chargement de l'IR est lance quand le state change :
+    - thread dedie (jamais sur le thread audio) ?
+    - que se passe-t-il si un nouveau chemin arrive pendant un chargement ?
+    - le chemin est-il relatif au projet ou absolu ?
+ d) Comment pIRStatus (No IR / Loading / Loaded / Error) et pIRLengthMs
+    sont mis a jour pendant et apres le chargement.
+ e) Formats de fichiers acceptes (wav seul ? flac ? multicanal ? frequences
+    d'echantillonnage differentes de celle de l'hote : reechantillonnage ?).
+
+Cote UI j'appellerai : setState("ir_path", chemin), et requestStateFile()
+pour ouvrir le selecteur de fichier natif.
+
+
+2. DONNEES DE L'IR A ENVOYER A L'UI (affichage)
+-----------------------------------------------
+L'UI doit dessiner l'IR APRES transformations (trim, stretch, attack, decay,
+reverse, normalisation, mode d'entree), en deux vues :
+ - WAVE : enveloppe temporelle (crete min/max par colonne, ~500-1000 points)
+ - SPECTRUM : spectre de l'IR (FFT, magnitude en dB, axe frequentiel log,
+   ~200-300 points entre 20 Hz et 20 kHz)
+
+Questions :
+ a) Ces donnees sont-elles (ou peuvent-elles etre) calculees cote DSP/thread
+    de chargement, apres chaque reconstruction de l'IR ?
+ b) Comment les transmettre a l'UI ? Proposition a discuter :
+    state en lecture seule (ex. "ir_display", tableau de floats encode),
+    ou autre mecanisme. Quelle taille maximale raisonnable ?
+ c) Comment l'UI sait-elle qu'une nouvelle version des donnees est prete
+    (changement de pIRStatus vers Loaded, compteur de version, ...) ?
+ d) Longueur et duree reelle de l'IR apres transformations (pIRLengthMs suffit ?).
+
+
+3. PARAMETRES QUI RECONSTRUISENT L'IR (non automatisables)
+----------------------------------------------------------
+pInputMode, pStretch, pAutoTrim, pBegin, pEnd, pAutoLen, pAttack, pDecay,
+pReverse, pNorm.
+
+ a) Comportement actuel quand l'un change : reconstruction complete de l'IR ?
+    dans quel thread ? avec quelle duree typique ?
+ b) Cote UI, j'appliquerai la valeur au RELACHEMENT du glisser (pas en continu).
+    Est-ce compatible avec le DSP actuel (editParameter / setParameterValue) ?
+ c) Pendant la reconstruction : l'audio continue-t-il avec l'ancienne IR
+    (double buffering, crossfade) ou y a-t-il un trou ?
+ d) pAutoLen / pAutoTrim : quand actifs, est-ce que pBegin / pEnd sont ignores ?
+    (pour griser les reglages correspondants dans l'UI)
+
+
+4. CHAINE DE TRAITEMENT (ordre exact)
+-------------------------------------
+Hypothese a confirmer : entree -> InGain -> (pre-delay) -> convolution -> EQ de
+sortie (HP, LP, 3 bandes) -> Width -> mix Dry/Wet -> OutGain.
+ a) L'EQ s'applique-t-il bien uniquement au signal wet ?
+ b) Ou s'applique pPreDelay (wet seulement ?) et pWidth ?
+ c) Dry/Wet : -100 dB correspond-il a "coupe" (-inf) ? (affichage UI "-inf")
+ d) Latence reportee a l'hote : valeur, et depend-elle de parametres
+    (taille de partition, pre-delay) ? Je veux l'afficher dans la barre du bas.
+
+
+5. DONNEES POUR LES VU-METRES
+-----------------------------
+Le module vu-metres du compresseur est repris (IN / OUT, mode PEAK cyclique :
+Peak, RMS, VU, EBU-S, EBU-M, profils RMS personnalises) ; le LRA est supprime.
+ a) Les niveaux IN / OUT (L et R) sont-ils deja mesures cote DSP ?
+    Ou sont-ils mesures (avant/apres gain, avant/apres EQ) ?
+ b) Comment les envoyer a l'UI (sorties de metering DPF, memoire partagee, ...) ?
+    Frequence de rafraichissement visee : ~30-60 Hz.
+ c) Quels modes d'integration sont calcules cote DSP et lesquels cote UI ?
+
+
+6. A/B (comparaison de reglages)
+--------------------------------
+A = jeu automatisable ; B = slot temporaire de comparaison, non automatisable,
+avec action "copier B dans A".
+ a) Les parametres d'IR (non automatisables) font-ils partie du jeu A/B ?
+    Si oui, changer de slot declenche une reconstruction de l'IR.
+ b) Le chemin du fichier IR fait-il partie du jeu A/B ?
+
+
+7. DIVERS
+---------
+ - Liste exacte des entrees / sorties audio du plugin (stereo ? entree
+   sidechain ? MIDI ?).
+ - Le plugin a-t-il deja des presets internes ? Format ?
+ - Valeurs minimales / maximales ou courbes particulieres souhaitees pour
+   l'affichage (pre-delay 0-2000 ms, dry/wet en dB) : echelle lineaire ou log
+   pour les potards ? (Le flag kFlagLog existe deja pour Freq et Q.)
+
+
+Ce que je fournis en retour
+---------------------------
+Mockup HTML de l'UI (page 1 convolution, page 2 EQ de sortie, page 3 Settings),
+puis portage NanoVG une fois les echanges DSP <-> UI valides.

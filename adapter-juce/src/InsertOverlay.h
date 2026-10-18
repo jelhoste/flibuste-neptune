@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include "PluginProcessor.h"
+#include "ShaperEditor.h"
 #include "UtilityEditor.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
@@ -36,6 +37,7 @@ private:
     std::function<void()> onClose_;
     NeptuneProcessor::InsertHandle handle_;
     std::unique_ptr<UtilityEditor> content_;
+    std::unique_ptr<ShaperEditor> shaperContent_;
     juce::TextButton bypassButton_, closeButton_;
     juce::String title_;
     juce::Rectangle<int> panel_;
