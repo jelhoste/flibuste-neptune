@@ -372,8 +372,8 @@ void KnobCard::resized()
 {
     knob_->setScale (skin_.scale());
     const auto b = getLocalBounds();
-    const int side = std::min (skin_.ipx (60.0f), b.getWidth() - skin_.ipx (8.0f));
-    knob_->setBounds (juce::Rectangle<int> (side, side).withCentre ({ b.getCentreX(), skin_.ipx (10.0f + 14.0f) + side / 2 }));
+    const int side = std::min (skin_.ipx (compact_ ? 48.0f : 60.0f), b.getWidth() - skin_.ipx (8.0f));
+    knob_->setBounds (juce::Rectangle<int> (side, side).withCentre ({ b.getCentreX(), skin_.ipx (compact_ ? 26.0f : 28.0f) + side / 2 }));
 }
 
 void KnobCard::paint (juce::Graphics& g)
@@ -387,11 +387,11 @@ void KnobCard::paint (juce::Graphics& g)
         g.drawRoundedRectangle (b, rad, skin_.borderWidth());
     }
     g.setColour (pink_ ? skin_.colour (Token::Pink2) : skin_.colour (Token::TextDim));
-    g.setFont (skin_.font (10.0f, true));
-    g.drawText (title_, b.withTrimmedTop (skin_.px (10.0f)).withHeight (skin_.px (14.0f)), juce::Justification::centred, true);
+    g.setFont (skin_.font (compact_ ? 9.0f : 10.0f, true));
+    g.drawText (title_, b.withTrimmedTop (skin_.px (compact_ ? 6.0f : 10.0f)).withHeight (skin_.px (14.0f)), juce::Justification::centred, true);
     const auto kb = knob_->getBounds().toFloat();
     g.setColour (skin_.colour (Token::Text));
-    g.setFont (skin_.font (14.0f, true));
+    g.setFont (skin_.font (compact_ ? 11.0f : 14.0f, true));
     g.drawText (valueText_, juce::Rectangle<float> (b.getX(), kb.getBottom() + skin_.px (2.0f), b.getWidth(), skin_.px (18.0f)),
                 juce::Justification::centred, true);
     if (lo_.isNotEmpty() || hi_.isNotEmpty())
@@ -509,7 +509,7 @@ bool VMeter::update (float l, float r)
 void VMeter::mouseUp (const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu()) return;
-    if (modeArea().contains (e.position)) { if (onModeClick) onModeClick(); }
+    if (showMode_ && modeArea().contains (e.position)) { if (onModeClick) onModeClick(); }
     else resetPeak();
 }
 
@@ -550,6 +550,7 @@ void VMeter::paint (juce::Graphics& g)
                 b.withTop (bars.getBottom() + skin_.px (4.0f)).withHeight (skin_.px (12.0f)), juce::Justification::centred);
     g.drawText (juce::String (kind_ == Kind::Level ? std::max (peak_[0], peak_[1]) : -std::max (peak_[0], peak_[1]), 1),
                 b.withTop (bars.getBottom() + skin_.px (16.0f)).withHeight (skin_.px (12.0f)), juce::Justification::centred);
+    if (! showMode_) return;
     const auto m = modeArea();
     skin_.fill (g, Token::BgCard, m, skin_.px (5.0f));
     g.setColour (skin_.colour (Token::CtlBd));

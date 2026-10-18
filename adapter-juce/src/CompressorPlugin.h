@@ -6,7 +6,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <memory>
 #include "HostProbe.h"
 #include "ParamHost.h"
-#include "CompressorEditor.h"
+#include "NovaCompressorEditor.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/StockModule.h"
@@ -14,7 +14,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Undo.h"
 
 // « Compresseur » (nom provisoire) : le compresseur de la suite (porté de ZL Compressor), publié comme plugin CLAP indépendant. Même DSP et même interface
-// que l'insert de Neptune (CompressorModule / CompressorEditor), autre adaptateur : ici, c'est l'hôte qui porte le plugin. Entrée sidechain de l'hôte.
+// que l'insert de Neptune (CompressorModule / NovaCompressorEditor), autre adaptateur : ici, c'est l'hôte qui porte le plugin. Entrée sidechain de l'hôte.
 class CompressorProcessor : public juce::AudioProcessor, private juce::Timer,
                              public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                              public ParamHost
@@ -82,5 +82,6 @@ public:
 private:
     CompressorProcessor& processor_;
     neptune::core::i18n::Translator tr_;
-    std::unique_ptr<GenericModuleEditor> content_;
+    std::unique_ptr<NovaCompressorEditor> content_;
+    juce::ComponentBoundsConstrainer constrainer_;
 };

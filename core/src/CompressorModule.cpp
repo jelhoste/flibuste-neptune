@@ -269,6 +269,42 @@ double CompressorModule::curveOutputDb (const ParameterSet& params, double input
     return c.evalOutput (inputDb);
 }
 
+double CompressorModule::sideBandResponseDb (const ParameterSet& params, int b, double f, double fs) noexcept
+{
+    if (b < 0 || b >= kBands || std::lround (params.get (bandParam (b, kStatus))) != kOn) return 0.0;
+    const int type = static_cast<int> (std::lround (params.get (bandParam (b, kType))));
+    const int order = static_cast<int> (std::lround (params.get (bandParam (b, kOrder))));
+    const double freq = params.get (bandParam (b, kFreq)), gain = params.get (bandParam (b, kGain)), q = params.get (bandParam (b, kQ));
+    const int slope = 6 * (order <= 1 ? order + 1 : order == 2 ? 4 : order == 3 ? 8 : order == 4 ? 12 : 16);
+    double mag = 1.0;
+    switch (static_cast<FilterType> (type))
+    {
+        case kLowPass: case kHighPass:
+        {
+            ButterworthCascade c;
+            c.design (type == kHighPass, fs, freq, slope);
+            mag = c.magnitude (fs, f);
+            break;
+        }
+        case kPeak: mag = BiquadCoefs::peaking (fs, freq, gain, q).magnitude (fs, f); break;
+        case kLowShelf: mag = BiquadCoefs::lowShelf (fs, freq, gain, q).magnitude (fs, f); break;
+        case kHighShelf: mag = BiquadCoefs::highShelf (fs, freq, gain, q).magnitude (fs, f); break;
+        case kNotch: mag = BiquadCoefs::notch (fs, freq, q).magnitude (fs, f); break;
+        case kBandPass: mag = BiquadCoefs::bandpass (fs, freq, q).magnitude (fs, f); break;
+        case kTiltShelf:
+            mag = BiquadCoefs::lowShelf (fs, freq, gain * 0.5, 0.707).magnitude (fs, f) * BiquadCoefs::highShelf (fs, freq, -gain * 0.5, 0.707).magnitude (fs, f);
+            break;
+    }
+    return 20.0 * std::log10 (std::max (mag, 1.0e-9));
+}
+
+double CompressorModule::sideResponseDb (const ParameterSet& params, double f, double fs) noexcept
+{
+    double sum = 0.0;
+    for (int b = 0; b < kBands; ++b) sum += sideBandResponseDb (params, b, f, fs);
+    return sum;
+}
+
 // Réduction (dB) pour un tampon de clé, selon le style ; remplace le contenu du tampon.
 void CompressorModule::styleProcess (int c, float* buf, int n) noexcept
 {

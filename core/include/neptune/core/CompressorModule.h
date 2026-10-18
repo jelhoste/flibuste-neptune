@@ -60,6 +60,10 @@ public:
     }
     // Courbe de gain courante (pour l'affichage) : niveau de sortie (dB) pour un niveau d'entrée (dB).
     double curveOutputDb (const ParameterSet&, double inputDb) const noexcept;
+    // Réponse (dB) d'un filtre de la clé à la fréquence f (0 dB si le filtre n'est pas en service), ou de l'ensemble des filtres en service.
+    // Mêmes coefficients que le DSP ; `fs` est la fréquence d'échantillonnage de travail (sans suréchantillonnage).
+    static double sideBandResponseDb (const ParameterSet&, int band, double freq, double fs) noexcept;
+    static double sideResponseDb (const ParameterSet&, double freq, double fs) noexcept;
 
 private:
     struct Settings

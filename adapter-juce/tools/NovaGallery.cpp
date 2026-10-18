@@ -2,6 +2,11 @@
 // Usage : NovaGallery <dossier de sortie>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../src/NovaKit.h"
+#include "../src/NovaCompressorEditor.h"
+#include "neptune/core/CompressorModule.h"
+#include "neptune/core/StockModule.h"
+#include <cmath>
+#include <memory>
 
 using namespace neptune::core;
 namespace th = neptune::core::theme;
@@ -16,6 +21,17 @@ struct FakeHost : ParamHost
     void uiSetNormalised (ParamId id, double n) override { set.setNormalized (id, n); }
     void uiEndEdit (ParamId) override {}
     void uiResetToDefault (ParamId id) override { set.reset (id); }
+};
+
+struct RunnerHost : ParamHost
+{
+    ModuleRunner& runner;
+    explicit RunnerHost (ModuleRunner& r) : runner (r) {}
+    ParameterSet& parameters() override { return runner.params(); }
+    void uiBeginEdit (ParamId) override {}
+    void uiSetNormalised (ParamId id, double n) override { runner.params().setNormalized (id, n); }
+    void uiEndEdit (ParamId) override {}
+    void uiResetToDefault (ParamId id) override { runner.params().reset (id); }
 };
 
 juce::Path iconPath (int kind)
@@ -159,6 +175,63 @@ int main (int argc, char** argv)
         const auto& def = th::definition (c.id);
         Scene scene (th::withContrast (def, 0), def.knob, c.id, c.scale, host);
         const auto img = scene.createComponentSnapshot (scene.getLocalBounds(), true, 1.0f);
+        juce::PNGImageFormat png;
+        juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+        if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+        std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+    }
+    // ---- l'éditeur réel du compresseur : trois pages, quatre thèmes, plusieurs échelles
+    ModuleRunner runner (std::make_unique<CompressorModule>());
+    runner.prepare (48000.0, 512);
+    RunnerHost rhost (runner);
+    auto& ps = runner.params();
+    ps.set (compressor::threshold, -24.0);
+    ps.set (compressor::ratio, 4.0);
+    ps.set (compressor::attack, 10.0);
+    ps.set (compressor::release, 150.0);
+    ps.set (compressor::makeup, 3.2);
+    ps.set (compressor::bandParam (0, compressor::kStatus), compressor::kOn);
+    ps.set (compressor::bandParam (0, compressor::kType), compressor::kHighPass);
+    ps.set (compressor::bandParam (0, compressor::kFreq), 120.0);
+    ps.set (compressor::bandParam (1, compressor::kStatus), compressor::kOn);
+    ps.set (compressor::bandParam (1, compressor::kFreq), 2500.0);
+    ps.set (compressor::bandParam (1, compressor::kGain), 6.0);
+    ps.set (compressor::bandParam (1, compressor::kQ), 1.2);
+    ps.set (compressor::bandParam (2, compressor::kStatus), compressor::kOn);
+    ps.set (compressor::bandParam (2, compressor::kFreq), 400.0);
+    ps.set (compressor::bandParam (2, compressor::kGain), -5.0);
+    ps.set (compressor::bandParam (4, compressor::kStatus), compressor::kOn);
+    ps.set (compressor::bandParam (4, compressor::kType), compressor::kLowPass);
+    ps.set (compressor::bandParam (4, compressor::kFreq), 9000.0);
+    {
+        std::vector<float> l (512), r (512);
+        for (int b = 0; b < 40; ++b)
+        {
+            for (int i = 0; i < 512; ++i)
+            {
+                const float amp = b < 30 ? 0.5f : 0.06f;
+                l[static_cast<std::size_t> (i)] = r[static_cast<std::size_t> (i)] = amp * std::sin (0.058f * static_cast<float> (b * 512 + i));
+            }
+            runner.process (l.data(), r.data(), 512, false);
+        }
+    }
+    const i18n::Translator tr ("en");
+    struct EdCase { const char* name; th::ThemeId id; float scale; int page; };
+    const EdCase eds[] = { { "comp-dark-p0", th::ThemeId::Dark, 1.0f, 0 }, { "comp-dark-p1", th::ThemeId::Dark, 1.0f, 1 }, { "comp-dark-p2", th::ThemeId::Dark, 1.0f, 2 },
+                           { "comp-light-p0", th::ThemeId::Light, 1.0f, 0 }, { "comp-hc-p0", th::ThemeId::HighContrast, 1.0f, 0 },
+                           { "comp-hammond-p1", th::ThemeId::Hammond, 1.0f, 1 }, { "comp-dark-p0-070", th::ThemeId::Dark, 0.7f, 0 } };
+    for (const auto& c : eds)
+    {
+        std::fprintf (stderr, "editor %s\n", c.name);
+        const auto& def = th::definition (c.id);
+        NovaCompressorEditor::Options opt;
+        opt.brand = true;
+        NovaCompressorEditor ed (rhost, static_cast<const CompressorModule*> (&runner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+        ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+        ed.setPageForTest (c.page);
+        ed.refreshNow();
+        ed.refreshNow();
+        const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
         juce::PNGImageFormat png;
         juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
         if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }

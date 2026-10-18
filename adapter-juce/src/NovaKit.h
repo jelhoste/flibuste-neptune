@@ -183,6 +183,7 @@ public:
     void setTitle (const juce::String& t) { title_ = t; repaint(); }
     void setRangeLabels (juce::String lo, juce::String hi) { lo_ = std::move (lo); hi_ = std::move (hi); resized(); repaint(); }
     void setPlain (bool plain) { plain_ = plain; repaint(); }   // sans fond de carte (zones groupées)
+    void setCompact (bool c) { compact_ = c; resized(); repaint(); }   // potard de 48 px, textes réduits (zones étroites)
     void refresh() override;
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -192,7 +193,7 @@ private:
     ParamHost& host_;
     neptune::core::ParamId id_;
     juce::String title_, lo_, hi_, valueText_;
-    bool pink_, plain_ = false;
+    bool pink_, plain_ = false, compact_ = false;
     std::uint32_t seen_ = 0xFFFFFFFFu;
     std::unique_ptr<NeptuneKnob> knob_;
 };
@@ -232,6 +233,7 @@ public:
     // Retourne true si l'affichage a changé (donc un repaint a été demandé).
     bool update (float leftDb, float rightDb);
     void setModeLabel (const juce::String& m) { mode_ = m; repaint(); }
+    void setModeVisible (bool v) { showMode_ = v; repaint(); }
     std::function<void()> onModeClick;   // clic sur le bouton de mode (PEAK / RMS ...)
     void resetPeak() { peak_[0] = peak_[1] = -120.0f; repaint(); }
 
@@ -244,7 +246,7 @@ private:
     const Skin& skin_;
     juce::String title_, mode_ = "PEAK";
     Kind kind_;
-    bool pink_;
+    bool pink_, showMode_ = true;
     float floor_ = -60.0f, ceil_ = 0.0f;
     float shown_[2] = { -120.0f, -120.0f }, peak_[2] = { -120.0f, -120.0f }, painted_[4] = { 1.0e9f, 1.0e9f, 1.0e9f, 1.0e9f };
 };

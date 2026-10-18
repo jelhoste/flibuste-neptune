@@ -20,8 +20,11 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     }
     else if (isCompressor)
     {
-        genericContent_ = makeCompressorEditor (*handle_.host, static_cast<const CompressorModule*> (&handle_.instance->runner.module()), palette_, tr_);
-        addAndMakeVisible (*genericContent_);
+        NovaCompressorEditor::Options opt;
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        compressorContent_ = std::make_unique<NovaCompressorEditor> (*handle_.host, static_cast<const CompressorModule*> (&handle_.instance->runner.module()), palette_,
+                                                                      knobStyle, tr_, opt);
+        addAndMakeVisible (*compressorContent_);
     }
     else if (isShaper)
     {
@@ -93,6 +96,7 @@ void InsertOverlay::resized()
     if (content_ != nullptr) content_->setBounds (r);
     if (shaperContent_ != nullptr) shaperContent_->setBounds (r);
     if (genericContent_ != nullptr) genericContent_->setBounds (r);
+    if (compressorContent_ != nullptr) compressorContent_->setBounds (r);
 }
 
 void InsertOverlay::paint (juce::Graphics& g)
@@ -117,6 +121,7 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
     if (k == juce::KeyPress::escapeKey) { if (onClose_) onClose_(); return true; }
     if (content_ != nullptr) return content_->keyPressed (k);
     if (shaperContent_ != nullptr) return shaperContent_->keyPressed (k);
+    if (compressorContent_ != nullptr) return compressorContent_->keyPressed (k);
     if (genericContent_ != nullptr) return genericContent_->keyPressed (k);
     return false;
 }

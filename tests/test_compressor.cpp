@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "neptune/core/CompressorModule.h"
+#include "neptune/core/CompressorPresets.h"
 #include "neptune/core/DynamicsDsp.h"
 
 using namespace neptune::core;
@@ -308,4 +309,42 @@ TEST_CASE ("compressor: parameters are declared with the documented defaults", "
     CHECK (p.find (c::oversample)->automatable == false);
     auto* m = static_cast<CompressorModule*> (&r.runner.module());
     CHECK (m->curveOutputDb (p, -6.0) == Approx (-6.0 + (1.0 / 3.0 - 1.0) * 26.0).margin (0.01));
+}
+
+TEST_CASE ("compressor: side filter response matches the filters in service", "[compressor]")
+{
+    CompRig r;
+    auto& p = r.runner.params();
+    CHECK (CompressorModule::sideResponseDb (p, 1000.0, 48000.0) == Approx (0.0).margin (1e-9));   // tous hors service
+    p.set (c::bandParam (0, c::kStatus), c::kOn);
+    p.set (c::bandParam (0, c::kType), c::kPeak);
+    p.set (c::bandParam (0, c::kFreq), 1000.0);
+    p.set (c::bandParam (0, c::kGain), 9.0);
+    CHECK (CompressorModule::sideResponseDb (p, 1000.0, 48000.0) == Approx (9.0).margin (0.05));
+    p.set (c::bandParam (1, c::kStatus), c::kOn);
+    p.set (c::bandParam (1, c::kType), c::kHighPass);
+    p.set (c::bandParam (1, c::kFreq), 500.0);
+    p.set (c::bandParam (1, c::kOrder), 1);   // 12 dB/oct
+    CHECK (CompressorModule::sideBandResponseDb (p, 1, 500.0, 48000.0) == Approx (-3.0).margin (0.1));
+    CHECK (CompressorModule::sideBandResponseDb (p, 1, 5000.0, 48000.0) == Approx (0.0).margin (0.1));
+    p.set (c::bandParam (0, c::kStatus), c::kBypassed);
+    CHECK (CompressorModule::sideBandResponseDb (p, 0, 1000.0, 48000.0) == Approx (0.0).margin (1e-9));
+}
+
+TEST_CASE ("compressor: factory presets only name declared parameters, within range", "[compressor]")
+{
+    CompRig r;
+    const auto& p = r.runner.params();
+    CHECK (compressor::factoryPresets().size() >= 5);
+    for (const auto id : compressor::presetParams()) CHECK (p.find (id) != nullptr);
+    for (const auto& preset : compressor::factoryPresets())
+        for (const auto& [id, v] : preset.values)
+        {
+            const auto* spec = p.find (id);
+            REQUIRE (spec != nullptr);
+            CHECK (spec->clamp (v) == Approx (v));
+            bool listed = false;
+            for (const auto pid : compressor::presetParams()) listed = listed || pid == id;
+            CHECK (listed);
+        }
 }
