@@ -315,7 +315,7 @@ void Switch::paint (juce::Graphics& g)
     }
     const float m = skin_.px (2.0f), th = b.getHeight() - 2.0f * m;
     const float x = on_ ? b.getRight() - m - (bezel ? th * 0.7f : th) : b.getX() + m;
-    g.setColour (bezel && on_ ? skin_.colour (Token::Accent) : skin_.colour (Token::Handle));
+    g.setColour (bezel && on_ ? skin_.colour (Token::Accent) : hc && ! on_ ? skin_.colour (Token::BgApp) : skin_.colour (Token::Handle));
     if (bezel) g.fillRoundedRectangle (x, b.getY() + m, th * 0.7f, th, skin_.px (1.0f));
     else g.fillEllipse (x, b.getY() + m, th, th);
 }
