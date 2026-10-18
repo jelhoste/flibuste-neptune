@@ -160,7 +160,7 @@ void NeptuneKnob::setParamId (neptune::core::ParamId id)
 }
 
 void paintNeptuneKnob (juce::Graphics& g, juce::Rectangle<float> b, float n, const neptune::core::theme::Palette& palette,
-                       neptune::core::theme::KnobStyle style)
+                       neptune::core::theme::KnobStyle style, float k)
 {
     auto colour = [&palette] (Token t)
     {
@@ -182,18 +182,18 @@ void paintNeptuneKnob (juce::Graphics& g, juce::Rectangle<float> b, float n, con
         g.setGradientFill (grad);
         g.fillEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
         g.setColour (colour (Token::KnobPotRing));
-        g.drawEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1.5f);
+        g.drawEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1.5f * k);
 
         g.setColour (colour (Token::Accent));
-        strokeArc (g, cx, cy, radius - 5.0f, kA0, angle, 2.4f, true);
+        strokeArc (g, cx, cy, radius - 5.0f * k, kA0, angle, 2.4f * k, true);
 
         juce::Path tri;
-        tri.addTriangle (radius - 7.0f, 0.0f, radius - 14.0f, -2.2f, radius - 14.0f, 2.2f);
+        tri.addTriangle (radius - 7.0f * k, 0.0f, radius - 14.0f * k, -2.2f * k, radius - 14.0f * k, 2.2f * k);
         g.setColour (colour (Token::KnobPotPointer));
         g.fillPath (tri, juce::AffineTransform::rotation (angle).translated (cx, cy));
 
         g.setColour (colour (Token::KnobPotCenter));
-        g.fillEllipse (cx - 4.5f, cy - 4.5f, 9.0f, 9.0f);
+        g.fillEllipse (cx - 4.5f * k, cy - 4.5f * k, 9.0f * k, 9.0f * k);
     }
     else
     {
@@ -204,21 +204,21 @@ void paintNeptuneKnob (juce::Graphics& g, juce::Rectangle<float> b, float n, con
         g.fillEllipse (cx - r * 0.72f, cy - r * 0.72f, r * 1.44f, r * 1.44f);
 
         g.setColour (colour (Token::KnobTrack).withAlpha (0.8f));
-        strokeArc (g, cx, cy, r, kA0, kA1, 5.0f, false);
+        strokeArc (g, cx, cy, r, kA0, kA1, 5.0f * k, false);
 
         const auto c1 = colour (Token::Accent).interpolatedWith (colour (Token::KnobHot), n);
         const auto c2 = colour (Token::Accent2).interpolatedWith (colour (Token::KnobHot2), n);
         for (int i = 3; i >= 1; --i)
         {
             g.setColour (c1.withAlpha (0.07f * static_cast<float> (i)));
-            strokeArc (g, cx, cy, r, kA0, angle, 5.0f + static_cast<float> (i) * 2.5f, true);
+            strokeArc (g, cx, cy, r, kA0, angle, (5.0f + static_cast<float> (i) * 2.5f) * k, true);
         }
         g.setGradientFill (juce::ColourGradient (c1, cx - r, cy, c2, cx + r, cy, false));
-        strokeArc (g, cx, cy, r, kA0, angle, 5.0f, true);
+        strokeArc (g, cx, cy, r, kA0, angle, 5.0f * k, true);
 
         const float ix = cx + std::cos (angle) * (r - 1.0f), iy = cy + std::sin (angle) * (r - 1.0f);
         g.setColour (colour (Token::KnobDot));
-        g.fillEllipse (ix - 2.6f, iy - 2.6f, 5.2f, 5.2f);
+        g.fillEllipse (ix - 2.6f * k, iy - 2.6f * k, 5.2f * k, 5.2f * k);
     }
 }
 
@@ -237,7 +237,7 @@ void NeptuneKnob::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
     const float n = index_ == neptune::core::ParameterSet::npos ? 0.0f : static_cast<float> (processor_.parameters().getNormalizedAt (index_));
-    paintNeptuneKnob (g, b, n, palette_, style_);
+    paintNeptuneKnob (g, b, n, palette_, style_, scale_);
 
     if (hasKeyboardFocus (false))
     {

@@ -31,7 +31,7 @@ jobs:
             libfreetype-dev libfontconfig1-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
             libxrandr-dev libxrender-dev libxi-dev \
-            libglu1-mesa-dev mesa-common-dev libegl-dev
+            libglu1-mesa-dev mesa-common-dev libegl-dev xvfb fonts-dejavu-core
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -61,6 +61,22 @@ jobs:
 
       - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur et Egaliseur)
         run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP
+
+      # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
+      - name: NovaGallery (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake --build build --config Release --parallel --target NovaGallery
+          BIN=$(find build/adapter-juce -type f -name NovaGallery -perm -u+x -print -quit)
+          test -n "$BIN" || { echo "NovaGallery introuvable"; exit 1; }
+          xvfb-run -a "$BIN" nova-gallery
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: NovaGallery
+          path: nova-gallery/*.png
+          if-no-files-found: error
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)

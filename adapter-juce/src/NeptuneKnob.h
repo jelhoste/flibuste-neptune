@@ -9,7 +9,7 @@
 // Dessine l'image d'un potard NOVA (styles « led » et « pot ») dans `bounds`, pour la position normalisée `normalised`.
 // Partagé par NeptuneKnob et par le look des curseurs rotatifs (réglages du synthé / des filtres qui ne sont pas des paramètres).
 void paintNeptuneKnob (juce::Graphics&, juce::Rectangle<float> bounds, float normalised, const neptune::core::theme::Palette&,
-                       neptune::core::theme::KnobStyle);
+                       neptune::core::theme::KnobStyle, float scale = 1.0f);   // scale : épaisseurs de trait et repères (1 = taille de la maquette)
 
 // Look des juce::Slider rotatifs : même image que NeptuneKnob.
 class NeptuneSliderLook : public juce::LookAndFeel_V4
@@ -35,6 +35,7 @@ public:
     ~NeptuneKnob() override { stopTimer(); }
 
     neptune::core::ParamId paramId() const { return id_; }
+    void setScale (float s) { if (s != scale_) { scale_ = s; repaint(); } }   // épaisseurs de trait du dessin
     void setParamId (neptune::core::ParamId); // rebranche le potard sur un autre paramètre (piste sélectionnée)
 
     void paint (juce::Graphics&) override;
@@ -65,6 +66,7 @@ private:
     neptune::core::ui::KnobInteraction interaction_;
     std::uint32_t lastVersion_ = 0;
     bool lastWasTouch_ = false;
+    float scale_ = 1.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeptuneKnob)
 };
