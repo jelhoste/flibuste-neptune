@@ -385,32 +385,76 @@ private:
         v.swap (out);
     }
 
-    // vue WAVE : signal et enveloppes en haut, gain appliqué en bas (échelle +-RANGE). Défilement continu (la colonne en cours est
-    // soustraite), contours remplis et lissés plutôt que des barres : l'image bouge sans saccade.
+    // vue WAVE : signal et enveloppes en haut, gain appliqué en bas (échelle +-RANGE). Pour rester léger, la courbe est dessinée dans une
+    // image mise en cache (environ 250 points : l'oeil n'a pas besoin de plus), refaite seulement quand un nouveau groupe de colonnes est
+    // complet ; entre deux, chaque image de l'écran ne fait que faire glisser cette image (défilement continu, colonne en cours comprise).
+    static constexpr int kGroup = 4;
+
     void paintWave (juce::Graphics& g, juce::Rectangle<float> area)
     {
         if (owner_.module_ == nullptr) return;
-        owner_.module_->copyHistory (history_.data());
-        const float phase = owner_.module_->historyPhase();
         const int cols = sh::kHistoryColumns;
-        const float cw = area.getWidth() / static_cast<float> (cols - 2);
-        const float shift = phase * cw;
-        const float topH = area.getHeight() * 0.58f;
-        auto top = area.withHeight (topH), bottom = area.withTrimmedTop (topH + 12.0f);
-        const float mid = top.getCentreY(), amp = topH * 0.5f;
-        g.setColour (owner_.colour (Token::Grid));
-        g.drawHorizontalLine (static_cast<int> (mid), top.getX(), top.getRight());
+        const std::uint32_t head = owner_.module_->historyHead();
+        const float phase = owner_.module_->historyPhase();
+        const float cw = area.getWidth() / static_cast<float> (cols - 2);   // largeur d'une colonne à l'écran
+        const float range = static_cast<float> (owner_.value (sh::range));
+        const long long firstGroup = (static_cast<long long> (head) - cols + kGroup - 1) / kGroup;   // premier groupe entièrement disponible
+        const long long lastGroup = static_cast<long long> (head) / kGroup - 1;                       // dernier groupe complet
+        if (lastGroup < firstGroup) return;
+        const int groups = static_cast<int> (lastGroup - firstGroup + 1);
+        const float gw = cw * kGroup;                                                                   // largeur d'un groupe
+        const int imgW = std::max (1, static_cast<int> (std::ceil (gw * static_cast<float> (groups)))), imgH = std::max (1, static_cast<int> (area.getHeight()));
 
-        // décimation : un point pour `step` colonnes (maximum pour les crêtes, moyenne pour les courbes), puis lissage léger
-        constexpr int step = 2;
-        const int pts = cols / step;
-        std::vector<float> inEnv (static_cast<std::size_t> (pts)), outEnv (inEnv.size()), fast (inEnv.size()), slow (inEnv.size()), gain (inEnv.size());
-        for (int p = 0; p < pts; ++p)
+        const bool stale = ! cache_.isValid() || cache_.getWidth() != imgW || cache_.getHeight() != imgH || cacheGroup_ != lastGroup || cacheRange_ != range;
+        if (stale)
+        {
+            owner_.module_->copyHistory (history_.data());
+            renderWave (imgW, imgH, groups, gw, static_cast<long long> (head), firstGroup, range);
+            cacheGroup_ = lastGroup;
+            cacheRange_ = range;
+        }
+        // position à l'écran : le groupe `firstGroup` commence à la colonne firstGroup * kGroup ; « maintenant » = head + phase
+        const float now = static_cast<float> (head) + phase;
+        const float originX = area.getX() + (static_cast<float> (firstGroup * kGroup) - now + static_cast<float> (cols - 2)) * cw;
+        g.saveState();
+        g.reduceClipRegion (area.expanded (2.0f, 0.0f).toNearestInt());
+        g.drawImageTransformed (cache_, juce::AffineTransform::translation (originX, area.getY()));
+        g.restoreState();
+
+        const float topH = area.getHeight() * 0.58f, gmid = area.getY() + topH + 12.0f + (area.getHeight() - topH - 12.0f) * 0.5f;
+        g.setColour (owner_.colour (Token::TextDim));
+        g.setFont (juce::FontOptions (9.5f));
+        g.drawText ("+" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (area.getY() + topH + 12.0f) - 5, 28, 12, juce::Justification::centredRight);
+        g.drawText ("0 dB", static_cast<int> (area.getX()) - 32, static_cast<int> (gmid) - 6, 28, 12, juce::Justification::centredRight);
+        g.drawText ("-" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (area.getBottom()) - 6, 28, 12, juce::Justification::centredRight);
+        const double span = sh::kHistorySeconds * std::clamp (owner_.value (sh::displaySpan), 50.0, 1600.0) / 100.0;
+        for (int t = 0; t <= 8; ++t)
+            g.drawText (juce::String (span * t / 8.0, span >= 4.0 ? 1 : 2) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
+    }
+
+    // Dessine dans l'image mise en cache les `groups` groupes de kGroup colonnes (maximum des crêtes, moyenne des courbes), lissés.
+    void renderWave (int imgW, int imgH, int groups, float gw, long long head, long long firstGroup, float range)
+    {
+        cache_ = juce::Image (juce::Image::ARGB, imgW, imgH, true);
+        juce::Graphics g (cache_);
+        const float topH = static_cast<float> (imgH) * 0.58f, mid = topH * 0.5f, amp = topH * 0.5f;
+        const juce::Rectangle<float> bottom (0.0f, topH + 12.0f, static_cast<float> (imgW), static_cast<float> (imgH) - topH - 12.0f);
+        const float gmid = bottom.getCentreY();
+        g.setColour (owner_.colour (Token::Grid));
+        g.drawHorizontalLine (static_cast<int> (mid), 0.0f, static_cast<float> (imgW));
+        for (const float dbv : { -range, 0.0f, range }) g.drawHorizontalLine (static_cast<int> (gmid - dbv / range * bottom.getHeight() * 0.5f), 0.0f, static_cast<float> (imgW));
+
+        const auto n = static_cast<std::size_t> (groups);
+        std::vector<float> inEnv (n, 0.0f), outEnv (n, 0.0f), fast (n, 0.0f), slow (n, 0.0f), gain (n, 0.0f);
+        const long long base = head - sh::kHistoryColumns;   // indice absolu de history_[0]
+        for (int p = 0; p < groups; ++p)
         {
             float a = 0.0f, b = 0.0f, f = 0.0f, sl = 0.0f, gn = 0.0f;
-            for (int k = 0; k < step; ++k)
+            for (int k = 0; k < kGroup; ++k)
             {
-                const auto& c = history_[static_cast<std::size_t> (p * step + k)];
+                const long long idx = (firstGroup + p) * kGroup + k - base;
+                if (idx < 0 || idx >= sh::kHistoryColumns) continue;
+                const auto& c = history_[static_cast<std::size_t> (idx)];
                 a = std::max (a, c.inPeak);
                 b = std::max (b, c.outPeak);
                 f += c.fastLin;
@@ -419,23 +463,19 @@ private:
             }
             inEnv[static_cast<std::size_t> (p)] = std::min (1.0f, a);
             outEnv[static_cast<std::size_t> (p)] = std::min (1.0f, b);
-            fast[static_cast<std::size_t> (p)] = std::min (1.0f, f / step);
-            slow[static_cast<std::size_t> (p)] = std::min (1.0f, sl / step);
-            gain[static_cast<std::size_t> (p)] = gn / step;
+            fast[static_cast<std::size_t> (p)] = std::min (1.0f, f / kGroup);
+            slow[static_cast<std::size_t> (p)] = std::min (1.0f, sl / kGroup);
+            gain[static_cast<std::size_t> (p)] = gn / kGroup;
         }
         for (auto* v : { &inEnv, &outEnv }) smooth (*v, 1);
-        for (auto* v : { &fast, &slow, &gain }) smooth (*v, 2);
-        const float pw = cw * step;
-        auto xAtP = [&] (int i) { return area.getX() + pw * static_cast<float> (i) - shift; };
-
-        g.saveState();
-        g.reduceClipRegion (area.expanded (2.0f, 0.0f).toNearestInt());
+        for (auto* v : { &fast, &slow, &gain }) smooth (*v, 1);
+        auto xAtP = [gw] (int i) { return gw * (static_cast<float> (i) + 0.5f); };
         auto fillEnvelope = [&] (const std::vector<float>& env, juce::Colour col)
         {
             juce::Path p;
             p.startNewSubPath (xAtP (0), mid);
-            for (int i = 0; i < pts; ++i) p.lineTo (xAtP (i), mid - env[static_cast<std::size_t> (i)] * amp);
-            for (int i = pts - 1; i >= 0; --i) p.lineTo (xAtP (i), mid + env[static_cast<std::size_t> (i)] * amp);
+            for (int i = 0; i < groups; ++i) p.lineTo (xAtP (i), mid - env[static_cast<std::size_t> (i)] * amp);
+            for (int i = groups - 1; i >= 0; --i) p.lineTo (xAtP (i), mid + env[static_cast<std::size_t> (i)] * amp);
             p.closeSubPath();
             g.setColour (col);
             g.fillPath (p);
@@ -445,7 +485,7 @@ private:
         auto line = [&] (const std::vector<float>& v, juce::Colour col, float thick)
         {
             juce::Path p;
-            for (int i = 0; i < pts; ++i)
+            for (int i = 0; i < groups; ++i)
             {
                 const float x = xAtP (i), y = mid - v[static_cast<std::size_t> (i)] * amp;
                 if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
@@ -455,12 +495,8 @@ private:
         };
         line (slow, owner_.colour (Token::Pink2).withAlpha (0.9f), 1.3f);
         line (fast, owner_.colour (Token::KnobHot2).withAlpha (0.9f), 1.3f);
-        // gain
-        const float range = static_cast<float> (owner_.value (sh::range)), gmid = bottom.getCentreY();
-        g.setColour (owner_.colour (Token::Grid));
-        for (const float dbv : { -range, 0.0f, range }) g.drawHorizontalLine (static_cast<int> (gmid - dbv / range * bottom.getHeight() * 0.5f), bottom.getX(), bottom.getRight());
         juce::Path gp;
-        for (int i = 0; i < pts; ++i)
+        for (int i = 0; i < groups; ++i)
         {
             const float gdb = juce::jlimit (-range, range, gain[static_cast<std::size_t> (i)]);
             const float x = xAtP (i), y = gmid - gdb / range * bottom.getHeight() * 0.5f;
@@ -468,18 +504,11 @@ private:
         }
         g.setColour (owner_.colour (Token::Accent));
         g.strokePath (gp, juce::PathStrokeType (1.8f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
-        g.restoreState();
-
-        g.setColour (owner_.colour (Token::TextDim));
-        g.setFont (juce::FontOptions (9.5f));
-        g.drawText ("+" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getY()) - 5, 28, 12, juce::Justification::centredRight);
-        g.drawText ("0 dB", static_cast<int> (area.getX()) - 32, static_cast<int> (gmid) - 6, 28, 12, juce::Justification::centredRight);
-        g.drawText ("-" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getBottom()) - 6, 28, 12, juce::Justification::centredRight);
-        const double span = sh::kHistorySeconds * std::clamp (owner_.value (sh::displaySpan), 50.0, 1600.0) / 100.0;
-        for (int t = 0; t <= 8; ++t)
-            g.drawText (juce::String (span * t / 8.0, span >= 4.0 ? 1 : 2) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
     }
 
+    juce::Image cache_;
+    long long cacheGroup_ = -1;
+    float cacheRange_ = 0.0f;
     ShaperEditor& owner_;
     std::vector<sh::Column> history_;
     int editing_ = 0;
