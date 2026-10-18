@@ -155,6 +155,7 @@ int main (int argc, char** argv)
                            { "dark-070", th::ThemeId::Dark, 0.7f }, { "dark-140", th::ThemeId::Dark, 1.4f } };
     for (const auto& c : cases)
     {
+        std::fprintf (stderr, "case %s\n", c.name);
         const auto& def = th::definition (c.id);
         Scene scene (th::withContrast (def, 0), def.knob, c.id, c.scale, host);
         const auto img = scene.createComponentSnapshot (scene.getLocalBounds(), true, 1.0f);
