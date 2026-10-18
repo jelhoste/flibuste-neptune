@@ -281,10 +281,11 @@ private:
 };
 
 // ------------------------------------------------------------------------------------------------ vue principale : WAVE / RESPONSE
-class ShaperEditor::DetectionView : public juce::Component
+class ShaperEditor::DetectionView : public juce::Component, private juce::Timer
 {
 public:
-    explicit DetectionView (ShaperEditor& o) : owner_ (o), history_ (static_cast<std::size_t> (sh::kHistoryColumns)) {}
+    explicit DetectionView (ShaperEditor& o) : owner_ (o), history_ (static_cast<std::size_t> (sh::kHistoryColumns)) { startTimerHz (60); }
+    ~DetectionView() override { stopTimer(); }
     int view = 0;   // 0 WAVE, 1 RESPONSE
 
     void paint (juce::Graphics& g) override
@@ -305,6 +306,7 @@ public:
     }
 
 private:
+    void timerCallback() override { if (isShowing() && view == 0) repaint(); }   // défilement fluide : 60 images par seconde
     // vue RESPONSE : abscisse = niveau du transitoire (-60..0 dB), ordonnée = poids w (0..1)
     juce::Rectangle<float> plot_;
     float xOf (double db) const { return plot_.getX() + static_cast<float> ((db + 60.0) / 60.0) * plot_.getWidth(); }
@@ -361,60 +363,99 @@ private:
         if (const auto* spec = owner_.host_.parameters().find (id)) owner_.host_.uiSetNormalised (id, spec->toNormalized (v));
     }
 
-    // vue WAVE : signal et enveloppes en haut, gain appliqué en bas (échelle +-RANGE)
+    // Moyenne glissante centrée (lissage de l'affichage : la précision d'une colonne n'est pas utile à l'oeil)
+    static void smooth (std::vector<float>& v, int radius)
+    {
+        std::vector<float> out (v.size());
+        const int n = static_cast<int> (v.size());
+        for (int i = 0; i < n; ++i)
+        {
+            float acc = 0.0f;
+            int cnt = 0;
+            for (int k = std::max (0, i - radius); k <= std::min (n - 1, i + radius); ++k) { acc += v[static_cast<std::size_t> (k)]; ++cnt; }
+            out[static_cast<std::size_t> (i)] = acc / static_cast<float> (cnt);
+        }
+        v.swap (out);
+    }
+
+    // vue WAVE : signal et enveloppes en haut, gain appliqué en bas (échelle +-RANGE). Défilement continu (la colonne en cours est
+    // soustraite), contours remplis et lissés plutôt que des barres : l'image bouge sans saccade.
     void paintWave (juce::Graphics& g, juce::Rectangle<float> area)
     {
         if (owner_.module_ == nullptr) return;
         owner_.module_->copyHistory (history_.data());
+        const float phase = owner_.module_->historyPhase();
+        const int cols = sh::kHistoryColumns;
+        const float cw = area.getWidth() / static_cast<float> (cols - 2);
+        const float shift = phase * cw;
         const float topH = area.getHeight() * 0.58f;
         auto top = area.withHeight (topH), bottom = area.withTrimmedTop (topH + 12.0f);
         const float mid = top.getCentreY(), amp = topH * 0.5f;
+        auto xAt = [&] (int i) { return area.getX() + cw * static_cast<float> (i) - shift; };
         g.setColour (owner_.colour (Token::Grid));
         g.drawHorizontalLine (static_cast<int> (mid), top.getX(), top.getRight());
-        const int cols = sh::kHistoryColumns;
-        const float cw = area.getWidth() / static_cast<float> (cols);
+
+        std::vector<float> inEnv (static_cast<std::size_t> (cols)), outEnv (inEnv.size()), fast (inEnv.size()), slow (inEnv.size()), gain (inEnv.size());
         for (int i = 0; i < cols; ++i)
         {
             const auto& c = history_[static_cast<std::size_t> (i)];
-            const float x = area.getX() + cw * static_cast<float> (i);
-            g.setColour (owner_.colour (Token::TextDim2).withAlpha (0.55f));
-            g.fillRect (x, mid - std::min (1.0f, c.inPeak) * amp, std::max (1.0f, cw), std::min (1.0f, c.inPeak) * amp * 2.0f);
-            g.setColour (owner_.colour (Token::Accent).withAlpha (0.8f));
-            g.fillRect (x, mid - std::min (1.0f, c.outPeak) * amp, std::max (1.0f, cw), std::min (1.0f, c.outPeak) * amp * 2.0f);
+            inEnv[static_cast<std::size_t> (i)] = std::min (1.0f, c.inPeak);
+            outEnv[static_cast<std::size_t> (i)] = std::min (1.0f, c.outPeak);
+            fast[static_cast<std::size_t> (i)] = std::min (1.0f, std::pow (10.0f, c.fastDb / 20.0f));
+            slow[static_cast<std::size_t> (i)] = std::min (1.0f, std::pow (10.0f, c.slowDb / 20.0f));
+            gain[static_cast<std::size_t> (i)] = c.gainDb;
         }
-        auto envLine = [&] (float sh::Column::*field, juce::Colour col)
+        for (auto* v : { &inEnv, &outEnv }) smooth (*v, 2);
+        for (auto* v : { &fast, &slow }) smooth (*v, 3);
+        smooth (gain, 3);
+
+        g.saveState();
+        g.reduceClipRegion (area.expanded (2.0f, 0.0f).toNearestInt());
+        auto fillEnvelope = [&] (const std::vector<float>& env, juce::Colour col)
+        {
+            juce::Path p;
+            p.startNewSubPath (xAt (0), mid);
+            for (int i = 0; i < cols; ++i) p.lineTo (xAt (i), mid - env[static_cast<std::size_t> (i)] * amp);
+            for (int i = cols - 1; i >= 0; --i) p.lineTo (xAt (i), mid + env[static_cast<std::size_t> (i)] * amp);
+            p.closeSubPath();
+            g.setColour (col);
+            g.fillPath (p);
+        };
+        fillEnvelope (inEnv, owner_.colour (Token::TextDim2).withAlpha (0.28f));
+        fillEnvelope (outEnv, owner_.colour (Token::Accent).withAlpha (0.38f));
+        auto line = [&] (const std::vector<float>& v, juce::Colour col, float thick)
         {
             juce::Path p;
             for (int i = 0; i < cols; ++i)
             {
-                const float lin = std::pow (10.0f, history_[static_cast<std::size_t> (i)].*field / 20.0f);
-                const float x = area.getX() + cw * static_cast<float> (i), y = mid - std::min (1.0f, lin) * amp;
+                const float x = xAt (i), y = mid - v[static_cast<std::size_t> (i)] * amp;
                 if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
             }
             g.setColour (col);
-            g.strokePath (p, juce::PathStrokeType (1.2f));
+            g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         };
-        envLine (&sh::Column::slowDb, owner_.colour (Token::Pink2));
-        envLine (&sh::Column::fastDb, owner_.colour (Token::KnobHot2));
+        line (slow, owner_.colour (Token::Pink2).withAlpha (0.9f), 1.3f);
+        line (fast, owner_.colour (Token::KnobHot2).withAlpha (0.9f), 1.3f);
         // gain
         const float range = static_cast<float> (owner_.value (sh::range)), gmid = bottom.getCentreY();
         g.setColour (owner_.colour (Token::Grid));
         for (const float dbv : { -range, 0.0f, range }) g.drawHorizontalLine (static_cast<int> (gmid - dbv / range * bottom.getHeight() * 0.5f), bottom.getX(), bottom.getRight());
+        juce::Path gp;
+        for (int i = 0; i < cols; ++i)
+        {
+            const float gdb = juce::jlimit (-range, range, gain[static_cast<std::size_t> (i)]);
+            const float x = xAt (i), y = gmid - gdb / range * bottom.getHeight() * 0.5f;
+            if (i == 0) gp.startNewSubPath (x, y); else gp.lineTo (x, y);
+        }
+        g.setColour (owner_.colour (Token::Accent));
+        g.strokePath (gp, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.restoreState();
+
         g.setColour (owner_.colour (Token::TextDim));
         g.setFont (juce::FontOptions (9.5f));
         g.drawText ("+" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getY()) - 5, 28, 12, juce::Justification::centredRight);
         g.drawText ("0 dB", static_cast<int> (area.getX()) - 32, static_cast<int> (gmid) - 6, 28, 12, juce::Justification::centredRight);
         g.drawText ("-" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getBottom()) - 6, 28, 12, juce::Justification::centredRight);
-        juce::Path gp;
-        for (int i = 0; i < cols; ++i)
-        {
-            const float gdb = juce::jlimit (-range, range, history_[static_cast<std::size_t> (i)].gainDb);
-            const float x = area.getX() + cw * static_cast<float> (i), y = gmid - gdb / range * bottom.getHeight() * 0.5f;
-            if (i == 0) gp.startNewSubPath (x, y); else gp.lineTo (x, y);
-        }
-        g.setColour (owner_.colour (Token::Accent));
-        g.strokePath (gp, juce::PathStrokeType (1.6f));
-        g.setColour (owner_.colour (Token::TextDim));
         for (int t = 0; t <= 8; ++t)
             g.drawText (juce::String (t * 0.2, 1) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
     }
@@ -856,8 +897,8 @@ void ShaperEditor::timerCallback()
     gainMeter_->update();
     outMeter_->update();
     for (auto* b : bars_) if (b->isVisible()) b->repaint();
-    if (page_ == 0) detection_->repaint();
-    else if (page_ == 1) eq_->repaint();
+    if (page_ == 1) eq_->repaint();
+    else if (page_ == 0 && detection_->view != 0) detection_->repaint();
 }
 
 bool ShaperEditor::keyPressed (const juce::KeyPress& k)

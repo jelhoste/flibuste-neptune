@@ -404,6 +404,7 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
             accCount_ = 0;
         }
     }
+    historyPhase_.store (static_cast<float> (accCount_) / static_cast<float> (colSamples_), std::memory_order_relaxed);
     rmsCount_ += n;
     const int rmsWindow = std::max (1, static_cast<int> (param (meterRmsMs) * 0.001 * fs));
     meters_[kInPeakL].store (peakHold_[0], std::memory_order_relaxed);

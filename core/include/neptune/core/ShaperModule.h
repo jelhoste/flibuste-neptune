@@ -97,6 +97,8 @@ public:
     // Historique : copie les kHistoryColumns dernières colonnes, de la plus ancienne à la plus récente (lecture sans verrou : une colonne en
     // cours d'écriture peut être incohérente, sans conséquence pour l'affichage).
     void copyHistory (shaper::Column* dst) const noexcept;
+    // Avancement (0..1) de la colonne en cours d'accumulation : l'interface le soustrait au défilement pour qu'il soit continu.
+    float historyPhase() const noexcept { return historyPhase_.load (std::memory_order_relaxed); }
     void copyKey (float* dst, int n) const noexcept;    // les n dernières valeurs de la clé (n <= kKeyRing)
     // Réponse (module) de l'égaliseur de détection à la fréquence f, avec les mêmes coefficients que le DSP.
     double detectionResponseDb (const ParameterSet&, double f) const noexcept;
@@ -140,6 +142,7 @@ private:
     std::atomic<std::uint32_t> historyHead_ { 0 };
     shaper::Column acc_;
     int accCount_ = 0, colSamples_ = 1;
+    std::atomic<float> historyPhase_ { 0.0f };
     std::vector<float> keyRing_;
     std::atomic<std::uint32_t> keyHead_ { 0 };
 };
