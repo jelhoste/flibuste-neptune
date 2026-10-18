@@ -358,15 +358,16 @@ std::vector<ParamId> NovaCompressorEditor::presetParamIds() const { return cm::p
 
 void NovaCompressorEditor::buildCompressorPage()
 {
-    metersPanel_ = add<nova::Panel> (0, skin());
+    metersPanel_ = add<nova::Panel> (-1, skin());
     navPanel_ = add<nova::Panel> (-1, skin());
+    navPanel_->toBack();   // sous les entrées du menu, créées avant lui
     curvePanel_ = add<nova::Panel> (0, skin());
     curvePanel_->setTitle (tx ("nv.curve_title"));
     curve_ = add<CurveView> (0, skin(), host(), module_);
     curve_->setAxisLabels (tx ("nv.in_db"), tx ("nv.out_db"));
-    inMeter_ = add<nova::VMeter> (0, skin(), tx ("nv.in"), nova::VMeter::Kind::Level, false);
-    grMeter_ = add<nova::VMeter> (0, skin(), tx ("nv.gr"), nova::VMeter::Kind::Reduction, false);
-    outMeter_ = add<nova::VMeter> (0, skin(), tx ("nv.out"), nova::VMeter::Kind::Level, true);
+    inMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.in"), nova::VMeter::Kind::Level, false);
+    grMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.gr"), nova::VMeter::Kind::Reduction, false);
+    outMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.out"), nova::VMeter::Kind::Level, true);
     for (auto* m : { inMeter_, grMeter_, outMeter_ }) m->setModeVisible (false);
 
     struct Spec { ParamId id; const char* title; bool pink; ParamId sub; const char* subTitle; };
@@ -536,19 +537,19 @@ void NovaCompressorEditor::layout()
     const float cw = (910.0f - 12.0f * 4.0f) / 5.0f;
     for (std::size_t i = 0; i < advCards_.size(); ++i)
     {
-        const float x = 220.0f + static_cast<float> (i % 5) * (cw + 12.0f), y = 160.0f + static_cast<float> (i / 5) * 190.0f;
-        advCards_[i]->setBounds (R (x, y, cw, 170));
+        const float x = 220.0f + static_cast<float> (i % 5) * (cw + 12.0f), y = 160.0f + static_cast<float> (i / 5) * 160.0f;
+        advCards_[i]->setBounds (R (x, y, cw, 144));
     }
 
     // ---- barre du bas
     const float by = 724.0f + 12.0f;
     abPill()->setBounds (R (14, 724 + 12, 36, 32));
-    float x = 62.0f;
+    float x = 58.0f;
     for (auto* p : { stereoPill_, stylePill_, dirPill_, deltaPill_, osPill_, lookPill_ })
     {
-        const float w = p == stylePill_ ? 148.0f : p == dirPill_ ? 150.0f : p == deltaPill_ ? 86.0f : p == osPill_ ? 130.0f : p == lookPill_ ? 168.0f : 140.0f;
+        const float w = p == stylePill_ ? 134.0f : p == dirPill_ ? 146.0f : p == deltaPill_ ? 72.0f : p == osPill_ ? 166.0f : p == lookPill_ ? 160.0f : 124.0f;
         p->setBounds (R (x, by, w, 32));
-        x += w + 10.0f;
+        x += w + 8.0f;
     }
 
     // ---- en-tête
@@ -597,12 +598,12 @@ void NovaCompressorEditor::tick()
     const int os = choiceValue (cm::oversample);
     const int latency = (la > 0.0 ? static_cast<int> (std::lround (la * 0.001 * rate)) : 0) + Oversampler::latencyFor (os >= 2 ? 4 : os == 1 ? 2 : 1);
     const auto lat = juce::String::fromUTF8 (translator().format ("nv.latency", { std::to_string (latency) }).c_str());
-    if (lat != latencyText_) { latencyText_ = lat; repaint (R (800, 724, 346, 56)); }
+    if (lat != latencyText_) { latencyText_ = lat; repaint (R (920, 724, 226, 56)); }
 }
 
 void NovaCompressorEditor::paintBackground (juce::Graphics& g)
 {
     g.setColour (skin().colour (Token::TextDim2));
     g.setFont (skin().font (11.0f, true));
-    g.drawText (latencyText_, R (900, 724 + 12, 246, 32).toFloat(), juce::Justification::centredRight);
+    g.drawText (latencyText_, R (930, 724 + 12, 216, 32).toFloat(), juce::Justification::centredRight);
 }
