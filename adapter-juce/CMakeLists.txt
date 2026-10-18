@@ -56,6 +56,8 @@ target_sources(Neptune PRIVATE
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
   src/ShaperEditor.cpp
+  src/GenericModuleEditor.cpp
+  src/CompressorEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 
@@ -148,6 +150,46 @@ target_compile_definitions(LaFleche PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(LaFleche
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- Compresseur (nom provisoire) : compresseur porté de ZL Compressor (AGPLv3), plugin CLAP effet indépendant ------------------------------
+set(COMPRESSEUR_CLAP_ID "com.tournedosrossini.compresseur" CACHE STRING "Identifiant CLAP du compresseur")
+
+juce_add_plugin(Compresseur
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Compresseur"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Comp
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Compresseur
+  CLAP_ID       "${COMPRESSEUR_CLAP_ID}"
+  CLAP_FEATURES audio-effect compressor stereo)
+
+target_sources(Compresseur PRIVATE
+  src/CompressorPlugin.cpp
+  src/CompressorEditor.cpp
+  src/GenericModuleEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Compresseur PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Compresseur
   PRIVATE
     neptune_core
     juce::juce_audio_utils

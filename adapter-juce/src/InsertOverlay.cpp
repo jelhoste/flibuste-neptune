@@ -12,8 +12,13 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (handle_.instance == nullptr) return;
     bypassId_ = processor_.insertBypassParam (kind, index, slot);
 
-    const bool isShaper = handle_.instance->type == "shaper";
-    if (isShaper)
+    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor";
+    if (isCompressor)
+    {
+        genericContent_ = makeCompressorEditor (*handle_.host, static_cast<const CompressorModule*> (&handle_.instance->runner.module()), palette_, tr_);
+        addAndMakeVisible (*genericContent_);
+    }
+    else if (isShaper)
     {
         ShaperEditor::Options opt;
         opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
@@ -35,7 +40,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                                    : kind == NeptuneProcessor::StripKind::Parallel
                                          ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
                                          : text ("insert.where_master");
-    title_ = text (isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
+    title_ = text (isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 
     bypassButton_.setButtonText (text ("insert.bypass"));
@@ -82,6 +87,7 @@ void InsertOverlay::resized()
     r.removeFromTop (4);
     if (content_ != nullptr) content_->setBounds (r);
     if (shaperContent_ != nullptr) shaperContent_->setBounds (r);
+    if (genericContent_ != nullptr) genericContent_->setBounds (r);
 }
 
 void InsertOverlay::paint (juce::Graphics& g)
@@ -106,5 +112,6 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
     if (k == juce::KeyPress::escapeKey) { if (onClose_) onClose_(); return true; }
     if (content_ != nullptr) return content_->keyPressed (k);
     if (shaperContent_ != nullptr) return shaperContent_->keyPressed (k);
+    if (genericContent_ != nullptr) return genericContent_->keyPressed (k);
     return false;
 }

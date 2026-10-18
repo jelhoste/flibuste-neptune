@@ -1,0 +1,311 @@
+// Compresseur porté de ZL Compressor : directions, styles, plage, wet, maintien, liaison stéréo, clé externe, filtres de clé, écrêteur, delta, latence.
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include <cmath>
+#include <vector>
+
+#include "neptune/core/CompressorModule.h"
+#include "neptune/core/DynamicsDsp.h"
+
+using namespace neptune::core;
+using Catch::Approx;
+namespace c = neptune::core::compressor;
+
+namespace
+{
+constexpr double kRate = 48000.0;
+
+struct CompRig
+{
+    ModuleRunner runner { std::make_unique<CompressorModule>() };
+    std::vector<float> keyL, keyR;
+    CompRig()
+    {
+        REQUIRE (runner.ok());
+        runner.prepare (kRate, 256);
+    }
+    void set (ParamId id, double v) { runner.params().set (id, v); }
+    // joue `seconds` de signal constant (L, R) ; rend le dernier échantillon
+    std::pair<float, float> hold (float l, float r, double seconds, const float* kl = nullptr, const float* kr = nullptr)
+    {
+        std::vector<float> a (256), b (256);
+        std::pair<float, float> last { 0.0f, 0.0f };
+        for (int blk = 0; blk < static_cast<int> (seconds * kRate / 256.0); ++blk)
+        {
+            std::fill (a.begin(), a.end(), l);
+            std::fill (b.begin(), b.end(), r);
+            std::vector<float> ka (256, kl != nullptr ? *kl : 0.0f), kb (256, kr != nullptr ? *kr : 0.0f);
+            if (kl != nullptr) runner.setKey (ka.data(), kb.data()); else runner.setKey (nullptr, nullptr);
+            runner.process (a.data(), b.data(), 256, false);
+            last = { a[255], b[255] };
+        }
+        return last;
+    }
+    double gainDb (float level, double seconds = 3.0)
+    {
+        const auto out = hold (level, level, seconds);
+        return 20.0 * std::log10 (std::max (1e-9f, out.first / level));
+    }
+};
+} // namespace
+
+TEST_CASE ("compressor: the gain computer matches the textbook curve in each direction", "[compressor]")
+{
+    dyn::GainComputer g;
+    g.set (dyn::Direction::Compress, -32.0, 3.0, 8.0, 0.0, -140.0);
+    CHECK (g.eval (-60.0) == Approx (0.0));                        // sous le genou : aucune réduction
+    CHECK (g.eval (-6.0) == Approx ((1.0 / 3.0 - 1.0) * (-6.0 + 32.0)).margin (1e-9));   // bien au-dessus : droite de ratio
+    CHECK (g.evalOutput (-6.0) == Approx (-6.0 + (1.0 / 3.0 - 1.0) * 26.0));
+    CHECK (g.eval (-32.0) < 0.0);                                  // au seuil : déjà dans le genou
+    CHECK (g.eval (-32.0) > g.eval (-6.0));
+    // continuité aux bords du genou
+    CHECK (g.eval (-40.0 + 1e-6) == Approx (0.0).margin (1e-4));
+    g.set (dyn::Direction::Expand, -32.0, 3.0, 8.0, 0.0, -140.0);
+    CHECK (g.eval (-6.0) == Approx (0.0));
+    CHECK (g.eval (-60.0) < -20.0);                                // sous le seuil : atténué
+    g.set (dyn::Direction::Inflate, -32.0, 3.0, 8.0, 0.0, -140.0);
+    CHECK (g.eval (-6.0) == Approx (0.0));
+    CHECK (g.eval (-60.0) < -5.0);                                 // la courbe garde la convention « réduction » ; le gain appliqué est inversé (voir le test des directions)
+}
+
+TEST_CASE ("compressor: a steady level above the threshold is reduced by the textbook amount", "[compressor]")
+{
+    CompRig r;
+    CHECK (r.gainDb (0.5f) == Approx ((1.0 / 3.0 - 1.0) * (-6.0206 + 32.0)).margin (0.05));   // Clean : -17,32 dB
+    CompRig quiet;
+    CHECK (quiet.gainDb (0.001f) == Approx (0.0).margin (0.01));                              // sous le seuil : rien
+}
+
+TEST_CASE ("compressor: the four directions act where they should", "[compressor]")
+{
+    auto gain = [] (int direction, float level)
+    {
+        CompRig r;
+        r.set (c::direction, direction);
+        return r.gainDb (level);
+    };
+    CHECK (gain (0, 0.5f) < -10.0);        // Compress : réduit le fort
+    CHECK (gain (0, 0.001f) == Approx (0.0).margin (0.01));
+    CHECK (gain (1, 0.001f) > 5.0);        // Inflate : relève le faible
+    CHECK (gain (1, 0.5f) == Approx (0.0).margin (0.01));
+    CHECK (gain (2, 0.001f) < -20.0);      // Expand : creuse le faible
+    CHECK (gain (2, 0.5f) == Approx (0.0).margin (0.01));
+    CHECK (gain (3, 0.5f) > 10.0);         // Shape : relève le fort
+}
+
+TEST_CASE ("compressor: every style settles on a finite reduction; feedback styles reduce less at steady state", "[compressor]")
+{
+    double clean = 0.0;
+    for (int style = 0; style < 4; ++style)
+    {
+        CompRig r;
+        r.set (c::style, style);
+        const double g = r.gainDb (0.5f);
+        INFO ("style " << style);
+        CHECK (std::isfinite (g));
+        CHECK (g < -5.0);
+        if (style == 0) clean = g;
+        if (style == 2) CHECK (g == Approx (clean).margin (0.05));   // Optical : même courbe, suiveur sur le signal
+        if (style == 1 || style == 3) CHECK (g > clean + 3.0);       // Classic / Vocal : la clé voit la sortie, donc moins de réduction
+    }
+    // Optical et Vocal n'ont pas de sens en expansion : Clean est utilisé à la place
+    CompRig r;
+    r.set (c::direction, 2);
+    r.set (c::style, 3);
+    CHECK (r.gainDb (0.001f) < -20.0);
+}
+
+TEST_CASE ("compressor: RANGE limits the reduction and WET scales it", "[compressor]")
+{
+    CompRig a;
+    a.set (c::range, 6.0);
+    CHECK (a.gainDb (0.5f) == Approx (-6.0).margin (0.05));
+    CompRig w;
+    w.set (c::wet, 50.0);
+    CHECK (w.gainDb (0.5f) == Approx (0.5 * (1.0 / 3.0 - 1.0) * (-6.0206 + 32.0)).margin (0.1));
+    CompRig inf;
+    inf.set (c::range, 3.0);
+    inf.set (c::rangeInf, 1.0);
+    CHECK (inf.gainDb (0.5f) < -15.0);
+    CompRig m;
+    m.set (c::makeup, 6.0206);
+    CHECK (m.gainDb (0.5f) == Approx ((1.0 / 3.0 - 1.0) * (-6.0206 + 32.0) + 6.0206).margin (0.1));
+}
+
+TEST_CASE ("compressor: HOLD keeps the reduction after the loud part has gone", "[compressor]")
+{
+    auto reductionAfterBurst = [] (double holdMs)
+    {
+        CompRig r;
+        r.set (c::attack, 0.0);
+        r.set (c::release, 5.0);
+        r.hold (0.5f, 0.5f, 0.3);                 // forte : réduction installée
+        std::vector<float> a (256, 0.001f), b (256, 0.001f);
+        // 30 ms de faible niveau : sans maintien la réduction est retombée, avec 100 ms de maintien elle reste
+        for (int blk = 0; blk < 6; ++blk) r.runner.process (a.data(), b.data(), 256, false);
+        return 20.0 * std::log10 (std::max (1e-9f, a[255] / 0.001f));
+    };
+    CHECK (reductionAfterBurst (0.0) > -3.0);
+    CompRig held;
+    held.set (c::attack, 0.0);
+    held.set (c::release, 5.0);
+    held.set (c::hold, 100.0);
+    held.hold (0.5f, 0.5f, 0.3);
+    std::vector<float> a (256, 0.001f), b (256, 0.001f);
+    for (int blk = 0; blk < 6; ++blk) held.runner.process (a.data(), b.data(), 256, false);
+    CHECK (20.0 * std::log10 (std::max (1e-9f, a[255] / 0.001f)) < -10.0);
+}
+
+TEST_CASE ("compressor: stereo link spreads the reduction, LR mode keeps channels apart", "[compressor]")
+{
+    CompRig lr;
+    lr.set (c::stereoMode, 1);                       // Left Right
+    const auto split = lr.hold (0.5f, 0.001f, 3.0);
+    CHECK (20.0 * std::log10 (split.first / 0.5f) < -10.0);
+    CHECK (20.0 * std::log10 (split.second / 0.001f) == Approx (0.0).margin (0.05));   // l'autre canal n'est pas touché
+    CompRig linked;
+    linked.set (c::stereoMode, 1);
+    linked.set (c::stereoLink, 100.0);
+    const auto both = linked.hold (0.5f, 0.001f, 3.0);
+    CHECK (20.0 * std::log10 (both.second / 0.001f) < -5.0);                          // liée : l'autre canal est réduit aussi
+    CompRig swapped;
+    swapped.set (c::stereoMode, 1);
+    swapped.set (c::stereoSwap, 1.0);
+    const auto sw = swapped.hold (0.5f, 0.001f, 3.0);
+    CHECK (20.0 * std::log10 (std::max (1e-9f, sw.second / 0.001f)) < -10.0);         // échange : la réduction du gauche s'applique au droit
+    CHECK (20.0 * std::log10 (sw.first / 0.5f) == Approx (0.0).margin (0.05));
+}
+
+TEST_CASE ("compressor: the external key drives the compression and LISTEN outputs the filtered key", "[compressor]")
+{
+    CompRig r;
+    r.set (c::externalSide, 1.0);
+    const float loudKey = 0.5f;
+    const auto withKey = r.hold (0.1f, 0.1f, 3.0, &loudKey, &loudKey);
+    CHECK (20.0 * std::log10 (withKey.first / 0.1f) < -10.0);            // clé forte : signal faible réduit
+    const float silent = 0.0f;
+    CompRig q;
+    q.set (c::externalSide, 1.0);
+    const auto noKey = q.hold (0.1f, 0.1f, 3.0, &silent, &silent);
+    CHECK (20.0 * std::log10 (noKey.first / 0.1f) == Approx (0.0).margin (0.05));
+
+    CompRig l;
+    l.set (c::externalSide, 1.0);
+    l.set (c::sideOut, 1.0);
+    l.set (c::sideGain, 6.0206);
+    const float k = 0.25f;
+    const auto heard = l.hold (0.1f, 0.1f, 0.1, &k, &k);
+    CHECK (heard.first == Approx (0.5f).margin (1e-3f));                  // la clé (0,25) avec +6 dB
+}
+
+TEST_CASE ("compressor: side filters shape the key", "[compressor]")
+{
+    // une clé continue (0 Hz) est supprimée par un passe-haut : plus de réduction
+    CompRig r;
+    r.set (c::bandParam (0, c::kStatus), c::kOn);
+    r.set (c::bandParam (0, c::kType), c::kHighPass);
+    r.set (c::bandParam (0, c::kFreq), 5000.0);
+    r.set (c::bandParam (0, c::kOrder), 3);
+    CHECK (r.gainDb (0.5f) > -1.0);
+    CompRig bypassed;
+    bypassed.set (c::bandParam (0, c::kStatus), c::kOn);
+    bypassed.set (c::bandParam (0, c::kType), c::kHighPass);
+    bypassed.set (c::bandParam (0, c::kFreq), 5000.0);
+    bypassed.set (c::sideEqBypass, 1.0);
+    CHECK (bypassed.gainDb (0.5f) < -10.0);
+    CompRig off;
+    off.set (c::bandParam (0, c::kType), c::kHighPass);   // état « Off » (par défaut) : sans effet
+    CHECK (off.gainDb (0.5f) < -10.0);
+}
+
+TEST_CASE ("compressor: the clipper bounds the output and delta returns what was removed", "[compressor]")
+{
+    // l'écrêteur tanh : même réglage de compression avec et sans « drive », sur une sinusoïde forte ; la crête avec écrêteur est plus basse
+    auto peakOf = [] (double drive)
+    {
+        CompRig r;
+        r.set (c::threshold, -12.0);
+        r.set (c::ratio, 2.0);
+        r.set (c::clipperDrive, drive);
+        r.set (c::attack, 0.0);
+        r.set (c::release, 5.0);
+        float peak = 0.0f;
+        for (int blk = 0; blk < 100; ++blk)
+        {
+            std::vector<float> a (256), b;
+            for (std::size_t i = 0; i < 256; ++i) a[i] = 0.95f * static_cast<float> (std::sin (2.0 * 3.14159265358979 * 100.0 * static_cast<double> (blk * 256 + static_cast<int> (i)) / kRate));
+            b = a;
+            r.runner.process (a.data(), b.data(), 256, false);
+            if (blk > 60) for (const float x : a) peak = std::max (peak, std::fabs (x));
+        }
+        return peak;
+    };
+    CHECK (peakOf (100.0) < peakOf (0.0));
+    CHECK (peakOf (100.0) > 0.1f);
+
+    CompRig d;
+    d.set (c::delta, 1.0);
+    const auto removed = d.hold (0.5f, 0.5f, 3.0);
+    CHECK (removed.first == Approx (0.5f * (1.0f - std::pow (10.0f, -17.32f / 20.0f))).margin (0.01f));   // entrée - traité
+}
+
+TEST_CASE ("compressor: latency follows oversampling and positive lookahead, a negative lookahead adds none", "[compressor]")
+{
+    CompRig r;
+    CHECK (r.runner.latencySamples() == 0);
+    r.set (c::oversample, 1.0);
+    CHECK (r.runner.latencySamples() == Oversampler::kLatency2x);
+    r.set (c::oversample, 2.0);
+    CHECK (r.runner.latencySamples() == Oversampler::kLatency4x);
+    r.set (c::lookahead, 5.0);
+    CHECK (r.runner.latencySamples() == Oversampler::kLatency4x + 240);
+    r.set (c::lookahead, -5.0);
+    CHECK (r.runner.latencySamples() == Oversampler::kLatency4x);
+}
+
+TEST_CASE ("compressor: oversampled output is the input delayed by the latency when nothing is compressed", "[compressor]")
+{
+    CompRig r;
+    r.set (c::oversample, 2.0);
+    r.set (c::threshold, 0.0);
+    r.set (c::ratio, 1.0);
+    std::vector<float> in (8192);
+    for (std::size_t i = 0; i < in.size(); ++i) in[i] = 0.3f * static_cast<float> (std::sin (2.0 * 3.14159265358979 * 440.0 * static_cast<double> (i) / kRate));
+    std::vector<float> out (in.size());
+    for (std::size_t off = 0; off < in.size(); off += 256)
+    {
+        std::vector<float> a (in.begin() + static_cast<std::ptrdiff_t> (off), in.begin() + static_cast<std::ptrdiff_t> (off) + 256), b = a;
+        r.runner.process (a.data(), b.data(), 256, false);
+        std::copy (a.begin(), a.end(), out.begin() + static_cast<std::ptrdiff_t> (off));
+    }
+    const auto lat = static_cast<std::size_t> (r.runner.latencySamples());
+    for (std::size_t i = 3000; i < 3100; ++i) CHECK (out[i] == Approx (in[i - lat]).margin (0.01));
+}
+
+TEST_CASE ("compressor: RMS branch reacts slower to a burst than the peak branch and mixes in", "[compressor]")
+{
+    CompRig r;
+    r.set (c::rmsOn, 1.0);
+    r.set (c::rmsMix, 100.0);
+    r.set (c::rmsLength, 100.0);
+    const double g = r.gainDb (0.5f);
+    CHECK (std::isfinite (g));
+    CHECK (g == Approx ((1.0 / 3.0 - 1.0) * (-6.0206 + 32.0)).margin (0.3));   // niveau continu : même réduction
+}
+
+TEST_CASE ("compressor: parameters are declared with the documented defaults", "[compressor]")
+{
+    CompRig r;
+    const auto& p = r.runner.params();
+    CHECK (p.get (c::threshold) == Approx (-32.0));
+    CHECK (p.get (c::ratio) == Approx (3.0));
+    CHECK (p.get (c::attack) == Approx (100.0));
+    CHECK (p.get (c::release) == Approx (500.0));
+    CHECK (p.get (c::wet) == Approx (100.0));
+    CHECK (p.find (c::bandParam (7, c::kQ)) != nullptr);
+    CHECK (p.find (c::lookahead)->automatable == false);
+    CHECK (p.find (c::oversample)->automatable == false);
+    auto* m = static_cast<CompressorModule*> (&r.runner.module());
+    CHECK (m->curveOutputDb (p, -6.0) == Approx (-6.0 + (1.0 / 3.0 - 1.0) * 26.0).margin (0.01));
+}

@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon et La Flèche)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche et Compresseur)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -91,6 +91,9 @@ jobs:
           LAF=$(find build/adapter-juce/LaFleche_artefacts -name 'LaFleche.clap' -print -quit)
           test -n "$LAF" || { echo "LaFleche.clap introuvable"; exit 1; }
           "$CV" validate "$LAF"
+          COM=$(find build/adapter-juce/Compresseur_artefacts -name 'Compresseur.clap' -print -quit)
+          test -n "$COM" || { echo "Compresseur.clap introuvable"; exit 1; }
+          "$CV" validate "$COM"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -234,6 +237,30 @@ jobs:
         with:
           name: LaFleche-${{ matrix.name }}
           path: dist-laf/*
+          if-no-files-found: error
+
+      # Le compresseur séparé, archivé à part.
+      - name: Archive Compresseur.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Compresseur_artefacts -name 'Compresseur.clap' -print -quit)
+          test -n "$CLAP" || { echo "Compresseur.clap introuvable"; exit 1; }
+          mkdir -p dist-com/stage
+          cp -R "$CLAP" dist-com/stage/
+          cd dist-com/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Compresseur-${{ matrix.name }}.zip" Compresseur.clap
+          else
+            tar -czf "../Compresseur-${{ matrix.name }}.tar.gz" Compresseur.clap
+          fi
+          cd ../..
+          rm -rf dist-com/stage
+          ls -la dist-com
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Compresseur-${{ matrix.name }}
+          path: dist-com/*
           if-no-files-found: error
 
   release:

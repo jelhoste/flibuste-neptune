@@ -27,6 +27,31 @@ struct BiquadCoefs
         const double w = 2.0 * kBiquadPi * std::min (f, 0.49 * fs) / fs, al = std::sin (w) / (2.0 * q), c = std::cos (w), a0 = 1.0 + al;
         return { (1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, (1.0 + c) / 2.0 / a0, -2.0 * c / a0, (1.0 - al) / a0 };
     }
+    // Étagères RBJ (gain en dB, pente fixée par q), filtre coupe-bande et passe-bande (gain 0 dB au centre).
+    static BiquadCoefs lowShelf (double fs, double f, double gainDb, double q) noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0), w = 2.0 * kBiquadPi * std::min (f, 0.49 * fs) / fs, c = std::cos (w), al = std::sin (w) / (2.0 * std::max (q, 0.05));
+        const double sq = 2.0 * std::sqrt (A) * al, a0 = (A + 1.0) + (A - 1.0) * c + sq;
+        return { A * ((A + 1.0) - (A - 1.0) * c + sq) / a0, 2.0 * A * ((A - 1.0) - (A + 1.0) * c) / a0, A * ((A + 1.0) - (A - 1.0) * c - sq) / a0,
+                 -2.0 * ((A - 1.0) + (A + 1.0) * c) / a0, ((A + 1.0) + (A - 1.0) * c - sq) / a0 };
+    }
+    static BiquadCoefs highShelf (double fs, double f, double gainDb, double q) noexcept
+    {
+        const double A = std::pow (10.0, gainDb / 40.0), w = 2.0 * kBiquadPi * std::min (f, 0.49 * fs) / fs, c = std::cos (w), al = std::sin (w) / (2.0 * std::max (q, 0.05));
+        const double sq = 2.0 * std::sqrt (A) * al, a0 = (A + 1.0) - (A - 1.0) * c + sq;
+        return { A * ((A + 1.0) + (A - 1.0) * c + sq) / a0, -2.0 * A * ((A - 1.0) + (A + 1.0) * c) / a0, A * ((A + 1.0) + (A - 1.0) * c - sq) / a0,
+                 2.0 * ((A - 1.0) - (A + 1.0) * c) / a0, ((A + 1.0) - (A - 1.0) * c - sq) / a0 };
+    }
+    static BiquadCoefs notch (double fs, double f, double q) noexcept
+    {
+        const double w = 2.0 * kBiquadPi * std::min (f, 0.49 * fs) / fs, c = std::cos (w), al = std::sin (w) / (2.0 * std::max (q, 0.05)), a0 = 1.0 + al;
+        return { 1.0 / a0, -2.0 * c / a0, 1.0 / a0, -2.0 * c / a0, (1.0 - al) / a0 };
+    }
+    static BiquadCoefs bandpass (double fs, double f, double q) noexcept
+    {
+        const double w = 2.0 * kBiquadPi * std::min (f, 0.49 * fs) / fs, c = std::cos (w), al = std::sin (w) / (2.0 * std::max (q, 0.05)), a0 = 1.0 + al;
+        return { al / a0, 0.0, -al / a0, -2.0 * c / a0, (1.0 - al) / a0 };
+    }
     // Premier ordre (transformée bilinéaire), pour les pentes de 6 dB/oct.
     static BiquadCoefs lowpass1 (double fs, double f) noexcept
     {
@@ -70,10 +95,10 @@ private:
 class ButterworthCascade
 {
 public:
-    static constexpr int kMaxSections = 5;
+    static constexpr int kMaxSections = 9;   // ordre 16 (96 dB/octave) au plus
     void design (bool highpass, double fs, double f, int slopeDbPerOct) noexcept
     {
-        const int order = std::clamp (slopeDbPerOct / 6, 1, 8);
+        const int order = std::clamp (slopeDbPerOct / 6, 1, 16);
         count_ = 0;
         if (order % 2 == 1) sections_[static_cast<std::size_t> (count_++)].set (highpass ? BiquadCoefs::highpass1 (fs, f) : BiquadCoefs::lowpass1 (fs, f));
         for (int k = 1; k <= order / 2; ++k)
