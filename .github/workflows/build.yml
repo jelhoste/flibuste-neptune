@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche et Compresseur)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur et Egaliseur)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP
 
       # clap-validator 0.4.1 (free-audio, MIT), Linux seulement ; le rapport complet est dans les logs.
       - name: clap-validator (Linux)
@@ -94,6 +94,9 @@ jobs:
           COM=$(find build/adapter-juce/Compresseur_artefacts -name 'Compresseur.clap' -print -quit)
           test -n "$COM" || { echo "Compresseur.clap introuvable"; exit 1; }
           "$CV" validate "$COM"
+          EGA=$(find build/adapter-juce/Egaliseur_artefacts -name 'Egaliseur.clap' -print -quit)
+          test -n "$EGA" || { echo "Egaliseur.clap introuvable"; exit 1; }
+          "$CV" validate "$EGA"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -261,6 +264,30 @@ jobs:
         with:
           name: Compresseur-${{ matrix.name }}
           path: dist-com/*
+          if-no-files-found: error
+
+      # L'égaliseur séparé, archivé à part.
+      - name: Archive Egaliseur.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Egaliseur_artefacts -name 'Egaliseur.clap' -print -quit)
+          test -n "$CLAP" || { echo "Egaliseur.clap introuvable"; exit 1; }
+          mkdir -p dist-ega/stage
+          cp -R "$CLAP" dist-ega/stage/
+          cd dist-ega/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Egaliseur-${{ matrix.name }}.zip" Egaliseur.clap
+          else
+            tar -czf "../Egaliseur-${{ matrix.name }}.tar.gz" Egaliseur.clap
+          fi
+          cd ../..
+          rm -rf dist-ega/stage
+          ls -la dist-ega
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Egaliseur-${{ matrix.name }}
+          path: dist-ega/*
           if-no-files-found: error
 
   release:

@@ -58,6 +58,7 @@ target_sources(Neptune PRIVATE
   src/ShaperEditor.cpp
   src/GenericModuleEditor.cpp
   src/CompressorEditor.cpp
+  src/EqualizerEditor.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 
@@ -190,6 +191,46 @@ target_compile_definitions(Compresseur PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(Compresseur
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- Egaliseur (nom provisoire) : égaliseur porté de ZL Equalizer (AGPLv3), plugin CLAP effet indépendant ------------------------------
+set(EGALISEUR_CLAP_ID "com.tournedosrossini.egaliseur" CACHE STRING "Identifiant CLAP de l'égaliseur")
+
+juce_add_plugin(Egaliseur
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Egaliseur"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Eqlz
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Egaliseur
+  CLAP_ID       "${EGALISEUR_CLAP_ID}"
+  CLAP_FEATURES audio-effect equalizer stereo)
+
+target_sources(Egaliseur PRIVATE
+  src/EqualizerPlugin.cpp
+  src/EqualizerEditor.cpp
+  src/GenericModuleEditor.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Egaliseur PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Egaliseur
   PRIVATE
     neptune_core
     juce::juce_audio_utils

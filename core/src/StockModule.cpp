@@ -5,6 +5,7 @@
 
 #include "neptune/core/Mixer.h"
 #include "neptune/core/CompressorModule.h"
+#include "neptune/core/EqualizerModule.h"
 #include "neptune/core/ShaperModule.h"
 #include "neptune/core/UtilityModule.h"
 
@@ -128,7 +129,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" } };
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" } };
     return modules;
 }
 
@@ -137,6 +138,7 @@ std::unique_ptr<StockModule> createModule (std::string_view typeId)
     if (typeId == "utility") return std::make_unique<UtilityModule>();
     if (typeId == "shaper") return std::make_unique<ShaperModule>();
     if (typeId == "compressor") return std::make_unique<CompressorModule>();
+    if (typeId == "equalizer") return std::make_unique<EqualizerModule>();
     return nullptr;
 }
 

@@ -12,8 +12,13 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (handle_.instance == nullptr) return;
     bypassId_ = processor_.insertBypassParam (kind, index, slot);
 
-    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor";
-    if (isCompressor)
+    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer";
+    if (isEqualizer)
+    {
+        genericContent_ = makeEqualizerEditor (*handle_.host, static_cast<const EqualizerModule*> (&handle_.instance->runner.module()), palette_, tr_);
+        addAndMakeVisible (*genericContent_);
+    }
+    else if (isCompressor)
     {
         genericContent_ = makeCompressorEditor (*handle_.host, static_cast<const CompressorModule*> (&handle_.instance->runner.module()), palette_, tr_);
         addAndMakeVisible (*genericContent_);
@@ -40,7 +45,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                                    : kind == NeptuneProcessor::StripKind::Parallel
                                          ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
                                          : text ("insert.where_master");
-    title_ = text (isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
+    title_ = text (isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 
     bypassButton_.setButtonText (text ("insert.bypass"));

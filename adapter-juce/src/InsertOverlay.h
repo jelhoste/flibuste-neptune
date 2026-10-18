@@ -4,6 +4,7 @@
 #include <memory>
 #include "PluginProcessor.h"
 #include "CompressorEditor.h"
+#include "EqualizerEditor.h"
 #include "ShaperEditor.h"
 #include "UtilityEditor.h"
 #include "neptune/core/I18n.h"

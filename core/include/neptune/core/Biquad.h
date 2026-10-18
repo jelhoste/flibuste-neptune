@@ -63,6 +63,31 @@ struct BiquadCoefs
         const double k = std::tan (kBiquadPi * std::min (f, 0.49 * fs) / fs), n = 1.0 / (1.0 + k);
         return { n, -n, 0.0, (k - 1.0) * n, 0.0 };
     }
+    // Passe-tout (2e ordre, puis 1er ordre) et étagères du premier ordre (gain au milieu de la transition : racine du gain total).
+    static BiquadCoefs allpass (double fs, double f, double q) noexcept
+    {
+        const double w = 2.0 * kBiquadPi * std::min (f, 0.49 * fs) / fs, c = std::cos (w), al = std::sin (w) / (2.0 * std::max (q, 0.05)), a0 = 1.0 + al;
+        return { (1.0 - al) / a0, -2.0 * c / a0, (1.0 + al) / a0, -2.0 * c / a0, (1.0 - al) / a0 };
+    }
+    static BiquadCoefs allpass1 (double fs, double f) noexcept
+    {
+        const double k = std::tan (kBiquadPi * std::min (f, 0.49 * fs) / fs), n = 1.0 / (1.0 + k);
+        return { (1.0 - k) * n, -1.0, 0.0, (k - 1.0) * n, 0.0 };
+    }
+    // Étagère du premier ordre : transition centrée sur f, gain total gainDb entre les deux plateaux (basse : gain en dessous de f).
+    static BiquadCoefs lowShelf1 (double fs, double f, double gainDb) noexcept
+    {
+        const double G = std::pow (10.0, gainDb / 20.0), k = std::tan (kBiquadPi * std::min (f, 0.49 * fs) / fs);
+        const double a = k * std::sqrt (G), b = k / std::sqrt (G), n = 1.0 / (1.0 + b);
+        return { (1.0 + a) * n, (a - 1.0) * n, 0.0, (b - 1.0) * n, 0.0 };
+    }
+    static BiquadCoefs highShelf1 (double fs, double f, double gainDb) noexcept
+    {
+        auto c = lowShelf1 (fs, f, -gainDb);
+        const double G = std::pow (10.0, gainDb / 20.0);
+        c.b0 *= G; c.b1 *= G;
+        return c;
+    }
     // Module de la réponse à la fréquence f (pour tracer les courbes : mêmes coefficients que le DSP).
     double magnitude (double fs, double f) const noexcept
     {
@@ -77,12 +102,13 @@ class Biquad
 public:
     void set (const BiquadCoefs& c) noexcept { c_ = c; }
     void reset() noexcept { z1_ = z2_ = 0.0; }
-    float process (float x) noexcept
+    float process (float x) noexcept { return static_cast<float> (processD (x)); }
+    double processD (double in) noexcept
     {
-        const double in = x, y = c_.b0 * in + z1_;
+        const double y = c_.b0 * in + z1_;
         z1_ = c_.b1 * in - c_.a1 * y + z2_;
         z2_ = c_.b2 * in - c_.a2 * y;
-        return static_cast<float> (y);
+        return y;
     }
     const BiquadCoefs& coefs() const noexcept { return c_; }
 private:

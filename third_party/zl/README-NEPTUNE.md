@@ -35,3 +35,14 @@ Ce dossier ne contient AUCUN fichier de ZL : il documente ce qui a été porté 
 D. Giannoulis, M. Massberg, J. D. Reiss, *Digital dynamic range compressor design - A tutorial and analysis*, JAES (2012) ; M. Vicanek, *Matched
 One-Pole Digital Shelving Filters* (2019) et *Matched Second Order Digital Filters* (2016) ; N. Redmon, *Cascading filters* (2016) ; C. Moler,
 *Makima Piecewise Cubic Interpolation* (2019).
+
+# ZLEqualizer (https://github.com/ZL-Audio/ZLEqualizer, AGPLv3, zsliu98) : égaliseur porté
+
+| Source ZL | Fichier chez nous | Écarts |
+|---|---|---|
+| `dsp/filter/filter_design/filter_design.hpp` | `core/src/EqualizerModule.cpp` (`designFilter`) | mêmes types, mêmes ordres (1, 2, 4, 6, 8, 12, 16), même étalement des Q pour les pentes raides, mêmes paires d'étagères pour les cloches d'ordre > 2 ; sections RBJ / premier ordre (`Biquad.h`) au lieu des structures TDF, SVF, parallèle d'Ivantsov |
+| `dsp/filter/gain_compensation/gain_compensation.hpp` | `EqualizerModule.cpp` (`gainCompensationDb`) | mêmes formules et coefficients |
+| `dsp/filter/dynamic_filter/dynamic_side_handler.hpp`, `dynamic_base.hpp` | `EqualizerModule::processBand` | même rapport niveau -> glissement entre le gain et le gain cible (carré de la rampe seuil - genou -> seuil + genou), suiveur attaque / relâchement / lissage, fenêtre RMS ; les coefficients sont recalculés par blocs de 16 échantillons (ZL les met à jour à chaque échantillon avec un cache trigonométrique) |
+| `zlp/zlp_definitions.hpp` (paramètres) | idem (`bandParam`) | 16 bandes (ZL : 24), sans « Flat Tilt », sans structure de filtre (toujours phase minimale), sans phase linéaire (FIR) ni analyseur, sans `Static Gain`, `Dynamic Learn`, `Dynamic Relative` ni `Side Swap` |
+- Inclinaison (Tilt) : positif relève les aigus et abaisse les graves de moitié du gain de chaque côté (choix de Neptune, ZL ne précise pas le sens dans le code lu).
+- Filtre de détection d'une bande : BP, LP, HP ou AL (aucun), avec le même ordre et les mêmes pentes ; « Side Link » le cale sur la fréquence et le Q de la bande.
