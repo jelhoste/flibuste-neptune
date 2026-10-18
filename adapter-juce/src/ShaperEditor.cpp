@@ -59,7 +59,7 @@ class ShaperEditor::ParamBar : public juce::Component
 {
 public:
     ParamBar (ShaperEditor& o, ParamId id, juce::String label, bool horizontal, double step = 0.0)
-        : owner_ (o), id_ (id), label_ (std::move (label)), horizontal_ (horizontal), step_ (step) {}
+        : owner_ (o), id_ (id), label_ (std::move (label)), horizontal_ (horizontal), step_ (step) { setBufferedToImage (true); }
 
     ParamId id() const { return id_; }
     void setStep (double s) { step_ = s; }
@@ -206,7 +206,7 @@ class ShaperEditor::LevelMeter : public juce::Component
 {
 public:
     enum Kind { In, Out, Gain };
-    LevelMeter (ShaperEditor& o, Kind k) : owner_ (o), kind_ (k) {}
+    LevelMeter (ShaperEditor& o, Kind k) : owner_ (o), kind_ (k) { setBufferedToImage (true); }
     void update()
     {
         const auto* m = owner_.module_;
@@ -299,11 +299,14 @@ private:
 };
 
 // ------------------------------------------------------------------------------------------------ vue principale : WAVE / RESPONSE
-class ShaperEditor::DetectionView : public juce::Component, private juce::Timer
+class ShaperEditor::DetectionView : public juce::Component
 {
 public:
-    explicit DetectionView (ShaperEditor& o) : owner_ (o), history_ (static_cast<std::size_t> (sh::kHistoryColumns)) { startTimerHz (60); }
-    ~DetectionView() override { stopTimer(); }
+    explicit DetectionView (ShaperEditor& o) : owner_ (o), history_ (static_cast<std::size_t> (sh::kHistoryColumns))
+    {
+        // cadence synchronisée sur l'écran (comme ZL Compressor) ; le travail réel n'est fait que si l'image a vraiment bougé
+        vblank_ = std::make_unique<juce::VBlankAttachment> (this, [this] { tick(); });
+    }
     int view = 0;   // 0 WAVE, 1 RESPONSE
 
     void paint (juce::Graphics& g) override
@@ -324,18 +327,18 @@ public:
     }
 
 private:
-    void timerCallback() override
+    // Appelé à chaque rafraîchissement de l'écran : ne demande un nouveau dessin que si le défilement a avancé d'au moins quelques pixels
+    // (un historique long n'a pas besoin d'être fluide : « donner une idée »), ou si l'échelle a changé.
+    void tick()
     {
         if (! isShowing() || view != 0) return;
-        // redessine seulement si le défilement a avancé d'environ un pixel (ou si l'échelle a changé)
         const float now = static_cast<float> (owner_.module_ != nullptr ? owner_.module_->historyHead() : 0) + (owner_.module_ != nullptr ? owner_.module_->historyPhase() : 0.0f);
         const float pxPerColumn = static_cast<float> (getWidth()) / static_cast<float> (sh::kHistoryColumns);
         const float key = static_cast<float> (owner_.value (sh::range)) + static_cast<float> (owner_.value (sh::displaySpan));
-        if (std::fabs (now - lastNow_) * pxPerColumn >= 1.0f || key != lastKey_) { lastNow_ = now; lastKey_ = key; repaint(); }
-        // défilement lent (grande fenêtre) : 30 images par seconde suffisent et coûtent moitié moins ; sinon 60
-        const int wanted = owner_.value (sh::displaySpan) >= 400.0 ? 33 : 16;
-        if (getTimerInterval() != wanted) startTimer (wanted);
+        const float stepPx = owner_.value (sh::displaySpan) >= 400.0 ? 6.0f : 2.0f;
+        if (std::fabs (now - lastNow_) * pxPerColumn >= stepPx || key != lastKey_) { lastNow_ = now; lastKey_ = key; repaint(); }
     }
+    std::unique_ptr<juce::VBlankAttachment> vblank_;
     // vue RESPONSE : abscisse = niveau du transitoire (-60..0 dB), ordonnée = poids w (0..1)
     juce::Rectangle<float> plot_;
     float xOf (double db) const { return plot_.getX() + static_cast<float> ((db + 60.0) / 60.0) * plot_.getWidth(); }
@@ -410,7 +413,7 @@ private:
     // vue WAVE : signal et enveloppes en haut, gain appliqué en bas (échelle +-RANGE). Pour rester léger, la courbe est dessinée dans une
     // image mise en cache (environ 250 points : l'oeil n'a pas besoin de plus), refaite seulement quand un nouveau groupe de colonnes est
     // complet ; entre deux, chaque image de l'écran ne fait que faire glisser cette image (défilement continu, colonne en cours comprise).
-    static constexpr int kGroup = 4;
+    static constexpr int kGroup = 8;   // 128 points (ZL Compressor en utilise 100) : suffisant pour « donner une idée »
 
     void paintWave (juce::Graphics& g, juce::Rectangle<float> area)
     {
@@ -440,7 +443,7 @@ private:
         const float originX = area.getX() + (static_cast<float> (firstGroup * kGroup) - now + static_cast<float> (cols - 2)) * cw;
         g.saveState();
         g.reduceClipRegion (area.expanded (2.0f, 0.0f).toNearestInt());
-        g.drawImageTransformed (cache_, juce::AffineTransform::translation (originX, area.getY()));
+        g.drawImageAt (cache_, juce::roundToInt (originX), juce::roundToInt (area.getY()));   // décalage entier : simple copie, sans rééchantillonnage
         g.restoreState();
 
         const float topH = area.getHeight() * 0.58f, gmid = area.getY() + topH + 12.0f + (area.getHeight() - topH - 12.0f) * 0.5f;
