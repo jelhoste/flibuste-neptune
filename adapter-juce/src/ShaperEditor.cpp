@@ -337,20 +337,29 @@ private:
     void tick()
     {
         ++owner_.diag_.vblanks;
-        if (owner_.module_ != nullptr)
-        {
-            // arrivée des données par rafales (traitement anticipé de l'hôte) : nombre de colonnes apparues d'un coup entre deux rafraîchissements
-            const auto h = owner_.module_->historyHead();
-            if (owner_.diag_.lastHead != 0) owner_.diag_.maxHeadJump = std::max (owner_.diag_.maxHeadJump, static_cast<int> (h - owner_.diag_.lastHead));
-            owner_.diag_.lastHead = h;
-        }
+        if (owner_.module_ == nullptr) return;
+        // arrivée des données par rafales (traitement anticipé de l'hôte) : nombre de colonnes apparues d'un coup entre deux rafraîchissements
+        const auto h = owner_.module_->historyHead();
+        if (owner_.diag_.lastHead != 0) owner_.diag_.maxHeadJump = std::max (owner_.diag_.maxHeadJump, static_cast<int> (h - owner_.diag_.lastHead));
+        owner_.diag_.lastHead = h;
+        // Position affichée : elle avance avec l'HORLOGE, pas avec l'arrivée des blocs audio (l'hôte les livre par rafales). Elle reste en retrait
+        // de la donnée la plus récente (marge d'environ 250 ms) : si elle prend trop de retard elle accélère un peu, si elle rattrape les données elle attend.
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = lastMs_ > 0.0 ? std::min (0.25, (nowMs - lastMs_) * 0.001) : 0.0;
+        lastMs_ = nowMs;
+        const double cps = owner_.module_->columnsPerSecond();
+        const double dataPos = static_cast<double> (h) + static_cast<double> (owner_.module_->historyPhase());
+        const double targetLag = 0.25 * cps;
+        if (shown_ <= 0.0 || dataPos - shown_ > 4.0 * targetLag || shown_ > dataPos) shown_ = dataPos - targetLag;   // (re)calage
+        const double lag = dataPos - shown_;
+        const double speed = 1.0 + std::clamp ((lag - targetLag) / targetLag, -0.5, 1.0) * 0.5;
+        shown_ = std::min (dataPos, shown_ + dt * cps * speed);
         if (! isShowing() || view != 0) return;
-        const float now = static_cast<float> (owner_.module_ != nullptr ? owner_.module_->historyHead() : 0) + (owner_.module_ != nullptr ? owner_.module_->historyPhase() : 0.0f);
         const float pxPerColumn = static_cast<float> (getWidth()) / static_cast<float> (sh::kHistoryColumns);
         const float key = static_cast<float> (owner_.value (sh::range)) + static_cast<float> (owner_.value (sh::displaySpan));
-        const float stepPx = 1.0f;   // défilement fluide : un nouveau dessin dès que l'image a avancé d'un pixel (la copie est maintenant bon marché)
-        if (std::fabs (now - lastNow_) * pxPerColumn >= stepPx || key != lastKey_) { lastNow_ = now; lastKey_ = key; repaint(); }
+        if (std::fabs (static_cast<float> (shown_) - lastNow_) * pxPerColumn >= 1.0f || key != lastKey_) { lastNow_ = static_cast<float> (shown_); lastKey_ = key; repaint(); }
     }
+    double shown_ = 0.0, lastMs_ = 0.0;   // position affichée (en colonnes) et instant du dernier rafraîchissement
     std::unique_ptr<juce::VBlankAttachment> vblank_;
     // vue RESPONSE : abscisse = niveau du transitoire (-60..0 dB), ordonnée = poids w (0..1)
     juce::Rectangle<float> plot_;
@@ -457,7 +466,7 @@ private:
             cacheRange_ = range;
         }
         // position à l'écran : le groupe `firstGroup` commence à la colonne firstGroup * kGroup ; « maintenant » = head + phase
-        const float now = static_cast<float> (head) + phase;
+        const float now = shown_ > 0.0 ? static_cast<float> (shown_) : static_cast<float> (head) + phase;
         const float originX = area.getX() + (static_cast<float> (firstGroup * kGroup) - now + static_cast<float> (cols - 2)) * cw;
         const double b0 = juce::Time::getMillisecondCounterHiRes();
         g.saveState();

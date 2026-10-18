@@ -100,6 +100,7 @@ public:
     // cours d'écriture peut être incohérente, sans conséquence pour l'affichage).
     void copyHistory (shaper::Column* dst) const noexcept;
     // Avancement (0..1) de la colonne en cours d'accumulation : l'interface le soustrait au défilement pour qu'il soit continu.
+    double columnsPerSecond() const noexcept { return sampleRate_ / static_cast<double> (std::max (1, colSamples_)); }   // vitesse du défilement
     std::uint32_t historyHead() const noexcept { return historyHead_.load (std::memory_order_acquire); }   // nombre total de colonnes écrites
     float historyPhase() const noexcept { return historyPhase_.load (std::memory_order_relaxed); }
     void copyKey (float* dst, int n) const noexcept;    // les n dernières valeurs de la clé (n <= kKeyRing)
