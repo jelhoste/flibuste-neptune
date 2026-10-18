@@ -147,7 +147,7 @@ int main (int argc, char** argv)
 
     FakeHost host;
     for (int i = 0; i < 6; ++i)
-        host.set.add (ParamSpec::continuous (static_cast<ParamId> (i + 1), "p" + std::to_string (i), i % 2 ? Unit::Milliseconds : Unit::Decibel, i % 2 ? 1.0 : -60.0, i % 2 ? 500.0 : 0.0, 0.0));
+        host.set.add (ParamSpec::continuous (static_cast<ParamId> (i + 1), "p" + std::to_string (i), i % 2 ? Unit::Milliseconds : Unit::Decibel, i % 2 ? 1.0 : -60.0, i % 2 ? 500.0 : 0.0, i % 2 ? 10.0 : -12.0));
 
     struct Case { const char* name; th::ThemeId id; float scale; };
     const Case cases[] = { { "dark-100", th::ThemeId::Dark, 1.0f }, { "light-100", th::ThemeId::Light, 1.0f },
