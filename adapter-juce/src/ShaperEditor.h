@@ -95,7 +95,8 @@ private:
     struct Diag
     {
         double windowStart = 0.0, lastTick = 0.0, sumInterval = 0.0, maxInterval = 0.0, maxWork = 0.0, sumPaint = 0.0, maxPaint = 0.0;
-        int ticks = 0, paints = 0, vblanks = 0, maxHeadJump = 0;
+        double sumRender = 0.0, maxRender = 0.0, sumBlit = 0.0, maxBlit = 0.0, sumText = 0.0;
+        int renders = 0, ticks = 0, paints = 0, vblanks = 0, maxHeadJump = 0;
         std::uint32_t lastHead = 0;
     } diag_;
     juce::Label diagLabel_;

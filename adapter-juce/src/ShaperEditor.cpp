@@ -446,18 +446,28 @@ private:
         const bool stale = ! cache_.isValid() || cache_.getWidth() != imgW || cache_.getHeight() != imgH || cacheGroup_ != lastGroup || cacheRange_ != range;
         if (stale)
         {
+            const double r0 = juce::Time::getMillisecondCounterHiRes();
             owner_.module_->copyHistory (history_.data());
             renderWave (imgW, imgH, groups, gw, static_cast<long long> (head), firstGroup, range);
+            const double rms = juce::Time::getMillisecondCounterHiRes() - r0;
+            owner_.diag_.sumRender += rms;
+            owner_.diag_.maxRender = std::max (owner_.diag_.maxRender, rms);
+            ++owner_.diag_.renders;
             cacheGroup_ = lastGroup;
             cacheRange_ = range;
         }
         // position à l'écran : le groupe `firstGroup` commence à la colonne firstGroup * kGroup ; « maintenant » = head + phase
         const float now = static_cast<float> (head) + phase;
         const float originX = area.getX() + (static_cast<float> (firstGroup * kGroup) - now + static_cast<float> (cols - 2)) * cw;
+        const double b0 = juce::Time::getMillisecondCounterHiRes();
         g.saveState();
         g.reduceClipRegion (area.expanded (2.0f, 0.0f).toNearestInt());
         g.drawImageAt (cache_, juce::roundToInt (originX), juce::roundToInt (area.getY()));   // décalage entier : simple copie, sans rééchantillonnage
         g.restoreState();
+        const double bms = juce::Time::getMillisecondCounterHiRes() - b0;
+        owner_.diag_.sumBlit += bms;
+        owner_.diag_.maxBlit = std::max (owner_.diag_.maxBlit, bms);
+        const double x0 = juce::Time::getMillisecondCounterHiRes();
 
         const float topH = area.getHeight() * 0.58f, gmid = area.getY() + topH + 12.0f + (area.getHeight() - topH - 12.0f) * 0.5f;
         g.setColour (owner_.colour (Token::TextDim));
@@ -468,6 +478,7 @@ private:
         const double span = sh::kHistorySeconds * std::clamp (owner_.value (sh::displaySpan), 50.0, 1600.0) / 100.0;
         for (int t = 0; t <= 8; ++t)
             g.drawText (juce::String (span * t / 8.0, span >= 4.0 ? 1 : 2) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
+        owner_.diag_.sumText += juce::Time::getMillisecondCounterHiRes() - x0;
     }
 
     // Dessine dans l'image mise en cache les `groups` groupes de kGroup colonnes (maximum des crêtes, moyenne des courbes), lissés.
@@ -781,8 +792,9 @@ void ShaperEditor::buildHeader()
         s.addAndMakeVisible (navButtons_[static_cast<std::size_t> (i)]);
     }
     diagLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim2));
-    diagLabel_.setFont (juce::FontOptions (10.0f));
+    diagLabel_.setFont (juce::FontOptions (9.5f));
     diagLabel_.setJustificationType (juce::Justification::centredLeft);
+    diagLabel_.setMinimumHorizontalScale (1.0f);
     diagLabel_.setText (juce::String ("dev ") + NEPTUNE_GIT_HASH + "  " + __DATE__ + " " + __TIME__, juce::dontSendNotification);
     s.addAndMakeVisible (diagLabel_);
     latencyLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
@@ -1023,10 +1035,15 @@ void ShaperEditor::timerCallback()
                                 + "   |   minuterie " + juce::String (diag_.ticks > 0 ? diag_.sumInterval / diag_.ticks : 0.0, 0) + " ms (max " + juce::String (diag_.maxInterval, 0)
                                 + ", travail max " + juce::String (diag_.maxWork, 1) + ")   |   graphe : " + juce::String (diag_.paints / secs, 0) + " dessins/s, "
                                 + juce::String (diag_.paints > 0 ? diag_.sumPaint / diag_.paints : 0.0, 1) + " ms (max " + juce::String (diag_.maxPaint, 1) + ")   |   écran : "
-                                + juce::String (diag_.vblanks / secs, 0) + " Hz   |   données : +" + juce::String (diag_.maxHeadJump) + " col. max d'un coup",
+                                + juce::String (diag_.vblanks / secs, 0) + " Hz   |   données : +" + juce::String (diag_.maxHeadJump) + " col. max d'un coup"
+                                + "\nimage de courbe : " + juce::String (diag_.renders) + " refaites/s, " + juce::String (diag_.renders > 0 ? diag_.sumRender / diag_.renders : 0.0, 1)
+                                + " ms (max " + juce::String (diag_.maxRender, 1) + ")   |   copie " + juce::String (diag_.paints > 0 ? diag_.sumBlit / diag_.paints : 0.0, 1)
+                                + " ms (max " + juce::String (diag_.maxBlit, 1) + ")   |   textes " + juce::String (diag_.paints > 0 ? diag_.sumText / diag_.paints : 0.0, 1)
+                                + " ms   |   échelle effective " + juce::String (juce::Component::getApproximateScaleFactorForComponent (this), 3) + "  fenêtre " + juce::String (getWidth()) + "x" + juce::String (getHeight()),
                             juce::dontSendNotification);
         diag_.windowStart = t1;
-        diag_.sumInterval = diag_.maxInterval = diag_.maxWork = diag_.sumPaint = diag_.maxPaint = 0.0;
+        diag_.sumInterval = diag_.maxInterval = diag_.maxWork = diag_.sumPaint = diag_.maxPaint = diag_.sumRender = diag_.maxRender = diag_.sumBlit = diag_.maxBlit = diag_.sumText = 0.0;
+        diag_.renders = 0;
         diag_.ticks = diag_.paints = diag_.vblanks = diag_.maxHeadJump = 0;
     }
 }
@@ -1060,7 +1077,7 @@ void ShaperEditor::resized()
     const juce::Rectangle<int> main (176, 80, 964, 392);
     const juce::Rectangle<int> bottom (176, 704, 964, 56);
     latencyLabel_.setBounds (bottom.getX() + 380, bottom.getY() + 12, 150, 32);
-    diagLabel_.setBounds (24, designHeight - 22, 700, 16);
+    diagLabel_.setBounds (24, designHeight - 26, 1112, 24);
 
     auto place = [] (juce::Component* c, int x0, int y0, int w, int h) { c->setBounds (x0, y0, w, h); };
     auto find = [this] (ParamId id) -> juce::Component*
