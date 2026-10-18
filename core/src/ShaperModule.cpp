@@ -84,6 +84,7 @@ bool ShaperModule::declareParams (ParameterSet& set, std::string* error) const
     }
     add (fixed (P::continuous (meterRmsMs, "Meter RMS Window", Unit::Milliseconds, 10.0, 3000.0, 300.0, Curve::Exponential)));
     add (fixed (P::continuous (meterPeakDecay, "Meter Peak Decay", Unit::None, 5.0, 300.0, 40.0)));
+    add (fixed (P::continuous (displaySpan, "Display Window", Unit::Percent, 50.0, 800.0, 250.0, Curve::Exponential)));
     return ok;
 }
 
@@ -121,7 +122,7 @@ void ShaperModule::prepare (double sampleRate, int maxBlockSize)
         c.dryDelay.assign (dryMax, 0.0f);
         c.gainRing.assign (static_cast<std::size_t> (Oversampler::upDelayHigh (4)) + 2, 1.0f);
     }
-    colSamples_ = std::max (1, static_cast<int> (std::lround (kHistorySeconds * sampleRate_ / kHistoryColumns)));
+    colSamples_ = std::max (1, static_cast<int> (std::lround (kHistorySeconds * 2.5 * sampleRate_ / kHistoryColumns)));
     reset();
 }
 
@@ -207,6 +208,17 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
     if (n <= 0 || n > maxBlock_) return;
     readParams (params);
     designKeyFilters (params);
+    {
+        // durée affichée : une colonne dure span x 1,6 s / 1024 ; un changement efface l'historique (les colonnes n'ont plus la même durée)
+        const int cs = std::max (1, static_cast<int> (std::lround (kHistorySeconds * std::clamp (param (displaySpan), 50.0, 800.0) / 100.0 * sampleRate_ / kHistoryColumns)));
+        if (cs != colSamples_)
+        {
+            colSamples_ = cs;
+            std::fill (history_.begin(), history_.end(), Column {});
+            acc_ = Column {};
+            accCount_ = 0;
+        }
+    }
     const double fs = sampleRate_;
     const auto un = static_cast<std::size_t> (n);
 

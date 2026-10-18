@@ -348,3 +348,27 @@ TEST_CASE ("shaper: factory presets apply and Default restores neutral settings"
             CHECK (r.runner.params().find (id)->clamp (v) == Approx (v));
         }
 }
+
+TEST_CASE ("shaper: the display window is a setting, 250 % by default, and changing it restarts the history", "[shaper]")
+{
+    ShaperRig r;
+    const auto* spec = r.runner.params().find (shaper::displaySpan);
+    REQUIRE (spec != nullptr);
+    CHECK (r.runner.params().get (shaper::displaySpan) == Approx (250.0));
+    CHECK (spec->automatable == false);
+    CHECK (spec->min == Approx (50.0));
+    CHECK (spec->max == Approx (800.0));
+    auto& m = static_cast<ShaperModule&> (r.runner.module());
+    r.play (drumHits());
+    std::vector<shaper::Column> h (shaper::kHistoryColumns);
+    m.copyHistory (h.data());
+    float peak = 0.0f;
+    for (const auto& c : h) peak = std::max (peak, c.inPeak);
+    CHECK (peak > 0.3f);
+    r.set (shaper::displaySpan, 100.0);
+    r.play (std::vector<float> (256, 0.0f));
+    m.copyHistory (h.data());
+    peak = 0.0f;
+    for (const auto& c : h) peak = std::max (peak, c.inPeak);
+    CHECK (peak == Approx (0.0f).margin (1e-6));   // historique effacé au changement de fenêtre
+}

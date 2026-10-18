@@ -213,6 +213,12 @@ En mode Stereo, `shp_stereo_link` règle la part de détection commune aux deux 
 - help_short : Niveau sous lequel le shaper n'agit plus.
 - help_long : Sous ce niveau, la détection est ignorée pour ne jamais amplifier le bruit de fond, même quand LEVEL est à 0 %.
 
+#### meter_display_span
+- enum : `kParamMeterDisplaySpan` · label : Fenêtre d'affichage WAVE · type : float · range : 50…800 · default : 250 · unit : % de 1,6 s (250 % = 4 s) · scale : log · auto : non
+- page : SETTINGS (Metering)
+- help_short : Durée visible dans le graphique WAVE.
+- help_long : Plus la fenêtre est longue, plus le défilement est lent et facile à suivre (une valeur plus petite montre plus de détail sur moins de temps). Changer la valeur efface l'historique affiché. (Décision du 2026-10-18 : défaut 250 %.)
+
 ### 2.7 Détecteurs (page SETTINGS, section « Détecteurs »)
 Ces réglages changent le son : ce sont des paramètres du plugin (non automatisables), enregistrés avec les presets et la session, et non des préférences d'interface.
 

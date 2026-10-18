@@ -456,8 +456,9 @@ private:
         g.drawText ("+" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getY()) - 5, 28, 12, juce::Justification::centredRight);
         g.drawText ("0 dB", static_cast<int> (area.getX()) - 32, static_cast<int> (gmid) - 6, 28, 12, juce::Justification::centredRight);
         g.drawText ("-" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getBottom()) - 6, 28, 12, juce::Justification::centredRight);
+        const double span = sh::kHistorySeconds * std::clamp (owner_.value (sh::displaySpan), 50.0, 800.0) / 100.0;
         for (int t = 0; t <= 8; ++t)
-            g.drawText (juce::String (t * 0.2, 1) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
+            g.drawText (juce::String (span * t / 8.0, span >= 4.0 ? 1 : 2) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
     }
 
     ShaperEditor& owner_;
@@ -791,6 +792,7 @@ void ShaperEditor::buildSettingsPage()
     addBar (s, page, sh::noiseFloor, "shp.set_floor");
     addBar (s, page, sh::meterRmsMs, "shp.set_rms_window");
     addBar (s, page, sh::meterPeakDecay, "shp.set_peak_decay");
+    addBar (s, page, sh::displaySpan, "shp.set_display_span");
     settingsInfo_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     settingsInfo_.setFont (juce::FontOptions (12.0f));
     settingsInfo_.setJustificationType (juce::Justification::topLeft);
@@ -998,7 +1000,7 @@ void ShaperEditor::resized()
     {
         int y = main.getY();
         place (find (sh::detMode), main.getX(), y, 300, 36); y += 48;
-        for (const auto id : { sh::detFastRatio, sh::noiseFloor, sh::meterRmsMs, sh::meterPeakDecay }) { place (find (id), main.getX(), y, 300, 54); y += 62; }
+        for (const auto id : { sh::detFastRatio, sh::noiseFloor, sh::meterRmsMs, sh::meterPeakDecay, sh::displaySpan }) { place (find (id), main.getX(), y, 300, 54); y += 62; }
         settingsInfo_.setBounds (main.getX() + 340, main.getY(), 560, 300);
     }
     if (modal_) modal_->setBounds (surface_->getLocalBounds());

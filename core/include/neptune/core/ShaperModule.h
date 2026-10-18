@@ -51,6 +51,7 @@ constexpr ParamId scBand3Freq = 141, scBand3Gain = 142, scBand3Q = 143;
 
 constexpr ParamId meterRmsMs = 150;        // ms, 10..3000 (réglage d'affichage enregistré avec le preset)
 constexpr ParamId meterPeakDecay = 151;    // dB/s, 5..300
+constexpr ParamId displaySpan = 152;       // %, 50..800 : durée affichée par le graphe WAVE, en pour-cent de 1,6 s (défaut 250 % = 4 s)
 
 constexpr double maxLookaheadMs = 10.0;
 
@@ -121,8 +122,8 @@ private:
     double param (ParamId id) const noexcept { return values_[static_cast<std::size_t> (id - 100)]; }
     void readParams (const ParameterSet&) noexcept;
 
-    std::array<std::size_t, 52> idx_ {};
-    std::array<double, 52> values_ {};
+    std::array<std::size_t, 53> idx_ {};
+    std::array<double, 53> values_ {};
     double sampleRate_ = 48000.0;
     int maxBlock_ = 0, lookaheadSamples_ = 0, factor_ = 4;
     std::array<Channel, 2> ch_;

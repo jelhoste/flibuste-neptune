@@ -598,6 +598,7 @@ const Entry kEntries[] = {
     { "shp.set_floor", { "DETECTION FLOOR", "PLANCHER DE DÉTECTION" } },
     { "shp.set_rms_window", { "METER RMS WINDOW", "FENÊTRE RMS DES VU-MÈTRES" } },
     { "shp.set_peak_decay", { "METER PEAK DECAY", "RETOMBÉE DES CRÊTES" } },
+    { "shp.set_display_span", { "WAVE DISPLAY WINDOW (% of 1.6 s)", "FENÊTRE D'AFFICHAGE WAVE (% de 1,6 s)" } },
     { "shp.set_sample_rate", { "Sample rate", "Fréquence d'échantillonnage" } },
     { "shp.set_latency", { "Reported latency", "Latence déclarée" } },
     { "shp.set_info", { "These settings change the sound and are saved with the project. The oversampling and lookahead latency is reported to the host: changing them restarts the plugin on the host side.", "Ces réglages changent le son et sont enregistrés avec le projet. La latence du suréchantillonnage et du lookahead est déclarée à l'hôte : les changer redémarre le plugin côté hôte." } },
