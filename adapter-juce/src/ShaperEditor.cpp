@@ -348,7 +348,7 @@ private:
         const float now = static_cast<float> (owner_.module_ != nullptr ? owner_.module_->historyHead() : 0) + (owner_.module_ != nullptr ? owner_.module_->historyPhase() : 0.0f);
         const float pxPerColumn = static_cast<float> (getWidth()) / static_cast<float> (sh::kHistoryColumns);
         const float key = static_cast<float> (owner_.value (sh::range)) + static_cast<float> (owner_.value (sh::displaySpan));
-        const float stepPx = owner_.value (sh::displaySpan) >= 400.0 ? 6.0f : 2.0f;
+        const float stepPx = 1.0f;   // défilement fluide : un nouveau dessin dès que l'image a avancé d'un pixel (la copie est maintenant bon marché)
         if (std::fabs (now - lastNow_) * pxPerColumn >= stepPx || key != lastKey_) { lastNow_ = now; lastKey_ = key; repaint(); }
     }
     std::unique_ptr<juce::VBlankAttachment> vblank_;
@@ -484,8 +484,10 @@ private:
     // Dessine dans l'image mise en cache les `groups` groupes de kGroup colonnes (maximum des crêtes, moyenne des courbes), lissés.
     void renderWave (int imgW, int imgH, int groups, float gw, long long head, long long firstGroup, float range)
     {
-        cache_ = juce::Image (juce::Image::ARGB, imgW, imgH, true);
+        // image OPAQUE (le fond du graphique est peint dedans) : JUCE la copie alors sans calcul de transparence, nettement plus vite
+        cache_ = juce::Image (juce::Image::RGB, imgW, imgH, false);
         juce::Graphics g (cache_);
+        g.fillAll (owner_.colour (Token::BgApp).overlaidWith (owner_.colour (Token::StageBg)));
         const float topH = static_cast<float> (imgH) * 0.58f, mid = topH * 0.5f, amp = topH * 0.5f;
         const juce::Rectangle<float> bottom (0.0f, topH + 12.0f, static_cast<float> (imgW), static_cast<float> (imgH) - topH - 12.0f);
         const float gmid = bottom.getCentreY();
