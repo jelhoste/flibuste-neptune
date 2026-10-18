@@ -91,6 +91,14 @@ private:
     std::unique_ptr<DetectionView> detection_;
     std::unique_ptr<EqView> eq_;
     juce::Label settingsInfo_;
+    // Diagnostic de développement : identifiant de construction et mesures de fluidité de l'interface (affichés en bas à gauche)
+    struct Diag
+    {
+        double windowStart = 0.0, lastTick = 0.0, sumInterval = 0.0, maxInterval = 0.0, maxWork = 0.0, sumPaint = 0.0, maxPaint = 0.0;
+        int ticks = 0, paints = 0, vblanks = 0, maxHeadJump = 0;
+        std::uint32_t lastHead = 0;
+    } diag_;
+    juce::Label diagLabel_;
     int presetIndex_ = 0;
     int tick_ = 0;
     std::uint32_t eqVersions_ = 0, responseVersions_ = 0xFFFFFFFFu;

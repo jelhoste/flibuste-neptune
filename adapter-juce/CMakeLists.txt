@@ -1,3 +1,10 @@
+# Identifiant de construction (affiché dans les interfaces de développement) : hash court du dépôt au moment de la configuration.
+execute_process(COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD OUTPUT_VARIABLE NEPTUNE_GIT_HASH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT NEPTUNE_GIT_HASH)
+  set(NEPTUNE_GIT_HASH "nogit")
+endif()
+add_compile_definitions(NEPTUNE_GIT_HASH="${NEPTUNE_GIT_HASH}")
+
 # Nombre de pistes du pool de paramètres « sonde » (palier 0, point 4). 32 pistes = 676 paramètres.
 set(NEPTUNE_PROBE_TRACKS 16 CACHE STRING "Pistes du mixeur (paramètres exposés à l'hôte)")
 

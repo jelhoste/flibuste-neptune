@@ -311,11 +311,16 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const double p0 = juce::Time::getMillisecondCounterHiRes();
         const auto r = getLocalBounds().toFloat();
         g.setColour (owner_.colour (Token::StageBg));
         g.fillRoundedRectangle (r, 6.0f);
         if (view == 0) paintWave (g, r.reduced (34.0f, 12.0f).withTrimmedBottom (6.0f));
         else paintResponse (g, r.reduced (40.0f, 16.0f));
+        const double ms = juce::Time::getMillisecondCounterHiRes() - p0;
+        owner_.diag_.sumPaint += ms;
+        owner_.diag_.maxPaint = std::max (owner_.diag_.maxPaint, ms);
+        ++owner_.diag_.paints;
     }
 
     void mouseDown (const juce::MouseEvent& e) override { grab (e); }
@@ -331,6 +336,14 @@ private:
     // (un historique long n'a pas besoin d'être fluide : « donner une idée »), ou si l'échelle a changé.
     void tick()
     {
+        ++owner_.diag_.vblanks;
+        if (owner_.module_ != nullptr)
+        {
+            // arrivée des données par rafales (traitement anticipé de l'hôte) : nombre de colonnes apparues d'un coup entre deux rafraîchissements
+            const auto h = owner_.module_->historyHead();
+            if (owner_.diag_.lastHead != 0) owner_.diag_.maxHeadJump = std::max (owner_.diag_.maxHeadJump, static_cast<int> (h - owner_.diag_.lastHead));
+            owner_.diag_.lastHead = h;
+        }
         if (! isShowing() || view != 0) return;
         const float now = static_cast<float> (owner_.module_ != nullptr ? owner_.module_->historyHead() : 0) + (owner_.module_ != nullptr ? owner_.module_->historyPhase() : 0.0f);
         const float pxPerColumn = static_cast<float> (getWidth()) / static_cast<float> (sh::kHistoryColumns);
@@ -767,6 +780,11 @@ void ShaperEditor::buildHeader()
         navButtons_[static_cast<std::size_t> (i)].onClick = [this, i] { setPage (i); };
         s.addAndMakeVisible (navButtons_[static_cast<std::size_t> (i)]);
     }
+    diagLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim2));
+    diagLabel_.setFont (juce::FontOptions (10.0f));
+    diagLabel_.setJustificationType (juce::Justification::centredLeft);
+    diagLabel_.setText (juce::String ("dev ") + NEPTUNE_GIT_HASH + "  " + __DATE__ + " " + __TIME__, juce::dontSendNotification);
+    s.addAndMakeVisible (diagLabel_);
     latencyLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     latencyLabel_.setFont (juce::FontOptions (11.0f, juce::Font::bold));
     latencyLabel_.setJustificationType (juce::Justification::centredRight);
@@ -968,6 +986,15 @@ void ShaperEditor::refreshStates()
 
 void ShaperEditor::timerCallback()
 {
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    if (diag_.lastTick > 0.0)
+    {
+        const double dt = t0 - diag_.lastTick;
+        diag_.sumInterval += dt;
+        diag_.maxInterval = std::max (diag_.maxInterval, dt);
+        ++diag_.ticks;
+    }
+    diag_.lastTick = t0;
     if ((++tick_ % 3) == 0) refreshStates();   // textes et états grisés : 10 fois par seconde suffisent
     inMeter_->update();
     gainMeter_->update();
@@ -986,6 +1013,21 @@ void ShaperEditor::timerCallback()
     {
         const auto sum = host_.parameters().version (sh::levelDependency) + host_.parameters().version (sh::levelThreshold) + host_.parameters().version (sh::levelKnee);
         if (sum != responseVersions_) { responseVersions_ = sum; detection_->repaint(); }
+    }
+    const double t1 = juce::Time::getMillisecondCounterHiRes();
+    diag_.maxWork = std::max (diag_.maxWork, t1 - t0);
+    if (t1 - diag_.windowStart >= 1000.0)
+    {
+        const double secs = (t1 - diag_.windowStart) / 1000.0;
+        diagLabel_.setText (juce::String ("dev ") + NEPTUNE_GIT_HASH + "  " + __DATE__ + " " + __TIME__
+                                + "   |   minuterie " + juce::String (diag_.ticks > 0 ? diag_.sumInterval / diag_.ticks : 0.0, 0) + " ms (max " + juce::String (diag_.maxInterval, 0)
+                                + ", travail max " + juce::String (diag_.maxWork, 1) + ")   |   graphe : " + juce::String (diag_.paints / secs, 0) + " dessins/s, "
+                                + juce::String (diag_.paints > 0 ? diag_.sumPaint / diag_.paints : 0.0, 1) + " ms (max " + juce::String (diag_.maxPaint, 1) + ")   |   écran : "
+                                + juce::String (diag_.vblanks / secs, 0) + " Hz   |   données : +" + juce::String (diag_.maxHeadJump) + " col. max d'un coup",
+                            juce::dontSendNotification);
+        diag_.windowStart = t1;
+        diag_.sumInterval = diag_.maxInterval = diag_.maxWork = diag_.sumPaint = diag_.maxPaint = 0.0;
+        diag_.ticks = diag_.paints = diag_.vblanks = diag_.maxHeadJump = 0;
     }
 }
 
@@ -1018,6 +1060,7 @@ void ShaperEditor::resized()
     const juce::Rectangle<int> main (176, 80, 964, 392);
     const juce::Rectangle<int> bottom (176, 704, 964, 56);
     latencyLabel_.setBounds (bottom.getX() + 380, bottom.getY() + 12, 150, 32);
+    diagLabel_.setBounds (24, designHeight - 22, 700, 16);
 
     auto place = [] (juce::Component* c, int x0, int y0, int w, int h) { c->setBounds (x0, y0, w, h); };
     auto find = [this] (ParamId id) -> juce::Component*
