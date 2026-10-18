@@ -1062,7 +1062,9 @@ void ShaperEditor::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgApp))
 
 void ShaperEditor::resized()
 {
-    const float s = std::min (static_cast<float> (getWidth()) / designWidth, static_cast<float> (getHeight()) / designHeight);
+    // Réduit seulement, jamais agrandi : un agrandissement oblige JUCE à rééchantillonner chaque image copiée (mesuré : 14 ms par dessin du graphe
+    // à l'échelle 1,43, contre moins de 1 ms à l'échelle 1). Dans une fenêtre plus grande, l'interface reste à sa taille, centrée.
+    const float s = std::min (1.0f, std::min (static_cast<float> (getWidth()) / designWidth, static_cast<float> (getHeight()) / designHeight));
     surface_->setTransform (juce::AffineTransform::scale (s).translated ((static_cast<float> (getWidth()) - designWidth * s) * 0.5f,
                                                                            (static_cast<float> (getHeight()) - designHeight * s) * 0.5f));
     surface_->setBounds (0, 0, designWidth, designHeight);

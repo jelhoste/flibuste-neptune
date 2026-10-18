@@ -189,7 +189,7 @@ ShaperPluginEditor::ShaperPluginEditor (ShaperProcessor& p)
     addAndMakeVisible (*content_);
     setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setResizeLimits (580, 390, 2000, 1350);
+    setResizeLimits (580, 390, ShaperEditor::designWidth, ShaperEditor::designHeight);
     setSize (ShaperEditor::designWidth, ShaperEditor::designHeight);
 }
 
