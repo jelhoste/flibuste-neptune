@@ -14,6 +14,7 @@ using Catch::Approx;
 
 namespace
 {
+constexpr double M_PI_ = 3.14159265358979323846;
 std::vector<float> roundTrip (int factor, const std::vector<float>& in, int block)
 {
     Oversampler os;
@@ -50,7 +51,7 @@ TEST_CASE ("oversampler: an impulse comes back after exactly the declared latenc
 TEST_CASE ("oversampler: a sine below the cutoff keeps its level and block size does not matter", "[shaper][oversampler]")
 {
     std::vector<float> in (4096);
-    for (std::size_t i = 0; i < in.size(); ++i) in[i] = 0.5f * static_cast<float> (std::sin (2.0 * M_PI * 1000.0 / 48000.0 * static_cast<double> (i)));
+    for (std::size_t i = 0; i < in.size(); ++i) in[i] = 0.5f * static_cast<float> (std::sin (2.0 * M_PI_ * 1000.0 / 48000.0 * static_cast<double> (i)));
     for (const int factor : { 2, 4 })
     {
         const auto a = roundTrip (factor, in, 128), b = roundTrip (factor, in, 37);
@@ -74,7 +75,7 @@ TEST_CASE ("oversampler: images near Nyquist are attenuated by the interpolation
     os.setFactor (2);
     std::vector<float> in (256);
     // 0,45 x fs : proche de Nyquist, l'image haute cadence (0,55 x fs) doit être fortement atténuée dans le tampon haute cadence
-    for (std::size_t i = 0; i < in.size(); ++i) in[i] = static_cast<float> (std::sin (2.0 * M_PI * 0.2 * static_cast<double> (i)));
+    for (std::size_t i = 0; i < in.size(); ++i) in[i] = static_cast<float> (std::sin (2.0 * M_PI_ * 0.2 * static_cast<double> (i)));
     for (int pass = 0; pass < 3; ++pass) os.up (in.data(), 256);
     const float* hi = os.up (in.data(), 256);
     double e = 0.0;
@@ -144,7 +145,7 @@ std::vector<float> drumHits (int total = 48000)
         for (int i = 0; start + i < total && i < 12000; ++i)
         {
             const double t = i / kRate;
-            x[static_cast<std::size_t> (start + i)] += static_cast<float> (0.6 * std::exp (-t / 0.05) * std::sin (2.0 * M_PI * 200.0 * t));
+            x[static_cast<std::size_t> (start + i)] += static_cast<float> (0.6 * std::exp (-t / 0.05) * std::sin (2.0 * M_PI_ * 200.0 * t));
         }
     return x;
 }
@@ -216,7 +217,7 @@ TEST_CASE ("shaper: LEVEL reserves the effect to loud or soft transients", "[sha
 {
     std::vector<float> in (48000, 0.0f);
     for (const auto& [start, amp] : { std::pair<int, float> { 4800, 0.7f }, std::pair<int, float> { 40000, 0.05f } })
-        for (int i = 0; i < 6000; ++i) in[static_cast<std::size_t> (start + i)] += amp * static_cast<float> (std::exp (-(i / kRate) / 0.04) * std::sin (2.0 * M_PI * 200.0 * i / kRate));
+        for (int i = 0; i < 6000; ++i) in[static_cast<std::size_t> (start + i)] += amp * static_cast<float> (std::exp (-(i / kRate) / 0.04) * std::sin (2.0 * M_PI_ * 200.0 * i / kRate));
     ShaperRig flat;
     const auto ref = flat.play (in);
     const auto lat = static_cast<std::size_t> (flat.latency());
@@ -265,7 +266,7 @@ TEST_CASE ("shaper: an external key drives the detection while the audio stays u
 {
     // audio : sinusoïde continue ; clé : coups de batterie. ATTACK renforce l'audio aux instants des coups de la clé.
     std::vector<float> tone (48000);
-    for (std::size_t i = 0; i < tone.size(); ++i) tone[i] = 0.2f * static_cast<float> (std::sin (2.0 * M_PI * 440.0 * static_cast<double> (i) / kRate));
+    for (std::size_t i = 0; i < tone.size(); ++i) tone[i] = 0.2f * static_cast<float> (std::sin (2.0 * M_PI_ * 440.0 * static_cast<double> (i) / kRate));
     const auto key = drumHits();
     ShaperRig r;
     r.set (shaper::scEnable, 1.0);

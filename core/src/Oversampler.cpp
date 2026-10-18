@@ -7,6 +7,7 @@ namespace neptune::core
 {
 namespace
 {
+constexpr double kPi = 3.14159265358979323846;
 double bessel0 (double x) noexcept
 {
     double sum = 1.0, term = 1.0;
@@ -28,7 +29,7 @@ HalfbandStage::HalfbandStage (int taps) : taps_ (taps % 2 == 0 ? taps + 1 : taps
     for (int j = 0; j < taps_; ++j)
     {
         const double t = static_cast<double> (j - m);
-        const double sinc = t == 0.0 ? 0.5 : std::sin (0.5 * M_PI * t) / (M_PI * t);
+        const double sinc = t == 0.0 ? 0.5 : std::sin (0.5 * kPi * t) / (kPi * t);
         const double r = t / static_cast<double> (std::max (1, m));
         const double win = bessel0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r))) / norm;
         h_[static_cast<std::size_t> (j)] = static_cast<float> (sinc * win);
