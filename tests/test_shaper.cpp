@@ -349,15 +349,15 @@ TEST_CASE ("shaper: factory presets apply and Default restores neutral settings"
         }
 }
 
-TEST_CASE ("shaper: the display window is a setting, 250 % by default, and changing it restarts the history", "[shaper]")
+TEST_CASE ("shaper: the display window is a setting, 940 % (15 s) by default, and changing it restarts the history", "[shaper]")
 {
     ShaperRig r;
     const auto* spec = r.runner.params().find (shaper::displaySpan);
     REQUIRE (spec != nullptr);
-    CHECK (r.runner.params().get (shaper::displaySpan) == Approx (250.0));
+    CHECK (r.runner.params().get (shaper::displaySpan) == Approx (940.0));   // 15 s
     CHECK (spec->automatable == false);
     CHECK (spec->min == Approx (50.0));
-    CHECK (spec->max == Approx (800.0));
+    CHECK (spec->max == Approx (1600.0));
     auto& m = static_cast<ShaperModule&> (r.runner.module());
     r.play (drumHits());
     std::vector<shaper::Column> h (shaper::kHistoryColumns);

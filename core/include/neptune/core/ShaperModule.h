@@ -51,7 +51,7 @@ constexpr ParamId scBand3Freq = 141, scBand3Gain = 142, scBand3Q = 143;
 
 constexpr ParamId meterRmsMs = 150;        // ms, 10..3000 (réglage d'affichage enregistré avec le preset)
 constexpr ParamId meterPeakDecay = 151;    // dB/s, 5..300
-constexpr ParamId displaySpan = 152;       // %, 50..800 : durée affichée par le graphe WAVE, en pour-cent de 1,6 s (défaut 250 % = 4 s)
+constexpr ParamId displaySpan = 152;       // %, 50..1600 : durée affichée par le graphe WAVE, en pour-cent de 1,6 s (défaut 940 % = 15 s)
 
 constexpr double maxLookaheadMs = 10.0;
 
@@ -70,6 +70,7 @@ struct Column
 {
     float inPeak = 0.0f, outPeak = 0.0f;   // crêtes linéaires de la colonne (signal d'entrée / de sortie)
     float fastDb = -120.0f, slowDb = -120.0f, gainDb = 0.0f;
+    float fastLin = 0.0f, slowLin = 0.0f;   // les mêmes enveloppes en amplitude (calculées une fois par colonne, pas à chaque image)
 };
 constexpr int kKeyRing = 4096;             // dernières valeurs de la clé (somme des canaux), pour l'analyseur de spectre
 } // namespace shaper

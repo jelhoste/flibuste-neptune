@@ -306,7 +306,14 @@ public:
     }
 
 private:
-    void timerCallback() override { if (isShowing() && view == 0) repaint(); }   // défilement fluide : 60 images par seconde
+    void timerCallback() override
+    {
+        if (! isShowing() || view != 0) return;
+        repaint();
+        // défilement lent (grande fenêtre) : 30 images par seconde suffisent et coûtent moitié moins ; sinon 60
+        const int wanted = owner_.value (sh::displaySpan) >= 400.0 ? 33 : 16;
+        if (getTimerInterval() != wanted) startTimer (wanted);
+    }
     // vue RESPONSE : abscisse = niveau du transitoire (-60..0 dB), ordonnée = poids w (0..1)
     juce::Rectangle<float> plot_;
     float xOf (double db) const { return plot_.getX() + static_cast<float> ((db + 60.0) / 60.0) * plot_.getWidth(); }
@@ -391,32 +398,44 @@ private:
         const float topH = area.getHeight() * 0.58f;
         auto top = area.withHeight (topH), bottom = area.withTrimmedTop (topH + 12.0f);
         const float mid = top.getCentreY(), amp = topH * 0.5f;
-        auto xAt = [&] (int i) { return area.getX() + cw * static_cast<float> (i) - shift; };
         g.setColour (owner_.colour (Token::Grid));
         g.drawHorizontalLine (static_cast<int> (mid), top.getX(), top.getRight());
 
-        std::vector<float> inEnv (static_cast<std::size_t> (cols)), outEnv (inEnv.size()), fast (inEnv.size()), slow (inEnv.size()), gain (inEnv.size());
-        for (int i = 0; i < cols; ++i)
+        // décimation : un point pour `step` colonnes (maximum pour les crêtes, moyenne pour les courbes), puis lissage léger
+        constexpr int step = 2;
+        const int pts = cols / step;
+        std::vector<float> inEnv (static_cast<std::size_t> (pts)), outEnv (inEnv.size()), fast (inEnv.size()), slow (inEnv.size()), gain (inEnv.size());
+        for (int p = 0; p < pts; ++p)
         {
-            const auto& c = history_[static_cast<std::size_t> (i)];
-            inEnv[static_cast<std::size_t> (i)] = std::min (1.0f, c.inPeak);
-            outEnv[static_cast<std::size_t> (i)] = std::min (1.0f, c.outPeak);
-            fast[static_cast<std::size_t> (i)] = std::min (1.0f, std::pow (10.0f, c.fastDb / 20.0f));
-            slow[static_cast<std::size_t> (i)] = std::min (1.0f, std::pow (10.0f, c.slowDb / 20.0f));
-            gain[static_cast<std::size_t> (i)] = c.gainDb;
+            float a = 0.0f, b = 0.0f, f = 0.0f, sl = 0.0f, gn = 0.0f;
+            for (int k = 0; k < step; ++k)
+            {
+                const auto& c = history_[static_cast<std::size_t> (p * step + k)];
+                a = std::max (a, c.inPeak);
+                b = std::max (b, c.outPeak);
+                f += c.fastLin;
+                sl += c.slowLin;
+                gn += c.gainDb;
+            }
+            inEnv[static_cast<std::size_t> (p)] = std::min (1.0f, a);
+            outEnv[static_cast<std::size_t> (p)] = std::min (1.0f, b);
+            fast[static_cast<std::size_t> (p)] = std::min (1.0f, f / step);
+            slow[static_cast<std::size_t> (p)] = std::min (1.0f, sl / step);
+            gain[static_cast<std::size_t> (p)] = gn / step;
         }
-        for (auto* v : { &inEnv, &outEnv }) smooth (*v, 2);
-        for (auto* v : { &fast, &slow }) smooth (*v, 3);
-        smooth (gain, 3);
+        for (auto* v : { &inEnv, &outEnv }) smooth (*v, 1);
+        for (auto* v : { &fast, &slow, &gain }) smooth (*v, 2);
+        const float pw = cw * step;
+        auto xAtP = [&] (int i) { return area.getX() + pw * static_cast<float> (i) - shift; };
 
         g.saveState();
         g.reduceClipRegion (area.expanded (2.0f, 0.0f).toNearestInt());
         auto fillEnvelope = [&] (const std::vector<float>& env, juce::Colour col)
         {
             juce::Path p;
-            p.startNewSubPath (xAt (0), mid);
-            for (int i = 0; i < cols; ++i) p.lineTo (xAt (i), mid - env[static_cast<std::size_t> (i)] * amp);
-            for (int i = cols - 1; i >= 0; --i) p.lineTo (xAt (i), mid + env[static_cast<std::size_t> (i)] * amp);
+            p.startNewSubPath (xAtP (0), mid);
+            for (int i = 0; i < pts; ++i) p.lineTo (xAtP (i), mid - env[static_cast<std::size_t> (i)] * amp);
+            for (int i = pts - 1; i >= 0; --i) p.lineTo (xAtP (i), mid + env[static_cast<std::size_t> (i)] * amp);
             p.closeSubPath();
             g.setColour (col);
             g.fillPath (p);
@@ -426,13 +445,13 @@ private:
         auto line = [&] (const std::vector<float>& v, juce::Colour col, float thick)
         {
             juce::Path p;
-            for (int i = 0; i < cols; ++i)
+            for (int i = 0; i < pts; ++i)
             {
-                const float x = xAt (i), y = mid - v[static_cast<std::size_t> (i)] * amp;
+                const float x = xAtP (i), y = mid - v[static_cast<std::size_t> (i)] * amp;
                 if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
             }
             g.setColour (col);
-            g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
         };
         line (slow, owner_.colour (Token::Pink2).withAlpha (0.9f), 1.3f);
         line (fast, owner_.colour (Token::KnobHot2).withAlpha (0.9f), 1.3f);
@@ -441,14 +460,14 @@ private:
         g.setColour (owner_.colour (Token::Grid));
         for (const float dbv : { -range, 0.0f, range }) g.drawHorizontalLine (static_cast<int> (gmid - dbv / range * bottom.getHeight() * 0.5f), bottom.getX(), bottom.getRight());
         juce::Path gp;
-        for (int i = 0; i < cols; ++i)
+        for (int i = 0; i < pts; ++i)
         {
             const float gdb = juce::jlimit (-range, range, gain[static_cast<std::size_t> (i)]);
-            const float x = xAt (i), y = gmid - gdb / range * bottom.getHeight() * 0.5f;
+            const float x = xAtP (i), y = gmid - gdb / range * bottom.getHeight() * 0.5f;
             if (i == 0) gp.startNewSubPath (x, y); else gp.lineTo (x, y);
         }
         g.setColour (owner_.colour (Token::Accent));
-        g.strokePath (gp, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (gp, juce::PathStrokeType (1.8f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
         g.restoreState();
 
         g.setColour (owner_.colour (Token::TextDim));
@@ -456,7 +475,7 @@ private:
         g.drawText ("+" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getY()) - 5, 28, 12, juce::Justification::centredRight);
         g.drawText ("0 dB", static_cast<int> (area.getX()) - 32, static_cast<int> (gmid) - 6, 28, 12, juce::Justification::centredRight);
         g.drawText ("-" + juce::String (range, 0), static_cast<int> (area.getX()) - 32, static_cast<int> (bottom.getBottom()) - 6, 28, 12, juce::Justification::centredRight);
-        const double span = sh::kHistorySeconds * std::clamp (owner_.value (sh::displaySpan), 50.0, 800.0) / 100.0;
+        const double span = sh::kHistorySeconds * std::clamp (owner_.value (sh::displaySpan), 50.0, 1600.0) / 100.0;
         for (int t = 0; t <= 8; ++t)
             g.drawText (juce::String (span * t / 8.0, span >= 4.0 ? 1 : 2) + " s", static_cast<int> (area.getX() + area.getWidth() * t / 8.0f) - 18, static_cast<int> (area.getBottom()) + 1, 36, 12, juce::Justification::centred);
     }

@@ -84,7 +84,7 @@ bool ShaperModule::declareParams (ParameterSet& set, std::string* error) const
     }
     add (fixed (P::continuous (meterRmsMs, "Meter RMS Window", Unit::Milliseconds, 10.0, 3000.0, 300.0, Curve::Exponential)));
     add (fixed (P::continuous (meterPeakDecay, "Meter Peak Decay", Unit::None, 5.0, 300.0, 40.0)));
-    add (fixed (P::continuous (displaySpan, "Display Window", Unit::Percent, 50.0, 800.0, 250.0, Curve::Exponential)));
+    add (fixed (P::continuous (displaySpan, "Display Window", Unit::Percent, 50.0, 1600.0, 940.0, Curve::Exponential)));
     return ok;
 }
 
@@ -122,7 +122,7 @@ void ShaperModule::prepare (double sampleRate, int maxBlockSize)
         c.dryDelay.assign (dryMax, 0.0f);
         c.gainRing.assign (static_cast<std::size_t> (Oversampler::upDelayHigh (4)) + 2, 1.0f);
     }
-    colSamples_ = std::max (1, static_cast<int> (std::lround (kHistorySeconds * 2.5 * sampleRate_ / kHistoryColumns)));
+    colSamples_ = std::max (1, static_cast<int> (std::lround (kHistorySeconds * 9.4 * sampleRate_ / kHistoryColumns)));
     reset();
 }
 
@@ -210,7 +210,7 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
     designKeyFilters (params);
     {
         // durée affichée : une colonne dure span x 1,6 s / 1024 ; un changement efface l'historique (les colonnes n'ont plus la même durée)
-        const int cs = std::max (1, static_cast<int> (std::lround (kHistorySeconds * std::clamp (param (displaySpan), 50.0, 800.0) / 100.0 * sampleRate_ / kHistoryColumns)));
+        const int cs = std::max (1, static_cast<int> (std::lround (kHistorySeconds * std::clamp (param (displaySpan), 50.0, 1600.0) / 100.0 * sampleRate_ / kHistoryColumns)));
         if (cs != colSamples_)
         {
             colSamples_ = cs;
@@ -410,6 +410,8 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
         if (++accCount_ >= colSamples_)
         {
             auto& col = history_[historyHead_.load (std::memory_order_relaxed) % static_cast<std::uint32_t> (kHistoryColumns)];
+            acc_.fastLin = std::pow (10.0f, acc_.fastDb / 20.0f);
+            acc_.slowLin = std::pow (10.0f, acc_.slowDb / 20.0f);
             col = acc_;
             historyHead_.store (historyHead_.load (std::memory_order_relaxed) + 1, std::memory_order_release);
             acc_ = Column {};
