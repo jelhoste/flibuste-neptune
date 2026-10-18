@@ -92,6 +92,8 @@ private:
     std::unique_ptr<EqView> eq_;
     juce::Label settingsInfo_;
     int presetIndex_ = 0;
+    int tick_ = 0;
+    std::uint32_t eqVersions_ = 0, responseVersions_ = 0xFFFFFFFFu;
     bool slotB_ = false;
     std::map<neptune::core::ParamId, double> otherSlot_;
     juce::Rectangle<int> headerArea_;

@@ -63,6 +63,15 @@ public:
 
     ParamId id() const { return id_; }
     void setStep (double s) { step_ = s; }
+    // appelé par la minuterie de l'éditeur : ne redessine que si la valeur a changé (sinon l'image est inchangée)
+    void tick()
+    {
+        const auto& set = owner_.host_.parameters();
+        const auto index = set.indexOf (id_);
+        if (index == ParameterSet::npos) return;
+        const auto v = set.versionAt (index);
+        if (v != seen_) { seen_ = v; repaint(); }
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -132,6 +141,7 @@ private:
     ShaperEditor& owner_;
     ParamId id_;
     juce::String label_;
+    std::uint32_t seen_ = 0xFFFFFFFFu;
     bool horizontal_, dragging_ = false;
     double step_;
     double start_ = 0.0;
@@ -206,6 +216,9 @@ public:
         {
             gain_[0] = m->meter (sh::kGainL);
             gain_[1] = m->meter (sh::kGainR);
+            if (std::fabs (gain_[0] - painted_[0]) < 0.05f && std::fabs (gain_[1] - painted_[1]) < 0.05f) return;
+            painted_[0] = gain_[0];
+            painted_[1] = gain_[1];
         }
         else
         {
@@ -216,6 +229,11 @@ public:
                 rms_[c] = 0.7f * rms_[c] + 0.3f * m->meter (rmsBase + c);
                 maxPeak_ = std::max (maxPeak_, m->meter (peakBase + c));
             }
+            const float shown0 = dbOf (rmsMode_ ? rms_[0] : peak_[0]), shown1 = dbOf (rmsMode_ ? rms_[1] : peak_[1]), mx = dbOf (maxPeak_);
+            if (std::fabs (shown0 - painted_[0]) < 0.3f && std::fabs (shown1 - painted_[1]) < 0.3f && std::fabs (mx - painted_[2]) < 0.1f) return;   // rien de visible n'a bougé
+            painted_[0] = shown0;
+            painted_[1] = shown1;
+            painted_[2] = mx;
         }
         repaint();
     }
@@ -276,7 +294,7 @@ public:
 private:
     ShaperEditor& owner_;
     Kind kind_;
-    float peak_[2] = { 0, 0 }, rms_[2] = { 0, 0 }, gain_[2] = { 0, 0 }, maxPeak_ = 0.0f;
+    float peak_[2] = { 0, 0 }, rms_[2] = { 0, 0 }, gain_[2] = { 0, 0 }, maxPeak_ = 0.0f, painted_[3] = { -999.0f, -999.0f, -999.0f };
     bool rmsMode_ = false;
 };
 
@@ -309,7 +327,11 @@ private:
     void timerCallback() override
     {
         if (! isShowing() || view != 0) return;
-        repaint();
+        // redessine seulement si le défilement a avancé d'environ un pixel (ou si l'échelle a changé)
+        const float now = static_cast<float> (owner_.module_ != nullptr ? owner_.module_->historyHead() : 0) + (owner_.module_ != nullptr ? owner_.module_->historyPhase() : 0.0f);
+        const float pxPerColumn = static_cast<float> (getWidth()) / static_cast<float> (sh::kHistoryColumns);
+        const float key = static_cast<float> (owner_.value (sh::range)) + static_cast<float> (owner_.value (sh::displaySpan));
+        if (std::fabs (now - lastNow_) * pxPerColumn >= 1.0f || key != lastKey_) { lastNow_ = now; lastKey_ = key; repaint(); }
         // défilement lent (grande fenêtre) : 30 images par seconde suffisent et coûtent moitié moins ; sinon 60
         const int wanted = owner_.value (sh::displaySpan) >= 400.0 ? 33 : 16;
         if (getTimerInterval() != wanted) startTimer (wanted);
@@ -506,6 +528,7 @@ private:
         g.strokePath (gp, juce::PathStrokeType (1.8f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
     }
 
+    float lastNow_ = -1.0e9f, lastKey_ = -1.0f;
     juce::Image cache_;
     long long cacheGroup_ = -1;
     float cacheRange_ = 0.0f;
@@ -942,13 +965,25 @@ void ShaperEditor::refreshStates()
 
 void ShaperEditor::timerCallback()
 {
-    refreshStates();
+    if ((++tick_ % 3) == 0) refreshStates();   // textes et états grisés : 10 fois par seconde suffisent
     inMeter_->update();
     gainMeter_->update();
     outMeter_->update();
-    for (auto* b : bars_) if (b->isVisible()) b->repaint();
-    if (page_ == 1) eq_->repaint();
-    else if (page_ == 0 && detection_->view != 0) detection_->repaint();
+    for (auto* b : bars_) if (b->isVisible()) b->tick();
+    // égaliseur de détection : l'analyseur bouge tant qu'il est actif ; sinon seulement quand un réglage change
+    if (page_ == 1)
+    {
+        std::uint32_t sum = 0;
+        for (const auto id : { sh::scEqOn, sh::scHpFreq, sh::scHpSlope, sh::scLpFreq, sh::scLpSlope, sh::scBand1Freq, sh::scBand1Gain, sh::scBand1Q, sh::scBand2Freq,
+                               sh::scBand2Gain, sh::scBand2Q, sh::scBand3Freq, sh::scBand3Gain, sh::scBand3Q, sh::scAnalyzerOn })
+            sum += host_.parameters().version (id);
+        if (value (sh::scAnalyzerOn) >= 0.5 || sum != eqVersions_) { eqVersions_ = sum; eq_->repaint(); }
+    }
+    else if (page_ == 0 && detection_->view != 0)
+    {
+        const auto sum = host_.parameters().version (sh::levelDependency) + host_.parameters().version (sh::levelThreshold) + host_.parameters().version (sh::levelKnee);
+        if (sum != responseVersions_) { responseVersions_ = sum; detection_->repaint(); }
+    }
 }
 
 bool ShaperEditor::keyPressed (const juce::KeyPress& k)
