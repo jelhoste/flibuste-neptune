@@ -3,6 +3,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../src/NovaKit.h"
 #include "../src/NovaCompressorEditor.h"
+#include "../src/NovaEqualizerEditor.h"
+#include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/StockModule.h"
 #include <cmath>
@@ -236,6 +238,62 @@ int main (int argc, char** argv)
         juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
         if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
         std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+    }
+
+    // ---- l'éditeur réel de l'égaliseur
+    {
+        ModuleRunner eqRunner (std::make_unique<EqualizerModule>());
+        eqRunner.prepare (48000.0, 512);
+        RunnerHost eh (eqRunner);
+        auto& ep = eqRunner.params();
+        namespace e = equalizer;
+        auto band = [&] (int b, int type, double f, double g, double q, int dyn = 0)
+        {
+            ep.set (e::bandParam (b, e::kStatus), e::kOn);
+            ep.set (e::bandParam (b, e::kType), type);
+            ep.set (e::bandParam (b, e::kFreq), f);
+            ep.set (e::bandParam (b, e::kGain), g);
+            ep.set (e::bandParam (b, e::kQ), q);
+            ep.set (e::bandParam (b, e::kDynOn), dyn);
+            ep.set (e::bandParam (b, e::kTarget), -6.0);
+            ep.set (e::bandParam (b, e::kThreshold), -30.0);
+        };
+        band (0, e::kHighPass, 80, 0, 0.707);
+        band (1, e::kPeak, 250, -3.5, 1.2);
+        band (2, e::kPeak, 3200, 4.0, 0.9, 1);
+        band (3, e::kHighShelf, 9000, 2.5, 0.7);
+        band (4, e::kNotch, 1800, 0, 4.0);
+        ep.set (e::bandParam (2, e::kSideType), e::kSideBandPass);
+        {
+            std::vector<float> l (512), r (512);
+            for (int b = 0; b < 40; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                    l[static_cast<std::size_t> (i)] = r[static_cast<std::size_t> (i)] = 0.4f * std::sin (0.3f * static_cast<float> (b * 512 + i));
+                eqRunner.process (l.data(), r.data(), 512, false);
+            }
+        }
+        struct EqCase { const char* name; th::ThemeId id; float scale; int page; int sel; };
+        const EqCase ecs[] = { { "eq-dark-p0", th::ThemeId::Dark, 1.0f, 0, 2 }, { "eq-dark-p1", th::ThemeId::Dark, 1.0f, 1, 2 }, { "eq-light-p0", th::ThemeId::Light, 1.0f, 0, 0 },
+                               { "eq-hc-p0", th::ThemeId::HighContrast, 1.0f, 0, 1 }, { "eq-hammond-p0", th::ThemeId::Hammond, 1.0f, 0, 3 }, { "eq-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, 2 } };
+        for (const auto& c : ecs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaEqualizerEditor::Options opt;
+            opt.brand = true;
+            NovaEqualizerEditor ed (eh, static_cast<const EqualizerModule*> (&eqRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.selectBandForTest (c.sel);
+            ed.setPageForTest (c.page);
+            ed.refreshNow();
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
     }
     return 0;
 }

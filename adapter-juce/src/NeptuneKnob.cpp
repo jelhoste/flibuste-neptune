@@ -154,6 +154,11 @@ void NeptuneKnob::setParamId (neptune::core::ParamId id)
     if (id == id_) return;
     id_ = id;
     index_ = processor_.parameters().indexOf (id);
+    if (index_ != neptune::core::ParameterSet::npos)
+    {
+        const auto& spec = processor_.parameters().spec (index_);
+        interaction_.setSteps (spec.kind != neptune::core::Kind::Continuous ? static_cast<int> (spec.max - spec.min) : 0);
+    }
     interaction_.setValue (processor_.parameters().getNormalized (id_));
     lastVersion_ = 0;
     repaint();

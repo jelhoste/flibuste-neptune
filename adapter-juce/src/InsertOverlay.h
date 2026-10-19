@@ -4,7 +4,7 @@
 #include <memory>
 #include "PluginProcessor.h"
 #include "NovaCompressorEditor.h"
-#include "EqualizerEditor.h"
+#include "NovaEqualizerEditor.h"
 #include "ShaperEditor.h"
 #include "UtilityEditor.h"
 #include "neptune/core/I18n.h"
@@ -40,7 +40,7 @@ private:
     NeptuneProcessor::InsertHandle handle_;
     std::unique_ptr<UtilityEditor> content_;
     std::unique_ptr<ShaperEditor> shaperContent_;
-    std::unique_ptr<GenericModuleEditor> genericContent_;
+    std::unique_ptr<NovaEqualizerEditor> equalizerContent_;
     std::unique_ptr<NovaCompressorEditor> compressorContent_;
     juce::TextButton bypassButton_, closeButton_;
     juce::String title_;

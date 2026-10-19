@@ -181,6 +181,8 @@ public:
     KnobCard (const Skin&, ParamHost&, neptune::core::ParamId, juce::String title, NeptuneKnob::OpenModal, bool pink = false);
 
     void setTitle (const juce::String& t) { title_ = t; repaint(); }
+    void setAutoRange (bool a) { autoRange_ = a; }   // les bornes affichées suivent le paramètre lié
+    void setParam (neptune::core::ParamId, juce::String title);   // rebranche le potard sur un autre paramètre
     void setRangeLabels (juce::String lo, juce::String hi) { lo_ = std::move (lo); hi_ = std::move (hi); resized(); repaint(); }
     void setPlain (bool plain) { plain_ = plain; repaint(); }   // sans fond de carte (zones groupées)
     void setCompact (bool c) { compact_ = c; resized(); repaint(); }   // potard de 48 px, textes réduits (zones étroites)
@@ -193,7 +195,7 @@ private:
     ParamHost& host_;
     neptune::core::ParamId id_;
     juce::String title_, lo_, hi_, valueText_;
-    bool pink_, plain_ = false, compact_ = false;
+    bool pink_, plain_ = false, compact_ = false, autoRange_ = false;
     std::uint32_t seen_ = 0xFFFFFFFFu;
     std::unique_ptr<NeptuneKnob> knob_;
 };

@@ -179,12 +179,17 @@ EqualizerPluginEditor::EqualizerPluginEditor (EqualizerProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
 {
     const auto palette = makePalette (p.settings());
-    content_ = makeEqualizerEditor (p, static_cast<const EqualizerModule*> (&p.runner().module()), palette, tr_);
+    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
+    NovaEqualizerEditor::Options opt;
+    opt.brand = true;
+    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
+    content_ = std::make_unique<NovaEqualizerEditor> (p, static_cast<const EqualizerModule*> (&p.runner().module()), palette, def.knob, tr_, opt);
     addAndMakeVisible (*content_);
     setWantsKeyboardFocus (true);
+    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    setConstrainer (&constrainer_);
     setResizable (true, true);
-    setResizeLimits (480, 400, 1400, 1400);
-    setSize (720, 780);
+    setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
 }
 
 void EqualizerPluginEditor::resized() { content_->setBounds (getLocalBounds()); }

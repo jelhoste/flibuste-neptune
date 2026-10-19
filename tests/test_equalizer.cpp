@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "neptune/core/EqualizerModule.h"
+#include "neptune/core/EqualizerPresets.h"
 
 using namespace neptune::core;
 using Catch::Approx;
@@ -325,4 +326,20 @@ TEST_CASE ("equalizer: high order peak still reaches its gain at the centre", "[
     CHECK (r.gain (1000.0) == Approx (9.0).margin (0.3));
     CHECK (r.gain (100.0) == Approx (0.0).margin (0.3));
     CHECK (r.gain (10000.0) == Approx (0.0).margin (0.3));
+}
+
+TEST_CASE ("equalizer: factory presets only name declared parameters, within range", "[equalizer]")
+{
+    ModuleRunner runner (std::make_unique<EqualizerModule>());
+    REQUIRE (runner.ok());
+    const auto& p = runner.params();
+    CHECK (e::factoryPresets().size() >= 5);
+    for (const auto id : e::presetParams()) CHECK (p.find (id) != nullptr);
+    for (const auto& preset : e::factoryPresets())
+        for (const auto& [id, v] : preset.values)
+        {
+            const auto* spec = p.find (id);
+            REQUIRE (spec != nullptr);
+            CHECK (spec->clamp (v) == Approx (v));
+        }
 }

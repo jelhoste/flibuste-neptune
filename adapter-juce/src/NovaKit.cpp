@@ -361,6 +361,22 @@ KnobCard::KnobCard (const Skin& s, ParamHost& h, neptune::core::ParamId id, juce
     refresh();
 }
 
+void KnobCard::setParam (neptune::core::ParamId id, juce::String title)
+{
+    id_ = id;
+    title_ = std::move (title);
+    knob_->setParamId (id);
+    seen_ = 0xFFFFFFFFu;
+    if (autoRange_)
+        if (const auto* spec = host_.parameters().find (id))
+        {
+            lo_ = juce::String::fromUTF8 (host_.parameters().toText (*spec, spec->min).c_str());
+            hi_ = juce::String::fromUTF8 (host_.parameters().toText (*spec, spec->max).c_str());
+        }
+    refresh();
+    repaint();
+}
+
 void KnobCard::refresh()
 {
     if (! changed (host_, id_, seen_)) return;

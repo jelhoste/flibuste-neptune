@@ -15,8 +15,11 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer";
     if (isEqualizer)
     {
-        genericContent_ = makeEqualizerEditor (*handle_.host, static_cast<const EqualizerModule*> (&handle_.instance->runner.module()), palette_, tr_);
-        addAndMakeVisible (*genericContent_);
+        NovaEqualizerEditor::Options opt;
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        equalizerContent_ = std::make_unique<NovaEqualizerEditor> (*handle_.host, static_cast<const EqualizerModule*> (&handle_.instance->runner.module()), palette_,
+                                                                    knobStyle, tr_, opt);
+        addAndMakeVisible (*equalizerContent_);
     }
     else if (isCompressor)
     {
@@ -95,7 +98,7 @@ void InsertOverlay::resized()
     r.removeFromTop (4);
     if (content_ != nullptr) content_->setBounds (r);
     if (shaperContent_ != nullptr) shaperContent_->setBounds (r);
-    if (genericContent_ != nullptr) genericContent_->setBounds (r);
+    if (equalizerContent_ != nullptr) equalizerContent_->setBounds (r);
     if (compressorContent_ != nullptr) compressorContent_->setBounds (r);
 }
 
@@ -122,6 +125,6 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
     if (content_ != nullptr) return content_->keyPressed (k);
     if (shaperContent_ != nullptr) return shaperContent_->keyPressed (k);
     if (compressorContent_ != nullptr) return compressorContent_->keyPressed (k);
-    if (genericContent_ != nullptr) return genericContent_->keyPressed (k);
+    if (equalizerContent_ != nullptr) return equalizerContent_->keyPressed (k);
     return false;
 }
