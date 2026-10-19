@@ -56,6 +56,19 @@ bool CompressorModule::declareParams (ParameterSet& set, std::string* error) con
     add (pct (clipperDrive, "Clipper Drive", 0.0, 100.0, 0.0));
     add (fixed (P::choice (oversample, "Oversample", { "Off", "2x", "4x" }, 0)));
     add (fixed (P::continuous (lookahead, "Lookahead", Unit::Milliseconds, -maxLookaheadMs, maxLookaheadMs, 0.0)));
+    {
+        auto hid = [] (P p) { p.hidden = true; p.automatable = false; p.modulatable = false; return p; };
+        add (hid (P::choice (anTime, "Analyzer Time", { "6 s", "9 s", "12 s", "18 s" }, 1)));
+        add (hid (P::choice (anMove, "Analyzer Move", { "Sync", "Slow", "Roll" }, 0)));
+        add (hid (P::choice (anMaxDb, "Analyzer Max dB", { "6", "0", "-6", "-12", "-24" }, 1)));
+        add (hid (P::choice (anMinDb, "Analyzer Min dB", { "-9", "-18", "-36", "-54", "-72", "-120" }, 3)));
+        add (hid (P::choice (anMag, "Analyzer Magnitude", { "Peak", "RMS" }, 0)));
+        add (hid (P::choice (anStereo, "Analyzer Channels", { "M+S", "L+R", "Left", "Right", "Mid", "Side" }, 0)));
+        add (hid (P::toggle (anShowIn, "Analyzer Show Input", true)));
+        add (hid (P::toggle (anShowOut, "Analyzer Show Output", true)));
+        add (hid (P::toggle (anShowRed, "Analyzer Show Reduction", true)));
+        add (hid (P::toggle (anShowKey, "Analyzer Show Key", false)));
+    }
     add (P::toggle (rmsOn, "RMS ON"));
     add (P::continuous (rmsLength, "RMS Length", Unit::Milliseconds, 4.0, 160.0, 32.0, Curve::Exponential));
     add (P::continuous (rmsSpeed, "RMS Speed", Unit::None, 0.0, 8.0, 1.0));
@@ -104,6 +117,11 @@ void CompressorModule::prepare (double sampleRate, int maxBlockSize)
     for (auto& d : lookMain_) d.prepare (lookMax);
     for (auto& d : lookSide_) d.prepare (lookMax);
     for (auto& d : preDelay_) d.prepare (static_cast<std::size_t> (Oversampler::kLatency4x) + 2);
+    for (auto& d : keyDelay_) d.prepare (static_cast<std::size_t> (Oversampler::kLatency4x) + 2);
+    keyAnL_.assign (4 * n, 0.0f);
+    keyAnR_.assign (4 * n, 0.0f);
+    analyzer_.setSampleRate (sampleRate_);
+    analyzer_.setMaxBlock (maxBlock_);
     const auto hiMax = static_cast<std::size_t> (std::ceil (sampleRate_ * 4.0));
     for (auto& h : hold_) h.setCapacity (hiMax);                       // 1 s à la cadence suréchantillonnée 4x
     for (auto& t : tracker_) t.allocate (static_cast<std::size_t> (0.16 * sampleRate_ * 4.0) + 8);
@@ -116,6 +134,7 @@ void CompressorModule::reset() noexcept
     for (auto& d : lookMain_) d.reset();
     for (auto& d : lookSide_) d.reset();
     for (auto& d : preDelay_) d.reset();
+    for (auto& d : keyDelay_) d.reset();
     for (auto& h : hold_) h.clear();
     for (auto& t : tracker_) t.reset();
     for (auto& f : follower_) f.reset();
@@ -252,6 +271,7 @@ void CompressorModule::applySettings() noexcept
     for (auto& d : lookMain_) d.setDelay (s.lookaheadMs > 0.0 ? static_cast<std::size_t> (std::lround (std::min (s.lookaheadMs, maxLookaheadMs) * 0.001 * sampleRate_)) : 0);
     for (auto& d : lookSide_) d.setDelay (s.lookaheadMs < 0.0 ? static_cast<std::size_t> (std::lround (std::min (-s.lookaheadMs, maxLookaheadMs) * 0.001 * sampleRate_)) : 0);
     for (auto& d : preDelay_) d.setDelay (static_cast<std::size_t> (Oversampler::latencyFor (factor_)));
+    for (auto& d : keyDelay_) d.setDelay (static_cast<std::size_t> (Oversampler::latencyFor (factor_)));
     if (bandsDirty_)
     {
         for (int b = 0; b < kBands; ++b)
@@ -467,6 +487,8 @@ void CompressorModule::process (float* left, float* right, int n, const Paramete
     {
         preL_[static_cast<std::size_t> (i)] = preDelay_[0].process (main[0][i]);
         preR_[static_cast<std::size_t> (i)] = preDelay_[1].process (main[1][i]);
+        keyAnL_[static_cast<std::size_t> (i)] = keyDelay_[0].process (side[0][i]);
+        keyAnR_[static_cast<std::size_t> (i)] = keyDelay_[1].process (side[1][i]);
     }
     // M/S
     if (s.midSide)
@@ -511,6 +533,12 @@ void CompressorModule::process (float* left, float* right, int n, const Paramete
             main[1][i] = static_cast<float> (main[1][i] * makeupGain_);
         }
         makeupGain_ = makeupTarget_;
+    }
+    // analyseur : entrée alignée, sortie compressée, sortie finale (avant delta et écoute de la clé), clé alignée
+    if (analyzer_.active())
+    {
+        const float* const streams[8] = { preL_.data(), preR_.data(), postL_.data(), postR_.data(), main[0], main[1], keyAnL_.data(), keyAnR_.data() };
+        analyzer_.push (streams, n);
     }
     if (s.deltaOn)
         for (int i = 0; i < n; ++i)

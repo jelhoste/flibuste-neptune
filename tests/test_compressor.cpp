@@ -348,3 +348,66 @@ TEST_CASE ("compressor: factory presets only name declared parameters, within ra
             CHECK (listed);
         }
 }
+
+TEST_CASE ("compressor: analyzer ring is filled only when active, with aligned input, compressed output, final output and key", "[compressor][analyzer]")
+{
+    CompRig r;
+    auto* m = static_cast<CompressorModule*> (&r.runner.module());
+    auto& ring = m->analyzer();
+    r.set (c::threshold, -32.0);
+    r.set (c::ratio, 4.0);
+    r.set (c::makeup, 6.0);
+    r.hold (0.5f, 0.5f, 0.2);
+    CHECK (ring.writePos() == 0);                      // inactif : rien n'est copié
+    ring.setActive (true);
+    r.hold (0.5f, 0.5f, 2.0);                          // niveau constant : -6 dBFS, bien au-dessus du seuil
+    const auto w = ring.writePos();
+    REQUIRE (w > 20000);
+    const auto start = w - 4800;
+    const float pre = analyzerLevelDb (ring, c::kAnPre, start, 4800, MagType::Peak, StereoType::LeftRight);
+    const float comp = analyzerLevelDb (ring, c::kAnCompressed, start, 4800, MagType::Peak, StereoType::LeftRight);
+    const float post = analyzerLevelDb (ring, c::kAnPost, start, 4800, MagType::Peak, StereoType::LeftRight);
+    CHECK (pre == Approx (-6.02).margin (0.05));
+    CHECK (comp - pre == Approx ((1.0 / 4.0 - 1.0) * (-6.02 + 32.0)).margin (0.4));   // réduction = niveau compressé - niveau d'entrée
+    CHECK (post - comp == Approx (6.0).margin (0.05));                                 // gain de compensation après la copie « compressée »
+    const float key = analyzerLevelDb (ring, c::kAnKey, start, 4800, MagType::Peak, StereoType::LeftRight);
+    CHECK (key == Approx (-6.02).margin (0.05));
+}
+
+TEST_CASE ("analyzer level follows the ZL conventions for peak, RMS and channel types", "[analyzer]")
+{
+    AnalyzerRing ring (1, 2);
+    std::vector<float> l (1000), rr (1000);
+    for (int i = 0; i < 1000; ++i) { l[static_cast<std::size_t> (i)] = 0.5f; rr[static_cast<std::size_t> (i)] = 0.0f; }
+    const float* ch[2] = { l.data(), rr.data() };
+    ring.push (ch, 1000);
+    auto db = [&] (MagType m, StereoType s) { return analyzerLevelDb (ring, 0, 0, 1000, m, s); };
+    CHECK (db (MagType::Peak, StereoType::Left) == Approx (-6.02).margin (0.01));
+    CHECK (db (MagType::Peak, StereoType::Right) < -200.0f);
+    CHECK (db (MagType::Peak, StereoType::LeftRight) == Approx (-6.02).margin (0.01));
+    CHECK (db (MagType::Peak, StereoType::Mid) == Approx (-12.04).margin (0.01));            // (0,5 + 0) / 2
+    CHECK (db (MagType::Peak, StereoType::Side) == Approx (-12.04).margin (0.01));
+    CHECK (db (MagType::Peak, StereoType::MidSide) == Approx (-12.04).margin (0.01));
+    CHECK (db (MagType::RMS, StereoType::Left) == Approx (-6.02).margin (0.01));
+    CHECK (db (MagType::RMS, StereoType::LeftRight) == Approx (-6.02).margin (0.01));         // somme des énergies des deux voies
+    CHECK (db (MagType::RMS, StereoType::MidSide) == Approx (-9.03).margin (0.01));           // la même somme, multipliée par 0,5
+    CHECK (analyzerLevelDb (ring, 0, 0, 0, MagType::Peak, StereoType::Left) == 0.0f);
+}
+
+TEST_CASE ("compressor: analyzer display settings are hidden, not automatable and have the documented defaults", "[compressor][analyzer]")
+{
+    CompRig r;
+    const auto& p = r.runner.params();
+    for (const auto id : { c::anTime, c::anMove, c::anMaxDb, c::anMinDb, c::anMag, c::anStereo, c::anShowIn, c::anShowOut, c::anShowRed, c::anShowKey })
+    {
+        const auto* s = p.find (id);
+        REQUIRE (s != nullptr);
+        CHECK (s->hidden);
+        CHECK_FALSE (s->automatable);
+    }
+    CHECK (p.get (c::anTime) == 1.0);       // 9 s
+    CHECK (p.get (c::anMaxDb) == 1.0);      // 0 dB
+    CHECK (p.get (c::anMinDb) == 3.0);      // -54 dB
+    CHECK (p.get (c::anShowIn) == 1.0);
+    CHECK (p.get (c::anShowKey) == 0.0);
+}

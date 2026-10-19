@@ -151,7 +151,8 @@ std::map<ParamId, double> EditorBase::snapshot() const
 {
     std::map<ParamId, double> m;
     const auto& set = host_.parameters();
-    for (std::size_t i = 0; i < set.size(); ++i) m[set.spec (i).id] = set.getAt (i);
+    for (std::size_t i = 0; i < set.size(); ++i)
+        if (! set.spec (i).hidden) m[set.spec (i).id] = set.getAt (i);   // les réglages d'affichage cachés ne font pas partie du A/B
     return m;
 }
 

@@ -57,6 +57,7 @@ target_sources(Neptune PRIVATE
   src/InsertOverlay.cpp
   src/ShaperEditor.cpp
   src/NovaCompressorEditor.cpp
+  src/NovaHistoryView.cpp
   src/NovaEditor.cpp
   src/NovaKit.cpp
   src/NovaEqualizerEditor.cpp
@@ -182,6 +183,7 @@ clap_juce_extensions_plugin(
 target_sources(Compresseur PRIVATE
   src/CompressorPlugin.cpp
   src/NovaCompressorEditor.cpp
+  src/NovaHistoryView.cpp
   src/NovaEditor.cpp
   src/NovaKit.cpp
   src/NeptuneKnob.cpp
@@ -381,7 +383,7 @@ target_link_libraries(Orgamon
 # ---- NovaGallery : rendu hors-ligne en PNG des composants communs NOVA (NovaKit), pour la comparaison avec les maquettes HTML ----------
 # Outil de développement (CI Linux : exécuté sous xvfb, images archivées) ; non installé.
 juce_add_console_app(NovaGallery PRODUCT_NAME "NovaGallery")
-target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaEqualizerEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
+target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
 target_compile_definitions(NovaGallery PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1)
 target_link_libraries(NovaGallery
   PRIVATE

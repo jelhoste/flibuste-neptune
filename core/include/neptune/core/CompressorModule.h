@@ -9,6 +9,7 @@
 #include <atomic>
 #include <vector>
 
+#include "neptune/core/AnalyzerRing.h"
 #include "neptune/core/Biquad.h"
 #include "neptune/core/DynamicsDsp.h"
 #include "neptune/core/Oversampler.h"
@@ -24,6 +25,11 @@ constexpr ParamId externalSide = 116, sideOut = 117, sideEqBypass = 118, sideGai
 constexpr ParamId stereoMode = 120, stereoSwap = 121, stereoLink = 122, wet1 = 123, wet2 = 124;
 constexpr ParamId delta = 125, clipperDrive = 126, oversample = 127, lookahead = 128;
 constexpr ParamId rmsOn = 129, rmsLength = 130, rmsSpeed = 131, rmsMix = 132;
+// Réglages d'affichage de l'analyseur (cachés, non automatisables, enregistrés avec l'état ; hors presets et A/B) : durée affichée (6, 9, 12, 18 s), défilement
+// (Sync, Slow, Roll), plage haute (6, 0, -6, -12, -24 dB) et basse (-9 ... -120 dB), crête ou RMS, canaux, courbes visibles.
+constexpr ParamId anTime = 188, anMove = 189, anMaxDb = 190, anMinDb = 191, anMag = 192, anStereo = 193, anShowIn = 194, anShowOut = 195, anShowRed = 196, anShowKey = 197;
+// Flux de l'anneau d'analyse (comme ZL) : entrée alignée sur la latence, sortie compressée (avant le gain de compensation), sortie finale, clé.
+enum AnalyzerStream : int { kAnPre = 0, kAnCompressed, kAnPost, kAnKey, kAnStreams };
 constexpr int kBands = 8;
 // Filtres de la clé : base 140, six paramètres par bande (état, type, pente, fréquence, gain, Q).
 constexpr ParamId sideBandBase = 140;
@@ -60,6 +66,8 @@ public:
     }
     // Courbe de gain courante (pour l'affichage) : niveau de sortie (dB) pour un niveau d'entrée (dB).
     double curveOutputDb (const ParameterSet&, double inputDb) const noexcept;
+    // Anneau d'analyse pour l'historique ; l'interface l'active tant qu'un éditeur est ouvert (le remplissage est sinon sauté).
+    AnalyzerRing& analyzer() const noexcept { return analyzer_; }
     // Réponse (dB) d'un filtre de la clé à la fréquence f (0 dB si le filtre n'est pas en service), ou de l'ensemble des filtres en service.
     // Mêmes coefficients que le DSP ; `fs` est la fréquence d'échantillonnage de travail (sans suréchantillonnage).
     static double sideBandResponseDb (const ParameterSet&, int band, double freq, double fs) noexcept;
@@ -128,6 +136,9 @@ private:
     std::array<Oversampler, 4> os_;                 // principal L, R, clé L, R
     std::array<dyn::IntegerDelay, 2> lookMain_, lookSide_;
     std::array<dyn::IntegerDelay, 2> preDelay_;     // signal d'entrée aligné sur la latence (delta)
+    std::array<dyn::IntegerDelay, 2> keyDelay_;     // clé alignée de la même façon (analyseur)
+    std::vector<float> keyAnL_, keyAnR_;
+    mutable AnalyzerRing analyzer_ { compressor::kAnStreams, 2 };
     double makeupGain_ = 1.0, makeupTarget_ = 1.0;
 
     std::vector<float> sideL_, sideR_, preL_, preR_, postL_, postR_, rmsL_, rmsR_, sideEqL_, sideEqR_;

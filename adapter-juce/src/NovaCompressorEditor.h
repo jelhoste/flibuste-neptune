@@ -3,6 +3,7 @@
 // en direct, six potards à curseurs secondaires), SIDECHAIN (clé, filtres de la clé en cinq zones, réponse en fréquence) et ADVANCED (réglages de ZL
 // absents de la maquette : plancher, plage, maintien, liaison et jeux stéréo, RMS, ...). Même code pour le plugin séparé et pour l'insert de Neptune.
 #include "NovaEditor.h"
+#include "NovaHistoryView.h"
 #include "neptune/core/CompressorModule.h"
 
 class NovaCompressorEditor : public nova::EditorBase
@@ -12,9 +13,9 @@ public:
                           const neptune::core::i18n::Translator&, Options);
     ~NovaCompressorEditor() override;
     void setPageForTest (int p) { setPage (p); }
+    void stepHistoryForTest (double nowSeconds) { history_->step (nowSeconds); }
 
 private:
-    class CurveView;
     class SideEqView;
     struct Zone;
 
@@ -32,7 +33,8 @@ private:
     const neptune::core::CompressorModule* module_;
     nova::Panel *metersPanel_ = nullptr, *navPanel_ = nullptr, *curvePanel_ = nullptr, *scPanel_ = nullptr, *advPanel_ = nullptr;
     nova::VMeter *inMeter_ = nullptr, *grMeter_ = nullptr, *outMeter_ = nullptr;
-    CurveView* curve_ = nullptr;
+    nova::CompressorHistoryView* history_ = nullptr;
+    nova::Pill* analyzerPill_ = nullptr;
     SideEqView* sideEq_ = nullptr;
 
     struct Column { nova::Panel* card; nova::KnobCard* knob; nova::SubSlider* sub; };

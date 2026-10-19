@@ -181,7 +181,7 @@ void Panel::paint (juce::Graphics& g)
     {
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (11.0f));
-        g.drawText (meta_, juce::Rectangle<float> (b.getWidth() * 0.4f, skin_.px (12.0f), b.getWidth() * 0.6f - skin_.px (16.0f), skin_.px (16.0f)),
+        g.drawText (meta_, juce::Rectangle<float> (b.getWidth() * 0.4f, skin_.px (12.0f), b.getWidth() * 0.6f - skin_.px (16.0f + metaInset_), skin_.px (16.0f)),
                     juce::Justification::centredRight, true);
     }
 }
@@ -506,12 +506,14 @@ juce::Rectangle<float> VMeter::modeArea() const
 bool VMeter::update (float l, float r)
 {
     const float in[2] = { l, r };
-    const float fall = kind_ == Kind::Level ? 0.6f : 0.6f;
+    // retombée linéaire en dB par seconde (horloge murale), montée immédiate ; la crête tient jusqu'à la remise à zéro
+    const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const float dt = lastTime_ > 0.0 ? static_cast<float> (std::clamp (now - lastTime_, 0.0, 0.25)) : 0.0f;
+    lastTime_ = now;
     for (int c = 0; c < 2; ++c)
     {
-        // montée immédiate, retombée exponentielle ; la crête tient jusqu'à remise à zéro
         const float lo = kind_ == Kind::Level ? floor_ - 40.0f : 0.0f;
-        shown_[c] = in[c] > shown_[c] ? in[c] : lo + (shown_[c] - lo) * fall;
+        shown_[c] = in[c] > shown_[c] ? in[c] : std::max (lo, shown_[c] - decay_ * dt);
         peak_[c] = std::max (peak_[c], in[c]);
     }
     if (std::fabs (shown_[0] - painted_[0]) < 0.25f && std::fabs (shown_[1] - painted_[1]) < 0.25f

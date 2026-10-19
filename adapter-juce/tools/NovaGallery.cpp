@@ -205,18 +205,6 @@ int main (int argc, char** argv)
     ps.set (compressor::bandParam (4, compressor::kStatus), compressor::kOn);
     ps.set (compressor::bandParam (4, compressor::kType), compressor::kLowPass);
     ps.set (compressor::bandParam (4, compressor::kFreq), 9000.0);
-    {
-        std::vector<float> l (512), r (512);
-        for (int b = 0; b < 40; ++b)
-        {
-            for (int i = 0; i < 512; ++i)
-            {
-                const float amp = b < 30 ? 0.5f : 0.06f;
-                l[static_cast<std::size_t> (i)] = r[static_cast<std::size_t> (i)] = amp * std::sin (0.058f * static_cast<float> (b * 512 + i));
-            }
-            runner.process (l.data(), r.data(), 512, false);
-        }
-    }
     const i18n::Translator tr ("en");
     struct EdCase { const char* name; th::ThemeId id; float scale; int page; };
     const EdCase eds[] = { { "comp-dark-p0", th::ThemeId::Dark, 1.0f, 0 }, { "comp-dark-p1", th::ThemeId::Dark, 1.0f, 1 }, { "comp-dark-p2", th::ThemeId::Dark, 1.0f, 2 },
@@ -231,8 +219,34 @@ int main (int argc, char** argv)
         NovaCompressorEditor ed (rhost, static_cast<const CompressorModule*> (&runner.module()), th::withContrast (def, 0), def.knob, tr, opt);
         ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
         ed.setPageForTest (c.page);
-        ed.refreshNow();
-        ed.refreshNow();
+        // signal simulé : percussions toutes les 0,6 s, jouées à 30 images par seconde pendant 10 s ; l'historique défile sur l'horloge simulée
+        {
+            std::vector<float> l (512), r (512);
+            long sampleIndex = 0;
+            double simTime = 100.0;
+            for (int frame = 0; frame < 300; ++frame)
+            {
+                int remaining = 1600;
+                while (remaining > 0)
+                {
+                    const int n = std::min (512, remaining);
+                    for (int i = 0; i < n; ++i, ++sampleIndex)
+                    {
+                        const double t = static_cast<double> (sampleIndex) / 48000.0;
+                        const double since = std::fmod (t, 0.6);
+                        const double amp = 0.08 + 0.75 * std::exp (-since * 7.0) * (std::fmod (t, 2.4) < 0.6 ? 0.55 : 1.0);
+                        const float v = static_cast<float> (amp * std::sin (6.2831853 * 110.0 * t));
+                        l[static_cast<std::size_t> (i)] = v;
+                        r[static_cast<std::size_t> (i)] = v * 0.9f;
+                    }
+                    runner.process (l.data(), r.data(), n, false);
+                    remaining -= n;
+                }
+                simTime += 1.0 / 30.0;
+                ed.refreshNow();
+                ed.stepHistoryForTest (simTime);
+            }
+        }
         const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
         juce::PNGImageFormat png;
         juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));

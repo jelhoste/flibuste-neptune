@@ -85,6 +85,7 @@ public:
     explicit Panel (const Skin&, neptune::core::theme::Token fill = neptune::core::theme::Token::PanelBg);
     void setTitle (const juce::String&);
     void setMeta (const juce::String&);   // texte atténué à droite du titre
+    void setMetaRightInset (float designPx) { metaInset_ = designPx; repaint(); }   // laisse de la place à un bouton en haut à droite
     juce::Rectangle<int> contentArea() const;   // zone sous le titre
     void paint (juce::Graphics&) override;
 
@@ -92,6 +93,7 @@ private:
     const Skin& skin_;
     neptune::core::theme::Token fill_;
     juce::String title_, meta_;
+    float metaInset_ = 0.0f;
 };
 
 // ------------------------------------------------------------------------------------------------ pastille bouton (.pill-btn / .peak-btn / .icon-btn)
@@ -231,6 +233,7 @@ public:
     VMeter (const Skin&, juce::String title, Kind = Kind::Level, bool pink = false);
 
     void setRange (float floorDb, float ceilingDb) { floor_ = floorDb; ceil_ = ceilingDb; }
+    void setDecayDbPerSecond (float d) { decay_ = d; }   // retombée linéaire (dB par seconde) ; la crête reste affichée jusqu'à la remise à zéro
     // Niveaux instantanés en dB (Level) ou réduction positive en dB (Reduction) ; retombée, crête et valeur gérées ici.
     // Retourne true si l'affichage a changé (donc un repaint a été demandé).
     bool update (float leftDb, float rightDb);
@@ -250,6 +253,8 @@ private:
     Kind kind_;
     bool pink_, showMode_ = true;
     float floor_ = -60.0f, ceil_ = 0.0f;
+    float decay_ = 24.0f;
+    double lastTime_ = 0.0;
     float shown_[2] = { -120.0f, -120.0f }, peak_[2] = { -120.0f, -120.0f }, painted_[4] = { 1.0e9f, 1.0e9f, 1.0e9f, 1.0e9f };
 };
 

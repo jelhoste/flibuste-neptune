@@ -45,169 +45,6 @@ juce::Path iconPath (int kind)
 }
 } // namespace
 
-// ------------------------------------------------------------------------------------------------ courbe de transfert
-class NovaCompressorEditor::CurveView : public juce::Component
-{
-public:
-    CurveView (const nova::Skin& s, ParamHost& h, const CompressorModule* m) : skin_ (s), host_ (h), module_ (m) {}
-
-    static constexpr double kLo = -60.0, kHi = 12.0;
-
-    // Appelé à 30 Hz : ne redessine que si la courbe ou le point de fonctionnement ont changé
-    void update (float inDb, float grDb)
-    {
-        std::uint32_t key = 0;
-        for (const auto id : { cm::direction, cm::threshold, cm::ratio, cm::kneeWidth, cm::curve, cm::floorDb, cm::style }) key = key * 31u + host_.parameters().version (id);
-        const float qIn = std::round (inDb * 2.0f) * 0.5f, qGr = std::round (grDb * 2.0f) * 0.5f;
-        if (key == key_ && qIn == in_ && qGr == gr_) return;
-        key_ = key; in_ = qIn; gr_ = qGr;
-        pathValid_ = false;
-        repaint();
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        const auto b = getLocalBounds().toFloat();
-        skin_.fill (g, Token::StageBg, b, skin_.px (6.0f));
-        const auto plot = plotArea();
-        // grille tous les 12 dB
-        g.setFont (skin_.font (9.0f));
-        for (int d = -60; d <= 12; d += 12)
-        {
-            g.setColour (skin_.colour (Token::Grid, 0.55f));
-            g.drawVerticalLine (juce::roundToInt (xOf (d)), plot.getY(), plot.getBottom());
-            g.drawHorizontalLine (juce::roundToInt (yOf (d)), plot.getX(), plot.getRight());
-            g.setColour (skin_.colour (Token::TextDim2));
-            g.drawText (juce::String (d), juce::Rectangle<float> (xOf (d) - skin_.px (14.0f), plot.getBottom() + skin_.px (3.0f), skin_.px (28.0f), skin_.px (12.0f)), juce::Justification::centred);
-            g.drawText (juce::String (d), juce::Rectangle<float> (b.getX() + skin_.px (2.0f), yOf (d) - skin_.px (6.0f), plot.getX() - b.getX() - skin_.px (6.0f), skin_.px (12.0f)), juce::Justification::centredRight);
-        }
-        g.setColour (skin_.colour (Token::TextDim2));
-        g.drawText (tx_in_, juce::Rectangle<float> (plot.getRight() - skin_.px (60.0f), plot.getBottom() - skin_.px (14.0f), skin_.px (58.0f), skin_.px (12.0f)), juce::Justification::centredRight);
-        g.drawText (tx_out_, juce::Rectangle<float> (plot.getX() + skin_.px (4.0f), plot.getY() + skin_.px (2.0f), skin_.px (60.0f), skin_.px (12.0f)), juce::Justification::centredLeft);
-
-        // diagonale : aucun traitement
-        {
-            juce::Path unity;
-            unity.startNewSubPath (xOf (kLo), yOf (kLo));
-            unity.lineTo (xOf (kHi), yOf (kHi));
-            juce::Path dashed;
-            const float dash[] = { skin_.px (4.0f), skin_.px (4.0f) };
-            juce::PathStrokeType (1.0f).createDashedStroke (dashed, unity, dash, 2);
-            g.setColour (skin_.colour (Token::TextDim2, 0.6f));
-            g.fillPath (dashed);
-        }
-
-        if (module_ == nullptr) return;
-        const double thr = host_.parameters().get (cm::threshold);
-        // zone au-delà du seuil
-        const float tx = xOf (juce::jlimit (kLo, kHi, thr));
-        g.setColour (skin_.colour (Token::Accent, 0.06f));
-        g.fillRect (juce::Rectangle<float> (tx, plot.getY(), plot.getRight() - tx, plot.getHeight()));
-        {
-            juce::Path line;
-            line.startNewSubPath (tx, plot.getY());
-            line.lineTo (tx, plot.getBottom());
-            juce::Path dashed;
-            const float dash[] = { skin_.px (3.0f), skin_.px (4.0f) };
-            juce::PathStrokeType (1.0f).createDashedStroke (dashed, line, dash, 2);
-            g.setColour (skin_.colour (Token::Accent, 0.55f));
-            g.fillPath (dashed);
-        }
-        if (! pathValid_) rebuild();
-        g.setColour (skin_.colour (Token::Accent));
-        g.strokePath (path_, juce::PathStrokeType (skin_.px (2.5f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-        // point de fonctionnement en direct
-        if (in_ > static_cast<float> (kLo))
-        {
-            const float outDb = in_ + gr_;
-            const float cx = xOf (juce::jlimit (kLo, kHi, static_cast<double> (in_))), cy = yOf (juce::jlimit (kLo, kHi, static_cast<double> (outDb)));
-            const float r = skin_.px (4.0f);
-            g.setColour (skin_.colour (Token::Pink, 0.35f));
-            g.fillEllipse (cx - r * 2, cy - r * 2, r * 4, r * 4);
-            g.setColour (skin_.colour (Token::Pink2));
-            g.fillEllipse (cx - r, cy - r, r * 2, r * 2);
-        }
-        // poignée du seuil
-        const auto h = handle();
-        const float hr = skin_.px (6.0f);
-        g.setColour (skin_.colour (Token::Hring));
-        g.fillEllipse (h.x - hr - 2.0f, h.y - hr - 2.0f, hr * 2 + 4.0f, hr * 2 + 4.0f);
-        g.setColour (skin_.colour (Token::Handle));
-        g.fillEllipse (h.x - hr, h.y - hr, hr * 2, hr * 2);
-        g.setColour (skin_.colour (Token::Accent));
-        g.drawEllipse (h.x - hr, h.y - hr, hr * 2, hr * 2, skin_.px (1.5f));
-    }
-
-    void resized() override { pathValid_ = false; }
-
-    void mouseMove (const juce::MouseEvent& e) override
-    {
-        setMouseCursor (nearHandle (e.position) ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
-    }
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        if (e.mods.isPopupMenu() || ! nearHandle (e.position)) return;
-        dragging_ = true;
-        host_.uiBeginEdit (cm::threshold);
-        apply (e.position.x);
-    }
-    void mouseDrag (const juce::MouseEvent& e) override { if (dragging_) apply (e.position.x); }
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        if (dragging_) host_.uiEndEdit (cm::threshold);
-        dragging_ = false;
-    }
-    void mouseDoubleClick (const juce::MouseEvent& e) override { if (nearHandle (e.position)) host_.uiResetToDefault (cm::threshold); }
-
-    void setAxisLabels (juce::String in, juce::String out) { tx_in_ = std::move (in); tx_out_ = std::move (out); }
-
-private:
-    juce::Rectangle<float> plotArea() const
-    {
-        const auto b = getLocalBounds().toFloat();
-        return { b.getX() + skin_.px (34.0f), b.getY() + skin_.px (10.0f), b.getWidth() - skin_.px (34.0f + 14.0f), b.getHeight() - skin_.px (10.0f + 22.0f) };
-    }
-    float xOf (double db) const { const auto p = plotArea(); return p.getX() + static_cast<float> ((db - kLo) / (kHi - kLo)) * p.getWidth(); }
-    float yOf (double db) const { const auto p = plotArea(); return p.getBottom() - static_cast<float> ((db - kLo) / (kHi - kLo)) * p.getHeight(); }
-    double dbOfX (float x) const { const auto p = plotArea(); return kLo + static_cast<double> ((x - p.getX()) / p.getWidth()) * (kHi - kLo); }
-    juce::Point<float> handle() const
-    {
-        const double thr = juce::jlimit (kLo, kHi, host_.parameters().get (cm::threshold));
-        const double out = module_ != nullptr ? module_->curveOutputDb (host_.parameters(), thr) : thr;
-        return { xOf (thr), yOf (juce::jlimit (kLo, kHi, out)) };
-    }
-    bool nearHandle (juce::Point<float> p) const { return handle().getDistanceFrom (p) < skin_.px (14.0f); }
-    void apply (float x)
-    {
-        const auto* spec = host_.parameters().find (cm::threshold);
-        if (spec == nullptr) return;
-        host_.uiSetNormalised (cm::threshold, spec->toNormalized (juce::jlimit (kLo, 0.0, dbOfX (x))));
-        repaint();
-    }
-    void rebuild()
-    {
-        path_.clear();
-        for (int i = 0; i <= 144; ++i)
-        {
-            const double in = kLo + (kHi - kLo) * i / 144.0;
-            const double out = juce::jlimit (kLo - 6.0, kHi + 6.0, module_->curveOutputDb (host_.parameters(), in));
-            const float x = xOf (in), y = yOf (out);
-            if (i == 0) path_.startNewSubPath (x, y); else path_.lineTo (x, y);
-        }
-        pathValid_ = true;
-    }
-
-    const nova::Skin& skin_;
-    ParamHost& host_;
-    const CompressorModule* module_;
-    juce::Path path_;
-    bool pathValid_ = false, dragging_ = false;
-    std::uint32_t key_ = 0xFFFFFFFFu;
-    float in_ = -999.0f, gr_ = 0.0f;
-    juce::String tx_in_ = "IN dB", tx_out_ = "OUT dB";
-};
-
 // ------------------------------------------------------------------------------------------------ réponse des filtres de la clé
 class NovaCompressorEditor::SideEqView : public juce::Component
 {
@@ -363,12 +200,26 @@ void NovaCompressorEditor::buildCompressorPage()
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
     curvePanel_ = add<nova::Panel> (0, skin());
     curvePanel_->setTitle (tx ("nv.curve_title"));
-    curve_ = add<CurveView> (0, skin(), host(), module_);
-    curve_->setAxisLabels (tx ("nv.in_db"), tx ("nv.out_db"));
+    history_ = add<nova::CompressorHistoryView> (0, skin(), host(), module_);
+    analyzerPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Icon);
+    {
+        juce::Path gear;   // curseurs de réglage
+        for (const float y : { 6.0f, 12.0f, 18.0f }) { gear.startNewSubPath (3.0f, y); gear.lineTo (21.0f, y); }
+        gear.addEllipse (6.0f, 4.0f, 4.0f, 4.0f);
+        gear.addEllipse (14.0f, 10.0f, 4.0f, 4.0f);
+        gear.addEllipse (8.0f, 16.0f, 4.0f, 4.0f);
+        analyzerPill_->setIcon (gear);
+    }
+    analyzerPill_->onClick = [this]
+    {
+        nova::CompressorHistoryView::showSettings (analyzerPill_, skin(), host(), [this] (const char* key) { return tx (key); });
+    };
     inMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.in"), nova::VMeter::Kind::Level, false);
     grMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.gr"), nova::VMeter::Kind::Reduction, false);
     outMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.out"), nova::VMeter::Kind::Level, true);
     for (auto* m : { inMeter_, grMeter_, outMeter_ }) m->setModeVisible (false);
+    grMeter_->setDecayDbPerSecond (16.0f);   // retombée de la réduction : 16 dB/s, comme ZL
+    curvePanel_->setMetaRightInset (36.0f);
 
     struct Spec { ParamId id; const char* title; bool pink; ParamId sub; const char* subTitle; };
     const Spec specs[6] = { { cm::threshold, "nv.threshold", false, cm::kneeWidth, "nv.knee" }, { cm::ratio, "nv.ratio", false, cm::curve, "nv.curve" },
@@ -516,7 +367,8 @@ void NovaCompressorEditor::layout()
     navPanel_->setBounds (R (14, 496, 176, 214));
     for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 496 + 21 + 50.0f * static_cast<float> (i), 148, 44));
     curvePanel_->setBounds (R (204, 72, 942, 410));
-    curve_->setBounds (R (220, 100, 910, 366));
+    history_->setBounds (R (220, 100, 910, 366));
+    analyzerPill_->setBounds (R (1146 - 14 - 28, 76, 28, 24));
     const float colW = (942.0f - 12.0f * 5.0f) / 6.0f;
     for (std::size_t i = 0; i < columns_.size(); ++i)
     {
@@ -594,7 +446,6 @@ void NovaCompressorEditor::tick()
         inDb = std::max (il, ir);
         grDb = -std::max (gl, gr);
     }
-    curve_->update (inDb, grDb);
     const auto meta = tx ("nv.in") + " " + (inDb < -100.0f ? juce::String ("-inf") : juce::String (inDb, 1)) + " dB   " + tx ("nv.gr") + " " + juce::String (-grDb, 1) + " dB";
     if (meta != metaText_) { metaText_ = meta; curvePanel_->setMeta (meta); }
     sideEq_->update();
