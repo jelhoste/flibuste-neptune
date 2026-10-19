@@ -209,7 +209,7 @@ int main (int argc, char** argv)
     ps.set (compressor::bandParam (4, compressor::kFreq), 9000.0);
     const i18n::Translator tr ("en");
     struct EdCase { const char* name; th::ThemeId id; float scale; int page; };
-    const EdCase eds[] = { { "comp-dark-p0", th::ThemeId::Dark, 1.0f, 0 }, { "comp-dark-p1", th::ThemeId::Dark, 1.0f, 1 }, { "comp-dark-p2", th::ThemeId::Dark, 1.0f, 2 },
+    const EdCase eds[] = { { "comp-dark-p0", th::ThemeId::Dark, 1.0f, 0 }, { "comp-dark-p3", th::ThemeId::Dark, 1.0f, 3 }, { "comp-dark-p1", th::ThemeId::Dark, 1.0f, 1 }, { "comp-dark-p2", th::ThemeId::Dark, 1.0f, 2 },
                            { "comp-light-p0", th::ThemeId::Light, 1.0f, 0 }, { "comp-hc-p0", th::ThemeId::HighContrast, 1.0f, 0 },
                            { "comp-hammond-p1", th::ThemeId::Hammond, 1.0f, 1 }, { "comp-dark-p0-070", th::ThemeId::Dark, 0.7f, 0 } };
     for (const auto& c : eds)
@@ -291,7 +291,7 @@ int main (int argc, char** argv)
             }
         }
         struct EqCase { const char* name; th::ThemeId id; float scale; int page; int sel; };
-        const EqCase ecs[] = { { "eq-dark-p0", th::ThemeId::Dark, 1.0f, 0, 2 }, { "eq-dark-p1", th::ThemeId::Dark, 1.0f, 1, 2 }, { "eq-light-p0", th::ThemeId::Light, 1.0f, 0, 0 },
+        const EqCase ecs[] = { { "eq-dark-p0", th::ThemeId::Dark, 1.0f, 0, 2 }, { "eq-dark-p2", th::ThemeId::Dark, 1.0f, 2, 2 }, { "eq-dark-p1", th::ThemeId::Dark, 1.0f, 1, 2 }, { "eq-light-p0", th::ThemeId::Light, 1.0f, 0, 0 },
                                { "eq-hc-p0", th::ThemeId::HighContrast, 1.0f, 0, 1 }, { "eq-hammond-p0", th::ThemeId::Hammond, 1.0f, 0, 3 }, { "eq-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, 2 } };
         for (const auto& c : ecs)
         {

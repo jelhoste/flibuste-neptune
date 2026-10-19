@@ -172,25 +172,49 @@ bool CompressorProcessor::uiRedo()
     return done;
 }
 
+void CompressorProcessor::applySettings (const settings::GlobalSettings& s)
+{
+    settings_ = s;
+    std::string error;
+    settings::saveFile (configDirectory() / "settings.json", s, &error);
+}
+
 juce::AudioProcessorEditor* CompressorProcessor::createEditor() { return new CompressorPluginEditor (*this); }
 
 // ---- éditeur
 CompressorPluginEditor::CompressorPluginEditor (CompressorProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
 {
-    const auto palette = makePalette (p.settings());
-    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
-    NovaCompressorEditor::Options opt;
-    opt.brand = true;
-    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
-    content_ = std::make_unique<NovaCompressorEditor> (p, static_cast<const CompressorModule*> (&p.runner().module()), palette, def.knob, tr_, opt);
-    addAndMakeVisible (*content_);
+    buildContent();
     setWantsKeyboardFocus (true);
     // proportions de la maquette conservées ; l'interface se redessine à la vraie taille (aucune transformation)
     nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
     setConstrainer (&constrainer_);
     setResizable (true, true);
     setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
+}
+
+void CompressorPluginEditor::buildContent()
+{
+    auto& p = processor_;
+    tr_ = i18n::Translator (p.settings().language);
+    const auto palette = makePalette (p.settings());
+    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
+    NovaCompressorEditor::Options opt;
+    opt.brand = true;
+    opt.moduleName = "compressor";
+    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
+    opt.getSettings = [&p] { return p.settings(); };
+    // appliqué hors de l'éditeur qui l'appelle : l'interface est détruite puis recréée avec la nouvelle palette
+    opt.applySettings = [&p, safe = juce::Component::SafePointer<CompressorPluginEditor> (this)] (const settings::GlobalSettings& s)
+    {
+        p.applySettings (s);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
+    };
+    content_.reset();
+    content_ = std::make_unique<NovaCompressorEditor> (p, static_cast<const CompressorModule*> (&p.runner().module()), palette, def.knob, tr_, opt);
+    addAndMakeVisible (*content_);
+    content_->setBounds (getLocalBounds());
 }
 
 void CompressorPluginEditor::resized() { content_->setBounds (getLocalBounds()); }

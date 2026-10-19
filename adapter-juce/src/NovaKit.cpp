@@ -319,8 +319,25 @@ void Pill::paint (juce::Graphics& g)
         area.removeFromLeft (d + skin_.px (6.0f));
     }
     g.setColour (textColour);
-    g.setFont (skin_.font (look_ == Look::Pill ? 12.0f : 9.5f, true));
+    g.setFont (skin_.font (fontSize_ > 0.0f ? fontSize_ : look_ == Look::Pill ? 12.0f : 9.5f, true));
     g.drawText (text_, area, juce::Justification::centred, true);
+}
+
+// ------------------------------------------------------------------------------------------------ Text
+Text::Text (const Skin& s, Token colour, float size, bool bold) : skin_ (s), colour_ (colour), size_ (size), bold_ (bold) { setInterceptsMouseClicks (false, false); }
+
+void Text::setText (const juce::String& t)
+{
+    if (t == text_) return;
+    text_ = t;
+    repaint();
+}
+
+void Text::paint (juce::Graphics& g)
+{
+    g.setColour (skin_.colour (colour_));
+    g.setFont (skin_.font (size_, bold_));
+    g.drawFittedText (text_, getLocalBounds(), juce::Justification::topLeft, 12, 1.0f);
 }
 
 // ------------------------------------------------------------------------------------------------ Switch

@@ -16,6 +16,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (isEqualizer)
     {
         NovaEqualizerEditor::Options opt;
+        opt.moduleName = "equalizer";
         opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
         equalizerContent_ = std::make_unique<NovaEqualizerEditor> (*handle_.host, static_cast<const EqualizerModule*> (&handle_.instance->runner.module()), palette_,
                                                                     knobStyle, tr_, opt);
@@ -24,6 +25,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     else if (isCompressor)
     {
         NovaCompressorEditor::Options opt;
+        opt.moduleName = "compressor";
         opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
         compressorContent_ = std::make_unique<NovaCompressorEditor> (*handle_.host, static_cast<const CompressorModule*> (&handle_.instance->runner.module()), palette_,
                                                                       knobStyle, tr_, opt);

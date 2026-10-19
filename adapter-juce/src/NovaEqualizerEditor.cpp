@@ -40,6 +40,13 @@ juce::Path iconPath (int kind)
     {
         for (const float x : { 4.0f, 12.0f, 20.0f }) { p.startNewSubPath (x, 21.0f); p.lineTo (x, x == 4.0f ? 14.0f : x == 12.0f ? 12.0f : 16.0f); p.startNewSubPath (x, x == 4.0f ? 10.0f : 8.0f); p.lineTo (x, 3.0f); }
     }
+    else if (kind == 2)   // réglages : curseurs
+    {
+        for (const float y : { 6.0f, 12.0f, 18.0f }) { p.startNewSubPath (3.0f, y); p.lineTo (21.0f, y); }
+        p.addEllipse (6.0f, 4.0f, 4.0f, 4.0f);
+        p.addEllipse (14.0f, 10.0f, 4.0f, 4.0f);
+        p.addEllipse (8.0f, 16.0f, 4.0f, 4.0f);
+    }
     else   // impulsion
     {
         p.startNewSubPath (2.0f, 12.0f); p.lineTo (7.0f, 12.0f); p.lineTo (10.0f, 4.0f); p.lineTo (14.0f, 20.0f); p.lineTo (17.0f, 12.0f); p.lineTo (22.0f, 12.0f);
@@ -494,9 +501,11 @@ NovaEqualizerEditor::NovaEqualizerEditor (ParamHost& host, const EqualizerModule
 {
     addPage (tx ("nv.page_equalizer"), iconPath (0));
     addPage (tx ("nv.page_dynamics"), iconPath (1));
+    addPage (tx ("nv.page_settings"), iconPath (2));
     buildMain();
     buildDynamics();
     buildBottomBar();
+    buildSettingsPage (2);
     selected_ = firstActive();
     bindSelected();
     if (const auto names = presetNames(); names.size() > 1) presetPill()->setText (names[0]);
@@ -670,11 +679,11 @@ void NovaEqualizerEditor::buildMain()
     };
     sh.bypassed = [this] (int b) { return choiceValue (eq::bandParam (b, eq::kStatus)) == eq::kBypassed; };
     sh.dynamic = [this] (int b) { return value (eq::bandParam (b, eq::kDynOn)) >= 0.5 && hasGain (choiceValue (eq::bandParam (b, eq::kType))); };
-    strip_ = add<BandStrip> (-1, skin(), std::move (sh), tx ("nv.add_band"));
+    strip_ = add<BandStrip> (-2, skin(), std::move (sh), tx ("nv.add_band"));
 
-    toolbarPanel_ = add<nova::Panel> (-1, skin());
-    label_ = add<BandLabel> (-1, skin());
-    typePill_ = add<nova::Pill> (-1, skin());
+    toolbarPanel_ = add<nova::Panel> (-2, skin());
+    label_ = add<BandLabel> (-2, skin());
+    typePill_ = add<nova::Pill> (-2, skin());
     typePill_->onClick = [this]
     {
         if (!active (selected_)) return;
@@ -682,31 +691,31 @@ void NovaEqualizerEditor::buildMain()
         for (int t = 0; t < eq::kNumTypes; ++t) l.push_back (typeLabel (t));
         showChoiceMenu (typePill_, eq::bandParam (selected_, eq::kType), std::move (l));
     };
-    onPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    onPill_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
     onPill_->setText (tx ("nv.on"));
     onPill_->onClick = [this]
     {
         if (active (selected_)) nova::setParam (host(), eq::bandParam (selected_, eq::kStatus), choiceValue (eq::bandParam (selected_, eq::kStatus)) == eq::kOn ? eq::kBypassed : eq::kOn);
     };
-    dynPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
-    stereoPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    dynPill_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
+    stereoPill_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
     stereoPill_->onClick = [this]
     {
         if (!active (selected_)) return;
         showChoiceMenu (stereoPill_, eq::bandParam (selected_, eq::kStereo), { tx ("nv.s_stereo"), tx ("nv.s_left"), tx ("nv.s_right"), tx ("nv.s_mid"), tx ("nv.s_side") });
     };
-    deletePill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    deletePill_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
     deletePill_->setText (tx ("nv.delete_band"));
     deletePill_->setTintToken (Token::KnobHot);
     deletePill_->onClick = [this] { removeBand (selected_); };
 
-    addInfo (-1, typePill_, "hlp.bandtype");
-    addInfo (-1, dynPill_, "hlp.banddynamic");
-    addInfo (-1, stereoPill_, "hlp.bandstereo");
+    addInfo (-2, typePill_, "hlp.bandtype");
+    addInfo (-2, dynPill_, "hlp.banddynamic");
+    addInfo (-2, stereoPill_, "hlp.bandstereo");
 
     for (int i = 0; i < 7; ++i)
     {
-        auto* k = add<nova::KnobCard> (-1, skin(), host(), eq::bandParam (0, eq::kFreq), juce::String(), modalOpener(), false);
+        auto* k = add<nova::KnobCard> (-2, skin(), host(), eq::bandParam (0, eq::kFreq), juce::String(), modalOpener(), false);
         k->setAutoRange (true);
         knobs_.push_back (k);
     }
@@ -803,7 +812,7 @@ void NovaEqualizerEditor::assignKnobs()
     }
     for (std::size_t i = 0; i < knobs_.size(); ++i)
     {
-        const bool used = ok && i < defs.size();
+        const bool used = ok && i < defs.size() && currentPage() != 2;
         knobs_[i]->setVisible (used);
         if (used) knobs_[i]->setParam (eq::bandParam (selected_, defs[i].k), tx (defs[i].key));
     }
@@ -819,7 +828,7 @@ void NovaEqualizerEditor::assignKnobs()
 
 void NovaEqualizerEditor::layout()
 {
-    metersPanel_->setBounds (R (14, 72, 176, 382));
+    metersPanel_->setBounds (R (14, 72, 176, 474));
     {
         const auto in = metersPanel_->getBounds().reduced (skin().ipx (14.0f), skin().ipx (12.0f));
         const int w = in.getWidth() / 2, trimH = skin().ipx (60.0f);
@@ -830,15 +839,16 @@ void NovaEqualizerEditor::layout()
         inTrimPill_->setBounds (in.getX() + skin().ipx (6.0f), py, w - skin().ipx (12.0f), ph);
         outPill_->setBounds (in.getX() + w + skin().ipx (6.0f), py, w - skin().ipx (12.0f), ph);
     }
-    // zone du menu : son haut et son bas s'alignent sur ceux de la rangée de bandes et des potards (462 et 710) ; les entrées sont centrées dedans
-    navPanel_->setBounds (R (14, 462, 176, 248));
-    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 462 + (248.0f - (numPages() * 44.0f + (numPages() - 1) * 6.0f)) / 2.0f + 50.0f * static_cast<float> (i), 148, 44));
+    // marges uniformes de 14 px entre tous les conteneurs. Colonne de gauche : le vu-mètre descend jusqu'au bas de la barre d'outils de la bande (546),
+    // la zone du menu s'aligne sur les potards (560 à 710) ; les entrées y sont centrées.
+    navPanel_->setBounds (R (14, 560, 176, 150));
+    layoutNav (560, 150);
 
-    curvePanel_->setBounds (R (204, 72, 942, 382));
-    curve_->setBounds (R (220, 100, 910, 346));
+    curvePanel_->setBounds (R (204, 72, 942, 370));
+    curve_->setBounds (R (220, 100, 910, 334));
     spectrumGear_->setBounds (R (1146 - 14 - 28, 76, 28, 24));
     spectrumPill_->setBounds (R (1146 - 14 - 28 - 8 - 104, 76, 104, 24));
-    detPanel_->setBounds (R (204, 72, 942, 382));
+    detPanel_->setBounds (R (204, 72, 942, 370));
     dynBypassPill_->setBounds (R (220, 108, 150, 30));
     detTypePill_->setBounds (R (392, 108, 150, 30));
     detSlopePill_->setBounds (R (574, 108, 120, 30));
@@ -848,7 +858,7 @@ void NovaEqualizerEditor::layout()
         for (std::size_t i = 0; i < detKnobs_.size(); ++i)
             detKnobs_[i]->setBounds (R (220.0f + static_cast<float> (i % 5) * (cw + 12.0f), i < 5 ? 146.0f : 280.0f, cw, 130));
     }
-    strip_->setBounds (R (204, 462, 942, 32));
+    strip_->setBounds (R (204, 456, 942, 32));
     toolbarPanel_->setBounds (R (204, 502, 942, 44));
     label_->setBounds (R (220, 512, 130, 24));
     typePill_->setBounds (R (352, 508, 130, 32));
@@ -861,7 +871,7 @@ void NovaEqualizerEditor::layout()
 
     // barre du bas
     const float by = 724.0f + 12.0f;
-    abPill()->setBounds (R (14, by, 36, 32));
+    abPill()->setBounds (R (14, by, 40, 32));
     float x = 58.0f;
     for (auto* p : { phasePill_, extPill_, scalePill_ })
     {
@@ -906,7 +916,7 @@ void NovaEqualizerEditor::tick()
     const char* const sk[5] = { "nv.s_stereo", "nv.s_left", "nv.s_right", "nv.s_mid", "nv.s_side" };
     stereoPill_->setText (ok ? tx (sk[juce::jlimit (0, 4, choiceValue (eq::bandParam (selected_, eq::kStereo)))]) : juce::String());
     for (auto* p : { typePill_, onPill_, stereoPill_, deletePill_ }) p->setEnabled (ok);
-    dynPill_->setVisible (ok && hasGain (t));
+    dynPill_->setVisible (ok && hasGain (t) && currentPage() != 2);
     dynPill_->setEnabled (ok);
     if (ok)
     {

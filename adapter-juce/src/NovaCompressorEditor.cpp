@@ -36,10 +36,17 @@ juce::Path iconPath (int kind)
         p.addEllipse (4.4f, 1.4f, 3.2f, 3.2f);
         p.addEllipse (16.4f, 19.4f, 3.2f, 3.2f);
     }
-    else   // réglages
+    else if (kind == 2)   // avancé
     {
         p.addEllipse (9.0f, 9.0f, 6.0f, 6.0f);
         p.addEllipse (3.5f, 3.5f, 17.0f, 17.0f);
+    }
+    else   // réglages : curseurs
+    {
+        for (const float y : { 6.0f, 12.0f, 18.0f }) { p.startNewSubPath (3.0f, y); p.lineTo (21.0f, y); }
+        p.addEllipse (6.0f, 4.0f, 4.0f, 4.0f);
+        p.addEllipse (14.0f, 10.0f, 4.0f, 4.0f);
+        p.addEllipse (8.0f, 16.0f, 4.0f, 4.0f);
     }
     return p;
 }
@@ -252,10 +259,12 @@ NovaCompressorEditor::NovaCompressorEditor (ParamHost& host, const CompressorMod
     addPage (tx ("nv.page_compressor"), iconPath (0));
     addPage (tx ("nv.page_sidechain"), iconPath (1));
     addPage (tx ("nv.page_advanced"), iconPath (2));
+    addPage (tx ("nv.page_settings"), iconPath (3));
     buildCompressorPage();
     buildSidechainPage();
     buildAdvancedPage();
     buildBottomBar();
+    buildSettingsPage (3);
     if (const auto names = presetNames(); ! names.empty()) presetPill()->setText (names[1]);
     setPage (0);
     setSize (designWidth, designHeight);
@@ -480,8 +489,7 @@ void NovaCompressorEditor::layout()
         outTrimPill_->setBounds (in.getX() + 2 * w + skin().ipx (1.0f), py, w - skin().ipx (2.0f), ph);
     }
     navPanel_->setBounds (R (14, 496, 176, 214));
-    // entrées du menu centrées dans leur zone (3 x 44 px + 2 intervalles de 6 px)
-    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 496 + (214.0f - (numPages() * 44.0f + (numPages() - 1) * 6.0f)) / 2.0f + 50.0f * static_cast<float> (i), 148, 44));
+    layoutNav (496, 214);
     curvePanel_->setBounds (R (204, 72, 942, 410));
     history_->setBounds (R (220, 100, 910, 366));
     analyzerPill_->setBounds (R (1146 - 14 - 28, 76, 28, 24));
@@ -539,7 +547,7 @@ void NovaCompressorEditor::layout()
 
     // ---- barre du bas
     const float by = 724.0f + 12.0f;
-    abPill()->setBounds (R (14, 724 + 12, 36, 32));
+    abPill()->setBounds (R (14, 724 + 12, 40, 32));
     float x = 58.0f;
     for (auto* p : { stereoPill_, stylePill_, dirPill_, deltaPill_, osPill_, lookPill_ })
     {

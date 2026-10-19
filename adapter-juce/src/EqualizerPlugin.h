@@ -56,6 +56,7 @@ public:
 
     neptune::core::ModuleRunner& runner() { return runner_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
 
 private:
     static BusesProperties makeBuses();
@@ -82,6 +83,7 @@ public:
 private:
     EqualizerProcessor& processor_;
     neptune::core::i18n::Translator tr_;
+    void buildContent();   // (re)crée l'interface : au démarrage et quand le thème, le contraste ou la langue changent
     std::unique_ptr<NovaEqualizerEditor> content_;
     juce::ComponentBoundsConstrainer constrainer_;
 };

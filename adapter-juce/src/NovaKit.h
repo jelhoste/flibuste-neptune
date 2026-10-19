@@ -110,7 +110,8 @@ public:
     void setDim (bool d) { dim_ = d; repaint(); }
     void setIcon (juce::Path, bool strokeOnly = true);     // chemin dans un carré 24 x 24
     void setDot (bool shown) { dot_ = shown; repaint(); }
-    void setTintToken (neptune::core::theme::Token t) { tint_ = t; repaint(); }  // couleur de l'état actif (défaut : Accent)
+    void setTintToken (neptune::core::theme::Token t) { tint_ = t; repaint(); }
+    void setFontSize (float designSize) { fontSize_ = designSize; repaint(); }   // taille du texte (maquette) ; 0 : celle du type de pastille  // couleur de l'état actif (défaut : Accent)
 
     // Liaison à un paramètre : bascule (booléen) ou choix cyclique parmi `choices` (libellés à afficher après `label`).
     void bindToggle (ParamHost&, neptune::core::ParamId, juce::String label);
@@ -143,6 +144,23 @@ private:
     std::uint32_t seen_ = 0xFFFFFFFFu;
     bool valueMode_ = false, dragging_ = false;
     double startNorm_ = 0.0;
+    float fontSize_ = 0.0f;
+};
+
+// ------------------------------------------------------------------------------------------------ texte
+class Text : public juce::Component
+{
+public:
+    Text (const Skin&, neptune::core::theme::Token colour = neptune::core::theme::Token::TextDim, float designSize = 11.0f, bool bold = false);
+    void setText (const juce::String&);
+    void paint (juce::Graphics&) override;
+
+private:
+    const Skin& skin_;
+    neptune::core::theme::Token colour_;
+    float size_;
+    bool bold_;
+    juce::String text_;
 };
 
 // ------------------------------------------------------------------------------------------------ interrupteur (.switch)

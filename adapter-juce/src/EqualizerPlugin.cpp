@@ -172,24 +172,49 @@ bool EqualizerProcessor::uiRedo()
     return done;
 }
 
+void EqualizerProcessor::applySettings (const settings::GlobalSettings& s)
+{
+    settings_ = s;
+    std::string error;
+    settings::saveFile (configDirectory() / "settings.json", s, &error);
+}
+
 juce::AudioProcessorEditor* EqualizerProcessor::createEditor() { return new EqualizerPluginEditor (*this); }
 
 // ---- éditeur
 EqualizerPluginEditor::EqualizerPluginEditor (EqualizerProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
 {
-    const auto palette = makePalette (p.settings());
-    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
-    NovaEqualizerEditor::Options opt;
-    opt.brand = true;
-    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
-    content_ = std::make_unique<NovaEqualizerEditor> (p, static_cast<const EqualizerModule*> (&p.runner().module()), palette, def.knob, tr_, opt);
-    addAndMakeVisible (*content_);
+    buildContent();
     setWantsKeyboardFocus (true);
+    // proportions de la maquette conservées ; l'interface se redessine à la vraie taille (aucune transformation)
     nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
     setConstrainer (&constrainer_);
     setResizable (true, true);
     setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
+}
+
+void EqualizerPluginEditor::buildContent()
+{
+    auto& p = processor_;
+    tr_ = i18n::Translator (p.settings().language);
+    const auto palette = makePalette (p.settings());
+    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
+    NovaEqualizerEditor::Options opt;
+    opt.brand = true;
+    opt.moduleName = "equalizer";
+    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
+    opt.getSettings = [&p] { return p.settings(); };
+    // appliqué hors de l'éditeur qui l'appelle : l'interface est détruite puis recréée avec la nouvelle palette
+    opt.applySettings = [&p, safe = juce::Component::SafePointer<EqualizerPluginEditor> (this)] (const settings::GlobalSettings& s)
+    {
+        p.applySettings (s);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
+    };
+    content_.reset();
+    content_ = std::make_unique<NovaEqualizerEditor> (p, static_cast<const EqualizerModule*> (&p.runner().module()), palette, def.knob, tr_, opt);
+    addAndMakeVisible (*content_);
+    content_->setBounds (getLocalBounds());
 }
 
 void EqualizerPluginEditor::resized() { content_->setBounds (getLocalBounds()); }

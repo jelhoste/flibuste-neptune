@@ -10,6 +10,7 @@
 #include "KnobModal.h"
 #include "NovaKit.h"
 #include "neptune/core/I18n.h"
+#include "neptune/core/Settings.h"
 
 namespace nova
 {
@@ -20,6 +21,10 @@ public:
     {
         bool brand = false;    // plugin séparé : marque et bouton de bypass dans l'en-tête (dans un insert, la fenêtre du plugin les fournit)
         std::function<double()> sampleRate;
+        juce::String moduleName;   // « compressor », « equalizer » : dossier des presets utilisateur
+        // plugin séparé seulement : réglages globaux de la suite (thème, contraste, langue) ; `applySettings` les enregistre et reconstruit l'éditeur
+        std::function<neptune::core::settings::GlobalSettings()> getSettings;
+        std::function<void (const neptune::core::settings::GlobalSettings&)> applySettings;
     };
 
     static constexpr int designWidth = 1160, designHeight = 780;
@@ -63,7 +68,7 @@ protected:
     }
     juce::Rectangle<int> frame() const { return frame_; }
 
-    // Crée un composant, l'ajoute à la fenêtre et à une page (-1 : toutes les pages), l'enregistre pour le rafraîchissement s'il est Refreshable.
+    // Crée un composant, l'ajoute à la fenêtre et à une page (-1 : toutes les pages, -2 : toutes sauf la page SETTINGS), l'enregistre pour le rafraîchissement s'il est Refreshable.
     template <class T, class... Args>
     T* add (int page, Args&&... args)
     {
@@ -76,7 +81,11 @@ protected:
     // Bouton « ? » rattaché à un composant (à sa droite, ou dans son coin supérieur droit) ; les textes sont les clés `hlp.<key>.t` et `hlp.<key>`.
     // pos : 0 à droite du composant, 1 dans son coin supérieur droit, 2 en dessous (centré)
     InfoButton* addInfo (int page, juce::Component* target, const char* key, int pos = 0);
-    int addPage (juce::String label, juce::Path icon);   // entrée du menu latéral ; retourne l'indice de la page
+    int addPage (juce::String label, juce::Path icon);
+    // Page SETTINGS commune : thème, contraste, langue (plugin séparé), dossier des presets utilisateur, à propos. À appeler après addPage.
+    void buildSettingsPage (int page);
+    // Place les entrées du menu latéral, centrées dans la zone [y, y + h] de la maquette
+    void layoutNav (float zoneY, float zoneH);   // entrée du menu latéral ; retourne l'indice de la page
     void setPage (int);
     int currentPage() const noexcept { return page_; }
     int numPages() const noexcept { return static_cast<int> (navs_.size()); }
@@ -98,6 +107,12 @@ private:
     void addChild (juce::Component*, int page);
     void timerCallback() override;
     void closeModal();
+    void layoutSettings();
+    void refreshSettingsTexts();
+    juce::File userPresetsDir() const;
+    void saveUserPreset (const juce::String& name);
+    bool loadUserPreset (const juce::File&);
+    void askName (const juce::String& title, std::function<void (juce::String)> done);
     void showPresetMenu();
     void toggleAB();
     std::map<neptune::core::ParamId, double> snapshot() const;
@@ -116,6 +131,11 @@ private:
     std::vector<NavItem*> navs_;
     Pill *preset_ = nullptr, *ab_ = nullptr, *bypass_ = nullptr;
     std::unique_ptr<KnobModal> modal_;
+    std::unique_ptr<juce::Component> nameEntry_;
+    int settingsPage_ = -1;
+    Panel* setPanel_ = nullptr;
+    Pill *themePill_ = nullptr, *contrastPill_ = nullptr, *langPill_ = nullptr, *openPill_ = nullptr;
+    Text *setGeneral_ = nullptr, *setNote_ = nullptr, *setPresets_ = nullptr, *setFolder_ = nullptr, *setAbout_ = nullptr, *setAboutText_ = nullptr;
     int page_ = 0, presetIndex_ = 0;
     bool slotB_ = false;
     std::map<neptune::core::ParamId, double> otherSlot_;
