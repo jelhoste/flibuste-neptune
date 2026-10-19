@@ -591,7 +591,8 @@ void NovaEqualizerEditor::buildMain()
     sh.label = [this] (int b)
     {
         const int t = choiceValue (eq::bandParam (b, eq::kType));
-        return (hasFreq (t) ? freqText (value (eq::bandParam (b, eq::kFreq))) + "  " : juce::String()) + typeLabel (t).upToFirstOccurrenceOf (" ", false, false);
+        static const char* const abbr[eq::kNumTypes] = { "Bell", "L.Shelf", "LP", "H.Shelf", "HP", "Notch", "BP", "Tilt", "AP", "Flat" };
+        return (hasFreq (t) ? freqText (value (eq::bandParam (b, eq::kFreq))) + "  " : juce::String()) + abbr[juce::jlimit (0, eq::kNumTypes - 1, t)];
     };
     sh.bypassed = [this] (int b) { return choiceValue (eq::bandParam (b, eq::kStatus)) == eq::kBypassed; };
     sh.dynamic = [this] (int b) { return value (eq::bandParam (b, eq::kDynOn)) >= 0.5 && hasGain (choiceValue (eq::bandParam (b, eq::kType))); };
