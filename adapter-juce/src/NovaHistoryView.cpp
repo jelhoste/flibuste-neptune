@@ -15,7 +15,7 @@ constexpr int kMaxPoints = 300, kPausedThreshold = 6, kTooMuchResetThreshold = 6
 constexpr float kMissingDb = -10000.0f;
 // Retard d'affichage : l'hôte livre l'audio par rafales ; garder en réserve quelques dizaines de millisecondes de données évite les trous (donc les saccades)
 // sans qu'on puisse le voir : seul le dessin de la compression compte, pas sa précision temporelle.
-constexpr double kDisplayDelayMs = 40.0;
+constexpr double kDisplayDelayMs = 50.0;
 constexpr int kPointsPerSecond[4] = { 40, 30, 20, 15 };
 constexpr double kTimeLength[4] = { 6.0, 9.0, 12.0, 18.0 };
 constexpr float kMaxDbValues[5] = { 6.0f, 0.0f, -6.0f, -12.0f, -24.0f };
@@ -449,7 +449,7 @@ void CompressorHistoryView::renderOverlay (juce::Graphics& g)
         g.setColour (skin_.colour (Token::Accent, 0.55f));
         g.fillPath (dashed);
     }
-    g.setColour (skin_.colour (Token::Text, 0.95f));
+    g.setColour (skin_.colour (Token::Accent));   // orangée, comme la maquette
     g.strokePath (curve_, juce::PathStrokeType (skin_.px (2.4f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
