@@ -193,10 +193,10 @@ bool EqualizerModule::declareParams (ParameterSet& set, std::string* error) cons
     for (int b = 0; b < kBands; ++b)
     {
         const std::string n = "Band " + std::to_string (b + 1) + " ";
-        // Par défaut : bandes éteintes, réparties sur le spectre (comme un égaliseur neuf).
-        const double freqs[kBands] = { 40, 80, 150, 300, 500, 800, 1200, 2000, 3000, 4500, 6500, 9000, 12000, 15000, 18000, 21000 };
-        add (P::choice (bandParam (b, kStatus), n + "Status", { "Off", "Bypass", "On" }, 0));
-        add (P::choice (bandParam (b, kType), n + "Type", { "Peak", "Low Shelf", "Low Pass", "High Shelf", "High Pass", "Notch", "Band Pass", "Tilt Shelf", "All Pass", "Flat Gain" }, 0));
+        // Par défaut : un passe-haut à 20 Hz et trois cloches à gain nul (120 Hz, 1 kHz, 6 kHz) en service ; les autres bandes éteintes, réparties sur le spectre.
+        const double freqs[kBands] = { 20, 120, 1000, 6000, 500, 800, 1200, 2000, 3000, 4500, 6500, 9000, 12000, 15000, 18000, 21000 };
+        add (P::choice (bandParam (b, kStatus), n + "Status", { "Off", "Bypass", "On" }, b < 4 ? 2 : 0));
+        add (P::choice (bandParam (b, kType), n + "Type", { "Peak", "Low Shelf", "Low Pass", "High Shelf", "High Pass", "Notch", "Band Pass", "Tilt Shelf", "All Pass", "Flat Gain" }, b == 0 ? 4 : 0));
         add (P::choice (bandParam (b, kOrder), n + "Order", orders, 1));
         add (P::choice (bandParam (b, kStereo), n + "Stereo", { "Stereo", "Left", "Right", "Mid", "Side" }, 0));
         add (P::continuous (bandParam (b, kFreq), (n + "Freq").c_str(), Unit::Hertz, 10.0, 30000.0, freqs[b], Curve::Exponential));

@@ -115,13 +115,19 @@ public:
     // Liaison à un paramètre : bascule (booléen) ou choix cyclique parmi `choices` (libellés à afficher après `label`).
     void bindToggle (ParamHost&, neptune::core::ParamId, juce::String label);
     void bindChoice (ParamHost&, neptune::core::ParamId, juce::String label, std::vector<juce::String> choices);
+    // Réglage continu au glisser : un glissement vertical règle le paramètre (160 px = toute la plage, Maj = 10 fois plus fin) ; le double-clic appelle onClick
+    // (en général la modale de saisie). Le texte est « libellé  valeur » (ou la valeur seule si le libellé est vide).
+    void bindValue (ParamHost&, neptune::core::ParamId, juce::String label);
     void refresh() override;
     std::function<void()> onClick;
 
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override { hover_ = true; repaint(); }
     void mouseExit (const juce::MouseEvent&) override { hover_ = false; repaint(); }
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
     const Skin& skin_;
@@ -135,6 +141,8 @@ private:
     juce::String label_;
     std::vector<juce::String> choices_;
     std::uint32_t seen_ = 0xFFFFFFFFu;
+    bool valueMode_ = false, dragging_ = false;
+    double startNorm_ = 0.0;
 };
 
 // ------------------------------------------------------------------------------------------------ interrupteur (.switch)

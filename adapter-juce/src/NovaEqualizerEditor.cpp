@@ -749,13 +749,19 @@ void NovaEqualizerEditor::buildBottomBar()
     phasePill_->bindToggle (host(), eq::phaseFlip, tx ("nv.phase"));
     extPill_ = add<nova::Pill> (-1, skin());
     extPill_->bindToggle (host(), eq::externalSide, tx ("nv.ext_key"));
-    outPill_ = add<nova::Pill> (-1, skin());
+    // gain d'entrée (réglage commun des modules) et gain de sortie de l'égaliseur : pastilles à glisser sous les vu-mètres ; double-clic : saisie
+    inTrimPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    inTrimPill_->bindValue (host(), stock::inputTrim, {});
+    inTrimPill_->onClick = [this] { openModal (stock::inputTrim, uistate::Terminal::Pointer); };
+    outPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    outPill_->bindValue (host(), eq::outputGain, {});
     outPill_->onClick = [this] { openModal (eq::outputGain, uistate::Terminal::Pointer); };
     scalePill_ = add<nova::Pill> (-1, skin());
+    scalePill_->bindValue (host(), eq::gainScale, tx ("nv.gain_scale"));
     scalePill_->onClick = [this] { openModal (eq::gainScale, uistate::Terminal::Pointer); };
     addInfo (-1, phasePill_, "hlp.eqphase");
     addInfo (-1, extPill_, "hlp.eqext");
-    addInfo (-1, outPill_, "hlp.eqout");
+    addInfo (-1, outPill_, "hlp.eqout", 2);
     addInfo (-1, scalePill_, "hlp.eqscale");
     minPhasePill_ = add<nova::Pill> (-1, skin());
     minPhasePill_->setText (tx ("nv.min_phase"));
@@ -816,11 +822,17 @@ void NovaEqualizerEditor::layout()
     metersPanel_->setBounds (R (14, 72, 176, 346));
     {
         const auto in = metersPanel_->getBounds().reduced (skin().ipx (14.0f), skin().ipx (12.0f));
-        inMeter_->setBounds (in.withWidth (in.getWidth() / 2));
-        outMeter_->setBounds (in.withX (in.getX() + in.getWidth() / 2).withWidth (in.getWidth() / 2));
+        const int w = in.getWidth() / 2, trimH = skin().ipx (60.0f);
+        const auto meters = in.withTrimmedBottom (trimH);
+        inMeter_->setBounds (meters.withWidth (w));
+        outMeter_->setBounds (meters.withX (meters.getX() + w).withWidth (w));
+        const int py = in.getBottom() - skin().ipx (50.0f), ph = skin().ipx (24.0f);
+        inTrimPill_->setBounds (in.getX() + skin().ipx (6.0f), py, w - skin().ipx (12.0f), ph);
+        outPill_->setBounds (in.getX() + w + skin().ipx (6.0f), py, w - skin().ipx (12.0f), ph);
     }
-    navPanel_->setBounds (R (14, 426, 176, 284));
-    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 426 + 20 + 50.0f * static_cast<float> (i), 148, 44));
+    // zone du menu : son bas s'aligne sur celui des potards (674) ; les entrées sont centrées dedans
+    navPanel_->setBounds (R (14, 426, 176, 248));
+    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 426 + (248.0f - (numPages() * 44.0f + (numPages() - 1) * 6.0f)) / 2.0f + 50.0f * static_cast<float> (i), 148, 44));
 
     curvePanel_->setBounds (R (204, 72, 942, 346));
     curve_->setBounds (R (220, 100, 910, 310));
@@ -851,9 +863,9 @@ void NovaEqualizerEditor::layout()
     const float by = 724.0f + 12.0f;
     abPill()->setBounds (R (14, by, 36, 32));
     float x = 58.0f;
-    for (auto* p : { phasePill_, extPill_, outPill_, scalePill_ })
+    for (auto* p : { phasePill_, extPill_, scalePill_ })
     {
-        const float w = p == phasePill_ ? 92.0f : p == extPill_ ? 100.0f : p == outPill_ ? 150.0f : 130.0f;
+        const float w = p == phasePill_ ? 92.0f : p == extPill_ ? 100.0f : 150.0f;
         p->setBounds (R (x, by, w, 32));
         x += w + 26.0f;   // place du bouton « ? »
     }
@@ -922,6 +934,4 @@ void NovaEqualizerEditor::tick()
     }
     else if (metaText_ != tx ("nv.no_band")) { metaText_ = tx ("nv.no_band"); curvePanel_->setMeta (metaText_); }
 
-    outPill_->setText (tx ("nv.out_gain") + "  " + (value (eq::outputGain) > 0.0 ? "+" : "") + juce::String (value (eq::outputGain), 1) + " dB");
-    scalePill_->setText (tx ("nv.gain_scale") + "  " + juce::String (juce::roundToInt (value (eq::gainScale))) + " %");
 }

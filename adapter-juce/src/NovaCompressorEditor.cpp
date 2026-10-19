@@ -104,17 +104,101 @@ public:
         for (int i = 0; i < cm::kBands; ++i)
         {
             if (host_.parameters().get (cm::bandParam (i, cm::kStatus)) < 1.5) continue;
-            const double f = host_.parameters().get (cm::bandParam (i, cm::kFreq));
-            const float cx = xOf (f), cy = yOf (juce::jlimit (-24.0, 24.0, CompressorModule::sideResponseDb (host_.parameters(), f, rate_())));
-            const float r = skin_.px (5.0f);
+            const auto pt = pointOf (i);
+            const float r = skin_.px (i == drag_ ? 6.5f : 5.0f);
             g.setColour (skin_.colour (colourFor (i)));
-            g.fillEllipse (cx - r, cy - r, r * 2, r * 2);
+            g.fillEllipse (pt.x - r, pt.y - r, r * 2, r * 2);
             g.setColour (skin_.colour (Token::StageBg));
-            g.drawEllipse (cx - r, cy - r, r * 2, r * 2, skin_.px (1.2f));
+            g.drawEllipse (pt.x - r, pt.y - r, r * 2, r * 2, skin_.px (1.2f));
+        }
+    }
+
+    // ---- réglage à la souris : glisser une poignée (fréquence, et gain pour les types qui en ont), molette = Q (ou pente d'un passe-haut / passe-bas)
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        setMouseCursor (hit (e.position, 14.0f) >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const int b = hit (e.position, 14.0f);
+        if (b < 0 || e.mods.isPopupMenu()) return;
+        drag_ = b;
+        host_.uiBeginEdit (cm::bandParam (b, cm::kFreq));
+        if (hasGain (typeOf (b))) host_.uiBeginEdit (cm::bandParam (b, cm::kGain));
+        startPos_ = e.position;
+        startFreq_ = host_.parameters().get (cm::bandParam (b, cm::kFreq));
+        startGain_ = host_.parameters().get (cm::bandParam (b, cm::kGain));
+        repaint();
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (drag_ < 0) return;
+        const int b = drag_;
+        const float k = e.mods.isShiftDown() ? 0.1f : 1.0f;   // Maj : déplacement fin
+        const auto plot = plotArea();
+        const double octaves = std::log2 (1000.0) * static_cast<double> ((e.position.x - startPos_.x) * k / plot.getWidth());
+        if (const auto* spec = host_.parameters().find (cm::bandParam (b, cm::kFreq)))
+            host_.uiSetNormalised (cm::bandParam (b, cm::kFreq), spec->toNormalized (std::clamp (startFreq_ * std::pow (2.0, octaves), 20.0, 20000.0)));
+        if (hasGain (typeOf (b)))
+            if (const auto* spec = host_.parameters().find (cm::bandParam (b, cm::kGain)))
+            {
+                const double dDb = -static_cast<double> ((e.position.y - startPos_.y) * k / (plot.getHeight() * 0.5f)) * 24.0;
+                host_.uiSetNormalised (cm::bandParam (b, cm::kGain), spec->toNormalized (std::clamp (startGain_ + dDb, -30.0, 30.0)));
+            }
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (drag_ < 0) return;
+        const int b = drag_;
+        if (hasGain (typeOf (b))) host_.uiEndEdit (cm::bandParam (b, cm::kGain));
+        host_.uiEndEdit (cm::bandParam (b, cm::kFreq));
+        drag_ = -1;
+        repaint();
+    }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        const int b = hit (e.position, 22.0f);
+        if (b < 0 || w.deltaY == 0.0f) return;
+        const int dir = w.deltaY > 0.0f ? 1 : -1, t = typeOf (b);
+        if (t == cm::kLowPass || t == cm::kHighPass)
+        {
+            const auto id = cm::bandParam (b, cm::kOrder);
+            nova::setParam (host_, id, std::clamp (static_cast<int> (std::lround (host_.parameters().get (id))) + dir, 0, 5));
+        }
+        else
+        {
+            const auto id = cm::bandParam (b, cm::kQ);
+            nova::setParam (host_, id, std::clamp (host_.parameters().get (id) * std::pow (1.12, dir), 0.025, 25.0));
         }
     }
 
 private:
+    static bool hasGain (int t) { return t == cm::kPeak || t == cm::kLowShelf || t == cm::kHighShelf || t == cm::kTiltShelf; }
+    int typeOf (int b) const { return static_cast<int> (std::lround (host_.parameters().get (cm::bandParam (b, cm::kType)))); }
+    // position d'une poignée : fréquence du filtre ; gain réglé pour les types qui en ont, sinon la ligne 0 dB
+    juce::Point<float> pointOf (int b) const
+    {
+        const double f = std::clamp (host_.parameters().get (cm::bandParam (b, cm::kFreq)), 20.0, 20000.0);
+        const double g = hasGain (typeOf (b)) ? host_.parameters().get (cm::bandParam (b, cm::kGain)) : 0.0;
+        return { xOf (f), yOf (std::clamp (g, -24.0, 24.0)) };
+    }
+    int hit (juce::Point<float> p, float radius) const
+    {
+        int best = -1;
+        float bestD = skin_.px (radius);
+        for (int i = 0; i < cm::kBands; ++i)
+        {
+            if (host_.parameters().get (cm::bandParam (i, cm::kStatus)) < 1.5) continue;
+            const float d = pointOf (i).getDistanceFrom (p);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+    int drag_ = -1;
+    juce::Point<float> startPos_;
+    double startFreq_ = 1000.0, startGain_ = 0.0;
+
     static Token colourFor (int band) { return band == 1 ? Token::Band1 : band == 2 ? Token::Band2 : band == 3 ? Token::Band3 : Token::Accent; }
     juce::Rectangle<float> plotArea() const
     {
@@ -218,6 +302,13 @@ void NovaCompressorEditor::buildCompressorPage()
     grMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.gr"), nova::VMeter::Kind::Reduction, false);
     outMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.out"), nova::VMeter::Kind::Level, true);
     for (auto* m : { inMeter_, grMeter_, outMeter_ }) m->setModeVisible (false);
+    // gains d'entrée et de sortie (réglages communs des modules) : pastilles à glisser sous les vu-mètres
+    inTrimPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    inTrimPill_->bindValue (host(), stock::inputTrim, {});
+    inTrimPill_->onClick = [this] { openModal (stock::inputTrim, uistate::Terminal::Pointer); };
+    outTrimPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    outTrimPill_->bindValue (host(), stock::outputTrim, {});
+    outTrimPill_->onClick = [this] { openModal (stock::outputTrim, uistate::Terminal::Pointer); };
     grMeter_->setDecayDbPerSecond (16.0f);   // retombée de la réduction : 16 dB/s, comme ZL
     curvePanel_->setMetaRightInset (36.0f);
 
@@ -363,6 +454,7 @@ void NovaCompressorEditor::buildBottomBar()
     osPill_ = add<nova::Pill> (-1, skin());
     osPill_->bindChoice (host(), cm::oversample, tx ("nv.oversampling"), { tx ("nv.os_off"), tx ("nv.os_2x"), tx ("nv.os_4x") });
     lookPill_ = add<nova::Pill> (-1, skin());
+    lookPill_->bindValue (host(), cm::lookahead, tx ("nv.lookahead"));   // glisser pour régler ; double-clic : saisie
     lookPill_->onClick = [this] { openModal (cm::lookahead, uistate::Terminal::Pointer); };
     addInfo (-1, stereoPill_, "hlp.stereo");
     addInfo (-1, stylePill_, "hlp.style");
@@ -378,13 +470,18 @@ void NovaCompressorEditor::layout()
     metersPanel_->setBounds (R (14, 72, 176, 410));
     {
         const auto in = metersPanel_->getBounds().reduced (skin().ipx (8.0f), skin().ipx (12.0f));
-        const int w = in.getWidth() / 3;
-        inMeter_->setBounds (in.withWidth (w));
-        grMeter_->setBounds (in.withX (in.getX() + w).withWidth (w));
-        outMeter_->setBounds (in.withX (in.getX() + 2 * w).withWidth (w));
+        const int w = in.getWidth() / 3, trimH = skin().ipx (40.0f);
+        const auto meters = in.withTrimmedBottom (trimH);
+        inMeter_->setBounds (meters.withWidth (w));
+        grMeter_->setBounds (meters.withX (meters.getX() + w).withWidth (w));
+        outMeter_->setBounds (meters.withX (meters.getX() + 2 * w).withWidth (w));
+        const int py = in.getBottom() - skin().ipx (30.0f), ph = skin().ipx (24.0f);
+        inTrimPill_->setBounds (in.getX() + skin().ipx (1.0f), py, w - skin().ipx (2.0f), ph);
+        outTrimPill_->setBounds (in.getX() + 2 * w + skin().ipx (1.0f), py, w - skin().ipx (2.0f), ph);
     }
     navPanel_->setBounds (R (14, 496, 176, 214));
-    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 496 + 21 + 50.0f * static_cast<float> (i), 148, 44));
+    // entrées du menu centrées dans leur zone (3 x 44 px + 2 intervalles de 6 px)
+    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 496 + (214.0f - (numPages() * 44.0f + (numPages() - 1) * 6.0f)) / 2.0f + 50.0f * static_cast<float> (i), 148, 44));
     curvePanel_->setBounds (R (204, 72, 942, 410));
     history_->setBounds (R (220, 100, 910, 366));
     analyzerPill_->setBounds (R (1146 - 14 - 28, 76, 28, 24));
@@ -490,8 +587,6 @@ void NovaCompressorEditor::tick()
 
     // anticipation et latence
     const double la = value (cm::lookahead);
-    const auto look = tx ("nv.lookahead") + "  " + (la > 0.0 ? "+" : "") + juce::String (la, 1) + " ms";
-    lookPill_->setText (look);
     const double rate = options().sampleRate ? options().sampleRate() : 48000.0;
     const int os = choiceValue (cm::oversample);
     const int latency = (la > 0.0 ? static_cast<int> (std::lround (la * 0.001 * rate)) : 0) + Oversampler::latencyFor (os >= 2 ? 4 : os == 1 ? 2 : 1);

@@ -45,6 +45,7 @@ private:
     std::vector<nova::Pill*> advPills_;
     nova::Pill *sourcePill_ = nullptr, *listenPill_ = nullptr, *eqPill_ = nullptr, *rmsPill_ = nullptr;
     nova::SubSlider *keyGain_ = nullptr, *rmsLength_ = nullptr;
+    nova::Pill *inTrimPill_ = nullptr, *outTrimPill_ = nullptr;
     nova::Pill *stereoPill_ = nullptr, *stylePill_ = nullptr, *dirPill_ = nullptr, *deltaPill_ = nullptr, *osPill_ = nullptr, *lookPill_ = nullptr;
     juce::String metaText_, latencyText_;
 };

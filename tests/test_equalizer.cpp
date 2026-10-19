@@ -24,6 +24,7 @@ struct EqRig
     {
         REQUIRE (runner.ok());
         runner.prepare (kRate, 256);
+        for (int b = 0; b < 4; ++b) runner.params().set (e::bandParam (b, e::kStatus), e::kOff);   // les tests partent d'un égaliseur sans bande (les défauts en ont quatre)
     }
     EqualizerModule& eq() { return static_cast<EqualizerModule&> (runner.module()); }
     void set (ParamId id, double v) { runner.params().set (id, v); }
@@ -370,4 +371,25 @@ TEST_CASE ("equalizer: analyzer ring carries input and output only when active, 
     CHECK (ring.sample (e::kSpIn, 0, 10) == Approx (0.5f));
     CHECK (ring.sample (e::kSpIn, 1, 10) == Approx (0.25f));
     CHECK (ring.sample (e::kSpOut, 0, 10) == Approx (c[10]));     // sortie : le signal traité
+}
+
+TEST_CASE ("equalizer: defaults are a 20 Hz high pass and three flat bells, the rest off", "[equalizer]")
+{
+    ModuleRunner runner (std::make_unique<EqualizerModule>());
+    REQUIRE (runner.ok());
+    runner.prepare (kRate, 256);
+    const auto& p = runner.params();
+    CHECK (p.get (e::bandParam (0, e::kStatus)) == e::kOn);
+    CHECK (p.get (e::bandParam (0, e::kType)) == e::kHighPass);
+    CHECK (p.get (e::bandParam (0, e::kFreq)) == Approx (20.0));
+    for (int b = 1; b < 4; ++b)
+    {
+        CHECK (p.get (e::bandParam (b, e::kStatus)) == e::kOn);
+        CHECK (p.get (e::bandParam (b, e::kType)) == e::kPeak);
+        CHECK (p.get (e::bandParam (b, e::kGain)) == Approx (0.0));
+    }
+    for (int b = 4; b < e::kBands; ++b) CHECK (p.get (e::bandParam (b, e::kStatus)) == e::kOff);
+    auto* m = static_cast<EqualizerModule*> (&runner.module());
+    CHECK (m->totalResponseDb (p, 1000.0, false) == Approx (0.0).margin (0.01));     // quasi transparent dans la bande audio
+    CHECK (m->totalResponseDb (p, 100.0, false) == Approx (0.0).margin (0.05));
 }

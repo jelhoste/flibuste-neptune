@@ -207,9 +207,24 @@ void Pill::bindChoice (ParamHost& h, neptune::core::ParamId id, juce::String lab
     refresh();
 }
 
+void Pill::bindValue (ParamHost& h, neptune::core::ParamId id, juce::String label)
+{
+    host_ = &h; id_ = id; label_ = std::move (label); choices_.clear();
+    valueMode_ = true;
+    seen_ = 0xFFFFFFFFu;
+    setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+    refresh();
+}
+
 void Pill::refresh()
 {
     if (host_ == nullptr || ! changed (*host_, id_, seen_)) return;
+    if (valueMode_)
+    {
+        const auto v = juce::String::fromUTF8 (host_->parameters().toText (id_).c_str());
+        setText (label_.isEmpty() ? v : label_ + "  " + v);
+        return;
+    }
     const int v = static_cast<int> (std::lround (host_->parameters().get (id_)));
     if (choices_.empty())
     {
@@ -224,8 +239,40 @@ void Pill::refresh()
     }
 }
 
+void Pill::mouseDown (const juce::MouseEvent& e)
+{
+    if (! valueMode_ || e.mods.isPopupMenu() || host_ == nullptr) return;
+    dragging_ = false;
+    startNorm_ = host_->parameters().getNormalized (id_);
+}
+
+void Pill::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! valueMode_ || host_ == nullptr || e.mods.isPopupMenu()) return;
+    if (! dragging_)
+    {
+        if (std::abs (e.getDistanceFromDragStartY()) < 3) return;
+        dragging_ = true;
+        host_->uiBeginEdit (id_);
+    }
+    const double k = e.mods.isShiftDown() ? 0.1 : 1.0;
+    host_->uiSetNormalised (id_, std::clamp (startNorm_ - static_cast<double> (e.getDistanceFromDragStartY()) * k / 160.0, 0.0, 1.0));
+    repaint();
+}
+
+void Pill::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (valueMode_ && ! e.mods.isPopupMenu() && onClick) onClick();
+}
+
 void Pill::mouseUp (const juce::MouseEvent& e)
 {
+    if (valueMode_)
+    {
+        if (dragging_ && host_ != nullptr) host_->uiEndEdit (id_);
+        dragging_ = false;
+        return;
+    }
     if (static_ || ! isEnabled() || e.mods.isPopupMenu() || ! getLocalBounds().contains (e.getPosition())) return;
     if (host_ != nullptr)
     {

@@ -34,6 +34,8 @@ FactoryPreset make (const char* name, std::initializer_list<B> bands)
         p.values.push_back ({ bandParam (i, kQ), b.q });
         ++i;
     }
+    // les quatre bandes en service par défaut (passe-haut et trois cloches) qui ne servent pas à ce preset sont éteintes
+    for (; i < 4; ++i) p.values.push_back ({ bandParam (i, kStatus), kOff });
     return p;
 }
 } // namespace
@@ -41,7 +43,7 @@ FactoryPreset make (const char* name, std::initializer_list<B> bands)
 const std::vector<FactoryPreset>& factoryPresets()
 {
     static const std::vector<FactoryPreset> list = {
-        make ("Default", {}),
+        FactoryPreset { "Default", {} },
         make ("Vocal Clarity", { { kHighPass, 2, 90, 0, 0.707 }, { kPeak, 0, 300, -3, 1.2 }, { kPeak, 0, 3000, 2.5, 1.0 }, { kHighShelf, 0, 10000, 2, 0.7 } }),
         make ("Warm Bus", { { kLowShelf, 0, 100, 1.5, 0.7 }, { kPeak, 0, 400, -1.5, 0.8 }, { kHighShelf, 0, 9000, 1.0, 0.7 } }),
         make ("Mud Cut", { { kHighPass, 1, 40, 0, 0.707 }, { kPeak, 0, 250, -4, 1.5 }, { kPeak, 0, 500, -2, 1.0 } }),
