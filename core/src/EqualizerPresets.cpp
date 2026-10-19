@@ -10,7 +10,7 @@ const std::vector<ParamId>& presetParams()
     {
         std::vector<ParamId> v = { outputGain, autoGain };
         for (int b = 0; b < kBands; ++b)
-            for (int k = 0; k < kBandStride; ++k) v.push_back (bandParam (b, k));
+            for (int k = 0; k <= kSideLink; ++k) v.push_back (bandParam (b, k));
         return v;
     }();
     return ids;

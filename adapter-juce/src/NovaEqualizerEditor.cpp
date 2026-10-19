@@ -68,7 +68,7 @@ public:
         std::uint32_t key = static_cast<std::uint32_t> (hooks_.selected() + 2);
         for (int b = 0; b < eq::kBands; ++b)
         {
-            for (int k = 0; k < eq::kBandStride; ++k) key = key * 31u + host_.parameters().version (eq::bandParam (b, k));
+            for (int k = 0; k <= eq::kSideLink; ++k) key = key * 31u + host_.parameters().version (eq::bandParam (b, k));
             if (module_ != nullptr && host_.parameters().get (eq::bandParam (b, eq::kDynOn)) >= 0.5)
                 key = key * 31u + static_cast<std::uint32_t> (std::lround (module_->meter (eq::kBandGain0 + b) * 8.0f) + 4096);
         }
@@ -492,7 +492,7 @@ int NovaEqualizerEditor::addBand (double freq, double gain)
     for (int b = 0; b < eq::kBands && slot < 0; ++b) if (! active (b)) slot = b;
     if (slot < 0) return -1;
     // l'emplacement repart de ses valeurs par défaut (une ancienne bande supprimée y a laissé ses réglages)
-    for (int k = 0; k < eq::kBandStride; ++k)
+    for (int k = 0; k <= eq::kSideLink; ++k)
     {
         const auto id = eq::bandParam (slot, k);
         if (const auto* spec = host().parameters().find (id))
