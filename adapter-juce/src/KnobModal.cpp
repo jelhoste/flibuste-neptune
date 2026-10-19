@@ -48,7 +48,9 @@ KnobModal::KnobModal (ParamHost& p, neptune::core::ParamId id, neptune::core::ui
     closeButton_.onClick = [this] { if (onClose_) onClose_(); };
     panel_.addAndMakeVisible (closeButton_);
 
-    const auto size = processor_.modalSize (terminal_);
+    auto size = processor_.modalSize (terminal_);
+    // Taille jamais mémorisée (plugin séparé : l'hôte ne fournit rien) : valeur par défaut, sinon le panneau serait invisible derrière le voile.
+    if (size.width < neptune::core::uistate::minModalSide || size.height < 140) size = { terminal_ == neptune::core::uistate::Terminal::Touch ? 560 : 460, terminal_ == neptune::core::uistate::Terminal::Touch ? 300 : 260 };
     constrainer_.setMinimumSize (neptune::core::uistate::minModalSide, 140);
     constrainer_.setMaximumSize (neptune::core::uistate::maxModalSide, neptune::core::uistate::maxModalSide);
     panel_.setSize (size.width, size.height);

@@ -576,6 +576,55 @@ void VMeter::paint (juce::Graphics& g)
     g.drawText (mode_, m, juce::Justification::centred);
 }
 
+// ------------------------------------------------------------------------------------------------ InfoButton
+namespace
+{
+class HelpBubble : public juce::Component
+{
+public:
+    HelpBubble (const Skin& s, const juce::String& title, const juce::String& body) : skin_ (s)
+    {
+        text_.setJustification (juce::Justification::topLeft);
+        text_.append (title + "\n", juce::Font (juce::FontOptions (14.0f, juce::Font::bold)), s.colour (Token::Accent));
+        text_.append (body, juce::Font (juce::FontOptions (13.0f)), s.colour (Token::Text));
+        layout_.createLayout (text_, 300.0f);
+        setSize (320, static_cast<int> (std::ceil (layout_.getHeight())) + 20);
+    }
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (skin_.colour (Token::BgCard));
+        layout_.draw (g, getLocalBounds().toFloat().reduced (10.0f));
+    }
+
+private:
+    const Skin& skin_;
+    juce::AttributedString text_;
+    juce::TextLayout layout_;
+};
+} // namespace
+
+InfoButton::InfoButton (const Skin& s, juce::String title, juce::String body) : skin_ (s), title_ (std::move (title)), body_ (std::move (body))
+{
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+}
+
+void InfoButton::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced (1.0f);
+    g.setColour (hover_ ? skin_.colour (Token::Accent) : skin_.colour (Token::TextDim2));
+    g.drawEllipse (b, skin_.px (1.2f));
+    g.setFont (skin_.font (10.0f, true));
+    g.drawText ("?", b, juce::Justification::centred);
+}
+
+void InfoButton::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || ! getLocalBounds().contains (e.getPosition())) return;
+    auto* top = getTopLevelComponent();
+    if (top == nullptr) return;
+    juce::CallOutBox::launchAsynchronously (std::make_unique<HelpBubble> (skin_, title_, body_), top->getLocalArea (this, getLocalBounds()), top);
+}
+
 // ------------------------------------------------------------------------------------------------ LookAndFeel
 LookAndFeel::LookAndFeel (const Skin& s) : skin_ (s)
 {
@@ -587,6 +636,7 @@ LookAndFeel::LookAndFeel (const Skin& s) : skin_ (s)
     setColour (juce::TooltipWindow::backgroundColourId, s.colour (Token::BgCard));
     setColour (juce::TooltipWindow::textColourId, s.colour (Token::Text));
     setColour (juce::TooltipWindow::outlineColourId, s.colour (Token::CtlBd));
+    setColour (juce::ResizableWindow::backgroundColourId, s.colour (Token::BgCard));
     setColour (juce::TextEditor::backgroundColourId, s.colour (Token::BgCard));
     setColour (juce::TextEditor::textColourId, s.colour (Token::Text));
     setColour (juce::TextEditor::outlineColourId, s.colour (Token::CtlBd));

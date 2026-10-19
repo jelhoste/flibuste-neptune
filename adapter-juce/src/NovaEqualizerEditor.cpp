@@ -626,6 +626,10 @@ void NovaEqualizerEditor::buildMain()
     deletePill_->setTintToken (Token::KnobHot);
     deletePill_->onClick = [this] { removeBand (selected_); };
 
+    addInfo (-1, typePill_, "hlp.bandtype");
+    addInfo (-1, dynPill_, "hlp.banddynamic");
+    addInfo (-1, stereoPill_, "hlp.bandstereo");
+
     for (int i = 0; i < 7; ++i)
     {
         auto* k = add<nova::KnobCard> (-1, skin(), host(), eq::bandParam (0, eq::kFreq), juce::String(), modalOpener(), false);
@@ -638,6 +642,7 @@ void NovaEqualizerEditor::buildDynamics()
 {
     detPanel_ = add<nova::Panel> (1, skin());
     detPanel_->setTitle (tx ("nv.det_title"));
+    dynBypassPill_ = add<nova::Pill> (1, skin());
     detTypePill_ = add<nova::Pill> (1, skin());
     detTypePill_->onClick = [this]
     {
@@ -651,20 +656,21 @@ void NovaEqualizerEditor::buildDynamics()
                             { tx ("nv.slope_6"), tx ("nv.slope_12"), tx ("nv.slope_24"), tx ("nv.slope_36"), tx ("nv.slope_48"), tx ("nv.slope_72"), tx ("nv.slope_96") });
     };
     detLinkPill_ = add<nova::Pill> (1, skin());
-    const char* const keys[6] = { "nv.knee", "nv.smooth", "nv.rms_len", "nv.rms_mix", "nv.det_freq", "nv.det_q" };
-    const int ks[6] = { eq::kKnee, eq::kSmooth, eq::kRmsLength, eq::kRmsMix, eq::kSideFreq, eq::kSideQ };
-    for (int i = 0; i < 6; ++i)
+    addInfo (1, detTypePill_, "hlp.detect");
+    addInfo (1, detLinkPill_, "hlp.detlink");
+    const char* const keys[10] = { "nv.thresh", "nv.range", "nv.attack", "nv.release", "nv.knee", "nv.smooth", "nv.rms_len", "nv.rms_mix", "nv.det_freq", "nv.det_q" };
+    const char* const helps[10] = { "hlp.dtthresh", "hlp.dtrange", nullptr, nullptr, "hlp.dtknee", "hlp.dtsmooth", "hlp.dtrms", nullptr, "hlp.detect", nullptr };
+    for (int i = 0; i < 10; ++i)
     {
-        auto* k = add<nova::KnobCard> (1, skin(), host(), eq::bandParam (0, ks[i]), tx (keys[i]), modalOpener(), false);
+        auto* k = add<nova::KnobCard> (1, skin(), host(), eq::bandParam (0, eq::kFreq), tx (keys[i]), modalOpener(), false);
         k->setAutoRange (true);
         detKnobs_.push_back (k);
+        if (helps[i] != nullptr) addInfo (1, k, helps[i], true);
     }
 }
 
 void NovaEqualizerEditor::buildBottomBar()
 {
-    autoPill_ = add<nova::Pill> (-1, skin());
-    autoPill_->bindToggle (host(), eq::autoGain, tx ("nv.auto_gain"));
     phasePill_ = add<nova::Pill> (-1, skin());
     phasePill_->bindToggle (host(), eq::phaseFlip, tx ("nv.phase"));
     extPill_ = add<nova::Pill> (-1, skin());
@@ -673,6 +679,10 @@ void NovaEqualizerEditor::buildBottomBar()
     outPill_->onClick = [this] { openModal (eq::outputGain, uistate::Terminal::Pointer); };
     scalePill_ = add<nova::Pill> (-1, skin());
     scalePill_->onClick = [this] { openModal (eq::gainScale, uistate::Terminal::Pointer); };
+    addInfo (-1, phasePill_, "hlp.eqphase");
+    addInfo (-1, extPill_, "hlp.eqext");
+    addInfo (-1, outPill_, "hlp.eqout");
+    addInfo (-1, scalePill_, "hlp.eqscale");
     minPhasePill_ = add<nova::Pill> (-1, skin());
     minPhasePill_->setText (tx ("nv.min_phase"));
     minPhasePill_->setStatic (true);
@@ -687,6 +697,7 @@ void NovaEqualizerEditor::bindSelected()
     {
         dynPill_->bindToggle (host(), eq::bandParam (selected_, eq::kDynOn), tx ("nv.dynamic"));
         detLinkPill_->bindToggle (host(), eq::bandParam (selected_, eq::kSideLink), tx ("nv.side_link"));
+        dynBypassPill_->bindToggle (host(), eq::bandParam (selected_, eq::kDynBypass), tx ("nv.dyn_bypass"));
     }
     assignKnobs();
     if (curve_ != nullptr) curve_->update();
@@ -719,8 +730,8 @@ void NovaEqualizerEditor::assignKnobs()
     if (ok)
         for (std::size_t i = 0; i < detKnobs_.size(); ++i)
         {
-            const int ks[6] = { eq::kKnee, eq::kSmooth, eq::kRmsLength, eq::kRmsMix, eq::kSideFreq, eq::kSideQ };
-            const char* const keys[6] = { "nv.knee", "nv.smooth", "nv.rms_len", "nv.rms_mix", "nv.det_freq", "nv.det_q" };
+            const int ks[10] = { eq::kThreshold, eq::kTarget, eq::kAttack, eq::kRelease, eq::kKnee, eq::kSmooth, eq::kRmsLength, eq::kRmsMix, eq::kSideFreq, eq::kSideQ };
+            const char* const keys[10] = { "nv.thresh", "nv.range", "nv.attack", "nv.release", "nv.knee", "nv.smooth", "nv.rms_len", "nv.rms_mix", "nv.det_freq", "nv.det_q" };
             detKnobs_[i]->setParam (eq::bandParam (selected_, ks[i]), tx (keys[i]));
         }
     for (auto* k : detKnobs_) k->setVisible (ok && currentPage() == 1);
@@ -740,20 +751,22 @@ void NovaEqualizerEditor::layout()
     curvePanel_->setBounds (R (204, 72, 942, 346));
     curve_->setBounds (R (220, 100, 910, 310));
     detPanel_->setBounds (R (204, 72, 942, 346));
-    detTypePill_->setBounds (R (220, 108, 150, 30));
-    detSlopePill_->setBounds (R (378, 108, 120, 30));
-    detLinkPill_->setBounds (R (506, 108, 90, 30));
+    dynBypassPill_->setBounds (R (220, 108, 150, 30));
+    detTypePill_->setBounds (R (392, 108, 150, 30));
+    detSlopePill_->setBounds (R (574, 108, 120, 30));
+    detLinkPill_->setBounds (R (702, 108, 90, 30));
     {
-        const float cw = (910.0f - 12.0f * 5.0f) / 6.0f;
-        for (std::size_t i = 0; i < detKnobs_.size(); ++i) detKnobs_[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + 12.0f), 160, cw, 150));
+        const float cw = (910.0f - 12.0f * 4.0f) / 5.0f;
+        for (std::size_t i = 0; i < detKnobs_.size(); ++i)
+            detKnobs_[i]->setBounds (R (220.0f + static_cast<float> (i % 5) * (cw + 12.0f), i < 5 ? 146.0f : 280.0f, cw, 130));
     }
     strip_->setBounds (R (204, 426, 942, 32));
     toolbarPanel_->setBounds (R (204, 466, 942, 44));
     label_->setBounds (R (220, 476, 130, 24));
-    typePill_->setBounds (R (352, 472, 140, 32));
-    onPill_->setBounds (R (500, 472, 56, 32));
-    dynPill_->setBounds (R (564, 472, 100, 32));
-    stereoPill_->setBounds (R (672, 472, 96, 32));
+    typePill_->setBounds (R (352, 472, 130, 32));
+    onPill_->setBounds (R (510, 472, 56, 32));
+    dynPill_->setBounds (R (574, 472, 100, 32));
+    stereoPill_->setBounds (R (702, 472, 96, 32));
     deletePill_->setBounds (R (1146 - 14 - 130, 472, 130, 32));
     const float kw = (942.0f - 12.0f * 6.0f) / 7.0f;
     for (std::size_t i = 0; i < knobs_.size(); ++i) knobs_[i]->setBounds (R (204.0f + static_cast<float> (i) * (kw + 12.0f), 524, kw, 150));
@@ -762,11 +775,11 @@ void NovaEqualizerEditor::layout()
     const float by = 724.0f + 12.0f;
     abPill()->setBounds (R (14, by, 36, 32));
     float x = 58.0f;
-    for (auto* p : { autoPill_, phasePill_, extPill_, outPill_, scalePill_ })
+    for (auto* p : { phasePill_, extPill_, outPill_, scalePill_ })
     {
-        const float w = p == autoPill_ ? 118.0f : p == phasePill_ ? 92.0f : p == extPill_ ? 100.0f : p == outPill_ ? 150.0f : 130.0f;
+        const float w = p == phasePill_ ? 92.0f : p == extPill_ ? 100.0f : p == outPill_ ? 150.0f : 130.0f;
         p->setBounds (R (x, by, w, 32));
-        x += w + 8.0f;
+        x += w + 26.0f;   // place du bouton « ? »
     }
     minPhasePill_->setBounds (R (1146 - 14 - 170, by, 170, 32));
     presetPill()->setBounds (R (470, 11, 220, 36));
@@ -815,6 +828,11 @@ void NovaEqualizerEditor::tick()
     const float dim = ok && hasGain (t) && value (eq::bandParam (selected_, eq::kDynOn)) >= 0.5 ? 1.0f : 0.4f;
     for (auto* c : std::initializer_list<juce::Component*> { detTypePill_, detSlopePill_, detLinkPill_ }) c->setAlpha (dim);
     for (auto* k : detKnobs_) k->setAlpha (dim);
+    dynBypassPill_->setAlpha (dim);
+    {
+        const auto title = tx ("nv.det_title") + (ok ? "   -   " + tx ("nv.band") + " " + juce::String (selected_ + 1) : juce::String());
+        if (title != detTitle_) { detTitle_ = title; detPanel_->setTitle (title); }
+    }
     detLinkPill_->refresh();
 
     if (ok)

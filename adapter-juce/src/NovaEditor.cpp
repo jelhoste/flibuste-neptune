@@ -51,6 +51,25 @@ void EditorBase::addChild (juce::Component* c, int page)
     if (auto* r = dynamic_cast<Refreshable*> (c)) refreshables_.push_back (r);
 }
 
+InfoButton* EditorBase::addInfo (int page, juce::Component* target, const char* key, bool inside)
+{
+    auto* b = add<InfoButton> (page, skin_, tx ((std::string (key) + ".t").c_str()), tx (key));
+    infos_.push_back ({ b, target, inside });
+    return b;
+}
+
+void EditorBase::placeInfos()
+{
+    const int d = skin_.ipx (16.0f);
+    for (auto& i : infos_)
+    {
+        const auto t = i.target->getBounds();
+        if (i.inside) i.button->setBounds (t.getRight() - d - skin_.ipx (6.0f), t.getY() + skin_.ipx (6.0f), d, d);
+        else i.button->setBounds (t.getRight() + skin_.ipx (4.0f), t.getCentreY() - d / 2, d, d);
+        i.button->toFront (false);
+    }
+}
+
 int EditorBase::addPage (juce::String label, juce::Path icon)
 {
     const int index = static_cast<int> (navs_.size());
@@ -77,6 +96,7 @@ void EditorBase::resized()
     skin_.setScale (s);
     frame_ = fitRect (getWidth(), getHeight(), designWidth, designHeight, s);
     layout();
+    placeInfos();
     if (modal_ != nullptr) modal_->setBounds (getLocalBounds());
     repaint();
 }

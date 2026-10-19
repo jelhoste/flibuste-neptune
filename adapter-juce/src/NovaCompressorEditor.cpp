@@ -383,7 +383,13 @@ void NovaCompressorEditor::buildCompressorPage()
         if (const auto* spec = host().parameters().find (s.id))
             c.knob->setRangeLabels (juce::String::fromUTF8 (host().parameters().toText (*spec, spec->min).c_str()),
                                     juce::String::fromUTF8 (host().parameters().toText (*spec, spec->max).c_str()));
-        if (s.sub != 0) c.sub = add<nova::SubSlider> (0, skin(), host(), s.sub, tx (s.subTitle), s.pink);
+        if (s.sub != 0)
+        {
+            c.sub = add<nova::SubSlider> (0, skin(), host(), s.sub, tx (s.subTitle), s.pink);
+            const char* key = s.sub == cm::kneeWidth ? "hlp.knee" : s.sub == cm::curve ? "hlp.curve" : s.sub == cm::pump ? "hlp.pump" : s.sub == cm::smooth ? "hlp.smooth" : "hlp.clip";
+            addInfo (0, c.sub, key, true);
+        }
+        else addInfo (0, c.card, "hlp.mix", true);
         columns_.push_back (c);
     }
 }
@@ -402,6 +408,12 @@ void NovaCompressorEditor::buildSidechainPage()
     rmsPill_->bindToggle (host(), cm::rmsOn, tx ("nv.rms_on"));
     keyGain_ = add<nova::SubSlider> (1, skin(), host(), cm::sideGain, tx ("nv.side_gain"));
     rmsLength_ = add<nova::SubSlider> (1, skin(), host(), cm::rmsLength, tx ("nv.rms_length"));
+    addInfo (1, sourcePill_, "hlp.source");
+    addInfo (1, listenPill_, "hlp.listen");
+    addInfo (1, eqPill_, "hlp.eqswitch");
+    addInfo (1, rmsPill_, "hlp.rmsswitch");
+    addInfo (1, keyGain_, "hlp.keygain", true);
+    addInfo (1, rmsLength_, "hlp.rmslength", true);
     sideEq_ = add<SideEqView> (1, skin(), host(), [this] { const double r = options().sampleRate ? options().sampleRate() : 48000.0; return r > 0.0 ? r : 48000.0; });
 
     // cinq zones : passe-haut (filtre 1), trois cloches (filtres 2 à 4), passe-bas (filtre 5) ; les trois autres filtres restent accessibles à l'hôte
@@ -455,12 +467,16 @@ void NovaCompressorEditor::buildAdvancedPage()
         auto* pill = add<nova::Pill> (2, skin());
         pill->bindToggle (host(), p.id, tx (p.key));
         advPills_.push_back (pill);
+        addInfo (2, pill, p.id == cm::stereoSwap ? "hlp.swap" : p.id == cm::rangeInf ? "hlp.rangeinf" : p.id == cm::rmsOn ? "hlp.rmsswitch" : "hlp.delta");
     }
     for (const auto& p : { P { cm::floorDb, "nv.floor" }, P { cm::range, "nv.range" }, P { cm::hold, "nv.hold" }, P { cm::stereoLink, "nv.link" }, P { cm::wet1, "nv.wet_a" },
                            P { cm::wet2, "nv.wet_b" }, P { cm::rmsLength, "nv.rms_length" }, P { cm::rmsSpeed, "nv.rms_speed" }, P { cm::rmsMix, "nv.rms_mix" } })
     {
         auto* kc = add<nova::KnobCard> (2, skin(), host(), p.id, tx (p.key), modalOpener(), false);
         advCards_.push_back (kc);
+        const char* hk = p.id == cm::floorDb ? "hlp.floor" : p.id == cm::range ? "hlp.range" : p.id == cm::hold ? "hlp.hold" : p.id == cm::stereoLink ? "hlp.link"
+                       : p.id == cm::wet1 || p.id == cm::wet2 ? "hlp.wet" : p.id == cm::rmsLength ? "hlp.rmslength" : p.id == cm::rmsSpeed ? "hlp.rmsspeed" : "hlp.rmsmix";
+        addInfo (2, kc, hk, true);
     }
 }
 
@@ -478,6 +494,12 @@ void NovaCompressorEditor::buildBottomBar()
     osPill_->bindChoice (host(), cm::oversample, tx ("nv.oversampling"), { tx ("nv.os_off"), tx ("nv.os_2x"), tx ("nv.os_4x") });
     lookPill_ = add<nova::Pill> (-1, skin());
     lookPill_->onClick = [this] { openModal (cm::lookahead, uistate::Terminal::Pointer); };
+    addInfo (-1, stereoPill_, "hlp.stereo");
+    addInfo (-1, stylePill_, "hlp.style");
+    addInfo (-1, dirPill_, "hlp.mode");
+    addInfo (-1, deltaPill_, "hlp.delta");
+    addInfo (-1, osPill_, "hlp.oversampling");
+    addInfo (-1, lookPill_, "hlp.lookahead");
 }
 
 void NovaCompressorEditor::layout()
@@ -506,12 +528,12 @@ void NovaCompressorEditor::layout()
 
     // ---- page SIDECHAIN
     scPanel_->setBounds (R (204, 72, 942, 410));
-    sourcePill_->setBounds (R (220, 108, 176, 30));
-    listenPill_->setBounds (R (404, 108, 96, 30));
-    eqPill_->setBounds (R (508, 108, 84, 30));
-    rmsPill_->setBounds (R (600, 108, 64, 30));
-    keyGain_->setBounds (R (700, 102, 200, 40));
-    rmsLength_->setBounds (R (924, 102, 206, 40));
+    sourcePill_->setBounds (R (220, 108, 150, 30));
+    listenPill_->setBounds (R (398, 108, 90, 30));
+    eqPill_->setBounds (R (516, 108, 84, 30));
+    rmsPill_->setBounds (R (628, 108, 60, 30));
+    keyGain_->setBounds (R (724, 102, 190, 40));
+    rmsLength_->setBounds (R (930, 102, 200, 40));
     sideEq_->setBounds (R (220, 152, 910, 314));
     const float unit = (942.0f - 12.0f * 4.0f) / 13.0f;
     float zx = 204.0f;
@@ -533,7 +555,7 @@ void NovaCompressorEditor::layout()
 
     // ---- page ADVANCED
     advPanel_->setBounds (R (204, 72, 942, 638));
-    for (std::size_t i = 0; i < advPills_.size(); ++i) advPills_[i]->setBounds (R (220 + 130.0f * static_cast<float> (i), 108, 120, 30));
+    for (std::size_t i = 0; i < advPills_.size(); ++i) advPills_[i]->setBounds (R (220 + 150.0f * static_cast<float> (i), 108, 120, 30));
     const float cw = (910.0f - 12.0f * 4.0f) / 5.0f;
     for (std::size_t i = 0; i < advCards_.size(); ++i)
     {
@@ -547,9 +569,9 @@ void NovaCompressorEditor::layout()
     float x = 58.0f;
     for (auto* p : { stereoPill_, stylePill_, dirPill_, deltaPill_, osPill_, lookPill_ })
     {
-        const float w = p == stylePill_ ? 134.0f : p == dirPill_ ? 146.0f : p == deltaPill_ ? 72.0f : p == osPill_ ? 166.0f : p == lookPill_ ? 160.0f : 124.0f;
+        const float w = p == stylePill_ ? 124.0f : p == dirPill_ ? 134.0f : p == deltaPill_ ? 64.0f : p == osPill_ ? 154.0f : p == lookPill_ ? 150.0f : 112.0f;
         p->setBounds (R (x, by, w, 32));
-        x += w + 8.0f;
+        x += w + 26.0f;   // place du bouton « ? »
     }
 
     // ---- en-tête

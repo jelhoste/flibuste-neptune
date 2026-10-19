@@ -253,6 +253,22 @@ private:
     float shown_[2] = { -120.0f, -120.0f }, peak_[2] = { -120.0f, -120.0f }, painted_[4] = { 1.0e9f, 1.0e9f, 1.0e9f, 1.0e9f };
 };
 
+// ------------------------------------------------------------------------------------------------ bouton d'information « ? » (bulle d'aide au clic)
+class InfoButton : public juce::Component
+{
+public:
+    InfoButton (const Skin&, juce::String title, juce::String body);
+    void paint (juce::Graphics&) override;
+    void mouseEnter (const juce::MouseEvent&) override { hover_ = true; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover_ = false; repaint(); }
+    void mouseUp (const juce::MouseEvent&) override;
+
+private:
+    const Skin& skin_;
+    juce::String title_, body_;
+    bool hover_ = false;
+};
+
 // ------------------------------------------------------------------------------------------------ LookAndFeel (menus, info-bulles, barres de défilement)
 class LookAndFeel : public juce::LookAndFeel_V4
 {
