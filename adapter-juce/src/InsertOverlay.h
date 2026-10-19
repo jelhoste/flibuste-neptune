@@ -5,7 +5,7 @@
 #include "PluginProcessor.h"
 #include "NovaCompressorEditor.h"
 #include "NovaEqualizerEditor.h"
-#include "ShaperEditor.h"
+#include "NovaShaperEditor.h"
 #include "UtilityEditor.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
@@ -39,7 +39,7 @@ private:
     std::function<void()> onClose_;
     NeptuneProcessor::InsertHandle handle_;
     std::unique_ptr<UtilityEditor> content_;
-    std::unique_ptr<ShaperEditor> shaperContent_;
+    std::unique_ptr<NovaShaperEditor> shaperContent_;
     std::unique_ptr<NovaEqualizerEditor> equalizerContent_;
     std::unique_ptr<NovaCompressorEditor> compressorContent_;
     juce::TextButton bypassButton_, closeButton_;

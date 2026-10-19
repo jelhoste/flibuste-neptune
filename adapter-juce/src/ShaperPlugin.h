@@ -6,7 +6,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <memory>
 #include "HostProbe.h"
 #include "ParamHost.h"
-#include "ShaperEditor.h"
+#include "NovaShaperEditor.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/StockModule.h"
@@ -14,7 +14,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Undo.h"
 
 // « La Flèche » : le shaper de transitoires de la suite (série NOVA), publié comme plugin CLAP indépendant. Même DSP et même interface
-// que l'insert de Neptune (ShaperModule / ShaperEditor), autre adaptateur : ici, c'est l'hôte qui porte le plugin. Entrée sidechain de l'hôte.
+// que l'insert de Neptune (ShaperModule / NovaShaperEditor), autre adaptateur : ici, c'est l'hôte qui porte le plugin. Entrée sidechain de l'hôte.
 class ShaperProcessor : public juce::AudioProcessor, private juce::Timer,
                              public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                              public ParamHost
@@ -56,6 +56,7 @@ public:
 
     neptune::core::ModuleRunner& runner() { return runner_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
 
 private:
     static BusesProperties makeBuses();
@@ -82,5 +83,7 @@ public:
 private:
     ShaperProcessor& processor_;
     neptune::core::i18n::Translator tr_;
-    std::unique_ptr<ShaperEditor> content_;
+    void buildContent();   // (re)crée l'interface : au démarrage et quand le thème, le contraste ou la langue changent
+    std::unique_ptr<NovaShaperEditor> content_;
+    juce::ComponentBoundsConstrainer constrainer_;
 };

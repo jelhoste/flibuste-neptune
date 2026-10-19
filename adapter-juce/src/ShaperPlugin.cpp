@@ -174,23 +174,48 @@ bool ShaperProcessor::uiRedo()
 
 juce::AudioProcessorEditor* ShaperProcessor::createEditor() { return new ShaperPluginEditor (*this); }
 
+void ShaperProcessor::applySettings (const settings::GlobalSettings& s)
+{
+    settings_ = s;
+    std::string error;
+    settings::saveFile (configDirectory() / "settings.json", s, &error);
+}
+
 // ---- éditeur
 ShaperPluginEditor::ShaperPluginEditor (ShaperProcessor& p)
     : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
 {
+    buildContent();
+    setWantsKeyboardFocus (true);
+    // proportions de la maquette conservées ; l'interface se redessine à la vraie taille (aucune transformation)
+    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    setConstrainer (&constrainer_);
+    setResizable (true, true);
+    setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
+}
+
+void ShaperPluginEditor::buildContent()
+{
+    auto& p = processor_;
+    tr_ = i18n::Translator (p.settings().language);
     const auto palette = makePalette (p.settings());
     const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
-    ShaperEditor::Options opt;
+    NovaShaperEditor::Options opt;
     opt.brand = true;
-    opt.bypass = true;
     opt.externalKey = true;
+    opt.moduleName = "shaper";
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
-    content_ = std::make_unique<ShaperEditor> (p, static_cast<const ShaperModule*> (&p.runner().module()), palette, tr_, def.knob, opt);
+    opt.getSettings = [&p] { return p.settings(); };
+    // appliqué hors de l'éditeur qui l'appelle : l'interface est détruite puis recréée avec la nouvelle palette
+    opt.applySettings = [&p, safe = juce::Component::SafePointer<ShaperPluginEditor> (this)] (const settings::GlobalSettings& s)
+    {
+        p.applySettings (s);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
+    };
+    content_.reset();
+    content_ = std::make_unique<NovaShaperEditor> (p, static_cast<const ShaperModule*> (&p.runner().module()), palette, def.knob, tr_, opt);
     addAndMakeVisible (*content_);
-    setWantsKeyboardFocus (true);
-    setResizable (true, true);
-    setResizeLimits (580, 390, ShaperEditor::designWidth, ShaperEditor::designHeight);
-    setSize (ShaperEditor::designWidth, ShaperEditor::designHeight);
+    content_->setBounds (getLocalBounds());
 }
 
 void ShaperPluginEditor::resized() { content_->setBounds (getLocalBounds()); }

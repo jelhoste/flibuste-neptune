@@ -311,20 +311,49 @@ TEST_CASE ("shaper: the runner keeps dry and bypass aligned with the module late
     for (std::size_t i = 6000; i < 20000; ++i) REQUIRE (out[i] == Approx (in[i - lat]).margin (1e-6));
 }
 
-TEST_CASE ("shaper: history and meters are filled", "[shaper]")
+TEST_CASE ("shaper: meters and the analysis ring are filled", "[shaper]")
 {
     ShaperRig r;
-    r.play (drumHits());
     auto& m = static_cast<ShaperModule&> (r.runner.module());
+    r.play (std::vector<float> (4096, 0.0f));
+    CHECK (m.analyzer().writePos() == 0);                    // rien n'est copié tant qu'aucun éditeur n'a activé l'anneau
+    m.analyzer().setActive (true);
+    r.play (drumHits());
     CHECK (m.meter (shaper::kInPeakL) >= 0.0f);
-    std::vector<shaper::Column> h (shaper::kHistoryColumns);
-    m.copyHistory (h.data());
-    float peak = 0.0f;
-    for (const auto& c : h) peak = std::max (peak, c.inPeak);
-    CHECK (peak > 0.3f);
+    const auto& ring = m.analyzer();
+    REQUIRE (ring.writePos() > 0);
+    float inPeak = 0.0f, outPeak = 0.0f, fastMax = 0.0f, slowMax = 0.0f, gainMax = 0.0f;
+    const auto end = ring.writePos(), start = end > ring.capacity() ? end - ring.capacity() : 0;
+    for (auto p = start; p < end; ++p)
+    {
+        inPeak = std::max (inPeak, std::fabs (ring.sample (shaper::kAnIn, 0, p)));
+        outPeak = std::max (outPeak, std::fabs (ring.sample (shaper::kAnOut, 0, p)));
+        fastMax = std::max (fastMax, ring.sample (shaper::kAnFast, 0, p));
+        slowMax = std::max (slowMax, ring.sample (shaper::kAnSlow, 0, p));
+        gainMax = std::max (gainMax, std::fabs (ring.sample (shaper::kAnGain, 0, p)));
+    }
+    CHECK (inPeak > 0.3f);
+    CHECK (outPeak > 0.0f);
+    CHECK (fastMax >= slowMax);                              // le suiveur rapide monte au moins aussi haut que le lent
+    CHECK (fastMax > 0.0f);
+    (void) gainMax;
     std::vector<float> k (1024);
     m.copyKey (k.data(), 1024);
     CHECK (m.detectionResponseDb (r.runner.params(), 1000.0) == Approx (0.0).margin (1.0));
+}
+
+TEST_CASE ("shaper: the gain stream follows the applied gain", "[shaper]")
+{
+    ShaperRig r;
+    r.set (shaper::attackGain1, 100.0);
+    auto& m = static_cast<ShaperModule&> (r.runner.module());
+    m.analyzer().setActive (true);
+    r.play (drumHits());
+    const auto& ring = m.analyzer();
+    float gainMax = 0.0f;
+    const auto end = ring.writePos(), start = end > ring.capacity() ? end - ring.capacity() : 0;
+    for (auto p = start; p < end; ++p) gainMax = std::max (gainMax, ring.sample (shaper::kAnGain, 0, p));
+    CHECK (gainMax > 1.0f);                                  // renfort d'attaque : gain positif, en dB
 }
 
 #include "neptune/core/ShaperPresets.h"
@@ -349,26 +378,16 @@ TEST_CASE ("shaper: factory presets apply and Default restores neutral settings"
         }
 }
 
-TEST_CASE ("shaper: the display window is a setting, 940 % (15 s) by default, and changing it restarts the history", "[shaper]")
+TEST_CASE ("shaper: the analyzer display settings are hidden, not automatable and default to 18 s / Sync", "[shaper]")
 {
     ShaperRig r;
-    const auto* spec = r.runner.params().find (shaper::displaySpan);
-    REQUIRE (spec != nullptr);
-    CHECK (r.runner.params().get (shaper::displaySpan) == Approx (940.0));   // 15 s
-    CHECK (spec->automatable == false);
-    CHECK (spec->min == Approx (50.0));
-    CHECK (spec->max == Approx (1600.0));
-    auto& m = static_cast<ShaperModule&> (r.runner.module());
-    r.play (drumHits());
-    std::vector<shaper::Column> h (shaper::kHistoryColumns);
-    m.copyHistory (h.data());
-    float peak = 0.0f;
-    for (const auto& c : h) peak = std::max (peak, c.inPeak);
-    CHECK (peak > 0.3f);
-    r.set (shaper::displaySpan, 100.0);
-    r.play (std::vector<float> (256, 0.0f));
-    m.copyHistory (h.data());
-    peak = 0.0f;
-    for (const auto& c : h) peak = std::max (peak, c.inPeak);
-    CHECK (peak == Approx (0.0f).margin (1e-6));   // historique effacé au changement de fenêtre
+    for (const auto id : { shaper::anTime, shaper::anMove })
+    {
+        const auto* spec = r.runner.params().find (id);
+        REQUIRE (spec != nullptr);
+        CHECK (spec->hidden);
+        CHECK (! spec->automatable);
+    }
+    CHECK (r.runner.params().get (shaper::anTime) == Approx (3.0));
+    CHECK (r.runner.params().get (shaper::anMove) == Approx (0.0));
 }

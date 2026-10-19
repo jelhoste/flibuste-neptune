@@ -33,9 +33,10 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     }
     else if (isShaper)
     {
-        ShaperEditor::Options opt;
+        NovaShaperEditor::Options opt;
+        opt.moduleName = "shaper";
         opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
-        shaperContent_ = std::make_unique<ShaperEditor> (*handle_.host, static_cast<const ShaperModule*> (&handle_.instance->runner.module()), palette_, tr_, knobStyle, opt);
+        shaperContent_ = std::make_unique<NovaShaperEditor> (*handle_.host, static_cast<const ShaperModule*> (&handle_.instance->runner.module()), palette_, knobStyle, tr_, opt);
         addAndMakeVisible (*shaperContent_);
     }
     else

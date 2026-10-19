@@ -10,6 +10,7 @@
 #include <atomic>
 #include <vector>
 
+#include "neptune/core/AnalyzerRing.h"
 #include "neptune/core/Biquad.h"
 #include "neptune/core/Oversampler.h"
 #include "neptune/core/StockModule.h"
@@ -51,7 +52,9 @@ constexpr ParamId scBand3Freq = 141, scBand3Gain = 142, scBand3Q = 143;
 
 constexpr ParamId meterRmsMs = 150;        // ms, 10..3000 (réglage d'affichage enregistré avec le preset)
 constexpr ParamId meterPeakDecay = 151;    // dB/s, 5..300
-constexpr ParamId displaySpan = 152;       // %, 50..1600 : durée affichée par le graphe WAVE, en pour-cent de 1,6 s (défaut 940 % = 15 s)
+// Réglages d'affichage de l'historique (cachés, non automatisables, enregistrés avec l'état ; hors presets et A/B) : durée affichée (6, 9, 12, 18 s) et
+// défilement (Sync, Slow, Roll), comme l'analyseur du compresseur.
+constexpr ParamId anTime = 152, anMove = 153;
 
 constexpr double maxLookaheadMs = 10.0;
 
@@ -63,15 +66,8 @@ enum Meter : int
     kNumMeters
 };
 
-// Une colonne de l'historique affiché (1,6 s sur kHistoryColumns colonnes).
-constexpr int kHistoryColumns = 1024;
-constexpr double kHistorySeconds = 1.6;
-struct Column
-{
-    float inPeak = 0.0f, outPeak = 0.0f;   // crêtes linéaires de la colonne (signal d'entrée / de sortie)
-    float fastDb = -120.0f, slowDb = -120.0f, gainDb = 0.0f;
-    float fastLin = 0.0f, slowLin = 0.0f;   // les mêmes enveloppes en amplitude (calculées une fois par colonne, pas à chaque image)
-};
+// Flux de l'anneau d'analyse (deux canaux chacun) : entrée, sortie, enveloppe rapide et enveloppe lente de la détection (amplitude linéaire), gain appliqué (dB).
+enum AnalyzerStream : int { kAnIn = 0, kAnOut, kAnFast, kAnSlow, kAnGain, kAnStreams };
 constexpr int kKeyRing = 4096;             // dernières valeurs de la clé (somme des canaux), pour l'analyseur de spectre
 } // namespace shaper
 
@@ -96,13 +92,8 @@ public:
     {
         return i >= 0 && i < shaper::kNumMeters ? meters_[static_cast<std::size_t> (i)].load (std::memory_order_relaxed) : 0.0f;
     }
-    // Historique : copie les kHistoryColumns dernières colonnes, de la plus ancienne à la plus récente (lecture sans verrou : une colonne en
-    // cours d'écriture peut être incohérente, sans conséquence pour l'affichage).
-    void copyHistory (shaper::Column* dst) const noexcept;
-    // Avancement (0..1) de la colonne en cours d'accumulation : l'interface le soustrait au défilement pour qu'il soit continu.
-    double columnsPerSecond() const noexcept { return sampleRate_ / static_cast<double> (std::max (1, colSamples_)); }   // vitesse du défilement
-    std::uint32_t historyHead() const noexcept { return historyHead_.load (std::memory_order_acquire); }   // nombre total de colonnes écrites
-    float historyPhase() const noexcept { return historyPhase_.load (std::memory_order_relaxed); }
+    // Anneau d'analyse pour le graphe WAVE ; l'interface l'active tant qu'un éditeur est ouvert (le remplissage est sinon sauté).
+    AnalyzerRing& analyzer() const noexcept { return analyzer_; }
     void copyKey (float* dst, int n) const noexcept;    // les n dernières valeurs de la clé (n <= kKeyRing)
     // Réponse (module) de l'égaliseur de détection à la fréquence f, avec les mêmes coefficients que le DSP.
     double detectionResponseDb (const ParameterSet&, double f) const noexcept;
@@ -125,8 +116,8 @@ private:
     double param (ParamId id) const noexcept { return values_[static_cast<std::size_t> (id - 100)]; }
     void readParams (const ParameterSet&) noexcept;
 
-    std::array<std::size_t, 53> idx_ {};
-    std::array<double, 53> values_ {};
+    std::array<std::size_t, 54> idx_ {};   // ids 100..153
+    std::array<double, 54> values_ {};
     double sampleRate_ = 48000.0;
     int maxBlock_ = 0, lookaheadSamples_ = 0, factor_ = 4;
     std::array<Channel, 2> ch_;
@@ -142,11 +133,8 @@ private:
     float peakHold_[4] = { 0, 0, 0, 0 };
     double rmsSum_[4] = { 0, 0, 0, 0 };
     int rmsCount_ = 0;
-    std::vector<shaper::Column> history_;
-    std::atomic<std::uint32_t> historyHead_ { 0 };
-    shaper::Column acc_;
-    int accCount_ = 0, colSamples_ = 1;
-    std::atomic<float> historyPhase_ { 0.0f };
+    mutable AnalyzerRing analyzer_ { shaper::kAnStreams, 2 };
+    std::array<std::vector<float>, 2 * shaper::kAnStreams> anBuf_;   // flux x canal, copiés dans l'anneau en fin de bloc
     std::vector<float> keyRing_;
     std::atomic<std::uint32_t> keyHead_ { 0 };
 };

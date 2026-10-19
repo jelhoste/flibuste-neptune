@@ -25,7 +25,6 @@ ParamSpec stepsOf (ParamId id, const char* name, int lo, int hi, int def)
 ShaperModule::ShaperModule()
 {
     for (auto& m : meters_) m.store (0.0f, std::memory_order_relaxed);
-    history_.assign (static_cast<std::size_t> (kHistoryColumns), Column {});
     keyRing_.assign (static_cast<std::size_t> (kKeyRing), 0.0f);
 }
 
@@ -84,7 +83,11 @@ bool ShaperModule::declareParams (ParameterSet& set, std::string* error) const
     }
     add (fixed (P::continuous (meterRmsMs, "Meter RMS Window", Unit::Milliseconds, 10.0, 3000.0, 300.0, Curve::Exponential)));
     add (fixed (P::continuous (meterPeakDecay, "Meter Peak Decay", Unit::None, 5.0, 300.0, 40.0)));
-    add (fixed (P::continuous (displaySpan, "Display Window", Unit::Percent, 50.0, 1600.0, 940.0, Curve::Exponential)));
+    {
+        auto hid = [] (P p) { p.hidden = true; p.automatable = false; p.modulatable = false; return p; };
+        add (hid (P::choice (anTime, "Analyzer Time", { "6 s", "9 s", "12 s", "18 s" }, 3)));
+        add (hid (P::choice (anMove, "Analyzer Move", { "Sync", "Slow", "Roll" }, 0)));
+    }
     return ok;
 }
 
@@ -112,6 +115,9 @@ void ShaperModule::prepare (double sampleRate, int maxBlockSize)
     maxBlock_ = std::max (1, maxBlockSize);
     const auto n = static_cast<std::size_t> (maxBlock_);
     for (auto* v : { &in0_, &in1_, &key0_, &key1_, &work0_, &work1_, &gain0_, &gain1_ }) v->assign (n, 0.0f);
+    for (auto& v : anBuf_) v.assign (n, 0.0f);
+    analyzer_.setSampleRate (sampleRate_);
+    analyzer_.setMaxBlock (maxBlock_);
     hiGain_.assign (4 * n, 0.0f);
     const auto lookMax = static_cast<std::size_t> (std::ceil (maxLookaheadMs * 0.001 * sampleRate_)) + 2;
     const auto dryMax = static_cast<std::size_t> (maxLatencySamples (sampleRate_)) + 2;
@@ -122,7 +128,6 @@ void ShaperModule::prepare (double sampleRate, int maxBlockSize)
         c.dryDelay.assign (dryMax, 0.0f);
         c.gainRing.assign (static_cast<std::size_t> (Oversampler::upDelayHigh (4)) + 2, 1.0f);
     }
-    colSamples_ = std::max (1, static_cast<int> (std::lround (kHistorySeconds * 9.4 * sampleRate_ / kHistoryColumns)));
     reset();
 }
 
@@ -144,8 +149,6 @@ void ShaperModule::reset() noexcept
         c.atkG = c.susG = 0.0f;
     }
     designed_ = false;
-    acc_ = Column {};
-    accCount_ = 0;
     for (auto& m : meters_) m.store (0.0f, std::memory_order_relaxed);
 }
 
@@ -190,12 +193,6 @@ double ShaperModule::detectionResponseDb (const ParameterSet& params, double f) 
     return 20.0 * std::log10 (std::max (m, 1.0e-9));
 }
 
-void ShaperModule::copyHistory (Column* dst) const noexcept
-{
-    const auto head = historyHead_.load (std::memory_order_acquire);
-    for (int i = 0; i < kHistoryColumns; ++i) dst[i] = history_[(head + static_cast<std::uint32_t> (i)) % static_cast<std::uint32_t> (kHistoryColumns)];
-}
-
 void ShaperModule::copyKey (float* dst, int n) const noexcept
 {
     n = std::min (n, kKeyRing);
@@ -208,17 +205,6 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
     if (n <= 0 || n > maxBlock_) return;
     readParams (params);
     designKeyFilters (params);
-    {
-        // durée affichée : une colonne dure span x 1,6 s / 1024 ; un changement efface l'historique (les colonnes n'ont plus la même durée)
-        const int cs = std::max (1, static_cast<int> (std::lround (kHistorySeconds * std::clamp (param (displaySpan), 50.0, 1600.0) / 100.0 * sampleRate_ / kHistoryColumns)));
-        if (cs != colSamples_)
-        {
-            colSamples_ = cs;
-            std::fill (history_.begin(), history_.end(), Column {});
-            acc_ = Column {};
-            accCount_ = 0;
-        }
-    }
     const double fs = sampleRate_;
     const auto un = static_cast<std::size_t> (n);
 
@@ -257,7 +243,13 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
     const double atkG[2] = { param (attackGain1) / 100.0, mode == 0 ? param (attackGain1) / 100.0 : param (attackGain2) / 100.0 };
     const double susG[2] = { param (sustainGain1) / 100.0, mode == 0 ? param (sustainGain1) / 100.0 : param (sustainGain2) / 100.0 };
 
+    const bool analyse = analyzer_.active();
     // ---- entrée : mesures, passage dans le domaine des canaux (L/R ou M/S)
+    if (analyse)
+    {
+        std::copy (left, left + n, anBuf_[2 * kAnIn].begin());
+        std::copy (right, right + n, anBuf_[2 * kAnIn + 1].begin());
+    }
     for (int i = 0; i < n; ++i)
     {
         const float l = left[i], r = right[i];
@@ -273,7 +265,6 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
     float* const key[2] = { key0_.data(), key1_.data() };
     float* const gainLin[2] = { gain0_.data(), gain1_.data() };
     float* const in[2] = { in0_.data(), in1_.data() };
-    double lastFastDb = -120.0, lastSlowDb = -120.0;
     for (int i = 0; i < n; ++i)
     {
         sLevel_ += ctlC * (tgtLevel - sLevel_);
@@ -336,16 +327,17 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
             if (fastDb < floorDb) target = 0.0;
             ch.gainDb += smoothC * (target - ch.gainDb);
             gainLin[c][i] = static_cast<float> (dbToLin (ch.gainDb));
-            if (c == 0) { lastFastDb = fastDb; lastSlowDb = slowDb; }
+            if (analyse)
+            {
+                anBuf_[static_cast<std::size_t> (2 * kAnFast + c)][static_cast<std::size_t> (i)] = static_cast<float> (rms ? std::sqrt (ch.fastEnv) : ch.fastEnv);
+                anBuf_[static_cast<std::size_t> (2 * kAnSlow + c)][static_cast<std::size_t> (i)] = static_cast<float> (rms ? std::sqrt (ch.slowEnv) : ch.slowEnv);
+                anBuf_[static_cast<std::size_t> (2 * kAnGain + c)][static_cast<std::size_t> (i)] = static_cast<float> (ch.gainDb);
+            }
         }
-        // historique et clé affichés
+        // clé affichée (analyseur de spectre)
         const float kv = static_cast<float> (0.5 * (k[0] + k[1]));
         keyRing_[keyHead_.load (std::memory_order_relaxed) % static_cast<std::uint32_t> (kKeyRing)] = kv;
         keyHead_.store (keyHead_.load (std::memory_order_relaxed) + 1, std::memory_order_release);
-        acc_.inPeak = std::max (acc_.inPeak, std::max (std::fabs (static_cast<float> (in[0][i])), std::fabs (static_cast<float> (in[1][i]))));
-        acc_.fastDb = std::max (acc_.fastDb, static_cast<float> (lastFastDb));
-        acc_.slowDb = std::max (acc_.slowDb, static_cast<float> (lastSlowDb));
-        acc_.gainDb = std::fabs (static_cast<float> (ch_[0].gainDb)) > std::fabs (acc_.gainDb) ? static_cast<float> (ch_[0].gainDb) : acc_.gainDb;
     }
 
     // ---- signal : lookahead, suréchantillonnage, gain retardé, retour à la cadence de base
@@ -406,19 +398,15 @@ void ShaperModule::process (float* left, float* right, int n, const ParameterSet
         peakHold_[3] = std::max (peakHold_[3], std::fabs (b));
         rmsSum_[2] += static_cast<double> (a) * a;
         rmsSum_[3] += static_cast<double> (b) * b;
-        acc_.outPeak = std::max (acc_.outPeak, std::max (std::fabs (a), std::fabs (b)));
-        if (++accCount_ >= colSamples_)
-        {
-            auto& col = history_[historyHead_.load (std::memory_order_relaxed) % static_cast<std::uint32_t> (kHistoryColumns)];
-            acc_.fastLin = std::pow (10.0f, acc_.fastDb / 20.0f);
-            acc_.slowLin = std::pow (10.0f, acc_.slowDb / 20.0f);
-            col = acc_;
-            historyHead_.store (historyHead_.load (std::memory_order_relaxed) + 1, std::memory_order_release);
-            acc_ = Column {};
-            accCount_ = 0;
-        }
     }
-    historyPhase_.store (static_cast<float> (accCount_) / static_cast<float> (colSamples_), std::memory_order_relaxed);
+    if (analyse)
+    {
+        std::copy (left, left + n, anBuf_[2 * kAnOut].begin());
+        std::copy (right, right + n, anBuf_[2 * kAnOut + 1].begin());
+        const float* streams[2 * kAnStreams];
+        for (std::size_t k = 0; k < anBuf_.size(); ++k) streams[k] = anBuf_[k].data();
+        analyzer_.push (streams, n);
+    }
     rmsCount_ += n;
     const int rmsWindow = std::max (1, static_cast<int> (param (meterRmsMs) * 0.001 * fs));
     meters_[kInPeakL].store (peakHold_[0], std::memory_order_relaxed);

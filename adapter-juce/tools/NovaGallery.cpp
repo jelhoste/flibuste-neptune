@@ -4,9 +4,11 @@
 #include "../src/NovaKit.h"
 #include "../src/NovaCompressorEditor.h"
 #include "../src/NovaEqualizerEditor.h"
+#include "../src/NovaShaperEditor.h"
 #include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
+#include "neptune/core/ShaperModule.h"
 #include "neptune/core/StockModule.h"
 #include <cmath>
 #include <memory>
@@ -257,6 +259,73 @@ int main (int argc, char** argv)
         juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
         if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
         std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+    }
+
+    // ---- l'éditeur réel de La Flèche (shaper)
+    {
+        ModuleRunner shRunner (std::make_unique<ShaperModule>());
+        shRunner.prepare (48000.0, 512);
+        RunnerHost sh (shRunner);
+        auto& sp = shRunner.params();
+        sp.set (shaper::attackGain1, 60.0);
+        sp.set (shaper::sustainGain1, -35.0);
+        sp.set (shaper::scEnable, 1.0);
+        sp.set (shaper::scBand2Gain, 5.0);
+        struct ShCase { const char* name; th::ThemeId id; float scale; int page; bool response; };
+        const ShCase scs[] = { { "shaper-dark-p0", th::ThemeId::Dark, 1.0f, 0, false }, { "shaper-dark-resp", th::ThemeId::Dark, 1.0f, 0, true }, { "shaper-dark-p1", th::ThemeId::Dark, 1.0f, 1, false },
+                               { "shaper-dark-p2", th::ThemeId::Dark, 1.0f, 2, false }, { "shaper-dark-p3", th::ThemeId::Dark, 1.0f, 3, false },
+                               { "shaper-light-p0", th::ThemeId::Light, 1.0f, 0, false }, { "shaper-hammond-p1", th::ThemeId::Hammond, 1.0f, 1, false },
+                               { "shaper-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, false } };
+        for (const auto& c : scs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaShaperEditor::Options opt;
+            opt.brand = true;
+            opt.externalKey = true;
+            opt.moduleName = "shaper";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaShaperEditor ed (sh, static_cast<const ShaperModule*> (&shRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            ed.showResponseForTest (c.response);
+            ed.refreshNow();   // active l'anneau d'analyse
+            // signal simulé : percussions toutes les 0,6 s, jouées à 30 images par seconde pendant 10 s ; l'historique défile sur l'horloge simulée
+            {
+                std::vector<float> l (512), r (512);
+                long sampleIndex = 0;
+                double simTime = 100.0;
+                ed.stepWaveForTest (simTime);
+                for (int frame = 0; frame < 300; ++frame)
+                {
+                    int remaining = 1600;
+                    while (remaining > 0)
+                    {
+                        const int n = std::min (512, remaining);
+                        for (int i = 0; i < n; ++i, ++sampleIndex)
+                        {
+                            const double t = static_cast<double> (sampleIndex) / 48000.0;
+                            const double since = std::fmod (t, 0.6);
+                            const double amp = 0.08 + 0.75 * std::exp (-since * 7.0) * (std::fmod (t, 2.4) < 0.6 ? 0.55 : 1.0);
+                            const float v = static_cast<float> (amp * std::sin (6.2831853 * 110.0 * t));
+                            l[static_cast<std::size_t> (i)] = v;
+                            r[static_cast<std::size_t> (i)] = v * 0.9f;
+                        }
+                        shRunner.process (l.data(), r.data(), n, false);
+                        remaining -= n;
+                    }
+                    simTime += 1.0 / 30.0;
+                    ed.refreshNow();
+                    ed.stepWaveForTest (simTime);
+                }
+            }
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
     }
 
     // ---- l'éditeur réel de l'égaliseur

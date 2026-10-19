@@ -21,6 +21,7 @@ public:
     {
         bool brand = false;    // plugin séparé : marque et bouton de bypass dans l'en-tête (dans un insert, la fenêtre du plugin les fournit)
         std::function<double()> sampleRate;
+        bool externalKey = false;   // entrée sidechain de l'hôte disponible (plugin séparé) ; faux dans un insert de Neptune (shaper)
         bool midiSource = false;   // plugin séparé avec entrée MIDI : la source du sidechain peut être « MIDI » (compresseur)
         juce::String moduleName;   // « compressor », « equalizer » : dossier des presets utilisateur
         // plugin séparé seulement : réglages globaux de la suite (thème, contraste, langue) ; `applySettings` les enregistre et reconstruit l'éditeur
