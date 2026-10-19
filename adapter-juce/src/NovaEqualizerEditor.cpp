@@ -819,7 +819,7 @@ void NovaEqualizerEditor::assignKnobs()
 
 void NovaEqualizerEditor::layout()
 {
-    metersPanel_->setBounds (R (14, 72, 176, 346));
+    metersPanel_->setBounds (R (14, 72, 176, 382));
     {
         const auto in = metersPanel_->getBounds().reduced (skin().ipx (14.0f), skin().ipx (12.0f));
         const int w = in.getWidth() / 2, trimH = skin().ipx (60.0f);
@@ -830,15 +830,15 @@ void NovaEqualizerEditor::layout()
         inTrimPill_->setBounds (in.getX() + skin().ipx (6.0f), py, w - skin().ipx (12.0f), ph);
         outPill_->setBounds (in.getX() + w + skin().ipx (6.0f), py, w - skin().ipx (12.0f), ph);
     }
-    // zone du menu : son bas s'aligne sur celui des potards (674) ; les entrées sont centrées dedans
-    navPanel_->setBounds (R (14, 426, 176, 248));
-    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 426 + (248.0f - (numPages() * 44.0f + (numPages() - 1) * 6.0f)) / 2.0f + 50.0f * static_cast<float> (i), 148, 44));
+    // zone du menu : son haut et son bas s'alignent sur ceux de la rangée de bandes et des potards (462 et 710) ; les entrées sont centrées dedans
+    navPanel_->setBounds (R (14, 462, 176, 248));
+    for (int i = 0; i < numPages(); ++i) nav (i)->setBounds (R (14 + 14, 462 + (248.0f - (numPages() * 44.0f + (numPages() - 1) * 6.0f)) / 2.0f + 50.0f * static_cast<float> (i), 148, 44));
 
-    curvePanel_->setBounds (R (204, 72, 942, 346));
-    curve_->setBounds (R (220, 100, 910, 310));
+    curvePanel_->setBounds (R (204, 72, 942, 382));
+    curve_->setBounds (R (220, 100, 910, 346));
     spectrumGear_->setBounds (R (1146 - 14 - 28, 76, 28, 24));
     spectrumPill_->setBounds (R (1146 - 14 - 28 - 8 - 104, 76, 104, 24));
-    detPanel_->setBounds (R (204, 72, 942, 346));
+    detPanel_->setBounds (R (204, 72, 942, 382));
     dynBypassPill_->setBounds (R (220, 108, 150, 30));
     detTypePill_->setBounds (R (392, 108, 150, 30));
     detSlopePill_->setBounds (R (574, 108, 120, 30));
@@ -848,16 +848,16 @@ void NovaEqualizerEditor::layout()
         for (std::size_t i = 0; i < detKnobs_.size(); ++i)
             detKnobs_[i]->setBounds (R (220.0f + static_cast<float> (i % 5) * (cw + 12.0f), i < 5 ? 146.0f : 280.0f, cw, 130));
     }
-    strip_->setBounds (R (204, 426, 942, 32));
-    toolbarPanel_->setBounds (R (204, 466, 942, 44));
-    label_->setBounds (R (220, 476, 130, 24));
-    typePill_->setBounds (R (352, 472, 130, 32));
-    onPill_->setBounds (R (510, 472, 56, 32));
-    dynPill_->setBounds (R (574, 472, 100, 32));
-    stereoPill_->setBounds (R (702, 472, 96, 32));
-    deletePill_->setBounds (R (1146 - 14 - 130, 472, 130, 32));
+    strip_->setBounds (R (204, 462, 942, 32));
+    toolbarPanel_->setBounds (R (204, 502, 942, 44));
+    label_->setBounds (R (220, 512, 130, 24));
+    typePill_->setBounds (R (352, 508, 130, 32));
+    onPill_->setBounds (R (510, 508, 56, 32));
+    dynPill_->setBounds (R (574, 508, 100, 32));
+    stereoPill_->setBounds (R (702, 508, 96, 32));
+    deletePill_->setBounds (R (1146 - 14 - 130, 508, 130, 32));
     const float kw = (942.0f - 12.0f * 6.0f) / 7.0f;
-    for (std::size_t i = 0; i < knobs_.size(); ++i) knobs_[i]->setBounds (R (204.0f + static_cast<float> (i) * (kw + 12.0f), 524, kw, 150));
+    for (std::size_t i = 0; i < knobs_.size(); ++i) knobs_[i]->setBounds (R (204.0f + static_cast<float> (i) * (kw + 12.0f), 560, kw, 150));
 
     // barre du bas
     const float by = 724.0f + 12.0f;
