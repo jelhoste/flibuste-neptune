@@ -418,6 +418,7 @@ const Entry kEntries[] = {
     { "nv.set_theme", { "THEME", "THÈME" } },
     { "nv.set_contrast", { "CONTRAST", "CONTRASTE" } },
     { "nv.set_language", { "LANGUAGE", "LANGUE" } },
+    { "nv.set_note_header", { "Theme and contrast are in the header, left of the bypass button.", "Le thème et le contraste sont dans l'en-tête, à gauche du bouton de bypass." } },
     { "nv.set_presets", { "USER PRESETS", "PRESETS UTILISATEUR" } },
     { "nv.set_about", { "ABOUT", "À PROPOS" } },
     { "nv.set_note_insert", { "Theme, contrast and language are shared by the whole suite: change them in the stand-alone plugin or in Neptune.", "Le thème, le contraste et la langue sont communs à toute la suite : changez-les dans le plugin séparé ou dans Neptune." } },

@@ -176,7 +176,7 @@ bool EqualizerModule::declareParams (ParameterSet& set, std::string* error) cons
     add (P::toggle (externalSide, "External Side"));
     {
         auto hid = [] (P p) { p.hidden = true; p.automatable = false; p.modulatable = false; return p; };
-        add (hid (P::toggle (spOn, "Spectrum On", true)));
+        add (hid (P::toggle (spOn, "Spectrum On", false)));   // éteint par défaut (coût de calcul) ; l'interrupteur SPECTRUM l'allume
         add (hid (P::choice (spQuality, "Spectrum Quality", { "Normal", "High" }, 0)));
         add (hid (P::choice (spSpeed, "Spectrum Speed", { "Very Fast", "Fast", "Medium", "Slow", "Very Slow" }, 2)));
         add (hid (P::choice (spTilt, "Spectrum Tilt", { "0 dB/oct", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" }, 3)));

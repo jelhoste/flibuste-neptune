@@ -161,7 +161,7 @@ public:
         }
         if (! curves_.empty())
         {
-            g.setColour (skin_.colour (Token::Text, 0.95f));
+            g.setColour (skin_.colour (Token::Accent));   // courbe de résultat orangée
             g.strokePath (total_, juce::PathStrokeType (skin_.px (2.2f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
         // points

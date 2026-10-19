@@ -37,6 +37,32 @@ EditorBase::EditorBase (ParamHost& host, const theme::Palette& palette, theme::K
         bypass_->bindToggle (host_, stock::bypass, {});
         bypass_->setText ({});
     }
+    if (options_.brand && options_.getSettings && options_.applySettings)
+    {
+        hdrTheme_ = add<Pill> (-1, skin_, Pill::Look::Small);
+        hdrTheme_->setFontSize (10.0f);
+        hdrTheme_->onClick = [this]
+        {
+            auto st = options_.getSettings();
+            static const char* const ids[4] = { "dark", "light", "hc", "hammond" };
+            int cur = 0;
+            for (int i = 0; i < 4; ++i) if (st.theme == ids[i]) cur = i;
+            st.theme = ids[(cur + 1) % 4];
+            options_.applySettings (st);
+        };
+        hdrMinus_ = add<Pill> (-1, skin_, Pill::Look::Small);
+        hdrMinus_->setText (juce::String::fromUTF8 ("\xe2\x88\x92"));
+        hdrMinus_->setFontSize (16.0f);
+        hdrMinus_->onClick = [this] { auto st = options_.getSettings(); if (st.contrast > 0) { --st.contrast; options_.applySettings (st); } };
+        hdrContrast_ = add<Pill> (-1, skin_, Pill::Look::Small);
+        hdrContrast_->setStatic (true);
+        hdrContrast_->setFontSize (12.0f);
+        hdrPlus_ = add<Pill> (-1, skin_, Pill::Look::Small);
+        hdrPlus_->setText ("+");
+        hdrPlus_->setFontSize (16.0f);
+        hdrPlus_->onClick = [this] { auto st = options_.getSettings(); if (st.contrast < 4) { ++st.contrast; options_.applySettings (st); } };
+        refreshSettingsTexts();
+    }
     startTimerHz (30);
 }
 
@@ -100,6 +126,7 @@ void EditorBase::resized()
     frame_ = fitRect (getWidth(), getHeight(), designWidth, designHeight, s);
     layout();
     layoutSettings();
+    layoutHeaderControls();
     placeInfos();
     if (modal_ != nullptr) modal_->setBounds (getLocalBounds());
     repaint();
@@ -117,7 +144,7 @@ void EditorBase::paint (juce::Graphics& g)
 void EditorBase::timerCallback()
 {
     for (auto* r : refreshables_) r->refresh();
-    if (settingsPage_ >= 0 && page_ == settingsPage_) refreshSettingsTexts();
+    if (hdrTheme_ != nullptr || (settingsPage_ >= 0 && page_ == settingsPage_)) refreshSettingsTexts();
     tick();
 }
 
@@ -383,8 +410,6 @@ void EditorBase::buildSettingsPage (int page)
     setPanel_->setTitle (tx ("nv.set_title"));
     setGeneral_ = add<Text> (page, skin_, Token::TextDim2, 11.0f, true);
     setGeneral_->setText (tx ("nv.set_general"));
-    themePill_ = add<Pill> (page, skin_);
-    contrastPill_ = add<Pill> (page, skin_);
     langPill_ = add<Pill> (page, skin_);
     setNote_ = add<Text> (page, skin_, Token::TextDim2, 11.0f);
     setPresets_ = add<Text> (page, skin_, Token::TextDim2, 11.0f, true);
@@ -400,23 +425,8 @@ void EditorBase::buildSettingsPage (int page)
     setFolder_->setText (userPresetsDir().getFullPathName());
 
     const bool canApply = options_.brand && options_.getSettings && options_.applySettings;
-    for (auto* p : { themePill_, contrastPill_, langPill_ }) p->setEnabled (canApply);
-    setNote_->setText (canApply ? juce::String() : tx ("nv.set_note_insert"));
-    themePill_->onClick = [this]
-    {
-        auto st = options_.getSettings();
-        static const char* const ids[4] = { "dark", "light", "hc", "hammond" };
-        int cur = 0;
-        for (int i = 0; i < 4; ++i) if (st.theme == ids[i]) cur = i;
-        st.theme = ids[(cur + 1) % 4];
-        options_.applySettings (st);
-    };
-    contrastPill_->onClick = [this]
-    {
-        auto st = options_.getSettings();
-        st.contrast = (st.contrast + 1) % 5;
-        options_.applySettings (st);
-    };
+    langPill_->setEnabled (canApply);
+    setNote_->setText (canApply ? tx ("nv.set_note_header") : tx ("nv.set_note_insert"));
     langPill_->onClick = [this]
     {
         auto st = options_.getSettings();
@@ -428,13 +438,26 @@ void EditorBase::buildSettingsPage (int page)
 
 void EditorBase::refreshSettingsTexts()
 {
-    if (settingsPage_ < 0) return;
     const auto st = options_.getSettings ? options_.getSettings() : neptune::core::settings::GlobalSettings{};
-    const char* name = st.theme == "light" ? "LIGHT" : st.theme == "hc" ? "HIGH CONTRAST" : st.theme == "hammond" ? "WOOD" : "DARK";
-    themePill_->setText (tx ("nv.set_theme") + "  " + name);
-    contrastPill_->setText (tx ("nv.set_contrast") + "  " + juce::String (st.contrast));
-    contrastPill_->setDim (st.theme == "hc");
-    langPill_->setText (tx ("nv.set_language") + "  " + juce::String (st.language).toUpperCase());
+    if (hdrTheme_ != nullptr)
+    {
+        hdrTheme_->setText (st.theme == "light" ? "LIGHT" : st.theme == "hc" ? "HIGH C." : st.theme == "hammond" ? "WOOD" : "DARK");
+        hdrContrast_->setText (juce::String (st.contrast));
+        hdrContrast_->setDim (st.theme == "hc");   // sans effet sur le thème à contraste élevé
+        hdrMinus_->setDim (st.contrast <= 0);
+        hdrPlus_->setDim (st.contrast >= 4);
+    }
+    if (settingsPage_ >= 0) langPill_->setText (tx ("nv.set_language") + "  " + juce::String (st.language).toUpperCase());
+}
+
+void EditorBase::layoutHeaderControls()
+{
+    if (hdrTheme_ == nullptr) return;
+    // de droite à gauche : bypass (36 px à 14 px du bord), thème, puis le sélecteur de contraste « - valeur + »
+    hdrTheme_->setBounds (R (1160 - 14 - 36 - 10 - 64, 15, 64, 28));
+    hdrPlus_->setBounds (R (1160 - 14 - 36 - 10 - 64 - 10 - 28, 15, 28, 28));
+    hdrContrast_->setBounds (R (1160 - 14 - 36 - 10 - 64 - 10 - 28 - 36, 15, 36, 28));
+    hdrMinus_->setBounds (R (1160 - 14 - 36 - 10 - 64 - 10 - 28 - 36 - 28, 15, 28, 28));
 }
 
 void EditorBase::layoutSettings()
@@ -442,9 +465,7 @@ void EditorBase::layoutSettings()
     if (settingsPage_ < 0) return;
     setPanel_->setBounds (R (204, 72, 942, 638));
     setGeneral_->setBounds (R (220, 116, 400, 16));
-    themePill_->setBounds (R (220, 140, 250, 34));
-    contrastPill_->setBounds (R (482, 140, 200, 34));
-    langPill_->setBounds (R (694, 140, 200, 34));
+    langPill_->setBounds (R (220, 140, 250, 34));
     setNote_->setBounds (R (220, 184, 900, 34));
     setPresets_->setBounds (R (220, 244, 400, 16));
     setFolder_->setBounds (R (220, 268, 900, 34));

@@ -358,7 +358,7 @@ TEST_CASE ("equalizer: analyzer ring carries input and output only when active, 
         CHECK (s->hidden);
         CHECK_FALSE (s->automatable);
     }
-    CHECK (p.get (e::spOn) == 1.0);
+    CHECK (p.get (e::spOn) == 0.0);            // spectre éteint par défaut
     CHECK (p.get (e::spTilt) == 3.0);          // 4,5 dB/oct
     CHECK (p.get (e::spSmoothType) == 1.0);    // ERB
     std::vector<float> a (256, 0.5f), b (256, 0.25f);

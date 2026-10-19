@@ -218,6 +218,9 @@ int main (int argc, char** argv)
         const auto& def = th::definition (c.id);
         NovaCompressorEditor::Options opt;
         opt.brand = true;
+        opt.moduleName = "compressor";
+        opt.getSettings = [] { return settings::GlobalSettings{}; };
+        opt.applySettings = [] (const settings::GlobalSettings&) {};
         NovaCompressorEditor ed (rhost, static_cast<const CompressorModule*> (&runner.module()), th::withContrast (def, 0), def.knob, tr, opt);
         ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
         ed.setPageForTest (c.page);
@@ -275,6 +278,7 @@ int main (int argc, char** argv)
             ep.set (e::bandParam (b, e::kTarget), -6.0);
             ep.set (e::bandParam (b, e::kThreshold), -30.0);
         };
+        ep.set (e::spOn, 1.0);
         band (0, e::kHighPass, 80, 0, 0.707);
         band (1, e::kPeak, 250, -3.5, 1.2);
         band (2, e::kPeak, 3200, 4.0, 0.9, 1);
@@ -299,6 +303,9 @@ int main (int argc, char** argv)
             const auto& def = th::definition (c.id);
             NovaEqualizerEditor::Options opt;
             opt.brand = true;
+            opt.moduleName = "equalizer";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaEqualizerEditor ed (eh, static_cast<const EqualizerModule*> (&eqRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
             ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
             ed.selectBandForTest (c.sel);

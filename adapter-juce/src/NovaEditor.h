@@ -108,6 +108,7 @@ private:
     void timerCallback() override;
     void closeModal();
     void layoutSettings();
+    void layoutHeaderControls();
     void refreshSettingsTexts();
     juce::File userPresetsDir() const;
     void saveUserPreset (const juce::String& name);
@@ -134,7 +135,9 @@ private:
     std::unique_ptr<juce::Component> nameEntry_;
     int settingsPage_ = -1;
     Panel* setPanel_ = nullptr;
-    Pill *themePill_ = nullptr, *contrastPill_ = nullptr, *langPill_ = nullptr, *openPill_ = nullptr;
+    Pill *langPill_ = nullptr, *openPill_ = nullptr;
+    // en-tête, à gauche du bouton de bypass : thème et contraste (plugin séparé)
+    Pill *hdrTheme_ = nullptr, *hdrMinus_ = nullptr, *hdrContrast_ = nullptr, *hdrPlus_ = nullptr;
     Text *setGeneral_ = nullptr, *setNote_ = nullptr, *setPresets_ = nullptr, *setFolder_ = nullptr, *setAbout_ = nullptr, *setAboutText_ = nullptr;
     int page_ = 0, presetIndex_ = 0;
     bool slotB_ = false;
