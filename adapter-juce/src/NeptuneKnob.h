@@ -35,6 +35,8 @@ public:
     ~NeptuneKnob() override { stopTimer(); }
 
     neptune::core::ParamId paramId() const { return id_; }
+    void setDisplayRange (double lo, double hi, double exponent = 1.0);   // course du potard sur [lo, hi] seulement (voir le .cpp)
+    void clearDisplayRange() { hasRange_ = false; interaction_.setValue (shownNormalised()); repaint(); }
     void setScale (float s) { if (s != scale_) { scale_ = s; repaint(); } }   // épaisseurs de trait du dessin
     void setParamId (neptune::core::ParamId); // rebranche le potard sur un autre paramètre (piste sélectionnée)
 
@@ -49,6 +51,8 @@ public:
 
 private:
     void timerCallback() override;
+    double shownNormalised() const;                // position affichée (0..1), selon la plage d'affichage
+    double paramNormalised (double shown) const;   // position du paramètre pour une position affichée
     void showMacroMenu();
     static double nowMs() { return juce::Time::getMillisecondCounterHiRes(); }
     juce::Colour colour (neptune::core::theme::Token t) const;
@@ -67,6 +71,8 @@ private:
     std::uint32_t lastVersion_ = 0;
     bool lastWasTouch_ = false;
     float scale_ = 1.0f;
+    bool hasRange_ = false;
+    double rangeLo_ = 0.0, rangeHi_ = 1.0, rangeExp_ = 1.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeptuneKnob)
 };

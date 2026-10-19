@@ -64,7 +64,7 @@ private:
     juce::VBlankAttachment vblank_;
 
     // réglages lus des paramètres cachés
-    int timeIdx_ = 1, moveType_ = 0;
+    int timeIdx_ = 3, moveType_ = 0;
     float maxDb_ = 0.0f, minDb_ = -54.0f;
     neptune::core::MagType mag_ = neptune::core::MagType::Peak;
     neptune::core::StereoType stereo_ = neptune::core::StereoType::MidSide;

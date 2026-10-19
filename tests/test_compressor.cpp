@@ -204,6 +204,7 @@ TEST_CASE ("compressor: side filters shape the key", "[compressor]")
 {
     // une clé continue (0 Hz) est supprimée par un passe-haut : plus de réduction
     CompRig r;
+    r.set (c::sideEqBypass, 0.0);   // le filtrage de la clé est éteint par défaut
     r.set (c::bandParam (0, c::kStatus), c::kOn);
     r.set (c::bandParam (0, c::kType), c::kHighPass);
     r.set (c::bandParam (0, c::kFreq), 5000.0);
@@ -405,7 +406,8 @@ TEST_CASE ("compressor: analyzer display settings are hidden, not automatable an
         CHECK (s->hidden);
         CHECK_FALSE (s->automatable);
     }
-    CHECK (p.get (c::anTime) == 1.0);       // 9 s
+    CHECK (p.get (c::anTime) == 3.0);       // 18 s
+    CHECK (p.get (c::sideEqBypass) == 1.0); // clé non filtrée tant qu'on n'allume pas son égaliseur
     CHECK (p.get (c::anMaxDb) == 1.0);      // 0 dB
     CHECK (p.get (c::anMinDb) == 3.0);      // -54 dB
     CHECK (p.get (c::anShowIn) == 1.0);

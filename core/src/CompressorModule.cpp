@@ -45,7 +45,7 @@ bool CompressorModule::declareParams (ParameterSet& set, std::string* error) con
     add (pct (wet, "Wet", 0.0, 100.0, 100.0));
     add (P::toggle (externalSide, "External Side"));
     add (P::toggle (sideOut, "Side Out"));
-    add (P::toggle (sideEqBypass, "Side EQ Bypass"));
+    add (P::toggle (sideEqBypass, "Side EQ Bypass", true));   // éteint par défaut : l'interface le rallume avec un jeu de filtres de départ
     add (db (sideGain, "Side Gain", -15.0, 15.0, 0.0));
     add (P::choice (stereoMode, "Side Stereo Mode", { "Mid Side", "Left Right", "Mid Side Max", "Left Right Max" }, 0));
     add (P::toggle (stereoSwap, "Side Stereo Swap"));
@@ -58,7 +58,7 @@ bool CompressorModule::declareParams (ParameterSet& set, std::string* error) con
     add (fixed (P::continuous (lookahead, "Lookahead", Unit::Milliseconds, -maxLookaheadMs, maxLookaheadMs, 0.0)));
     {
         auto hid = [] (P p) { p.hidden = true; p.automatable = false; p.modulatable = false; return p; };
-        add (hid (P::choice (anTime, "Analyzer Time", { "6 s", "9 s", "12 s", "18 s" }, 1)));
+        add (hid (P::choice (anTime, "Analyzer Time", { "6 s", "9 s", "12 s", "18 s" }, 3)));
         add (hid (P::choice (anMove, "Analyzer Move", { "Sync", "Slow", "Roll" }, 0)));
         add (hid (P::choice (anMaxDb, "Analyzer Max dB", { "6", "0", "-6", "-12", "-24" }, 1)));
         add (hid (P::choice (anMinDb, "Analyzer Min dB", { "-9", "-18", "-36", "-54", "-72", "-120" }, 3)));

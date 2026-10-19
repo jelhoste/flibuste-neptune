@@ -361,6 +361,17 @@ KnobCard::KnobCard (const Skin& s, ParamHost& h, neptune::core::ParamId id, juce
     refresh();
 }
 
+void KnobCard::setDisplayRange (double lo, double hi, double exponent)
+{
+    knob_->setDisplayRange (lo, hi, exponent);
+    if (const auto* spec = host_.parameters().find (id_))
+    {
+        lo_ = juce::String::fromUTF8 (host_.parameters().toText (*spec, lo).c_str());
+        hi_ = juce::String::fromUTF8 (host_.parameters().toText (*spec, hi).c_str());
+    }
+    repaint();
+}
+
 void KnobCard::setParam (neptune::core::ParamId id, juce::String title)
 {
     id_ = id;
@@ -388,8 +399,8 @@ void KnobCard::resized()
 {
     knob_->setScale (skin_.scale());
     const auto b = getLocalBounds();
-    const int side = std::min (skin_.ipx (compact_ ? 48.0f : 60.0f), b.getWidth() - skin_.ipx (8.0f));
-    knob_->setBounds (juce::Rectangle<int> (side, side).withCentre ({ b.getCentreX(), skin_.ipx (compact_ ? 26.0f : 28.0f) + side / 2 }));
+    const int side = std::min (skin_.ipx (compact_ ? 44.0f : 60.0f), b.getWidth() - skin_.ipx (8.0f));
+    knob_->setBounds (juce::Rectangle<int> (side, side).withCentre ({ b.getCentreX(), skin_.ipx (compact_ ? 20.0f : 28.0f) + side / 2 }));
 }
 
 void KnobCard::paint (juce::Graphics& g)
@@ -404,7 +415,7 @@ void KnobCard::paint (juce::Graphics& g)
     }
     g.setColour (pink_ ? skin_.colour (Token::Pink2) : skin_.colour (Token::TextDim));
     g.setFont (skin_.font (compact_ ? 9.0f : 10.0f, true));
-    g.drawText (title_, b.withTrimmedTop (skin_.px (compact_ ? 6.0f : 10.0f)).withHeight (skin_.px (14.0f)), juce::Justification::centred, true);
+    g.drawText (title_, b.withTrimmedTop (skin_.px (compact_ ? 4.0f : 10.0f)).withHeight (skin_.px (14.0f)), juce::Justification::centred, true);
     const auto kb = knob_->getBounds().toFloat();
     g.setColour (skin_.colour (Token::Text));
     g.setFont (skin_.font (compact_ ? 11.0f : 14.0f, true));
@@ -413,8 +424,8 @@ void KnobCard::paint (juce::Graphics& g)
     if (lo_.isNotEmpty() || hi_.isNotEmpty())
     {
         g.setColour (skin_.colour (Token::TextDim2));
-        g.setFont (skin_.font (9.0f));
-        const auto row = juce::Rectangle<float> (b.getX() + skin_.px (8.0f), b.getBottom() - skin_.px (18.0f), b.getWidth() - skin_.px (16.0f), skin_.px (12.0f));
+        g.setFont (skin_.font (13.5f));   // 9 x 1,5
+        const auto row = juce::Rectangle<float> (b.getX() + skin_.px (8.0f), b.getBottom() - skin_.px (22.0f), b.getWidth() - skin_.px (16.0f), skin_.px (18.0f));
         g.drawText (lo_, row, juce::Justification::centredLeft, true);
         g.drawText (hi_, row, juce::Justification::centredRight, true);
     }
@@ -429,17 +440,16 @@ void SubSlider::refresh() { if (changed (host_, id_, seen_)) repaint(); }
 juce::Rectangle<float> SubSlider::trackArea() const
 {
     const auto b = getLocalBounds().toFloat();
-    return { b.getX() + skin_.px (6.0f), b.getY() + skin_.px (13.0f), b.getWidth() - skin_.px (12.0f), skin_.px (4.0f) };
+    return { b.getX() + skin_.px (6.0f), b.getY() + skin_.px (17.0f), b.getWidth() - skin_.px (12.0f), skin_.px (4.0f) };
 }
 
 void SubSlider::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
     g.setColour (skin_.colour (Token::TextDim2));
-    g.setFont (skin_.font (8.0f, true));
-    g.drawText (title_, b.withHeight (skin_.px (11.0f)), juce::Justification::centred, true);
+    g.setFont (skin_.font (12.0f, true));   // 8 x 1,5
+    g.drawText (title_, b.withHeight (skin_.px (15.0f)), juce::Justification::centred, true);
     auto t = trackArea();
-    t.setY (b.getY() + skin_.px (14.0f));
     const float n = static_cast<float> (host_.parameters().getNormalized (id_));
     g.setColour (skin_.colour (Token::Grid));
     g.fillRoundedRectangle (t, t.getHeight() / 2);
@@ -455,8 +465,8 @@ void SubSlider::paint (juce::Graphics& g)
     g.setColour (skin_.colour (Token::Handle));
     g.fillEllipse (x - hd / 2, t.getCentreY() - hd / 2, hd, hd);
     g.setColour (skin_.colour (Token::TextDim));
-    g.setFont (skin_.font (9.0f));
-    g.drawText (juce::String::fromUTF8 (host_.parameters().toText (id_).c_str()), b.withTop (t.getBottom() + skin_.px (4.0f)).withHeight (skin_.px (12.0f)),
+    g.setFont (skin_.font (13.5f));   // 9 x 1,5
+    g.drawText (juce::String::fromUTF8 (host_.parameters().toText (id_).c_str()), b.withTop (t.getBottom() + skin_.px (4.0f)).withHeight (skin_.px (19.0f)),
                 juce::Justification::centred, true);
 }
 
@@ -491,7 +501,7 @@ VMeter::VMeter (const Skin& s, juce::String title, Kind k, bool pink) : skin_ (s
 juce::Rectangle<float> VMeter::barsArea() const
 {
     const auto b = getLocalBounds().toFloat();
-    auto r = b.withTrimmedTop (skin_.px (18.0f)).withTrimmedBottom (skin_.px (50.0f));
+    auto r = b.withTrimmedTop (skin_.px (18.0f)).withTrimmedBottom (skin_.px (70.0f));
     const float w = skin_.px (13.0f) * 2.0f + skin_.px (4.0f);
     return r.withSizeKeepingCentre (w, r.getHeight());
 }
@@ -563,11 +573,11 @@ void VMeter::paint (juce::Graphics& g)
     }
     const float v = std::max (shown_[0], shown_[1]);
     g.setColour (skin_.colour (Token::TextDim));
-    g.setFont (skin_.font (9.0f));
+    g.setFont (skin_.font (13.5f));   // 9 x 1,5
     g.drawText (v < floor_ - 30.0f && kind_ == Kind::Level ? juce::String ("-inf") : juce::String (kind_ == Kind::Level ? v : -v, 1),
-                b.withTop (bars.getBottom() + skin_.px (4.0f)).withHeight (skin_.px (12.0f)), juce::Justification::centred);
+                b.withTop (bars.getBottom() + skin_.px (4.0f)).withHeight (skin_.px (18.0f)), juce::Justification::centred);
     g.drawText (juce::String (kind_ == Kind::Level ? std::max (peak_[0], peak_[1]) : -std::max (peak_[0], peak_[1]), 1),
-                b.withTop (bars.getBottom() + skin_.px (16.0f)).withHeight (skin_.px (12.0f)), juce::Justification::centred);
+                b.withTop (bars.getBottom() + skin_.px (23.0f)).withHeight (skin_.px (18.0f)), juce::Justification::centred);
     if (! showMode_) return;
     const auto m = modeArea();
     skin_.fill (g, Token::BgCard, m, skin_.px (5.0f));

@@ -234,11 +234,15 @@ void NovaCompressorEditor::buildCompressorPage()
         if (const auto* spec = host().parameters().find (s.id))
             c.knob->setRangeLabels (juce::String::fromUTF8 (host().parameters().toText (*spec, spec->min).c_str()),
                                     juce::String::fromUTF8 (host().parameters().toText (*spec, spec->max).c_str()));
+        // course du potard réduite : attaque 0..200 ms, relâchement 0..800 ms, gain -12..+12 dB ; la modale (appui long) garde toute la plage du paramètre
+        if (s.id == cm::attack) c.knob->setDisplayRange (0.0, 200.0, 2.0);
+        else if (s.id == cm::release) c.knob->setDisplayRange (0.0, 800.0, 2.0);
+        else if (s.id == cm::makeup) c.knob->setDisplayRange (-12.0, 12.0, 1.0);
         if (s.sub != 0)
         {
             c.sub = add<nova::SubSlider> (0, skin(), host(), s.sub, tx (s.subTitle), s.pink);
             const char* key = s.sub == cm::kneeWidth ? "hlp.knee" : s.sub == cm::curve ? "hlp.curve" : s.sub == cm::pump ? "hlp.pump" : s.sub == cm::smooth ? "hlp.smooth" : "hlp.clip";
-            addInfo (0, c.sub, key, true);
+            addInfo (0, c.sub, key, 2);   // sous le curseur, pas dessus
         }
         else addInfo (0, c.card, "hlp.mix", true);
         columns_.push_back (c);
@@ -255,6 +259,21 @@ void NovaCompressorEditor::buildSidechainPage()
     listenPill_->bindToggle (host(), cm::sideOut, tx ("nv.listen"));
     eqPill_ = add<nova::Pill> (1, skin());
     eqPill_->bindChoice (host(), cm::sideEqBypass, {}, { tx ("nv.eq_on"), tx ("nv.eq_off") });
+    // allumer l'égaliseur de la clé sans aucune zone en service pose un jeu de départ : passe-haut et deux cloches
+    eqPill_->onClick = [this]
+    {
+        if (value (cm::sideEqBypass) >= 0.5) return;   // éteint
+        for (const auto& z : zones_)
+            if (choiceValue (cm::bandParam (z->band, cm::kStatus)) == cm::kOn) return;
+        const double freqs[3] = { 100.0, 250.0, 3000.0 };
+        for (int i = 0; i < 3 && i < static_cast<int> (zones_.size()); ++i)
+        {
+            const auto& z = zones_[static_cast<std::size_t> (i)];
+            nova::setParam (host(), cm::bandParam (z->band, cm::kType), z->fixedType);
+            nova::setParam (host(), cm::bandParam (z->band, cm::kFreq), freqs[i]);
+            nova::setParam (host(), cm::bandParam (z->band, cm::kStatus), cm::kOn);
+        }
+    };
     rmsPill_ = add<nova::Pill> (1, skin());
     rmsPill_->bindToggle (host(), cm::rmsOn, tx ("nv.rms_on"));
     keyGain_ = add<nova::SubSlider> (1, skin(), host(), cm::sideGain, tx ("nv.side_gain"));
@@ -263,8 +282,8 @@ void NovaCompressorEditor::buildSidechainPage()
     addInfo (1, listenPill_, "hlp.listen");
     addInfo (1, eqPill_, "hlp.eqswitch");
     addInfo (1, rmsPill_, "hlp.rmsswitch");
-    addInfo (1, keyGain_, "hlp.keygain", true);
-    addInfo (1, rmsLength_, "hlp.rmslength", true);
+    addInfo (1, keyGain_, "hlp.keygain");
+    addInfo (1, rmsLength_, "hlp.rmslength");
     sideEq_ = add<SideEqView> (1, skin(), host(), [this] { const double r = options().sampleRate ? options().sampleRate() : 48000.0; return r > 0.0 ? r : 48000.0; });
 
     // cinq zones : passe-haut (filtre 1), trois cloches (filtres 2 à 4), passe-bas (filtre 5) ; les trois autres filtres restent accessibles à l'hôte
@@ -375,7 +394,7 @@ void NovaCompressorEditor::layout()
         const float x = 204.0f + static_cast<float> (i) * (colW + 12.0f);
         columns_[i].card->setBounds (R (x, 496, colW, 214));
         columns_[i].knob->setBounds (R (x, 496, colW, 132));
-        if (columns_[i].sub != nullptr) columns_[i].sub->setBounds (R (x + 10, 496 + 140, colW - 20, 40));
+        if (columns_[i].sub != nullptr) columns_[i].sub->setBounds (R (x + 10, 496 + 134, colW - 20, 48));
     }
 
     // ---- page SIDECHAIN
@@ -384,8 +403,8 @@ void NovaCompressorEditor::layout()
     listenPill_->setBounds (R (398, 108, 90, 30));
     eqPill_->setBounds (R (516, 108, 84, 30));
     rmsPill_->setBounds (R (628, 108, 60, 30));
-    keyGain_->setBounds (R (724, 102, 190, 40));
-    rmsLength_->setBounds (R (930, 102, 200, 40));
+    keyGain_->setBounds (R (724, 100, 176, 48));
+    rmsLength_->setBounds (R (930, 100, 176, 48));
     sideEq_->setBounds (R (220, 152, 910, 314));
     const float unit = (942.0f - 12.0f * 4.0f) / 13.0f;
     float zx = 204.0f;
@@ -396,11 +415,17 @@ void NovaCompressorEditor::layout()
         z->sw->setBounds (R (zx + zw - 8 - 34, 496 + 10, 34, 19));
         const float inner = zw - 12.0f;
         if (z->knobs.size() == 3)
-            for (std::size_t k = 0; k < 3; ++k) z->knobs[k]->setBounds (R (zx + 6 + inner / 3.0f * static_cast<float> (k), 496 + 36, inner / 3.0f, 112));
+        {
+            // gain et fréquence sur la première ligne, Q sur la seconde (centré)
+            const float kw = inner / 2.0f;
+            z->knobs[0]->setBounds (R (zx + 6, 496 + 34, kw, 84));
+            z->knobs[1]->setBounds (R (zx + 6 + kw, 496 + 34, kw, 84));
+            z->knobs[2]->setBounds (R (zx + 6 + kw / 2.0f, 496 + 34 + 84, kw, 84));
+        }
         else
         {
-            z->knobs[0]->setBounds (R (zx + 6, 496 + 36, inner, 112));
-            z->slope->setBounds (R (zx + 14, 496 + 160, zw - 28, 26));
+            z->knobs[0]->setBounds (R (zx + 6, 496 + 40, inner, 84));
+            z->slope->setBounds (R (zx + 14, 496 + 150, zw - 28, 26));
         }
         zx += zw + 12.0f;
     }

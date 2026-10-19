@@ -37,18 +37,18 @@ NeptuneKnob::NeptuneKnob (ParamHost& p, neptune::core::ParamId id, const neptune
         using Kind = neptune::core::Kind;
         const auto& spec = set.spec (index_);
         if (spec.kind != Kind::Continuous) interaction_.setSteps (static_cast<int> (spec.max - spec.min));
-        interaction_.setValue (set.getNormalizedAt (index_));
+        interaction_.setValue (shownNormalised());
         lastVersion_ = set.versionAt (index_);
     }
 
     ui::KnobCallbacks cb;
     cb.beginGesture = [this] { processor_.uiBeginEdit (id_); };
-    cb.setNormalised = [this] (double n) { processor_.uiSetNormalised (id_, n); repaint(); };
+    cb.setNormalised = [this] (double n) { processor_.uiSetNormalised (id_, paramNormalised (n)); repaint(); };
     cb.endGesture = [this] { processor_.uiEndEdit (id_); };
     cb.resetToDefault = [this]
     {
         processor_.uiResetToDefault (id_);
-        interaction_.setValue (processor_.parameters().getNormalized (id_));
+        interaction_.setValue (shownNormalised());
         repaint();
     };
     cb.openModal = [this] { if (openModal_) openModal_ (id_, terminal()); };
@@ -63,6 +63,34 @@ juce::Colour NeptuneKnob::colour (Token t) const
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
 }
 
+// Plage d'affichage du potard : la course du potard ne couvre qu'une partie [lo, hi] de la plage du paramètre (au-delà, il reste en butée) ;
+// la modale (appui long) et l'hôte gardent toute la plage. `exponent` > 1 resserre les petites valeurs (course = ((v - lo) / (hi - lo))^(1/exponent)).
+void NeptuneKnob::setDisplayRange (double lo, double hi, double exponent)
+{
+    hasRange_ = hi > lo;
+    rangeLo_ = lo; rangeHi_ = hi; rangeExp_ = exponent > 0.0 ? exponent : 1.0;
+    interaction_.setValue (shownNormalised());
+    repaint();
+}
+
+double NeptuneKnob::shownNormalised() const
+{
+    if (index_ == neptune::core::ParameterSet::npos) return 0.0;
+    const auto& set = processor_.parameters();
+    if (! hasRange_) return set.getNormalizedAt (index_);
+    const double plain = set.spec (index_).fromNormalized (set.getNormalizedAt (index_));
+    const double t = std::clamp ((plain - rangeLo_) / (rangeHi_ - rangeLo_), 0.0, 1.0);
+    return rangeExp_ == 1.0 ? t : std::pow (t, 1.0 / rangeExp_);
+}
+
+double NeptuneKnob::paramNormalised (double shown) const
+{
+    if (! hasRange_ || index_ == neptune::core::ParameterSet::npos) return shown;
+    const double t = std::clamp (shown, 0.0, 1.0);
+    const double plain = rangeLo_ + (rangeHi_ - rangeLo_) * (rangeExp_ == 1.0 ? t : std::pow (t, rangeExp_));
+    return processor_.parameters().spec (index_).toNormalized (plain);
+}
+
 void NeptuneKnob::timerCallback()
 {
     interaction_.tick (nowMs());
@@ -73,7 +101,7 @@ void NeptuneKnob::timerCallback()
     if (v != lastVersion_)
     {
         lastVersion_ = v;
-        if (! interaction_.gestureOpen()) interaction_.setValue (set.getNormalizedAt (index_));
+        if (! interaction_.gestureOpen()) interaction_.setValue (shownNormalised());
         repaint();
     }
 }
@@ -94,7 +122,7 @@ void NeptuneKnob::mouseDrag (const juce::MouseEvent& e)
 void NeptuneKnob::mouseUp (const juce::MouseEvent& e)
 {
     interaction_.pointerUp (nowMs());
-    if (index_ != neptune::core::ParameterSet::npos) interaction_.setValue (processor_.parameters().getNormalizedAt (index_));
+    if (index_ != neptune::core::ParameterSet::npos) interaction_.setValue (shownNormalised());
     repaint();
     // Clic droit sans déplacement : menu des macros (le glissement avec le bouton droit reste le réglage fin).
     if (e.mods.isPopupMenu() && e.getDistanceFromDragStart() < 4 && processor_.canAssignMacro (id_)) showMacroMenu();
@@ -154,12 +182,13 @@ void NeptuneKnob::setParamId (neptune::core::ParamId id)
     if (id == id_) return;
     id_ = id;
     index_ = processor_.parameters().indexOf (id);
+    hasRange_ = false;
     if (index_ != neptune::core::ParameterSet::npos)
     {
         const auto& spec = processor_.parameters().spec (index_);
         interaction_.setSteps (spec.kind != neptune::core::Kind::Continuous ? static_cast<int> (spec.max - spec.min) : 0);
     }
-    interaction_.setValue (processor_.parameters().getNormalized (id_));
+    interaction_.setValue (shownNormalised());
     lastVersion_ = 0;
     repaint();
 }
@@ -241,7 +270,7 @@ void NeptuneSliderLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w
 void NeptuneKnob::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
-    const float n = index_ == neptune::core::ParameterSet::npos ? 0.0f : static_cast<float> (processor_.parameters().getNormalizedAt (index_));
+    const float n = index_ == neptune::core::ParameterSet::npos ? 0.0f : static_cast<float> (shownNormalised());
     paintNeptuneKnob (g, b, n, palette_, style_, scale_);
 
     if (hasKeyboardFocus (false))

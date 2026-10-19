@@ -74,7 +74,8 @@ protected:
         return raw;
     }
     // Bouton « ? » rattaché à un composant (à sa droite, ou dans son coin supérieur droit) ; les textes sont les clés `hlp.<key>.t` et `hlp.<key>`.
-    InfoButton* addInfo (int page, juce::Component* target, const char* key, bool inside = false);
+    // pos : 0 à droite du composant, 1 dans son coin supérieur droit, 2 en dessous (centré)
+    InfoButton* addInfo (int page, juce::Component* target, const char* key, int pos = 0);
     int addPage (juce::String label, juce::Path icon);   // entrée du menu latéral ; retourne l'indice de la page
     void setPage (int);
     int currentPage() const noexcept { return page_; }
@@ -91,7 +92,7 @@ protected:
 
 private:
     struct PageItem { juce::Component* c; int page; };
-    struct InfoPlace { InfoButton* button; juce::Component* target; bool inside; };
+    struct InfoPlace { InfoButton* button; juce::Component* target; int pos; };
     void placeInfos();
     std::vector<InfoPlace> infos_;
     void addChild (juce::Component*, int page);

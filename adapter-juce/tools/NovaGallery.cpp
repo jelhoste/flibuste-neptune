@@ -192,6 +192,7 @@ int main (int argc, char** argv)
     ps.set (compressor::attack, 10.0);
     ps.set (compressor::release, 150.0);
     ps.set (compressor::makeup, 3.2);
+    ps.set (compressor::sideEqBypass, 0.0);
     ps.set (compressor::bandParam (0, compressor::kStatus), compressor::kOn);
     ps.set (compressor::bandParam (0, compressor::kType), compressor::kHighPass);
     ps.set (compressor::bandParam (0, compressor::kFreq), 120.0);

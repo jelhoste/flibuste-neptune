@@ -183,6 +183,8 @@ public:
     KnobCard (const Skin&, ParamHost&, neptune::core::ParamId, juce::String title, NeptuneKnob::OpenModal, bool pink = false);
 
     void setTitle (const juce::String& t) { title_ = t; repaint(); }
+    // Course du potard limitée à [lo, hi] (valeurs du paramètre) : au-delà, la modale (appui long) reste libre sur toute la plage du paramètre.
+    void setDisplayRange (double lo, double hi, double exponent = 1.0);
     void setAutoRange (bool a) { autoRange_ = a; }   // les bornes affichées suivent le paramètre lié
     void setParam (neptune::core::ParamId, juce::String title);   // rebranche le potard sur un autre paramètre
     void setRangeLabels (juce::String lo, juce::String hi) { lo_ = std::move (lo); hi_ = std::move (hi); resized(); repaint(); }
