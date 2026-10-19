@@ -52,6 +52,8 @@ private:
     juce::Point<float> handle() const;
     bool nearHandle (juce::Point<float>) const;
     void rebuildCurve();
+    void renderBackground (juce::Graphics&) const;
+    void renderOverlay (juce::Graphics&);
     void rebuildPaths();
     void updateXs (double now);
     void updateYMapping();
@@ -81,7 +83,8 @@ private:
 
     // courbe de transfert
     juce::Path curve_;
-    bool curveValid_ = false;
+    bool curveValid_ = false, curveBuilt_ = false;
+    juce::Image bgImage_, overlayImage_;   // couches fixes en cache, à la taille réelle en pixels
     std::uint32_t curveKey_ = 0xFFFFFFFFu;
     bool dragging_ = false;
     int tooMuch_ = 0, activeFrames_ = 0;

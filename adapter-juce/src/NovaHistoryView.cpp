@@ -13,6 +13,9 @@ namespace
 {
 constexpr int kMaxPoints = 300, kPausedThreshold = 6, kTooMuchResetThreshold = 64;
 constexpr float kMissingDb = -10000.0f;
+// Retard d'affichage : l'hôte livre l'audio par rafales ; garder en réserve quelques dizaines de millisecondes de données évite les trous (donc les saccades)
+// sans qu'on puisse le voir : seul le dessin de la compression compte, pas sa précision temporelle.
+constexpr double kDisplayDelayMs = 40.0;
 constexpr int kPointsPerSecond[4] = { 40, 30, 20, 15 };
 constexpr double kTimeLength[4] = { 6.0, 9.0, 12.0, 18.0 };
 constexpr float kMaxDbValues[5] = { 6.0f, 0.0f, -6.0f, -12.0f, -24.0f };
@@ -131,7 +134,7 @@ juce::Rectangle<float> CompressorHistoryView::squareArea() const
 {
     const auto p = plotArea();
     const float r = std::min (p.getWidth(), p.getHeight());
-    return { p.getX(), p.getY(), r, r };
+    return { p.getRight() - r, p.getY(), r, r };   // à droite : c'est là que le signal entre, donc là qu'on voit l'action de la courbe
 }
 
 float CompressorHistoryView::yOf (float db) const noexcept
@@ -334,7 +337,7 @@ void CompressorHistoryView::step (double now)
             if (moveType_ == 2) rollNext_ = (rollNext_ + 1) % xs_.size();
             startTime_ += secondPerPoint_;
         }
-        const std::int64_t threshold = 2 * static_cast<std::int64_t> (std::max (maxBlock_, samplesPerPoint_));
+        const std::int64_t threshold = 2 * static_cast<std::int64_t> (std::max (maxBlock_, samplesPerPoint_)) + static_cast<std::int64_t> (sampleRate_ * kDisplayDelayMs * 0.001);
         if (ready > threshold)   // trop de données accumulées (hôte en rafales) : on en jette une partie, comme ZL
         {
             tooMuch_ += static_cast<int> ((ready - threshold) / samplesPerPoint_);
@@ -342,7 +345,7 @@ void CompressorHistoryView::step (double now)
         }
         else tooMuch_ = 0;
     }
-    else if (ready >= samplesPerPoint_)
+    else if (ready >= samplesPerPoint_ + static_cast<std::int64_t> (sampleRate_ * kDisplayDelayMs * 0.001))
     {
         first_ = false;
         startTime_ = now;
@@ -386,15 +389,15 @@ void CompressorHistoryView::rebuildCurve()
         curve_.lineTo (xOfIn (static_cast<float> (dbIn)), yOf (static_cast<float> (module_->curveOutputDb (host_.parameters(), dbIn))));
     }
     (void) s;
-    curveValid_ = true;
 }
 
-void CompressorHistoryView::paint (juce::Graphics& g)
+// Couches fixes mises en cache (fond et grille ; dégradé, diagonale, seuil et courbe de transfert) : elles ne changent qu'avec la taille, l'échelle ou les
+// réglages de la courbe, alors que l'historique est redessiné à chaque image. Les traits en pointillés en particulier coûtent cher à reconstruire.
+void CompressorHistoryView::renderBackground (juce::Graphics& g) const
 {
     const auto b = getLocalBounds().toFloat();
     skin_.fill (g, Token::StageBg, b, skin_.px (6.0f));
     const auto plot = plotArea();
-    // grille : six intervalles, étiquettes à droite quand la valeur est entière
     g.setFont (skin_.font (9.0f));
     for (int k = 0; k <= 6; ++k)
     {
@@ -409,13 +412,69 @@ void CompressorHistoryView::paint (juce::Graphics& g)
                         juce::Justification::centredRight);
         }
     }
+}
+
+void CompressorHistoryView::renderOverlay (juce::Graphics& g)
+{
+    if (module_ == nullptr) return;
+    const auto plot = plotArea();
+    juce::Graphics::ScopedSaveState save (g);
+    g.reduceClipRegion (plot.toNearestInt());
+    const auto sq = squareArea();
+    // dégradé de séparation : fond presque opaque à gauche du carré, transparent à droite, pour que la courbe reste lisible sur l'historique
+    g.setGradientFill (juce::ColourGradient (skin_.colour (Token::StageBg, 0.92f), sq.getX(), 0.0f, skin_.colour (Token::StageBg, 0.0f), sq.getX() + sq.getWidth() * 0.5f, 0.0f, false));
+    g.fillRect (juce::Rectangle<float> (sq.getX(), plot.getY(), sq.getWidth() * 0.5f, plot.getHeight()));
+    if (! curveBuilt_) { rebuildCurve(); curveBuilt_ = true; }
+    {
+        juce::Path unity;
+        unity.startNewSubPath (xOfIn (minDb_), yOf (minDb_));
+        unity.lineTo (xOfIn (maxDb_), yOf (maxDb_));
+        juce::Path dashed;
+        const float dash[] = { skin_.px (4.0f), skin_.px (4.0f) };
+        juce::PathStrokeType (1.0f).createDashedStroke (dashed, unity, dash, 2);
+        g.setColour (skin_.colour (Token::TextDim2, 0.6f));
+        g.fillPath (dashed);
+    }
+    const double thr = std::clamp (host_.parameters().get (cm::threshold), static_cast<double> (minDb_), static_cast<double> (maxDb_));
+    const float tx = xOfIn (static_cast<float> (thr));
+    g.setColour (skin_.colour (Token::Accent, 0.06f));
+    g.fillRect (juce::Rectangle<float> (tx, plot.getY(), sq.getRight() - tx, plot.getHeight()));
+    {
+        juce::Path line;
+        line.startNewSubPath (tx, plot.getY());
+        line.lineTo (tx, plot.getBottom());
+        juce::Path dashed;
+        const float dash[] = { skin_.px (3.0f), skin_.px (4.0f) };
+        juce::PathStrokeType (1.0f).createDashedStroke (dashed, line, dash, 2);
+        g.setColour (skin_.colour (Token::Accent, 0.55f));
+        g.fillPath (dashed);
+    }
+    g.setColour (skin_.colour (Token::Text, 0.95f));
+    g.strokePath (curve_, juce::PathStrokeType (skin_.px (2.4f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+void CompressorHistoryView::paint (juce::Graphics& g)
+{
+    const float ds = static_cast<float> (g.getInternalContext().getPhysicalPixelScaleFactor());
+    const auto size = getLocalBounds();
+    if (! curveValid_ || bgImage_.isNull() || bgImage_.getWidth() != juce::roundToInt (static_cast<float> (size.getWidth()) * ds) || bgImage_.getHeight() != juce::roundToInt (static_cast<float> (size.getHeight()) * ds))
+    {
+        const int w = juce::roundToInt (static_cast<float> (size.getWidth()) * ds), h = juce::roundToInt (static_cast<float> (size.getHeight()) * ds);
+        if (w <= 0 || h <= 0) return;
+        bgImage_ = juce::Image (juce::Image::ARGB, w, h, true);
+        overlayImage_ = juce::Image (juce::Image::ARGB, w, h, true);
+        { juce::Graphics ig (bgImage_); ig.addTransform (juce::AffineTransform::scale (ds)); renderBackground (ig); }
+        curveBuilt_ = false;
+        { juce::Graphics og (overlayImage_); og.addTransform (juce::AffineTransform::scale (ds)); renderOverlay (og); }
+        curveValid_ = true;
+    }
+    g.drawImage (bgImage_, size.toFloat(), juce::RectanglePlacement::stretchToFit);
     if (module_ == nullptr) return;
 
     {
         juce::Graphics::ScopedSaveState save (g);
-        g.reduceClipRegion (plot.toNearestInt());
-        const float thick = skin_.px (1.7f);
-        const auto stroke = juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+        g.reduceClipRegion (plotArea().toNearestInt());
+        const auto stroke = juce::PathStrokeType (skin_.px (1.7f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
         if (! first_)
         {
             if (showIn_) { g.setColour (skin_.colour (Token::Accent, 0.16f)); g.fillPath (inPath_); }
@@ -423,41 +482,8 @@ void CompressorHistoryView::paint (juce::Graphics& g)
             if (showOut_) { g.setColour (skin_.colour (Token::Accent2, 0.95f)); g.strokePath (outPath_, stroke); }
             if (showRed_) { g.setColour (skin_.colour (Token::Pink, 0.95f)); g.strokePath (redPath_, stroke); }
         }
-        // dégradé de séparation : fond opaque à gauche, transparent à droite, pour que la courbe de transfert reste lisible sur l'historique
-        const auto sq = squareArea();
-        g.setGradientFill (juce::ColourGradient (skin_.colour (Token::StageBg, 0.92f), sq.getX(), 0.0f, skin_.colour (Token::StageBg, 0.0f), sq.getX() + sq.getWidth() * 0.5f, 0.0f, false));
-        g.fillRect (juce::Rectangle<float> (sq.getX(), plot.getY(), sq.getWidth() * 0.5f, plot.getHeight()));
-
-        if (! curveValid_) rebuildCurve();
-        // diagonale : aucun traitement
-        {
-            juce::Path unity;
-            unity.startNewSubPath (xOfIn (minDb_), yOf (minDb_));
-            unity.lineTo (xOfIn (maxDb_), yOf (maxDb_));
-            juce::Path dashed;
-            const float dash[] = { skin_.px (4.0f), skin_.px (4.0f) };
-            juce::PathStrokeType (1.0f).createDashedStroke (dashed, unity, dash, 2);
-            g.setColour (skin_.colour (Token::TextDim2, 0.6f));
-            g.fillPath (dashed);
-        }
-        // zone au-delà du seuil et ligne du seuil
-        const double thr = std::clamp (host_.parameters().get (cm::threshold), static_cast<double> (minDb_), static_cast<double> (maxDb_));
-        const float tx = xOfIn (static_cast<float> (thr));
-        g.setColour (skin_.colour (Token::Accent, 0.06f));
-        g.fillRect (juce::Rectangle<float> (tx, plot.getY(), sq.getRight() - tx, plot.getHeight()));
-        {
-            juce::Path line;
-            line.startNewSubPath (tx, plot.getY());
-            line.lineTo (tx, plot.getBottom());
-            juce::Path dashed;
-            const float dash[] = { skin_.px (3.0f), skin_.px (4.0f) };
-            juce::PathStrokeType (1.0f).createDashedStroke (dashed, line, dash, 2);
-            g.setColour (skin_.colour (Token::Accent, 0.55f));
-            g.fillPath (dashed);
-        }
-        g.setColour (skin_.colour (Token::Text, 0.95f));
-        g.strokePath (curve_, juce::PathStrokeType (skin_.px (2.4f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
+    g.drawImage (overlayImage_, size.toFloat(), juce::RectanglePlacement::stretchToFit);
 
     const auto h = handle();
     const float hr = skin_.px (6.0f);
