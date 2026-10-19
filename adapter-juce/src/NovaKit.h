@@ -276,6 +276,16 @@ private:
     bool hover_ = false;
 };
 
+// ------------------------------------------------------------------------------------------------ fenêtre de réglages (bulle) : une pastille par réglage
+struct SettingItem
+{
+    neptune::core::ParamId id;
+    juce::String label;
+    std::vector<juce::String> choices;   // vide : bascule
+};
+// Ouvre une bulle ancrée sur `anchor` avec les réglages, liés à leurs paramètres ; deux colonnes. Elle garde sa propre copie de l'habillage.
+void showSettingsPopup (juce::Component* anchor, const Skin&, ParamHost&, const juce::String& title, std::vector<SettingItem> items);
+
 // ------------------------------------------------------------------------------------------------ LookAndFeel (menus, info-bulles, barres de défilement)
 class LookAndFeel : public juce::LookAndFeel_V4
 {

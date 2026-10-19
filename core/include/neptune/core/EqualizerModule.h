@@ -10,6 +10,7 @@
 #include <atomic>
 #include <vector>
 
+#include "neptune/core/AnalyzerRing.h"
 #include "neptune/core/Biquad.h"
 #include "neptune/core/DynamicsDsp.h"
 #include "neptune/core/StockModule.h"
@@ -20,6 +21,11 @@ namespace equalizer
 {
 constexpr ParamId outputGain = 100, autoGain = 101, gainScale = 102, phaseFlip = 103, externalSide = 104;
 constexpr int kBands = 16;
+// Réglages d'affichage du spectre (cachés, non automatisables, enregistrés avec l'état ; hors presets et A/B) : analyse allumée, qualité (Normal / High), vitesse
+// de retombée, pente de compensation, lissage (type, valeur octave, valeur ERB), haut et bas de l'échelle, canaux analysés, entrée et sortie visibles.
+constexpr ParamId spOn = 510, spQuality = 511, spSpeed = 512, spTilt = 513, spSmoothType = 514, spSmoothOct = 515, spSmoothErb = 516, spTop = 517, spMin = 518,
+                  spChannels = 519, spShowIn = 520, spShowOut = 521;
+enum SpectrumStream : int { kSpIn = 0, kSpOut, kSpStreams };
 constexpr ParamId bandBase = 120;
 constexpr int kBandStride = 24;
 constexpr ParamId bandParam (int band, int k) { return bandBase + static_cast<ParamId> (band * kBandStride + k); }
@@ -69,6 +75,8 @@ public:
     double bandResponseDb (const ParameterSet&, int band, double f, bool current) const noexcept;
     // Réponse de l'ensemble des bandes actives (sans le gain de sortie).
     double totalResponseDb (const ParameterSet&, double f, bool current) const noexcept;
+    // Anneau d'analyse du spectre (entrée et sortie) ; l'interface l'active tant qu'un éditeur affiche le spectre (le remplissage est sinon sauté).
+    AnalyzerRing& analyzer() const noexcept { return analyzer_; }
 
 private:
     static constexpr int kChunk = 16;
@@ -111,6 +119,8 @@ private:
     int maxBlock_ = 0;
     std::array<Band, equalizer::kBands> bands_;
     std::vector<double> wl_, wr_;
+    std::vector<float> preL_, preR_;
+    mutable AnalyzerRing analyzer_ { equalizer::kSpStreams, 2, 65536 };
     double autoSmoothed_ = 0.0, lastGain_ = 1.0;
     const float *keyL_ = nullptr, *keyR_ = nullptr;
     std::array<std::atomic<float>, equalizer::kNumMeters> meters_ {};

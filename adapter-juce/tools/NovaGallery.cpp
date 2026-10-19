@@ -4,6 +4,7 @@
 #include "../src/NovaKit.h"
 #include "../src/NovaCompressorEditor.h"
 #include "../src/NovaEqualizerEditor.h"
+#include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/StockModule.h"
@@ -257,6 +258,7 @@ int main (int argc, char** argv)
 
     // ---- l'éditeur réel de l'égaliseur
     {
+        nova::SpectrumEngine::setThreading (false);
         ModuleRunner eqRunner (std::make_unique<EqualizerModule>());
         eqRunner.prepare (48000.0, 512);
         RunnerHost eh (eqRunner);
@@ -301,8 +303,36 @@ int main (int argc, char** argv)
             ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
             ed.selectBandForTest (c.sel);
             ed.setPageForTest (c.page);
-            ed.refreshNow();
-            ed.refreshNow();
+            ed.refreshNow();   // active l'anneau d'analyse
+            // signal simulé (bruit passé dans un filtre d'un pôle, deux sinus) joué à 30 images par seconde ; le spectre est calculé sans fil
+            {
+                std::vector<float> l (512), r (512);
+                float lp = 0.0f;
+                std::uint32_t seed = 12345u;
+                long sampleIndex = 0;
+                for (int frame = 0; frame < 150; ++frame)
+                {
+                    int remaining = 1600;
+                    while (remaining > 0)
+                    {
+                        const int n = std::min (512, remaining);
+                        for (int i = 0; i < n; ++i, ++sampleIndex)
+                        {
+                            seed = seed * 1664525u + 1013904223u;
+                            const float w = static_cast<float> (seed >> 8) / 8388608.0f - 1.0f;
+                            lp += 0.18f * (w - lp);
+                            const double t = static_cast<double> (sampleIndex) / 48000.0;
+                            const float v = 0.5f * lp + 0.12f * static_cast<float> (std::sin (6.2831853 * 220.0 * t)) + 0.05f * static_cast<float> (std::sin (6.2831853 * 3000.0 * t));
+                            l[static_cast<std::size_t> (i)] = v;
+                            r[static_cast<std::size_t> (i)] = 0.9f * v;
+                        }
+                        eqRunner.process (l.data(), r.data(), n, false);
+                        remaining -= n;
+                    }
+                    ed.stepSpectrumForTest();
+                    ed.refreshNow();
+                }
+            }
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;
             juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));

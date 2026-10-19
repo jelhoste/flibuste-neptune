@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "NovaSpectrum.h"
 #include "neptune/core/EqualizerPresets.h"
 
 using namespace neptune::core;
@@ -60,11 +61,24 @@ public:
         std::function<void (int)> menu;
     };
 
-    CurveView (const nova::Skin& s, ParamHost& h, const EqualizerModule* m, Hooks hooks) : skin_ (s), host_ (h), module_ (m), hooks_ (std::move (hooks)) {}
+    CurveView (const nova::Skin& s, ParamHost& h, const EqualizerModule* m, Hooks hooks) : skin_ (s), host_ (h), module_ (m), hooks_ (std::move (hooks)), engine_ (h, m) {}
+
+    void stepSpectrum() { engine_.stepOnce(); }
 
     // 30 Hz : reconstruit les courbes seulement si un réglage ou le gain d'une bande dynamique a changé
     void update()
     {
+        // spectre : l'analyse tourne tant qu'il est affiché ; une nouvelle image ou un changement d'échelle reconstruit les tracés
+        {
+            const auto& ps = host_.parameters();
+            const bool on = ps.get (eq::spOn) >= 0.5;
+            engine_.setRunning (on);
+            bool changed = on && engine_.pullFrame (frame_);
+            std::uint32_t sk = 0;
+            for (const auto id : { eq::spOn, eq::spTop, eq::spMin, eq::spShowIn, eq::spShowOut, eq::spQuality }) sk = sk * 31u + ps.version (id);
+            if (sk != spKey_) { spKey_ = sk; changed = true; }
+            if (changed) { spValid_ = false; repaint(); }
+        }
         std::uint32_t key = static_cast<std::uint32_t> (hooks_.selected() + 2);
         for (int b = 0; b < eq::kBands; ++b)
         {
@@ -79,7 +93,7 @@ public:
         repaint();
     }
 
-    void resized() override { valid_ = false; }
+    void resized() override { valid_ = false; spValid_ = false; }
 
     void paint (juce::Graphics& g) override
     {
@@ -106,6 +120,20 @@ public:
             g.drawText (d > 0 ? "+" + juce::String (d) : juce::String (d), juce::Rectangle<float> (b.getX() + skin_.px (2.0f), yOf (d) - skin_.px (6.0f), plot.getX() - b.getX() - skin_.px (6.0f), skin_.px (12.0f)), juce::Justification::centredRight);
         }
         if (module_ == nullptr) return;
+        if (host_.parameters().get (eq::spOn) >= 0.5)
+        {
+            if (! spValid_) rebuildSpectrum();
+            juce::Graphics::ScopedSaveState save (g);
+            g.reduceClipRegion (plot.toNearestInt());
+            if (host_.parameters().get (eq::spShowIn) >= 0.5) { g.setColour (skin_.colour (Token::TextDim2, 0.22f)); g.fillPath (spPath_[0]); }
+            if (host_.parameters().get (eq::spShowOut) >= 0.5)
+            {
+                g.setColour (skin_.colour (Token::Accent2, 0.20f));
+                g.fillPath (spPath_[1]);
+                g.setColour (skin_.colour (Token::Accent2, 0.85f));
+                g.strokePath (spPath_[1], juce::PathStrokeType (skin_.px (1.4f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+        }
         if (! valid_) rebuild();
 
         const int sel = hooks_.selected();
@@ -268,6 +296,19 @@ private:
         }
         return best;
     }
+    void rebuildSpectrum()
+    {
+        const auto plot = plotArea();
+        static constexpr float tops[7] = { 6.0f, 0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -36.0f };
+        static constexpr float ranges[3] = { -60.0f, -72.0f, -96.0f };
+        const float top = tops[juce::jlimit (0, 6, static_cast<int> (std::lround (host_.parameters().get (eq::spTop))))];
+        const float range = ranges[juce::jlimit (0, 2, static_cast<int> (std::lround (host_.parameters().get (eq::spMin))))];
+        auto xOfHz = [this] (float hz) { return xOf (static_cast<double> (hz)); };
+        auto yOfDb = [plot, top, range] (float db) { return plot.getY() + (top - db) / (-range) * plot.getHeight(); };
+        for (int src = 0; src < 2; ++src) spPath_[src] = nova::makeSpectrumPath (frame_, src, xOfHz, yOfDb, plot.getBottom() + plot.getHeight() * 0.5f, plot.getRight() + 4.0f);
+        spValid_ = true;
+    }
+
     void rebuild()
     {
         curves_.clear();
@@ -305,6 +346,11 @@ private:
     Hooks hooks_;
     std::vector<Curve> curves_;
     juce::Path total_;
+    nova::SpectrumEngine engine_;
+    nova::SpectrumEngine::Frame frame_;
+    juce::Path spPath_[2];
+    bool spValid_ = false;
+    std::uint32_t spKey_ = 0xFFFFFFFFu;
     bool valid_ = false;
     std::uint32_t key_ = 0xFFFFFFFFu;
     int drag_ = -1;
@@ -581,6 +627,34 @@ void NovaEqualizerEditor::buildMain()
     ch.remove = [this] (int b) { removeBand (b); };
     ch.menu = [this] (int b) { showBandMenu (b); };
     curve_ = add<CurveView> (0, skin(), host(), module_, std::move (ch));
+    spectrumPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    spectrumPill_->bindToggle (host(), eq::spOn, tx ("nv.spectrum"));
+    spectrumGear_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Icon);
+    {
+        juce::Path gear;   // curseurs de réglage
+        for (const float y : { 6.0f, 12.0f, 18.0f }) { gear.startNewSubPath (3.0f, y); gear.lineTo (21.0f, y); }
+        gear.addEllipse (6.0f, 4.0f, 4.0f, 4.0f);
+        gear.addEllipse (14.0f, 10.0f, 4.0f, 4.0f);
+        gear.addEllipse (8.0f, 16.0f, 4.0f, 4.0f);
+        spectrumGear_->setIcon (gear);
+    }
+    spectrumGear_->onClick = [this]
+    {
+        auto t = [this] (const char* k) { return tx (k); };
+        std::vector<nova::SettingItem> items = {
+            { eq::spQuality, t ("nv.sp_quality"), { "Normal", "High" } },
+            { eq::spSpeed, t ("nv.sp_speed"), { "Very Fast", "Fast", "Medium", "Slow", "Very Slow" } },
+            { eq::spTilt, t ("nv.sp_tilt"), { "0 dB/oct", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" } },
+            { eq::spSmoothType, t ("nv.sp_smooth_type"), { "OCT", "ERB" } },
+            { eq::spSmoothOct, t ("nv.sp_smooth_oct"), { "1/24", "1/12", "1/6", "1/3", "1" } },
+            { eq::spSmoothErb, t ("nv.sp_smooth_erb"), { "1/4", "1/2", "1", "2", "4" } },
+            { eq::spTop, t ("nv.an_max"), { "6 dB", "0 dB", "-6 dB", "-12 dB", "-18 dB", "-24 dB", "-36 dB" } },
+            { eq::spMin, t ("nv.sp_range"), { "-60 dB", "-72 dB", "-96 dB" } },
+            { eq::spChannels, t ("nv.an_ch"), { "Stereo", "Left", "Right", "Mid", "Side" } },
+            { eq::spShowIn, t ("nv.an_in"), {} }, { eq::spShowOut, t ("nv.an_out"), {} } };
+        nova::showSettingsPopup (spectrumGear_, skin(), host(), t ("nv.spectrum"), std::move (items));
+    };
+    curvePanel_->setMetaRightInset (150.0f);
 
     BandStrip::Hooks sh;
     sh.bands = [this] { std::vector<int> v; for (int b = 0; b < eq::kBands; ++b) if (active (b)) v.push_back (b); return v; };
@@ -750,6 +824,8 @@ void NovaEqualizerEditor::layout()
 
     curvePanel_->setBounds (R (204, 72, 942, 346));
     curve_->setBounds (R (220, 100, 910, 310));
+    spectrumGear_->setBounds (R (1146 - 14 - 28, 76, 28, 24));
+    spectrumPill_->setBounds (R (1146 - 14 - 28 - 8 - 104, 76, 104, 24));
     detPanel_->setBounds (R (204, 72, 942, 346));
     dynBypassPill_->setBounds (R (220, 108, 150, 30));
     detTypePill_->setBounds (R (392, 108, 150, 30));
@@ -785,6 +861,8 @@ void NovaEqualizerEditor::layout()
     presetPill()->setBounds (R (470, 11, 220, 36));
     if (bypassPill() != nullptr) bypassPill()->setBounds (R (1160 - 14 - 36, 11, 36, 36));
 }
+
+void NovaEqualizerEditor::stepSpectrumForTest() { curve_->stepSpectrum(); }
 
 void NovaEqualizerEditor::tick()
 {

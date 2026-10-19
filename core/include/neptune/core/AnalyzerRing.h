@@ -20,12 +20,12 @@ enum class StereoType { MidSide = 0, LeftRight = 1, Left = 2, Right = 3, Mid = 4
 class AnalyzerRing
 {
 public:
-    // 32768 échantillons par canal (0,68 s à 48 kHz). Les données lues doivent avoir moins de la moitié de la capacité : l'écrivain ne peut alors
-    // pas les avoir écrasées pendant la lecture.
-    static constexpr std::size_t kCapacity = 32768;
-    static constexpr std::size_t kMask = kCapacity - 1;
+    // Capacité par canal : puissance de 2 (32768 par défaut, 0,68 s à 48 kHz). Les données lues doivent avoir moins de la moitié de la capacité :
+    // l'écrivain ne peut alors pas les avoir écrasées pendant la lecture.
+    explicit AnalyzerRing (int streams, int channels, std::size_t capacity = 32768)
+        : streams_ (streams), channels_ (channels), capacity_ (capacity), mask_ (capacity - 1), data_ (static_cast<std::size_t> (streams * channels) * capacity, 0.0f) {}
 
-    AnalyzerRing (int streams, int channels) : streams_ (streams), channels_ (channels), data_ (static_cast<std::size_t> (streams * channels) * kCapacity, 0.0f) {}
+    std::size_t capacity() const noexcept { return capacity_; }
 
     int streams() const noexcept { return streams_; }
     int channels() const noexcept { return channels_; }
@@ -45,8 +45,8 @@ public:
         const auto w = write_.load (std::memory_order_relaxed);
         for (int s = 0; s < streams_ * channels_; ++s)
         {
-            float* dst = data_.data() + static_cast<std::size_t> (s) * kCapacity;
-            for (int i = 0; i < n; ++i) dst[(w + static_cast<std::uint64_t> (i)) & kMask] = in[s][i];
+            float* dst = data_.data() + static_cast<std::size_t> (s) * capacity_;
+            for (int i = 0; i < n; ++i) dst[(w + static_cast<std::uint64_t> (i)) & mask_] = in[s][i];
         }
         write_.store (w + static_cast<std::uint64_t> (n), std::memory_order_release);
     }
@@ -55,11 +55,12 @@ public:
     std::uint64_t writePos() const noexcept { return write_.load (std::memory_order_acquire); }
     float sample (int stream, int channel, std::uint64_t pos) const noexcept
     {
-        return data_[static_cast<std::size_t> (stream * channels_ + channel) * kCapacity + static_cast<std::size_t> (pos & kMask)];
+        return data_[static_cast<std::size_t> (stream * channels_ + channel) * capacity_ + static_cast<std::size_t> (pos & mask_)];
     }
 
 private:
     int streams_, channels_;
+    std::size_t capacity_, mask_;
     std::vector<float> data_;
     std::atomic<std::uint64_t> write_ { 0 };
     std::atomic<double> sampleRate_ { 48000.0 };

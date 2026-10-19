@@ -637,6 +637,52 @@ void InfoButton::mouseUp (const juce::MouseEvent& e)
     juce::CallOutBox::launchAsynchronously (std::make_unique<HelpBubble> (skin_, title_, body_), top->getLocalArea (this, getLocalBounds()), top);
 }
 
+// ------------------------------------------------------------------------------------------------ fenêtre de réglages
+namespace
+{
+class SettingsBubble : public juce::Component
+{
+public:
+    SettingsBubble (const Skin& s, ParamHost& host, const juce::String& title, std::vector<SettingItem> items) : skin_ (s), title_ (title)
+    {
+        for (auto& it : items)
+        {
+            auto p = std::make_unique<Pill> (skin_);
+            if (it.choices.empty()) p->bindToggle (host, it.id, it.label);
+            else p->bindChoice (host, it.id, it.label, it.choices);
+            addAndMakeVisible (*p);
+            pills_.push_back (std::move (p));
+        }
+        const int rows = static_cast<int> ((pills_.size() + 1) / 2);
+        setSize (14 * 2 + 160 * 2 + 8, 14 + 22 + rows * 38 + 6);
+    }
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (skin_.colour (Token::BgCard));
+        g.setColour (skin_.colour (Token::Accent));
+        g.setFont (skin_.font (12.0f, true));
+        g.drawText (title_, 14, 10, getWidth() - 28, 18, juce::Justification::centredLeft);
+    }
+    void resized() override
+    {
+        for (std::size_t i = 0; i < pills_.size(); ++i)
+            pills_[i]->setBounds (14 + static_cast<int> (i % 2) * 168, 14 + 22 + static_cast<int> (i / 2) * 38, 160, 30);
+    }
+
+private:
+    Skin skin_;   // copie : la bulle peut survivre à l'éditeur qui l'a ouverte
+    juce::String title_;
+    std::vector<std::unique_ptr<Pill>> pills_;
+};
+} // namespace
+
+void showSettingsPopup (juce::Component* anchor, const Skin& skin, ParamHost& host, const juce::String& title, std::vector<SettingItem> items)
+{
+    auto* top = anchor->getTopLevelComponent();
+    if (top == nullptr) return;
+    juce::CallOutBox::launchAsynchronously (std::make_unique<SettingsBubble> (skin, host, title, std::move (items)), top->getLocalArea (anchor, anchor->getLocalBounds()), top);
+}
+
 // ------------------------------------------------------------------------------------------------ LookAndFeel
 LookAndFeel::LookAndFeel (const Skin& s) : skin_ (s)
 {

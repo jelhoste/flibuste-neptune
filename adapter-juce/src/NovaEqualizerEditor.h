@@ -13,6 +13,7 @@ public:
     ~NovaEqualizerEditor() override;
     void setPageForTest (int p) { setPage (p); }
     void selectBandForTest (int b) { select (b); }
+    void stepSpectrumForTest();
 
 private:
     class CurveView;
@@ -51,7 +52,7 @@ private:
     nova::Pill *typePill_ = nullptr, *onPill_ = nullptr, *dynPill_ = nullptr, *stereoPill_ = nullptr, *deletePill_ = nullptr;
     std::vector<nova::KnobCard*> knobs_, detKnobs_;
     nova::Pill *detTypePill_ = nullptr, *detSlopePill_ = nullptr, *detLinkPill_ = nullptr;
-    nova::Pill *dynBypassPill_ = nullptr;
+    nova::Pill *dynBypassPill_ = nullptr, *spectrumPill_ = nullptr, *spectrumGear_ = nullptr;
     nova::Pill *phasePill_ = nullptr, *extPill_ = nullptr, *outPill_ = nullptr, *scalePill_ = nullptr, *minPhasePill_ = nullptr;
     juce::String metaText_, detTitle_;
     int lastType_ = -2, lastDyn_ = -2, lastSel_ = -2;

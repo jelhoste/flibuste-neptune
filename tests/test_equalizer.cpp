@@ -343,3 +343,31 @@ TEST_CASE ("equalizer: factory presets only name declared parameters, within ran
             CHECK (spec->clamp (v) == Approx (v));
         }
 }
+
+TEST_CASE ("equalizer: analyzer ring carries input and output only when active, spectrum settings are hidden", "[equalizer][analyzer]")
+{
+    EqRig r;
+    auto* m = static_cast<EqualizerModule*> (&r.runner.module());
+    auto& ring = m->analyzer();
+    const auto& p = r.runner.params();
+    for (const auto id : { e::spOn, e::spQuality, e::spSpeed, e::spTilt, e::spSmoothType, e::spSmoothOct, e::spSmoothErb, e::spTop, e::spMin, e::spChannels, e::spShowIn, e::spShowOut })
+    {
+        const auto* s = p.find (id);
+        REQUIRE (s != nullptr);
+        CHECK (s->hidden);
+        CHECK_FALSE (s->automatable);
+    }
+    CHECK (p.get (e::spOn) == 1.0);
+    CHECK (p.get (e::spTilt) == 3.0);          // 4,5 dB/oct
+    CHECK (p.get (e::spSmoothType) == 1.0);    // ERB
+    std::vector<float> a (256, 0.5f), b (256, 0.25f);
+    r.runner.process (a.data(), b.data(), 256, false);
+    CHECK (ring.writePos() == 0);
+    ring.setActive (true);
+    std::vector<float> c (256, 0.5f), d (256, 0.25f);
+    r.runner.process (c.data(), d.data(), 256, false);
+    REQUIRE (ring.writePos() == 256);
+    CHECK (ring.sample (e::kSpIn, 0, 10) == Approx (0.5f));
+    CHECK (ring.sample (e::kSpIn, 1, 10) == Approx (0.25f));
+    CHECK (ring.sample (e::kSpOut, 0, 10) == Approx (c[10]));     // sortie : le signal traité
+}

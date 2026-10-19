@@ -31,57 +31,6 @@ int choosePointsPerSecond (int sampleRate, int preferred, int timeLength)
     return preferred;
 }
 
-// ------------------------------------------------------------------------------------------------ fenêtre de réglages
-class SettingsPanel : public juce::Component
-{
-public:
-    SettingsPanel (const Skin& s, ParamHost& host, const std::function<juce::String (const char*)>& tx) : skin_ (s), title_ (tx ("nv.an_title"))
-    {
-        struct C { ParamId id; const char* label; std::vector<juce::String> choices; };
-        const C choices[6] = { { cm::anTime, "nv.an_time", { "6 s", "9 s", "12 s", "18 s" } },
-                               { cm::anMove, "nv.an_scroll", { "Sync", "Slow", "Roll" } },
-                               { cm::anMaxDb, "nv.an_max", { "6 dB", "0 dB", "-6 dB", "-12 dB", "-24 dB" } },
-                               { cm::anMinDb, "nv.an_min", { "-9 dB", "-18 dB", "-36 dB", "-54 dB", "-72 dB", "-120 dB" } },
-                               { cm::anMag, "nv.an_mag", { "Peak", "RMS" } },
-                               { cm::anStereo, "nv.an_ch", { "M+S", "L+R", "Left", "Right", "Mid", "Side" } } };
-        for (const auto& c : choices)
-        {
-            auto p = std::make_unique<Pill> (skin_);
-            p->bindChoice (host, c.id, tx (c.label), c.choices);
-            addAndMakeVisible (*p);
-            pills_.push_back (std::move (p));
-        }
-        struct T { ParamId id; const char* label; };
-        for (const auto& t : { T { cm::anShowIn, "nv.an_in" }, T { cm::anShowOut, "nv.an_out" }, T { cm::anShowRed, "nv.an_red" }, T { cm::anShowKey, "nv.an_key" } })
-        {
-            auto p = std::make_unique<Pill> (skin_);
-            p->bindToggle (host, t.id, tx (t.label));
-            addAndMakeVisible (*p);
-            pills_.push_back (std::move (p));
-        }
-        setSize (14 * 2 + 160 * 2 + 8, 14 + 22 + 5 * 38 + 6);
-    }
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (skin_.colour (Token::BgCard));
-        g.setColour (skin_.colour (Token::Accent));
-        g.setFont (skin_.font (12.0f, true));
-        g.drawText (title_, 14, 10, getWidth() - 28, 18, juce::Justification::centredLeft);
-    }
-    void resized() override
-    {
-        for (std::size_t i = 0; i < pills_.size(); ++i)
-        {
-            const int col = static_cast<int> (i % 2), row = static_cast<int> (i / 2);
-            pills_[i]->setBounds (14 + col * 168, 14 + 22 + row * 38, 160, 30);
-        }
-    }
-
-private:
-    Skin skin_;   // copie : la fenêtre peut survivre à l'éditeur qui l'a ouverte
-    juce::String title_;
-    std::vector<std::unique_ptr<Pill>> pills_;
-};
 } // namespace
 
 // ------------------------------------------------------------------------------------------------ vue
@@ -99,9 +48,15 @@ CompressorHistoryView::~CompressorHistoryView()
 
 void CompressorHistoryView::showSettings (juce::Component* anchor, const Skin& skin, ParamHost& host, const std::function<juce::String (const char*)>& tx)
 {
-    auto* top = anchor->getTopLevelComponent();
-    if (top == nullptr) return;
-    juce::CallOutBox::launchAsynchronously (std::make_unique<SettingsPanel> (skin, host, tx), top->getLocalArea (anchor, anchor->getLocalBounds()), top);
+    std::vector<SettingItem> items = {
+        { cm::anTime, tx ("nv.an_time"), { "6 s", "9 s", "12 s", "18 s" } },
+        { cm::anMove, tx ("nv.an_scroll"), { "Sync", "Slow", "Roll" } },
+        { cm::anMaxDb, tx ("nv.an_max"), { "6 dB", "0 dB", "-6 dB", "-12 dB", "-24 dB" } },
+        { cm::anMinDb, tx ("nv.an_min"), { "-9 dB", "-18 dB", "-36 dB", "-54 dB", "-72 dB", "-120 dB" } },
+        { cm::anMag, tx ("nv.an_mag"), { "Peak", "RMS" } },
+        { cm::anStereo, tx ("nv.an_ch"), { "M+S", "L+R", "Left", "Right", "Mid", "Side" } },
+        { cm::anShowIn, tx ("nv.an_in"), {} }, { cm::anShowOut, tx ("nv.an_out"), {} }, { cm::anShowRed, tx ("nv.an_red"), {} }, { cm::anShowKey, tx ("nv.an_key"), {} } };
+    showSettingsPopup (anchor, skin, host, tx ("nv.an_title"), std::move (items));
 }
 
 void CompressorHistoryView::readSettings()
@@ -293,7 +248,7 @@ void CompressorHistoryView::step (double now)
     const std::uint64_t w = ring.writePos();
     if (readPos_ > w) readPos_ = w;
     std::int64_t ready = static_cast<std::int64_t> (w - readPos_);
-    if (ready > static_cast<std::int64_t> (AnalyzerRing::kCapacity / 2))   // lecteur trop en retard : on saute pour ne jamais lire de données écrasées
+    if (ready > static_cast<std::int64_t> (ring.capacity() / 2))   // lecteur trop en retard : on saute pour ne jamais lire de données écrasées
     {
         readPos_ = w - static_cast<std::uint64_t> (samplesPerPoint_) * 2;
         ready = samplesPerPoint_ * 2;

@@ -174,6 +174,21 @@ bool EqualizerModule::declareParams (ParameterSet& set, std::string* error) cons
     add (pct (gainScale, "Gain Scale", -100.0, 200.0, 100.0));
     add (P::toggle (phaseFlip, "Phase Flip"));
     add (P::toggle (externalSide, "External Side"));
+    {
+        auto hid = [] (P p) { p.hidden = true; p.automatable = false; p.modulatable = false; return p; };
+        add (hid (P::toggle (spOn, "Spectrum On", true)));
+        add (hid (P::choice (spQuality, "Spectrum Quality", { "Normal", "High" }, 0)));
+        add (hid (P::choice (spSpeed, "Spectrum Speed", { "Very Fast", "Fast", "Medium", "Slow", "Very Slow" }, 2)));
+        add (hid (P::choice (spTilt, "Spectrum Tilt", { "0 dB/oct", "1.5 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" }, 3)));
+        add (hid (P::choice (spSmoothType, "Spectrum Smooth Type", { "OCT", "ERB" }, 1)));
+        add (hid (P::choice (spSmoothOct, "Spectrum Smooth Octave", { "1/24", "1/12", "1/6", "1/3", "1" }, 1)));
+        add (hid (P::choice (spSmoothErb, "Spectrum Smooth ERB", { "1/4", "1/2", "1", "2", "4" }, 1)));
+        add (hid (P::choice (spTop, "Spectrum Top dB", { "6", "0", "-6", "-12", "-18", "-24", "-36" }, 1)));
+        add (hid (P::choice (spMin, "Spectrum Range dB", { "-60", "-72", "-96" }, 0)));
+        add (hid (P::choice (spChannels, "Spectrum Channels", { "Stereo", "Left", "Right", "Mid", "Side" }, 0)));
+        add (hid (P::toggle (spShowIn, "Spectrum Show Input", true)));
+        add (hid (P::toggle (spShowOut, "Spectrum Show Output", true)));
+    }
     const std::vector<std::string> orders { "6 dB/oct", "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct" };
     for (int b = 0; b < kBands; ++b)
     {
@@ -217,6 +232,10 @@ void EqualizerModule::prepare (double sampleRate, int maxBlockSize)
     maxBlock_ = std::max (1, maxBlockSize);
     wl_.assign (static_cast<std::size_t> (maxBlock_), 0.0);
     wr_.assign (static_cast<std::size_t> (maxBlock_), 0.0);
+    preL_.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+    preR_.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+    analyzer_.setSampleRate (sampleRate_);
+    analyzer_.setMaxBlock (maxBlock_);
     const auto ringSize = static_cast<std::size_t> (std::ceil (0.04 * sampleRate_)) + 8;
     for (auto& b : bands_)
     {
@@ -415,6 +434,8 @@ void EqualizerModule::process (float* left, float* right, int n, const Parameter
     {
         wl_[static_cast<std::size_t> (i)] = left[i];
         wr_[static_cast<std::size_t> (i)] = right[i];
+        preL_[static_cast<std::size_t> (i)] = left[i];
+        preR_[static_cast<std::size_t> (i)] = right[i];
         inL = std::max (inL, std::abs (left[i]));
         inR = std::max (inR, std::abs (right[i]));
     }
@@ -444,6 +465,11 @@ void EqualizerModule::process (float* left, float* right, int n, const Parameter
         outR = std::max (outR, std::abs (right[i]));
     }
     lastGain_ = total;
+    if (analyzer_.active())
+    {
+        const float* const streams[4] = { preL_.data(), preR_.data(), left, right };
+        analyzer_.push (streams, n);
+    }
     meters_[kInPeakL].store (inL, std::memory_order_relaxed);
     meters_[kInPeakR].store (inR, std::memory_order_relaxed);
     meters_[kOutPeakL].store (outL, std::memory_order_relaxed);
