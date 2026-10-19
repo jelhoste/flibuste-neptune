@@ -413,3 +413,138 @@ TEST_CASE ("compressor: analyzer display settings are hidden, not automatable an
     CHECK (p.get (c::anShowIn) == 1.0);
     CHECK (p.get (c::anShowKey) == 0.0);
 }
+
+// ---- source MIDI du sidechain
+#include "neptune/core/MidiKey.h"
+
+TEST_CASE ("midi key: velocity maps to level with the shape curve", "[compressor][midikey]")
+{
+    CHECK (MidiKey::levelFor (127, 0.0) == Approx (1.0f));
+    CHECK (MidiKey::levelFor (0, 0.0) == 0.0f);
+    CHECK (MidiKey::levelFor (64, 0.0) == Approx (64.0f / 127.0f));              // linéaire au centre
+    CHECK (MidiKey::levelFor (64, 100.0) == Approx (std::pow (64.0 / 127.0, 4.0)));   // k = 4
+    CHECK (MidiKey::levelFor (64, -100.0) == Approx (std::pow (64.0 / 127.0, 0.25))); // k = 1/4
+    CHECK (MidiKey::levelFor (127, 100.0) == Approx (1.0f));
+    CHECK (MidiKey::levelFor (200, 0.0) == Approx (1.0f));                        // borné
+}
+
+TEST_CASE ("midi key: notes start at their sample offset and are held until released", "[compressor][midikey]")
+{
+    MidiKey k;
+    std::vector<float> out (64, -1.0f);
+    k.beginBlock();
+    k.push (10, 0x90, 60, 127);
+    k.push (40, 0x80, 60, 0);
+    k.render (out.data(), 64, 0, 0.0);
+    CHECK (out[9] == 0.0f);
+    CHECK (out[10] == Approx (1.0f));
+    CHECK (out[39] == Approx (1.0f));
+    CHECK (out[40] == 0.0f);
+    CHECK (! k.noteHeld());
+
+    k.beginBlock();
+    k.push (0, 0x90, 60, 64);
+    k.render (out.data(), 64, 0, 0.0);
+    CHECK (k.noteHeld());
+    k.beginBlock();
+    k.render (out.data(), 64, 0, 0.0);                                             // tenue d'un bloc à l'autre
+    CHECK (out[0] == Approx (64.0f / 127.0f));
+    CHECK (out[63] == Approx (64.0f / 127.0f));
+}
+
+TEST_CASE ("midi key: overlapping notes keep the strongest, channel filter, all notes off, velocity-0 note-on", "[compressor][midikey]")
+{
+    MidiKey k;
+    std::vector<float> out (16);
+    k.beginBlock();
+    k.push (0, 0x90, 60, 100);
+    k.push (0, 0x90, 64, 40);
+    k.render (out.data(), 16, 0, 0.0);
+    CHECK (out[0] == Approx (100.0f / 127.0f));
+    k.beginBlock();
+    k.push (0, 0x80, 60, 0);                                                       // la plus forte relâchée : la plus faible reste
+    k.render (out.data(), 16, 0, 0.0);
+    CHECK (out[0] == Approx (40.0f / 127.0f));
+    k.beginBlock();
+    k.push (0, 0x90, 64, 0);                                                       // note-on de vélocité 0 = note-off
+    k.render (out.data(), 16, 0, 0.0);
+    CHECK (out[0] == 0.0f);
+
+    k.beginBlock();
+    k.push (0, 0x91, 60, 127);                                                     // canal 2
+    k.render (out.data(), 16, 1, 0.0);                                             // filtre canal 1 : ignoré
+    CHECK (out[0] == 0.0f);
+    k.beginBlock();
+    k.render (out.data(), 16, 2, 0.0);                                             // le canal est relu à chaque bloc
+    CHECK (out[0] == Approx (1.0f));
+    k.beginBlock();
+    k.push (0, 0xB1, 123, 0);                                                      // All notes off
+    k.render (out.data(), 16, 0, 0.0);
+    CHECK (out[0] == 0.0f);
+}
+
+TEST_CASE ("midi key: events of a block that was not rendered are applied by the next beginBlock, and a full queue never loses a note-off", "[compressor][midikey]")
+{
+    MidiKey k;
+    std::vector<float> out (8);
+    k.beginBlock();
+    k.push (0, 0x90, 60, 127);
+    k.beginBlock();            // module contourné : le bloc n'a pas été rendu
+    k.render (out.data(), 8, 0, 0.0);
+    CHECK (out[0] == Approx (1.0f));
+    k.beginBlock();
+    for (int i = 0; i < 600; ++i) k.push (0, 0x90, static_cast<std::uint8_t> (i % 100), 10);
+    k.push (0, 0x80, 60, 0);
+    k.push (0, 0xB0, 123, 0);
+    k.render (out.data(), 8, 0, 0.0);
+    CHECK (out[0] == 0.0f);
+}
+
+TEST_CASE ("compressor: the MIDI source compresses while a note is held, bypasses the key filters and cannot be listened to", "[compressor][midikey]")
+{
+    auto run = [] (bool noteOn, bool listen, int channel, int noteChannel)
+    {
+        CompRig r;
+        r.set (c::externalSide, c::kSourceMidi);
+        r.set (c::sideOut, listen ? 1.0 : 0.0);
+        r.set (c::midiChannel, channel);
+        // un passe-haut à 5 kHz éteindrait une clé continue s'il s'appliquait : en MIDI il est contourné
+        r.set (c::sideEqBypass, 0.0);
+        r.set (c::bandParam (0, c::kStatus), c::kOn);
+        r.set (c::bandParam (0, c::kType), c::kHighPass);
+        r.set (c::bandParam (0, c::kFreq), 5000.0);
+        r.set (c::bandParam (0, c::kOrder), 3);
+        auto& mk = static_cast<CompressorModule&> (r.runner.module()).midiKey();
+        std::vector<float> a (256), b (256);
+        std::pair<float, float> last { 0.0f, 0.0f };
+        for (int blk = 0; blk < 560; ++blk)
+        {
+            std::fill (a.begin(), a.end(), 0.1f);
+            std::fill (b.begin(), b.end(), 0.1f);
+            mk.beginBlock();
+            if (blk == 0 && noteOn) mk.push (0, static_cast<std::uint8_t> (0x90 | noteChannel), 60, 127);
+            r.runner.process (a.data(), b.data(), 256, false);
+            last = { a[255], b[255] };
+        }
+        return last.first;
+    };
+    CHECK (20.0 * std::log10 (run (true, false, 0, 0) / 0.1f) < -10.0);                       // note tenue : réduction
+    CHECK (20.0 * std::log10 (run (false, false, 0, 0) / 0.1f) == Approx (0.0).margin (0.05)); // pas de note : aucune réduction
+    CHECK (20.0 * std::log10 (run (true, false, 3, 0) / 0.1f) == Approx (0.0).margin (0.05));  // note sur le canal 1, filtre canal 3
+    CHECK (20.0 * std::log10 (run (true, false, 3, 2) / 0.1f) < -10.0);                        // note sur le canal 3
+    CHECK (run (true, true, 0, 0) < 0.1f);                                                      // LISTEN ignoré en MIDI : le signal reste le signal compressé
+}
+
+TEST_CASE ("compressor: the MIDI source parameters exist and the old external switch values keep their meaning", "[compressor][midikey]")
+{
+    CompRig r;
+    const auto* src = r.runner.params().find (c::externalSide);
+    REQUIRE (src != nullptr);
+    CHECK (src->max == Approx (2.0));
+    CHECK (src->defaultValue == Approx (0.0));
+    REQUIRE (r.runner.params().find (c::midiShape) != nullptr);
+    const auto* ch = r.runner.params().find (c::midiChannel);
+    REQUIRE (ch != nullptr);
+    CHECK (ch->max == Approx (16.0));
+    CHECK (! ch->automatable);
+}

@@ -173,7 +173,7 @@ juce_add_plugin(Compresseur
   PLUGIN_MANUFACTURER_CODE    Trss
   PLUGIN_CODE                 Comp
   IS_SYNTH                    FALSE
-  NEEDS_MIDI_INPUT            FALSE
+  NEEDS_MIDI_INPUT            TRUE
   FORMATS                     Standalone)
 
 clap_juce_extensions_plugin(

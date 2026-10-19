@@ -12,6 +12,7 @@
 #include "neptune/core/AnalyzerRing.h"
 #include "neptune/core/Biquad.h"
 #include "neptune/core/DynamicsDsp.h"
+#include "neptune/core/MidiKey.h"
 #include "neptune/core/Oversampler.h"
 #include "neptune/core/StockModule.h"
 
@@ -25,6 +26,9 @@ constexpr ParamId externalSide = 116, sideOut = 117, sideEqBypass = 118, sideGai
 constexpr ParamId stereoMode = 120, stereoSwap = 121, stereoLink = 122, wet1 = 123, wet2 = 124;
 constexpr ParamId delta = 125, clipperDrive = 126, oversample = 127, lookahead = 128;
 constexpr ParamId rmsOn = 129, rmsLength = 130, rmsSpeed = 131, rmsMix = 132;
+// Source MIDI du sidechain (`externalSide` vaut 2) : forme de la correspondance vélocité -> niveau de la clé (-100..+100 %) et canal MIDI (0 = tous, 1..16 ; réglage non automatisable).
+constexpr ParamId midiShape = 198, midiChannel = 199;
+enum KeySource : int { kSourceInternal = 0, kSourceExternal, kSourceMidi };
 // Réglages d'affichage de l'analyseur (cachés, non automatisables, enregistrés avec l'état ; hors presets et A/B) : durée affichée (6, 9, 12, 18 s), défilement
 // (Sync, Slow, Roll), plage haute (6, 0, -6, -12, -24 dB) et basse (-9 ... -120 dB), crête ou RMS, canaux, courbes visibles.
 constexpr ParamId anTime = 188, anMove = 189, anMaxDb = 190, anMinDb = 191, anMag = 192, anStereo = 193, anShowIn = 194, anShowOut = 195, anShowRed = 196, anShowKey = 197;
@@ -66,6 +70,9 @@ public:
     }
     // Courbe de gain courante (pour l'affichage) : niveau de sortie (dB) pour un niveau d'entrée (dB).
     double curveOutputDb (const ParameterSet&, double inputDb) const noexcept;
+    // Source MIDI : l'adaptateur y pousse les messages MIDI de chaque bloc (voir MidiKey) ; sans effet tant que la source n'est pas « MIDI ».
+    MidiKey& midiKey() noexcept { return midiKey_; }
+    const MidiKey& midiKey() const noexcept { return midiKey_; }
     // Anneau d'analyse pour l'historique ; l'interface l'active tant qu'un éditeur est ouvert (le remplissage est sinon sauté).
     AnalyzerRing& analyzer() const noexcept { return analyzer_; }
     // Réponse (dB) d'un filtre de la clé à la fréquence f (0 dB si le filtre n'est pas en service), ou de l'ensemble des filtres en service.
@@ -80,9 +87,9 @@ private:
         dyn::Direction direction = dyn::Direction::Compress;
         double threshold = -32.0, ratio = 3.0, knee = 8.0, curve = 0.0, floorDb = -140.0, attack = 100.0, release = 500.0, pump = 0.0, smooth = 0.0;
         double range = 80.0, holdMs = 0.0, makeup = 0.0, wet = 1.0, sideGainDb = 0.0, link = 0.0, wet1 = 1.0, wet2 = 1.0, clipper = 0.0;
-        double rmsLengthMs = 32.0, rmsSpeed = 1.0, rmsMix = 0.5, lookaheadMs = 0.0;
-        bool rangeInf = false, ext = false, sideOut = false, eqBypass = false, midSide = true, stereoMax = false, swap = false, deltaOn = false, rmsOn = false;
-        int oversample = 0;
+        double rmsLengthMs = 32.0, rmsSpeed = 1.0, rmsMix = 0.5, lookaheadMs = 0.0, midiShape = 0.0;
+        bool rangeInf = false, ext = false, midi = false, sideOut = false, eqBypass = false, midSide = true, stereoMax = false, swap = false, deltaOn = false, rmsOn = false;
+        int oversample = 0, midiChannel = 0;
     };
     struct SideBand
     {
@@ -113,8 +120,8 @@ private:
     void rmsProcess (int channel, const float* in, float* out, int n) noexcept;
     double param (ParamId id) const noexcept { return values_[static_cast<std::size_t> (id - 100)]; }
 
-    std::array<std::size_t, 96> idx_ {};
-    std::array<double, 96> values_ {};
+    std::array<std::size_t, 100> idx_ {};   // ids 100..199
+    std::array<double, 100> values_ {};
     double sampleRate_ = 48000.0;
     int maxBlock_ = 0, factor_ = 1;
 
@@ -142,6 +149,8 @@ private:
     double makeupGain_ = 1.0, makeupTarget_ = 1.0;
 
     std::vector<float> sideL_, sideR_, preL_, preR_, postL_, postR_, rmsL_, rmsR_, sideEqL_, sideEqR_;
+    std::vector<float> midiBuf_;
+    MidiKey midiKey_;
     const float *keyL_ = nullptr, *keyR_ = nullptr;
     std::array<std::atomic<float>, compressor::kNumMeters> meters_ {};
 };

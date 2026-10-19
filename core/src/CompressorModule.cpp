@@ -43,7 +43,7 @@ bool CompressorModule::declareParams (ParameterSet& set, std::string* error) con
     add (P::continuous (hold, "Hold", Unit::Milliseconds, 0.0, 1000.0, 0.0, Curve::Power, 2.0));
     add (db (makeup, "Makeup Gain", -30.0, 30.0, 0.0));
     add (pct (wet, "Wet", 0.0, 100.0, 100.0));
-    add (P::toggle (externalSide, "External Side"));
+    add (P::choice (externalSide, "External Side", { "Internal", "External", "MIDI" }, 0));   // 0 et 1 comme l'ancien interrupteur
     add (P::toggle (sideOut, "Side Out"));
     add (P::toggle (sideEqBypass, "Side EQ Bypass", true));   // éteint par défaut : l'interface le rallume avec un jeu de filtres de départ
     add (db (sideGain, "Side Gain", -15.0, 15.0, 0.0));
@@ -70,6 +70,12 @@ bool CompressorModule::declareParams (ParameterSet& set, std::string* error) con
         add (hid (P::toggle (anShowKey, "Analyzer Show Key", false)));
     }
     add (P::toggle (rmsOn, "RMS ON"));
+    add (pct (midiShape, "MIDI Key Shape", -100.0, 100.0, 0.0));
+    {
+        std::vector<std::string> channels { "All" };
+        for (int c = 1; c <= 16; ++c) channels.push_back (std::to_string (c));
+        add (fixed (P::choice (midiChannel, "MIDI Key Channel", std::move (channels), 0)));
+    }
     add (P::continuous (rmsLength, "RMS Length", Unit::Milliseconds, 4.0, 160.0, 32.0, Curve::Exponential));
     add (P::continuous (rmsSpeed, "RMS Speed", Unit::None, 0.0, 8.0, 1.0));
     add (pct (rmsMix, "RMS Mix", 0.0, 100.0, 50.0));
@@ -111,6 +117,7 @@ void CompressorModule::prepare (double sampleRate, int maxBlockSize)
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
     maxBlock_ = std::max (1, maxBlockSize);
     const auto n = static_cast<std::size_t> (maxBlock_);
+    midiBuf_.assign (n, 0.0f);
     for (auto* v : { &sideL_, &sideR_, &preL_, &preR_, &postL_, &postR_, &rmsL_, &rmsR_, &sideEqL_, &sideEqR_ }) v->assign (4 * n, 0.0f);
     for (auto& o : os_) o.prepare (maxBlock_);
     const auto lookMax = static_cast<std::size_t> (std::ceil (maxLookaheadMs * 0.001 * sampleRate_)) + 2;
@@ -168,7 +175,11 @@ void CompressorModule::readSettings (const ParameterSet& params) noexcept
     s.holdMs = param (hold);
     s.makeup = param (makeup);
     s.wet = param (wet) * 0.01;
-    s.ext = param (externalSide) >= 0.5;
+    const int source = static_cast<int> (std::lround (param (externalSide)));
+    s.ext = source == kSourceExternal;
+    s.midi = source == kSourceMidi;
+    s.midiShape = param (midiShape);
+    s.midiChannel = std::clamp (static_cast<int> (std::lround (param (midiChannel))), 0, 16);
     s.sideOut = param (sideOut) >= 0.5;
     s.eqBypass = param (sideEqBypass) >= 0.5;
     s.sideGainDb = param (sideGain);
@@ -456,15 +467,25 @@ void CompressorModule::process (float* left, float* right, int n, const Paramete
     float peakIn[2] = { 0.0f, 0.0f };
     for (int i = 0; i < n; ++i) { peakIn[0] = std::max (peakIn[0], std::fabs (left[i])); peakIn[1] = std::max (peakIn[1], std::fabs (right[i])); }
 
-    // clé : externe si demandée et branchée, sinon le signal lui-même ; gain puis filtres de détection
+    // clé : externe si demandée et branchée, sinon le signal lui-même ; gain puis filtres de détection. Source MIDI : clé synthétique constante,
+    // sans gain ni filtres (le niveau vient de la vélocité).
     const bool useExt = s.ext && keyL_ != nullptr && keyR_ != nullptr;
-    const float sideGain = static_cast<float> (dyn::decibelsToGain (s.sideGainDb));
-    for (int i = 0; i < n; ++i)
+    if (s.midi)
     {
-        side[0][i] = (useExt ? keyL_[i] : left[i]) * sideGain;
-        side[1][i] = (useExt ? keyR_[i] : right[i]) * sideGain;
+        midiKey_.render (midiBuf_.data(), n, s.midiChannel, s.midiShape);
+        std::copy (midiBuf_.begin(), midiBuf_.begin() + n, side[0]);
+        std::copy (midiBuf_.begin(), midiBuf_.begin() + n, side[1]);
     }
-    if (! s.eqBypass)
+    else
+    {
+        const float sideGain = static_cast<float> (dyn::decibelsToGain (s.sideGainDb));
+        for (int i = 0; i < n; ++i)
+        {
+            side[0][i] = (useExt ? keyL_[i] : left[i]) * sideGain;
+            side[1][i] = (useExt ? keyR_[i] : right[i]) * sideGain;
+        }
+    }
+    if (! s.eqBypass && ! s.midi)
         for (int b = 0; b < kBands; ++b)
             if (bands_[static_cast<std::size_t> (b)].status == kOn)
                 for (int c = 0; c < 2; ++c)
@@ -546,7 +567,7 @@ void CompressorModule::process (float* left, float* right, int n, const Paramete
             main[0][i] = preL_[static_cast<std::size_t> (i)] - postL_[static_cast<std::size_t> (i)];
             main[1][i] = preR_[static_cast<std::size_t> (i)] - postR_[static_cast<std::size_t> (i)];
         }
-    if (s.sideOut)
+    if (s.sideOut && ! s.midi)   // écouter une clé MIDI constante enverrait du continu à la sortie
         for (int i = 0; i < n; ++i) { main[0][i] = sideEqL_[static_cast<std::size_t> (i)]; main[1][i] = sideEqR_[static_cast<std::size_t> (i)]; }
     float peakOut[2] = { 0.0f, 0.0f };
     for (int i = 0; i < n; ++i) { peakOut[0] = std::max (peakOut[0], std::fabs (left[i])); peakOut[1] = std::max (peakOut[1], std::fabs (right[i])); }

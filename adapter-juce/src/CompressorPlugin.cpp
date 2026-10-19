@@ -69,7 +69,7 @@ void CompressorProcessor::timerCallback()
     setLatencySamples (latency);
 }
 
-void CompressorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void CompressorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
@@ -83,6 +83,16 @@ void CompressorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         keyR = buffer.getReadPointer (sc->getNumberOfChannels() >= 2 && buffer.getNumChannels() >= 4 ? 3 : 2);
     }
     runner_.setKey (keyL, keyR);
+    // source MIDI : les messages du bloc pilotent la clé synthétique du module (sans effet tant que la source n'est pas « MIDI »)
+    auto& midiKey = static_cast<CompressorModule&> (runner_.module()).midiKey();
+    midiKey.beginBlock();
+    for (const auto meta : midi)
+    {
+        const auto msg = meta.getMessage();
+        const auto* raw = msg.getRawData();
+        if (msg.getRawDataSize() >= 2 && raw[0] >= 0x80 && raw[0] < 0xF0)
+            midiKey.push (meta.samplePosition, raw[0], raw[1], msg.getRawDataSize() >= 3 ? raw[2] : std::uint8_t (0));
+    }
     runner_.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n); // en place ; le bypass est le paramètre du plugin
 }
 
@@ -202,6 +212,7 @@ void CompressorPluginEditor::buildContent()
     const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
     NovaCompressorEditor::Options opt;
     opt.brand = true;
+    opt.midiSource = true;
     opt.moduleName = "compressor";
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
     opt.getSettings = [&p] { return p.settings(); };

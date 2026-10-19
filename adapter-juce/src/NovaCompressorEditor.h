@@ -18,6 +18,7 @@ public:
 private:
     class SideEqView;
     struct Zone;
+    class MidiShapeView;
 
     void layout() override;
     void tick() override;
@@ -36,6 +37,9 @@ private:
     nova::CompressorHistoryView* history_ = nullptr;
     nova::Pill* analyzerPill_ = nullptr;
     SideEqView* sideEq_ = nullptr;
+    MidiShapeView* shapeView_ = nullptr;
+    nova::Pill* channelPill_ = nullptr;
+    nova::Text* midiNote_ = nullptr;
 
     struct Column { nova::Panel* card; nova::KnobCard* knob; nova::SubSlider* sub; };
     std::vector<Column> columns_;

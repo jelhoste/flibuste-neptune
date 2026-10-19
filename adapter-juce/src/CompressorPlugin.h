@@ -31,7 +31,7 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return "Compresseur"; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; }   // source MIDI du sidechain
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
     int getNumPrograms() override { return 1; }

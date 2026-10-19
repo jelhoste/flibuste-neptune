@@ -239,6 +239,99 @@ private:
     std::uint32_t key_ = 0xFFFFFFFFu;
 };
 
+// ------------------------------------------------------------------------------------------------ forme de la correspondance vélocité -> niveau (source MIDI)
+class NovaCompressorEditor::MidiShapeView : public juce::Component
+{
+public:
+    MidiShapeView (const nova::Skin& s, ParamHost& h, const CompressorModule* m, juce::String title) : skin_ (s), host_ (h), module_ (m), title_ (std::move (title)) {}
+
+    void update()
+    {
+        const auto v = host_.parameters().version (cm::midiShape);
+        const bool held = module_ != nullptr && module_->midiKey().noteHeld();
+        const float level = module_ != nullptr ? module_->midiKey().shownLevel() : 0.0f;
+        if (v == seen_ && held == held_ && std::fabs (level - level_) < 0.002f) return;
+        seen_ = v;
+        held_ = held;
+        level_ = level;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto b = getLocalBounds().toFloat();
+        g.setColour (skin_.colour (Token::TextDim2));
+        g.setFont (skin_.font (12.0f, true));
+        g.drawText (title_, b.withHeight (skin_.px (15.0f)), juce::Justification::centred, true);
+        const auto box = b.withTop (skin_.px (17.0f)).reduced (0.0f, skin_.px (1.0f));
+        skin_.fill (g, Token::StageBg, box, skin_.px (5.0f));
+        const double shape = host_.parameters().get (cm::midiShape);
+        auto at = [&] (double t, double y) { return juce::Point<float> (box.getX() + skin_.px (6.0f) + static_cast<float> (t) * (box.getWidth() - skin_.px (12.0f)),
+                                                                          box.getBottom() - skin_.px (4.0f) - static_cast<float> (y) * (box.getHeight() - skin_.px (8.0f))); };
+        g.setColour (skin_.colour (Token::Grid));
+        g.drawLine ({ at (0.0, 0.0), at (1.0, 1.0) }, skin_.px (1.0f));   // droite de référence
+        juce::Path curve;
+        for (int i = 0; i <= 32; ++i)
+        {
+            const double t = i / 32.0;
+            const auto pt = at (t, std::pow (t, exponent (shape)));
+            if (i == 0) curve.startNewSubPath (pt); else curve.lineTo (pt);
+        }
+        g.setColour (skin_.colour (Token::Accent));
+        g.strokePath (curve, juce::PathStrokeType (skin_.px (2.0f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (held_ && level_ > 0.0f)
+        {
+            const auto pt = at (std::pow (static_cast<double> (level_), 1.0 / exponent (shape)), level_);
+            g.setColour (skin_.colour (Token::Pink));
+            g.fillEllipse (pt.x - skin_.px (4.0f), pt.y - skin_.px (4.0f), skin_.px (8.0f), skin_.px (8.0f));
+        }
+        g.setColour (skin_.colour (held_ ? Token::Pink : Token::Grid));   // voyant de note tenue
+        g.fillEllipse (box.getX() + skin_.px (7.0f), box.getY() + skin_.px (6.0f), skin_.px (8.0f), skin_.px (8.0f));
+        g.setColour (skin_.colour (Token::TextDim));
+        g.setFont (skin_.font (11.0f));
+        const juce::String text = std::fabs (shape) < 0.5 ? juce::String ("LINEAR") : (shape > 0 ? "EXP " : "LOG ") + juce::String (std::lround (std::fabs (shape))) + " %";
+        g.drawText (text, box.reduced (skin_.px (6.0f), 0.0f), juce::Justification::centredRight, true);
+    }
+
+    // glisser vers le bas : courbe plus convexe (EXP) ; vers le haut : LOG ; double-clic : linéaire
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu()) return;
+        host_.uiBeginEdit (cm::midiShape);
+        start_ = host_.parameters().get (cm::midiShape);
+        dragging_ = true;
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging_) return;
+        const double plain = std::clamp (start_ + (e.position.y - e.mouseDownPosition.y) / skin_.px (1.0f) * (e.mods.isShiftDown() ? 0.2 : 1.0) * (200.0 / 120.0), -100.0, 100.0);
+        if (const auto* spec = host_.parameters().find (cm::midiShape)) host_.uiSetNormalised (cm::midiShape, spec->toNormalized (plain));
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! dragging_) return;
+        dragging_ = false;
+        host_.uiEndEdit (cm::midiShape);
+    }
+    void mouseDoubleClick (const juce::MouseEvent&) override { host_.uiResetToDefault (cm::midiShape); repaint(); }
+
+private:
+    static double exponent (double shapePercent)
+    {
+        const double s = std::clamp (shapePercent, -100.0, 100.0) * 0.01;
+        return s >= 0.0 ? 1.0 + 3.0 * s : 1.0 / (1.0 - 3.0 * s);
+    }
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    const CompressorModule* module_;
+    juce::String title_;
+    std::uint32_t seen_ = 0xFFFFFFFFu;
+    bool held_ = false, dragging_ = false;
+    float level_ = 0.0f;
+    double start_ = 0.0;
+};
+
 // ------------------------------------------------------------------------------------------------ zone de filtres de la clé
 struct NovaCompressorEditor::Zone
 {
@@ -354,7 +447,10 @@ void NovaCompressorEditor::buildSidechainPage()
     scPanel_ = add<nova::Panel> (1, skin());
     scPanel_->setTitle (tx ("nv.sc_title"));
     sourcePill_ = add<nova::Pill> (1, skin());
-    sourcePill_->bindChoice (host(), cm::externalSide, tx ("nv.source"), { tx ("nv.src_internal"), tx ("nv.src_external") });
+    if (options().midiSource)
+        sourcePill_->bindChoice (host(), cm::externalSide, tx ("nv.source"), { tx ("nv.src_internal"), tx ("nv.src_external"), tx ("nv.src_midi") });
+    else
+        sourcePill_->bindChoice (host(), cm::externalSide, tx ("nv.source"), { tx ("nv.src_internal"), tx ("nv.src_external") });
     listenPill_ = add<nova::Pill> (1, skin());
     listenPill_->bindToggle (host(), cm::sideOut, tx ("nv.listen"));
     eqPill_ = add<nova::Pill> (1, skin());
@@ -378,6 +474,19 @@ void NovaCompressorEditor::buildSidechainPage()
     rmsPill_->bindToggle (host(), cm::rmsOn, tx ("nv.rms_on"));
     keyGain_ = add<nova::SubSlider> (1, skin(), host(), cm::sideGain, tx ("nv.side_gain"));
     rmsLength_ = add<nova::SubSlider> (1, skin(), host(), cm::rmsLength, tx ("nv.rms_length"));
+    shapeView_ = add<MidiShapeView> (1, skin(), host(), module_, tx ("nv.midi_shape"));
+    channelPill_ = add<nova::Pill> (1, skin());
+    channelPill_->onClick = [this]
+    {
+        juce::PopupMenu menu;
+        for (int c = 0; c <= 16; ++c) menu.addItem (c + 1, c == 0 ? tx ("nv.midi_all") : juce::String (c), true, choiceValue (cm::midiChannel) == c);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (channelPill_), [this, safe = juce::Component::SafePointer<juce::Component> (this)] (int r)
+        {
+            if (safe != nullptr && r > 0) nova::setParam (host(), cm::midiChannel, r - 1);
+        });
+    };
+    midiNote_ = add<nova::Text> (1, skin(), Token::TextDim, 12.0f, true);
+    midiNote_->setText (tx ("nv.midi_note"));
     addInfo (1, sourcePill_, "hlp.source");
     addInfo (1, listenPill_, "hlp.listen");
     addInfo (1, eqPill_, "hlp.eqswitch");
@@ -510,7 +619,10 @@ void NovaCompressorEditor::layout()
     rmsPill_->setBounds (R (628, 108, 60, 30));
     keyGain_->setBounds (R (724, 100, 176, 48));
     rmsLength_->setBounds (R (930, 100, 176, 48));
+    shapeView_->setBounds (R (724, 100, 176, 48));
+    channelPill_->setBounds (R (930, 108, 176, 30));
     sideEq_->setBounds (R (220, 152, 910, 314));
+    midiNote_->setBounds (R (220, 300, 910, 40));
     const float unit = (942.0f - 12.0f * 4.0f) / 13.0f;
     float zx = 204.0f;
     for (auto& z : zones_)
@@ -588,10 +700,24 @@ void NovaCompressorEditor::tick()
         for (auto* k : z->knobs) k->setAlpha (on ? 1.0f : 0.4f);
         if (z->slope != nullptr) z->slope->setAlpha (on ? 1.0f : 0.4f);
     }
-    const bool ext = value (cm::externalSide) >= 0.5;
-    listenPill_->setAlpha (1.0f);
-    sourcePill_->setTintToken (ext ? Token::Pink : Token::Accent);
-    (void) ext;
+    const int source = choiceValue (cm::externalSide);
+    const bool midi = source == cm::kSourceMidi && options().midiSource;
+    sourcePill_->setTintToken (source != cm::kSourceInternal ? Token::Pink : Token::Accent);
+    // source MIDI : la clé est un niveau constant dérivé de la vélocité, sans filtres, ni gain, ni détecteur RMS, ni écoute
+    if (currentPage() == 1)
+    {
+        keyGain_->setVisible (! midi);
+        rmsLength_->setVisible (! midi);
+        rmsPill_->setVisible (! midi);
+        shapeView_->setVisible (midi);
+        channelPill_->setVisible (midi);
+        midiNote_->setVisible (midi);
+        eqPill_->setVisible (! midi);
+        listenPill_->setVisible (! midi);
+        sideEq_->setAlpha (midi ? 0.25f : 1.0f);
+    }
+    shapeView_->update();
+    channelPill_->setText (tx ("nv.midi_channel") + "  " + (choiceValue (cm::midiChannel) == 0 ? tx ("nv.midi_all") : juce::String (choiceValue (cm::midiChannel))));
 
     // anticipation et latence
     const double la = value (cm::lookahead);
