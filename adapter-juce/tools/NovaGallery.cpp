@@ -5,11 +5,13 @@
 #include "../src/NovaCompressorEditor.h"
 #include "../src/NovaEqualizerEditor.h"
 #include "../src/NovaShaperEditor.h"
+#include "../src/NovaChorusEditor.h"
 #include "../src/NovaDelayEditor.h"
 #include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/ShaperModule.h"
+#include "neptune/core/ChorusModule.h"
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/StockModule.h"
 #include <cmath>
@@ -371,6 +373,54 @@ int main (int argc, char** argv)
             ed.setPageForTest (c.page);
             ed.selectLineForTest (c.sel);
             ed.showFiltersForTest (c.filters);
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel du chorus
+    {
+        ModuleRunner cRunner (std::make_unique<ChorusModule>());
+        cRunner.prepare (48000.0, 512);
+        RunnerHost chh (cRunner);
+        auto& cp = cRunner.params();
+        cp.set (chorus::voices, 1.0);
+        cp.set (chorus::feedback, 20.0);
+        cp.set (chorus::lowCutOn, 1.0);
+        cp.set (chorus::lowCut, 180.0);
+        cp.set (chorus::highCutOn, 1.0);
+        cp.set (chorus::highCut, 9000.0);
+        cp.set (chorus::bbd, 60.0);
+        struct CCase { const char* name; th::ThemeId id; float scale; int page; bool response; bool tal; };
+        const CCase ccs[] = { { "chorus-dark-p0", th::ThemeId::Dark, 1.0f, 0, false, false }, { "chorus-dark-resp", th::ThemeId::Dark, 1.0f, 0, true, false }, { "chorus-dark-tal", th::ThemeId::Dark, 1.0f, 0, false, true },
+                              { "chorus-dark-p1", th::ThemeId::Dark, 1.0f, 1, false, false }, { "chorus-dark-p2", th::ThemeId::Dark, 1.0f, 2, false, false },
+                              { "chorus-light-p0", th::ThemeId::Light, 1.0f, 0, false, false }, { "chorus-hammond-p0", th::ThemeId::Hammond, 1.0f, 0, false, false },
+                              { "chorus-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, false, false } };
+        for (const auto& c : ccs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            cp.set (chorus::mode, c.tal ? 1.0 : 0.0);
+            cp.set (chorus::talI, c.tal ? 1.0 : 0.0);
+            cp.set (chorus::talII, c.tal ? 1.0 : 0.0);
+            const auto& def = th::definition (c.id);
+            NovaChorusEditor::Options opt;
+            opt.brand = true;
+            opt.hostTempo = true;
+            opt.moduleName = "chorus";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaChorusEditor ed (chh, static_cast<const ChorusModule*> (&cRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            ed.showResponseForTest (c.response);
+            {
+                std::vector<float> l (512, 0.0f), r (512, 0.0f);
+                for (int b = 0; b < 40; ++b) cRunner.process (l.data(), r.data(), 512, false);   // fait avancer la phase du LFO
+            }
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;

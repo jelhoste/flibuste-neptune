@@ -58,6 +58,7 @@ target_sources(Neptune PRIVATE
   src/NovaShaperEditor.cpp
   src/NovaShaperWaveView.cpp
   src/NovaDelayEditor.cpp
+  src/NovaChorusEditor.cpp
   src/NovaCompressorEditor.cpp
   src/NovaHistoryView.cpp
   src/NovaEditor.cpp
@@ -295,6 +296,48 @@ target_link_libraries(Delai
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+
+# ---- Choeur (nom provisoire) : chorus (série NOVA, moteur standard et mode TAL), plugin CLAP effet indépendant ------------------------------
+set(CHOEUR_CLAP_ID "com.tournedosrossini.choeur" CACHE STRING "Identifiant CLAP du chorus")
+
+juce_add_plugin(Choeur
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Choeur"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Chor
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Choeur
+  CLAP_ID       "${CHOEUR_CLAP_ID}"
+  CLAP_FEATURES audio-effect chorus stereo)
+
+target_sources(Choeur PRIVATE
+  src/ChorusPlugin.cpp
+  src/NovaChorusEditor.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Choeur PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Choeur
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- AnalogSynth (nom provisoire) : le synthé soustractif de Neptune, plugin CLAP instrument indépendant --------------------
 # Même moteur (neptune_core : AnalogSynth.h, Synth.h, SynthVoices.h) et même vue (SynthView) que la piste Synthé de Neptune ;
 # en plus, le système de presets (Preset.h, PresetLibrary.h : banques MIDI, grille concert, corbeille) et son gestionnaire.
@@ -432,7 +475,7 @@ target_link_libraries(Orgamon
 # ---- NovaGallery : rendu hors-ligne en PNG des composants communs NOVA (NovaKit), pour la comparaison avec les maquettes HTML ----------
 # Outil de développement (CI Linux : exécuté sous xvfb, images archivées) ; non installé.
 juce_add_console_app(NovaGallery PRODUCT_NAME "NovaGallery")
-target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/NovaSpectrum.cpp src/NovaShaperEditor.cpp src/NovaShaperWaveView.cpp src/NovaDelayEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
+target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/NovaSpectrum.cpp src/NovaShaperEditor.cpp src/NovaShaperWaveView.cpp src/NovaDelayEditor.cpp src/NovaChorusEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
 target_compile_definitions(NovaGallery PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1)
 target_link_libraries(NovaGallery
   PRIVATE

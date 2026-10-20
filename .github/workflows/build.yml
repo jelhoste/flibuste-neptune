@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur et Délai)
-        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai et Chœur)
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -116,6 +116,9 @@ jobs:
           DEL=$(find build/adapter-juce/Delai_artefacts -name 'Delai.clap' -print -quit)
           test -n "$DEL" || { echo "Delai.clap introuvable"; exit 1; }
           "$CV" validate "$DEL"
+          CHO=$(find build/adapter-juce/Choeur_artefacts -name 'Choeur.clap' -print -quit)
+          test -n "$CHO" || { echo "Choeur.clap introuvable"; exit 1; }
+          "$CV" validate "$CHO"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -331,6 +334,30 @@ jobs:
         with:
           name: Delai-${{ matrix.name }}
           path: dist-del/*
+          if-no-files-found: error
+
+      # Le chorus séparé, archivé à part.
+      - name: Archive Choeur.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Choeur_artefacts -name 'Choeur.clap' -print -quit)
+          test -n "$CLAP" || { echo "Choeur.clap introuvable"; exit 1; }
+          mkdir -p dist-cho/stage
+          cp -R "$CLAP" dist-cho/stage/
+          cd dist-cho/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Choeur-${{ matrix.name }}.zip" Choeur.clap
+          else
+            tar -czf "../Choeur-${{ matrix.name }}.tar.gz" Choeur.clap
+          fi
+          cd ../..
+          rm -rf dist-cho/stage
+          ls -la dist-cho
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Choeur-${{ matrix.name }}
+          path: dist-cho/*
           if-no-files-found: error
 
   release:
