@@ -59,6 +59,7 @@ target_sources(Neptune PRIVATE
   src/NovaShaperWaveView.cpp
   src/NovaDelayEditor.cpp
   src/NovaChorusEditor.cpp
+  src/NovaMicrodecaleEditor.cpp
   src/NovaCompressorEditor.cpp
   src/NovaHistoryView.cpp
   src/NovaEditor.cpp
@@ -338,6 +339,48 @@ target_link_libraries(Choeur
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
+
+# ---- Microdecale (nom provisoire) : micro-décalage de hauteur de type H3000 MICROPITCHSHIFT (série NOVA), plugin CLAP effet indépendant ------------------------------
+set(MICRODECALE_CLAP_ID "com.tournedosrossini.microdecale" CACHE STRING "Identifiant CLAP de Microdécale")
+
+juce_add_plugin(Microdecale
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Microdecale"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Micr
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Microdecale
+  CLAP_ID       "${MICRODECALE_CLAP_ID}"
+  CLAP_FEATURES audio-effect pitch-correction stereo)
+
+target_sources(Microdecale PRIVATE
+  src/MicrusPlugin.cpp
+  src/NovaMicrusEditor.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Microdecale PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Microdecale
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
 # ---- AnalogSynth (nom provisoire) : le synthé soustractif de Neptune, plugin CLAP instrument indépendant --------------------
 # Même moteur (neptune_core : AnalogSynth.h, Synth.h, SynthVoices.h) et même vue (SynthView) que la piste Synthé de Neptune ;
 # en plus, le système de presets (Preset.h, PresetLibrary.h : banques MIDI, grille concert, corbeille) et son gestionnaire.
@@ -475,7 +518,7 @@ target_link_libraries(Orgamon
 # ---- NovaGallery : rendu hors-ligne en PNG des composants communs NOVA (NovaKit), pour la comparaison avec les maquettes HTML ----------
 # Outil de développement (CI Linux : exécuté sous xvfb, images archivées) ; non installé.
 juce_add_console_app(NovaGallery PRODUCT_NAME "NovaGallery")
-target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/NovaSpectrum.cpp src/NovaShaperEditor.cpp src/NovaShaperWaveView.cpp src/NovaDelayEditor.cpp src/NovaChorusEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
+target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/NovaSpectrum.cpp src/NovaShaperEditor.cpp src/NovaShaperWaveView.cpp src/NovaDelayEditor.cpp src/NovaChorusEditor.cpp src/NovaMicrodecaleEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
 target_compile_definitions(NovaGallery PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1)
 target_link_libraries(NovaGallery
   PRIVATE

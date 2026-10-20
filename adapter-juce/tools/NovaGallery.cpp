@@ -7,12 +7,14 @@
 #include "../src/NovaShaperEditor.h"
 #include "../src/NovaChorusEditor.h"
 #include "../src/NovaDelayEditor.h"
+#include "../src/NovaMicrodecaleEditor.h"
 #include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/ShaperModule.h"
 #include "neptune/core/ChorusModule.h"
 #include "neptune/core/DelayModule.h"
+#include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/StockModule.h"
 #include <cmath>
 #include <memory>
@@ -421,6 +423,38 @@ int main (int argc, char** argv)
                 std::vector<float> l (512, 0.0f), r (512, 0.0f);
                 for (int b = 0; b < 40; ++b) cRunner.process (l.data(), r.data(), 512, false);   // fait avancer la phase du LFO
             }
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel de Microdécale
+    {
+        ModuleRunner mRunner (std::make_unique<MicrodecaleModule>());
+        mRunner.prepare (48000.0, 512);
+        RunnerHost mh (mRunner);
+        auto& mp = mRunner.params();
+        mp.set (microdecale::feedbackL, 30.0);
+        mp.set (microdecale::levelDryL, 40.0);
+        struct MCase { const char* name; th::ThemeId id; float scale; int page; };
+        const MCase mcs[] = { { "micro-dark-p0", th::ThemeId::Dark, 1.0f, 0 }, { "micro-dark-p1", th::ThemeId::Dark, 1.0f, 1 }, { "micro-dark-p2", th::ThemeId::Dark, 1.0f, 2 },
+                              { "micro-light-p0", th::ThemeId::Light, 1.0f, 0 }, { "micro-hammond-p1", th::ThemeId::Hammond, 1.0f, 1 }, { "micro-dark-p0-070", th::ThemeId::Dark, 0.7f, 0 } };
+        for (const auto& c : mcs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaMicrodecaleEditor::Options opt;
+            opt.brand = true;
+            opt.moduleName = "microdecale";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaMicrodecaleEditor ed (mh, static_cast<const MicrodecaleModule*> (&mRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;

@@ -12,8 +12,16 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (handle_.instance == nullptr) return;
     bypassId_ = processor_.insertBypassParam (kind, index, slot);
 
-    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer", isDelay = handle_.instance->type == "delay", isChorus = handle_.instance->type == "chorus";
-    if (isChorus)
+    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer", isDelay = handle_.instance->type == "delay", isChorus = handle_.instance->type == "chorus", isMicro = handle_.instance->type == "microdecale";
+    if (isMicro)
+    {
+        NovaMicrodecaleEditor::Options opt;
+        opt.moduleName = "microdecale";
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        microContent_ = std::make_unique<NovaMicrodecaleEditor> (*handle_.host, static_cast<const MicrodecaleModule*> (&handle_.instance->runner.module()), palette_, knobStyle, tr_, opt);
+        addAndMakeVisible (*microContent_);
+    }
+    else if (isChorus)
     {
         NovaChorusEditor::Options opt;
         opt.moduleName = "chorus";
@@ -70,7 +78,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                                    : kind == NeptuneProcessor::StripKind::Parallel
                                          ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
                                          : text ("insert.where_master");
-    title_ = text (isChorus ? "module.chorus" : isDelay ? "module.delay" : isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
+    title_ = text (isMicro ? "module.microdecale" : isChorus ? "module.chorus" : isDelay ? "module.delay" : isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 
     bypassButton_.setButtonText (text ("insert.bypass"));
@@ -120,6 +128,7 @@ void InsertOverlay::resized()
     if (equalizerContent_ != nullptr) equalizerContent_->setBounds (r);
     if (delayContent_ != nullptr) delayContent_->setBounds (r);
     if (chorusContent_ != nullptr) chorusContent_->setBounds (r);
+    if (microContent_ != nullptr) microContent_->setBounds (r);
     if (compressorContent_ != nullptr) compressorContent_->setBounds (r);
 }
 
@@ -149,5 +158,6 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
     if (equalizerContent_ != nullptr) return equalizerContent_->keyPressed (k);
     if (delayContent_ != nullptr) return delayContent_->keyPressed (k);
     if (chorusContent_ != nullptr) return chorusContent_->keyPressed (k);
+    if (microContent_ != nullptr) return microContent_->keyPressed (k);
     return false;
 }

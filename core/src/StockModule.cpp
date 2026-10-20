@@ -8,6 +8,7 @@
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/EqualizerModule.h"
+#include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/ShaperModule.h"
 #include "neptune/core/UtilityModule.h"
 
@@ -131,7 +132,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" } };
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" }, { "microdecale", "module.microdecale" } };
     return modules;
 }
 
@@ -143,6 +144,7 @@ std::unique_ptr<StockModule> createModule (std::string_view typeId)
     if (typeId == "equalizer") return std::make_unique<EqualizerModule>();
     if (typeId == "delay") return std::make_unique<DelayModule>();
     if (typeId == "chorus") return std::make_unique<ChorusModule>();
+    if (typeId == "microdecale") return std::make_unique<MicrodecaleModule>();
     return nullptr;
 }
 
