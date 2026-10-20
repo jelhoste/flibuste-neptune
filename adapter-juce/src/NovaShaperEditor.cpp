@@ -425,7 +425,13 @@ void NovaShaperEditor::buildShaperPage()
     struct Bar { ParamId id; const char* key; };
     for (const Bar b : { Bar { sh::attackTime, "shp.attack_time" }, Bar { sh::sustainTime, "shp.sustain_time" }, Bar { sh::shapeSmoothing, "shp.smoothing" },
                          Bar { sh::range, "shp.range" }, Bar { sh::levelKnee, "shp.knee" }, Bar { sh::stereoLink, "shp.link" } })
-        bars_.push_back (add<nova::SubSlider> (0, skin(), host(), b.id, tx (b.key), false));
+    {
+        auto* bar = add<nova::SubSlider> (0, skin(), host(), b.id, tx (b.key), false);
+        bars_.push_back (bar);
+        const char* hk = b.id == sh::attackTime ? "hlp.sh_attacktime" : b.id == sh::sustainTime ? "hlp.sh_sustaintime" : b.id == sh::shapeSmoothing ? "hlp.sh_smoothing"
+                       : b.id == sh::range ? "hlp.sh_range" : b.id == sh::levelKnee ? "hlp.sh_knee" : "hlp.sh_link";
+        addInfo (0, bar, hk, 2);   // sous le curseur
+    }
 
     struct Spec { ParamId id; const char* title; bool pink; ParamId sub; const char* subTitle; };
     const Spec specs[6] = { { sh::attackGain1, "shp.attack", false, sh::attackGain2, "shp.attack_2" }, { sh::sustainGain1, "shp.sustain", false, sh::sustainGain2, "shp.sustain_2" },
@@ -440,7 +446,14 @@ void NovaShaperEditor::buildShaperPage()
         if (const auto* spec = host().parameters().find (s.id))
             c.knob->setRangeLabels (juce::String::fromUTF8 (host().parameters().toText (*spec, spec->min).c_str()),
                                     juce::String::fromUTF8 (host().parameters().toText (*spec, spec->max).c_str()));
-        if (s.sub != 0) c.sub = add<nova::SubSlider> (0, skin(), host(), s.sub, tx (s.subTitle), s.pink);
+        const char* hk = s.id == sh::attackGain1 ? "hlp.sh_attack" : s.id == sh::sustainGain1 ? "hlp.sh_sustain" : s.id == sh::levelDependency ? "hlp.sh_level"
+                       : s.id == sh::levelThreshold ? "hlp.sh_threshold" : nullptr;   // MIX et OUTPUT : pas de texte propre au shaper pour l'instant
+        if (hk != nullptr) addInfo (0, c.card, hk, 1);
+        if (s.sub != 0)
+        {
+            c.sub = add<nova::SubSlider> (0, skin(), host(), s.sub, tx (s.subTitle), s.pink);
+            addInfo (0, c.sub, s.sub == sh::attackGain2 ? "hlp.sh_attack2" : "hlp.sh_sustain2", 2);
+        }
         columns_.push_back (c);
     }
 }
@@ -524,8 +537,12 @@ void NovaShaperEditor::buildAdvancedPage()
     detPill_ = add<nova::Pill> (2, skin());
     detPill_->bindChoice (host(), sh::detMode, tx ("shp.set_detection"), { tx ("shp.det_peak"), tx ("shp.det_rms") });
     struct P { ParamId id; const char* key; };
+    addInfo (2, detPill_, "hlp.sh_detect");
     for (const auto& p : { P { sh::detFastRatio, "shp.set_ratio" }, P { sh::noiseFloor, "shp.set_floor" }, P { sh::meterPeakDecay, "shp.set_peak_decay" } })
+    {
         advCards_.push_back (add<nova::KnobCard> (2, skin(), host(), p.id, tx (p.key), modalOpener(), false));
+        addInfo (2, advCards_.back(), p.id == sh::detFastRatio ? "hlp.sh_ratio" : p.id == sh::noiseFloor ? "hlp.sh_floor" : "hlp.sh_peakdecay", 1);
+    }
 }
 
 void NovaShaperEditor::buildBottomBar()

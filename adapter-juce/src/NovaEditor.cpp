@@ -86,6 +86,12 @@ InfoButton* EditorBase::addInfo (int page, juce::Component* target, const char* 
     return b;
 }
 
+void EditorBase::setInfoVisible (juce::Component* target, bool visible)
+{
+    for (auto& i : infos_)
+        if (i.target == target) i.button->setVisible (visible);
+}
+
 void EditorBase::placeInfos()
 {
     const int d = skin_.ipx (16.0f);

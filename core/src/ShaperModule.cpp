@@ -52,7 +52,7 @@ bool ShaperModule::declareParams (ParameterSet& set, std::string* error) const
     add (fixed (P::choice (channelMode, "Channel Mode", { "Stereo", "Dual Mono", "M-S" }, 0)));
     add (P::toggle (delta, "Delta"));
     add (fixed (P::continuous (lookahead, "Lookahead", Unit::Milliseconds, 0.0, maxLookaheadMs, 0.0)));
-    add (fixed (P::choice (oversampling, "Oversampling", { "None", "2x", "4x" }, 2)));
+    add (fixed (P::choice (oversampling, "Oversampling", { "None", "2x", "4x" }, 0)));
     add (fixed (db (noiseFloor, "Noise Floor", -100.0, -40.0, -70.0)));
     add (fixed (P::choice (detMode, "Detection", { "Peak", "RMS" }, 0)));
     add (fixed (P::continuous (detFastRatio, "Fast / Slow Ratio", Unit::Ratio, 3.0, 30.0, 10.0, Curve::Exponential)));

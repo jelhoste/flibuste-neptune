@@ -166,9 +166,11 @@ TEST_CASE ("shaper: declares its parameters, with the documented ranges and defa
         CHECK (set.find (id) != nullptr);
     CHECK (set.get (shaper::range) == Approx (15.0));
     CHECK (set.get (shaper::attackTime) == Approx (10.0));
-    CHECK (set.get (shaper::oversampling) == Approx (2.0));   // 4x par défaut
+    CHECK (set.get (shaper::oversampling) == Approx (0.0));   // aucun suréchantillonnage par défaut, comme les autres plugins de la suite
     CHECK (set.find (shaper::lookahead)->automatable == false);
     CHECK (set.find (shaper::attackGain1)->automatable == true);
+    CHECK (r.latency() == 0);                                  // par défaut : ni suréchantillonnage ni anticipation
+    r.set (shaper::oversampling, 2.0);
     CHECK (r.latency() == Oversampler::kLatency4x);
     r.set (shaper::oversampling, 0.0);
     r.set (shaper::lookahead, 5.0);

@@ -263,7 +263,7 @@ public:
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (12.0f, true));
         g.drawText (title_, b.withHeight (skin_.px (15.0f)), juce::Justification::centred, true);
-        const auto box = b.withTop (skin_.px (17.0f)).reduced (0.0f, skin_.px (1.0f));
+        const auto box = b.withTop (skin_.px (17.0f));
         skin_.fill (g, Token::StageBg, box, skin_.px (5.0f));
         const double shape = host_.parameters().get (cm::midiShape);
         auto at = [&] (double t, double y) { return juce::Point<float> (box.getX() + skin_.px (6.0f) + static_cast<float> (t) * (box.getWidth() - skin_.px (12.0f)),
@@ -286,11 +286,11 @@ public:
             g.fillEllipse (pt.x - skin_.px (4.0f), pt.y - skin_.px (4.0f), skin_.px (8.0f), skin_.px (8.0f));
         }
         g.setColour (skin_.colour (held_ ? Token::Pink : Token::Grid));   // voyant de note tenue
-        g.fillEllipse (box.getX() + skin_.px (7.0f), box.getY() + skin_.px (6.0f), skin_.px (8.0f), skin_.px (8.0f));
+        g.fillEllipse (box.getX() + skin_.px (7.0f), box.getY() + skin_.px (8.0f), skin_.px (8.0f), skin_.px (8.0f));
         g.setColour (skin_.colour (Token::TextDim));
         g.setFont (skin_.font (11.0f));
         const juce::String text = std::fabs (shape) < 0.5 ? juce::String ("LINEAR") : (shape > 0 ? "EXP " : "LOG ") + juce::String (std::lround (std::fabs (shape))) + " %";
-        g.drawText (text, box.reduced (skin_.px (6.0f), 0.0f), juce::Justification::centredRight, true);
+        g.drawText (text, box.reduced (skin_.px (6.0f), skin_.px (4.0f)), juce::Justification::topRight, true);
     }
 
     // glisser vers le bas : courbe plus convexe (EXP) ; vers le haut : LOG ; double-clic : linéaire
@@ -620,10 +620,10 @@ void NovaCompressorEditor::layout()
     rmsPill_->setBounds (R (628, 108, 60, 30));
     keyGain_->setBounds (R (724, 100, 176, 48));
     rmsLength_->setBounds (R (930, 100, 176, 48));
-    shapeView_->setBounds (R (724, 100, 176, 48));
-    channelPill_->setBounds (R (930, 108, 176, 30));
+    shapeView_->setBounds (R (1018, 74, 112, 122));   // petit et presque carré, son titre à la hauteur de celui du panneau
+    channelPill_->setBounds (R (398, 108, 176, 30));
     sideEq_->setBounds (R (220, 152, 910, 314));
-    midiNote_->setBounds (R (220, 300, 910, 40));
+    midiNote_->setBounds (R (220, 250, 780, 60));
     const float unit = (942.0f - 12.0f * 4.0f) / 13.0f;
     float zx = 204.0f;
     for (auto& z : zones_)
@@ -715,7 +715,10 @@ void NovaCompressorEditor::tick()
         midiNote_->setVisible (midi);
         eqPill_->setVisible (! midi);
         listenPill_->setVisible (! midi);
-        sideEq_->setAlpha (midi ? 0.25f : 1.0f);
+        sideEq_->setVisible (! midi);
+        for (auto* c : { static_cast<juce::Component*> (keyGain_), static_cast<juce::Component*> (rmsLength_), static_cast<juce::Component*> (rmsPill_),
+                         static_cast<juce::Component*> (eqPill_), static_cast<juce::Component*> (listenPill_) })
+            setInfoVisible (c, ! midi);   // leurs boutons « ? » disparaissent avec eux
     }
     shapeView_->update();
     channelPill_->setText (tx ("nv.midi_channel") + "  " + (choiceValue (cm::midiChannel) == 0 ? tx ("nv.midi_all") : juce::String (choiceValue (cm::midiChannel))));

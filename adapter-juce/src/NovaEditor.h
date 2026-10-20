@@ -83,6 +83,8 @@ protected:
     // Bouton « ? » rattaché à un composant (à sa droite, ou dans son coin supérieur droit) ; les textes sont les clés `hlp.<key>.t` et `hlp.<key>`.
     // pos : 0 à droite du composant, 1 dans son coin supérieur droit, 2 en dessous (centré)
     InfoButton* addInfo (int page, juce::Component* target, const char* key, int pos = 0);
+    // Montre ou cache le bouton « ? » rattaché à `target` (en plus de la visibilité du composant lui-même)
+    void setInfoVisible (juce::Component* target, bool visible);
     int addPage (juce::String label, juce::Path icon);
     // Page SETTINGS commune : thème, contraste, langue (plugin séparé), dossier des presets utilisateur, à propos. À appeler après addPage.
     void buildSettingsPage (int page);
