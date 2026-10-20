@@ -36,7 +36,10 @@ KnobModal::KnobModal (ParamHost& p, neptune::core::ParamId id, neptune::core::ui
     slider_.onDragStart = [this] { sliderDragging_ = true; processor_.uiBeginEdit (id_); };
     slider_.onValueChange = [this]
     {
-        if (sliderDragging_) processor_.uiSetNormalised (id_, slider_.getValue());
+        if (! sliderDragging_) return;
+        processor_.uiSetNormalised (id_, slider_.getValue());
+        // le champ de saisie garde souvent le focus clavier : on le met à jour ici, sans attendre la minuterie, pour que la valeur suive le fader en direct
+        text_.setText (juce::String::fromUTF8 (processor_.parameters().toText (id_).c_str()), false);
     };
     slider_.onDragEnd = [this] { sliderDragging_ = false; processor_.uiEndEdit (id_); refreshFromParameter (true); };
     panel_.addAndMakeVisible (slider_);
