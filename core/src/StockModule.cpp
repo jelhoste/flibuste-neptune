@@ -5,6 +5,7 @@
 
 #include "neptune/core/Mixer.h"
 #include "neptune/core/CompressorModule.h"
+#include "neptune/core/DelayModule.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/ShaperModule.h"
 #include "neptune/core/UtilityModule.h"
@@ -22,7 +23,7 @@ ModuleRunner::ModuleRunner (std::unique_ptr<StockModule> module) : module_ (std:
     };
     ok_ = params_.add (trim (stock::inputTrim, "Input Trim"), &error)
        && params_.add (trim (stock::outputTrim, "Output Trim"), &error)
-       && params_.add (ParamSpec::continuous (stock::mix, "Mix", Unit::Percent, 0.0, 100.0, 100.0), &error)
+       && params_.add (ParamSpec::continuous (stock::mix, "Mix", Unit::Percent, 0.0, 100.0, module_->defaultMixPercent()), &error)
        && params_.add (ParamSpec::toggle (stock::bypass, "Bypass"), &error)
        && module_->declareParams (params_, &error);
     idxIn_ = params_.indexOf (stock::inputTrim);
@@ -129,7 +130,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" } };
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" } };
     return modules;
 }
 
@@ -139,6 +140,7 @@ std::unique_ptr<StockModule> createModule (std::string_view typeId)
     if (typeId == "shaper") return std::make_unique<ShaperModule>();
     if (typeId == "compressor") return std::make_unique<CompressorModule>();
     if (typeId == "equalizer") return std::make_unique<EqualizerModule>();
+    if (typeId == "delay") return std::make_unique<DelayModule>();
     return nullptr;
 }
 

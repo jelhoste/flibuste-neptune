@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur et Egaliseur)
-        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur et Délai)
+        run: cmake --build build --config Release --parallel --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -113,6 +113,9 @@ jobs:
           EGA=$(find build/adapter-juce/Egaliseur_artefacts -name 'Egaliseur.clap' -print -quit)
           test -n "$EGA" || { echo "Egaliseur.clap introuvable"; exit 1; }
           "$CV" validate "$EGA"
+          DEL=$(find build/adapter-juce/Delai_artefacts -name 'Delai.clap' -print -quit)
+          test -n "$DEL" || { echo "Delai.clap introuvable"; exit 1; }
+          "$CV" validate "$DEL"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -304,6 +307,30 @@ jobs:
         with:
           name: Egaliseur-${{ matrix.name }}
           path: dist-ega/*
+          if-no-files-found: error
+
+      # Le delay séparé, archivé à part.
+      - name: Archive Delai.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Delai_artefacts -name 'Delai.clap' -print -quit)
+          test -n "$CLAP" || { echo "Delai.clap introuvable"; exit 1; }
+          mkdir -p dist-del/stage
+          cp -R "$CLAP" dist-del/stage/
+          cd dist-del/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Delai-${{ matrix.name }}.zip" Delai.clap
+          else
+            tar -czf "../Delai-${{ matrix.name }}.tar.gz" Delai.clap
+          fi
+          cd ../..
+          rm -rf dist-del/stage
+          ls -la dist-del
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Delai-${{ matrix.name }}
+          path: dist-del/*
           if-no-files-found: error
 
   release:

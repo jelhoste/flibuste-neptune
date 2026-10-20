@@ -45,6 +45,8 @@ public:
     virtual int latencySamples (const ParameterSet&) const noexcept { return 0; }
     // Borne supérieure de la latence à la cadence donnée (dimensionne le retard du signal sec du ModuleRunner).
     virtual int maxLatencySamples (double /*sampleRate*/) const noexcept { return 0; }
+    // Valeur par défaut du mix commun (%) : 100 pour un effet en insert ordinaire, moins pour un effet de départ (delay).
+    virtual double defaultMixPercent() const noexcept { return 100.0; }
 
     // Entrée de clé externe (sidechain), pour les modules qui en ont une : appelée avant process(), valable pour ce bloc seulement ;
     // nuls : pas de clé branchée.

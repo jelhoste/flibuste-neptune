@@ -12,8 +12,16 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
     if (handle_.instance == nullptr) return;
     bypassId_ = processor_.insertBypassParam (kind, index, slot);
 
-    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer";
-    if (isEqualizer)
+    const bool isShaper = handle_.instance->type == "shaper", isCompressor = handle_.instance->type == "compressor", isEqualizer = handle_.instance->type == "equalizer", isDelay = handle_.instance->type == "delay";
+    if (isDelay)
+    {
+        NovaDelayEditor::Options opt;
+        opt.moduleName = "delay";
+        opt.sampleRate = [this] { return processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0; };
+        delayContent_ = std::make_unique<NovaDelayEditor> (*handle_.host, static_cast<const DelayModule*> (&handle_.instance->runner.module()), palette_, knobStyle, tr_, opt);
+        addAndMakeVisible (*delayContent_);
+    }
+    else if (isEqualizer)
     {
         NovaEqualizerEditor::Options opt;
         opt.moduleName = "equalizer";
@@ -54,7 +62,7 @@ InsertOverlay::InsertOverlay (NeptuneProcessor& p, NeptuneProcessor::StripKind k
                                    : kind == NeptuneProcessor::StripKind::Parallel
                                          ? juce::String::fromUTF8 (tr_.format ("insert.where_parallel", { std::to_string (index + 1) }).c_str())
                                          : text ("insert.where_master");
-    title_ = text (isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
+    title_ = text (isDelay ? "module.delay" : isEqualizer ? "module.equalizer" : isCompressor ? "module.compressor" : isShaper ? "module.shaper" : "module.utility") + "  -  " + where + "  -  "
            + juce::String::fromUTF8 (tr_.format ("insert.slot", { std::to_string (slot + 1) }).c_str());
 
     bypassButton_.setButtonText (text ("insert.bypass"));
@@ -102,6 +110,7 @@ void InsertOverlay::resized()
     if (content_ != nullptr) content_->setBounds (r);
     if (shaperContent_ != nullptr) shaperContent_->setBounds (r);
     if (equalizerContent_ != nullptr) equalizerContent_->setBounds (r);
+    if (delayContent_ != nullptr) delayContent_->setBounds (r);
     if (compressorContent_ != nullptr) compressorContent_->setBounds (r);
 }
 
@@ -129,5 +138,6 @@ bool InsertOverlay::keyPressed (const juce::KeyPress& k)
     if (shaperContent_ != nullptr) return shaperContent_->keyPressed (k);
     if (compressorContent_ != nullptr) return compressorContent_->keyPressed (k);
     if (equalizerContent_ != nullptr) return equalizerContent_->keyPressed (k);
+    if (delayContent_ != nullptr) return delayContent_->keyPressed (k);
     return false;
 }

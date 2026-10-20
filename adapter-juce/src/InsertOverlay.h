@@ -4,6 +4,7 @@
 #include <memory>
 #include "PluginProcessor.h"
 #include "NovaCompressorEditor.h"
+#include "NovaDelayEditor.h"
 #include "NovaEqualizerEditor.h"
 #include "NovaShaperEditor.h"
 #include "UtilityEditor.h"
@@ -41,6 +42,7 @@ private:
     std::unique_ptr<UtilityEditor> content_;
     std::unique_ptr<NovaShaperEditor> shaperContent_;
     std::unique_ptr<NovaEqualizerEditor> equalizerContent_;
+    std::unique_ptr<NovaDelayEditor> delayContent_;
     std::unique_ptr<NovaCompressorEditor> compressorContent_;
     juce::TextButton bypassButton_, closeButton_;
     juce::String title_;

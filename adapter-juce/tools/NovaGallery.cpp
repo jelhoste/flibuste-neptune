@@ -5,10 +5,12 @@
 #include "../src/NovaCompressorEditor.h"
 #include "../src/NovaEqualizerEditor.h"
 #include "../src/NovaShaperEditor.h"
+#include "../src/NovaDelayEditor.h"
 #include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/ShaperModule.h"
+#include "neptune/core/DelayModule.h"
 #include "neptune/core/StockModule.h"
 #include <cmath>
 #include <memory>
@@ -320,6 +322,56 @@ int main (int argc, char** argv)
                     ed.stepWaveForTest (simTime);
                 }
             }
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel du delay
+    {
+        ModuleRunner dRunner (std::make_unique<DelayModule>());
+        dRunner.prepare (48000.0, 512);
+        RunnerHost dh (dRunner);
+        auto& dp = dRunner.params();
+        namespace dy = delay;
+        auto line = [&] (int n, double ms, double lv, double pan, double fb)
+        {
+            dp.set (dy::lineParam (n, dy::kOn), 1.0);
+            dp.set (dy::lineParam (n, dy::kTime), ms);
+            dp.set (dy::lineParam (n, dy::kLevel), lv);
+            dp.set (dy::lineParam (n, dy::kPan), pan);
+            dp.set (dy::lineParam (n, dy::kFeedback), fb);
+        };
+        line (0, 190, 0, -30, 45);
+        line (1, 380, -4, 30, 40);
+        line (2, 570, -8, 0, 50);
+        line (3, 900, -12, 60, 30);
+        dp.set (dy::lineParam (2, dy::kHighCut), 4000.0);
+        dp.set (dy::lineParam (2, dy::kLowCut), 150.0);
+        struct DCase { const char* name; th::ThemeId id; float scale; int page; bool filters; int sel; };
+        const DCase dcs[] = { { "delay-dark-p0", th::ThemeId::Dark, 1.0f, 0, false, 2 }, { "delay-dark-filters", th::ThemeId::Dark, 1.0f, 0, true, 2 }, { "delay-dark-p1", th::ThemeId::Dark, 1.0f, 1, false, 2 },
+                              { "delay-dark-p2", th::ThemeId::Dark, 1.0f, 2, false, 0 }, { "delay-dark-p3", th::ThemeId::Dark, 1.0f, 3, false, 0 },
+                              { "delay-light-p0", th::ThemeId::Light, 1.0f, 0, false, 0 }, { "delay-hammond-p0", th::ThemeId::Hammond, 1.0f, 0, false, 1 },
+                              { "delay-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, false, 2 } };
+        for (const auto& c : dcs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaDelayEditor::Options opt;
+            opt.brand = true;
+            opt.hostTempo = true;
+            opt.moduleName = "delay";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaDelayEditor ed (dh, static_cast<const DelayModule*> (&dRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            ed.selectLineForTest (c.sel);
+            ed.showFiltersForTest (c.filters);
+            ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;
             juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
