@@ -19,6 +19,7 @@ public:
 private:
     class DelayView;
     class LineRow;
+    class TapsMatrix;
 
     void layout() override;
     void tick() override;
@@ -49,7 +50,9 @@ private:
 
     // page TAPS
     nova::Panel* tapsPanel_ = nullptr;
-    LineRow* rowTaps_ = nullptr;
+    TapsMatrix* matrix_ = nullptr;
+    nova::Pill *copyPill_ = nullptr, *pastePill_ = nullptr, *resetPill_ = nullptr;
+    std::vector<double> clip_;               // ligne copiée (14 paramètres de ligne)
     std::vector<nova::KnobCard*> tapsCards_;   // LOW CUT, HIGH CUT, MOD DEPTH, MOD RATE, R OFFSET
     nova::Pill* invertPill_ = nullptr;
 

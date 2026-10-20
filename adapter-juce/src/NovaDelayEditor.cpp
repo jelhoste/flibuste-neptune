@@ -171,6 +171,167 @@ private:
     int dragLine_ = -1;
 };
 
+// ------------------------------------------------------------------------------------------------ matrice des huit lignes (page TAPS)
+class NovaDelayEditor::TapsMatrix : public juce::Component
+{
+public:
+    TapsMatrix (const nova::Skin& s, ParamHost& h, std::function<int()> selected, std::function<void (int)> select)
+        : skin_ (s), host_ (h), selected_ (std::move (selected)), select_ (std::move (select)) {}
+
+    void update()
+    {
+        std::uint32_t key = static_cast<std::uint32_t> (selected_()) * 3u + host_.parameters().version (dl::sync);
+        for (int n = 0; n < dl::kLines; ++n)
+            for (int k = 0; k < dl::kLineParams; ++k) key = key * 31u + host_.parameters().version (dl::lineParam (n, k));
+        if (key == key_) return;
+        key_ = key;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const bool syncOn = host_.parameters().get (dl::sync) >= 0.5;
+        skin_.fill (g, Token::StageBg, getLocalBounds().toFloat(), skin_.px (6.0f));
+        // en-tête
+        g.setFont (skin_.font (10.0f, true));
+        g.setColour (skin_.colour (Token::TextDim2));
+        for (int c = 0; c < kCols; ++c)
+        {
+            const auto r = cell (-1, c);
+            g.drawText (c == 3 && syncOn ? "DIV" : kCol[c].title, r, juce::Justification::centred);
+        }
+        const int sel = selected_();
+        for (int n = 0; n < dl::kLines; ++n)
+        {
+            const bool on = host_.parameters().get (dl::lineParam (n, dl::kOn)) >= 0.5;
+            const auto row = cell (n, 0).withLeft (cell (n, 0).getX() - skin_.px (4.0f)).withRight (cell (n, kCols - 1).getRight() + skin_.px (4.0f));
+            if (n == sel) { g.setColour (skin_.colour (lineToken (n), 0.14f)); g.fillRoundedRectangle (row, skin_.px (5.0f)); g.setColour (skin_.colour (lineToken (n), 0.8f)); g.drawRoundedRectangle (row.reduced (0.5f), skin_.px (5.0f), skin_.px (1.2f)); }
+            for (int c = 0; c < kCols; ++c)
+            {
+                const auto r = cell (n, c).reduced (skin_.px (2.0f), skin_.px (2.0f));
+                if (c == 0)
+                {
+                    g.setColour (skin_.colour (lineToken (n), on ? 1.0f : 0.35f));
+                    g.fillRoundedRectangle (r.withSizeKeepingCentre (skin_.px (24.0f), r.getHeight()), skin_.px (5.0f));
+                    g.setColour (skin_.colour (Token::BgApp));
+                    g.setFont (skin_.font (13.0f, true));
+                    g.drawText (juce::String (n + 1), r, juce::Justification::centred);
+                    continue;
+                }
+                const int k = kCol[c].k;
+                const ParamId id = dl::lineParam (n, k == dl::kTime && syncOn ? dl::kDiv : k);
+                const bool toggle = kCol[c].toggle;
+                const bool value = host_.parameters().get (id) >= 0.5;
+                if (toggle)
+                {
+                    g.setColour (value ? skin_.colour (k == dl::kSolo ? Token::Pink : Token::Accent, 0.9f) : skin_.colour (Token::Grid));
+                    const auto box = r.withSizeKeepingCentre (skin_.px (18.0f), skin_.px (18.0f));
+                    if (value) g.fillRoundedRectangle (box, skin_.px (4.0f)); else g.drawRoundedRectangle (box.reduced (0.5f), skin_.px (4.0f), 1.0f);
+                    continue;
+                }
+                const bool neutral = isNeutral (id);
+                g.setColour (skin_.colour (neutral ? Token::TextDim2 : Token::Text, on ? 1.0f : 0.45f));
+                g.setFont (skin_.font (11.0f, ! neutral));
+                g.drawText (juce::String::fromUTF8 (host_.parameters().toText (id).c_str()), r, juce::Justification::centred, true);
+            }
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        drag_ = {};
+        const auto at = cellAt (e.position);
+        if (at.row < 0) return;
+        select_ (at.row);
+        if (at.col <= 0) return;
+        const bool syncOn = host_.parameters().get (dl::sync) >= 0.5;
+        const int k = kCol[at.col].k;
+        const ParamId id = dl::lineParam (at.row, k == dl::kTime && syncOn ? dl::kDiv : k);
+        if (kCol[at.col].toggle) { nova::setParam (host_, id, host_.parameters().get (id) >= 0.5 ? 0.0 : 1.0); repaint(); return; }
+        if (e.mods.isPopupMenu()) return;
+        drag_.id = id;
+        drag_.start = host_.parameters().getNormalized (id);
+        host_.uiBeginEdit (id);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (drag_.id == 0) return;
+        const double scale = e.mods.isShiftDown() ? 1600.0 : 160.0;   // 160 px = toute la plage (Maj : dix fois plus fin)
+        const double n = std::clamp (drag_.start - static_cast<double> (e.getDistanceFromDragStartY()) / (scale * static_cast<double> (skin_.px (1.0f))), 0.0, 1.0);
+        host_.uiSetNormalised (drag_.id, n);
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (drag_.id != 0) host_.uiEndEdit (drag_.id);
+        drag_ = {};
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        const auto at = cellAt (e.position);
+        if (at.row < 0 || at.col <= 0 || kCol[at.col].toggle) return;
+        const bool syncOn = host_.parameters().get (dl::sync) >= 0.5;
+        const int k = kCol[at.col].k;
+        host_.uiResetToDefault (dl::lineParam (at.row, k == dl::kTime && syncOn ? dl::kDiv : k));
+        repaint();
+    }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        const auto at = cellAt (e.position);
+        if (at.row < 0 || at.col <= 0 || kCol[at.col].toggle) return;
+        const bool syncOn = host_.parameters().get (dl::sync) >= 0.5;
+        const int k = kCol[at.col].k;
+        const ParamId id = dl::lineParam (at.row, k == dl::kTime && syncOn ? dl::kDiv : k);
+        const double step = (e.mods.isShiftDown() ? 0.002 : 0.02) * (w.deltaY > 0 ? 1.0 : -1.0);
+        nova::setParamNormalised (host_, id, host_.parameters().getNormalized (id) + step);
+        repaint();
+    }
+
+private:
+    struct ColSpec { int k; const char* title; float w; bool toggle; };
+    static constexpr int kCols = 14;
+    static constexpr ColSpec kCol[kCols] = {
+        { -1, "#", 34, false }, { dl::kOn, "ON", 40, true }, { dl::kSolo, "SOLO", 44, true }, { dl::kTime, "TIME", 82, false }, { dl::kLevel, "LEVEL", 66, false },
+        { dl::kPan, "PAN", 66, false }, { dl::kOffset, "R OFFSET", 74, false }, { dl::kFeedback, "FEEDBACK", 74, false }, { dl::kPitch, "PITCH", 66, false },
+        { dl::kLowCut, "LOW CUT", 72, false }, { dl::kHighCut, "HIGH CUT", 76, false }, { dl::kInvert, "INV", 40, true }, { dl::kModDepth, "MOD D", 62, false }, { dl::kModRate, "MOD R", 62, false } };
+    struct Drag { ParamId id = 0; double start = 0.0; };
+    struct At { int row = -1, col = -1; };
+
+    float rowH() const { return skin_.px (30.0f); }
+    float headH() const { return skin_.px (28.0f); }
+    juce::Rectangle<float> cell (int row, int col) const
+    {
+        float total = 0.0f;
+        for (const auto& c : kCol) total += c.w;
+        const float scale = (static_cast<float> (getWidth()) - skin_.px (16.0f)) / total;
+        float x = skin_.px (8.0f);
+        for (int i = 0; i < col; ++i) x += kCol[i].w * scale;
+        const float y = row < 0 ? 0.0f : headH() + static_cast<float> (row) * rowH();
+        return { x, y, kCol[col].w * scale, row < 0 ? headH() : rowH() };
+    }
+    At cellAt (juce::Point<float> p) const
+    {
+        for (int r = 0; r < dl::kLines; ++r)
+            for (int c = 0; c < kCols; ++c)
+                if (cell (r, c).contains (p)) return { r, c };
+        return {};
+    }
+    // valeur « neutre » (rien d'actif) affichée plus discrètement
+    bool isNeutral (ParamId id) const
+    {
+        const auto* spec = host_.parameters().find (id);
+        return spec != nullptr && std::fabs (host_.parameters().get (id) - spec->defaultValue) < 1.0e-9 && (id - dl::lineBase) % dl::lineStride != dl::kTime && (id - dl::lineBase) % dl::lineStride != dl::kDiv
+               && (id - dl::lineBase) % dl::lineStride != dl::kLevel && (id - dl::lineBase) % dl::lineStride != dl::kFeedback;
+    }
+
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    std::function<int()> selected_;
+    std::function<void (int)> select_;
+    std::uint32_t key_ = 0xFFFFFFFFu;
+    Drag drag_;
+};
+
 // ------------------------------------------------------------------------------------------------ timeline des lignes / réponse des filtres
 class NovaDelayEditor::DelayView : public juce::Component
 {
@@ -518,7 +679,7 @@ void NovaDelayEditor::buildTapsPage()
 {
     tapsPanel_ = add<nova::Panel> (1, skin());
     tapsPanel_->setTitle (tx ("dl.taps_title"));
-    rowTaps_ = add<LineRow> (1, skin(), host(), [this] { return selected_; }, [this] (int n) { selectLine (n); });
+    matrix_ = add<TapsMatrix> (1, skin(), host(), [this] { return selected_; }, [this] (int n) { selectLine (n); });
     struct P { int k; const char* title; const char* help; };
     for (const P p : { P { dl::kLowCut, "dl.lowcut", "hlp.dl_lowcut" }, P { dl::kHighCut, "dl.highcut", "hlp.dl_highcut" }, P { dl::kModDepth, "dl.moddepth", "hlp.dl_moddepth" },
                        P { dl::kModRate, "dl.modrate", "hlp.dl_modrate" }, P { dl::kOffset, "dl.offset", "hlp.dl_offset" } })
@@ -534,6 +695,30 @@ void NovaDelayEditor::buildTapsPage()
         nova::setParam (host(), id, value (id) >= 0.5 ? 0.0 : 1.0);
     };
     addInfo (1, invertPill_, "hlp.dl_invert");
+    // copier / coller / remettre à zéro la ligne choisie
+    copyPill_ = add<nova::Pill> (1, skin());
+    copyPill_->setText (tx ("dl.copy"));
+    copyPill_->onClick = [this]
+    {
+        clip_.clear();
+        for (int k = 0; k < dl::kLineParams; ++k) clip_.push_back (value (dl::lineParam (selected_, k)));
+    };
+    pastePill_ = add<nova::Pill> (1, skin());
+    pastePill_->setText (tx ("dl.paste"));
+    pastePill_->onClick = [this]
+    {
+        if (clip_.size() != static_cast<std::size_t> (dl::kLineParams)) return;
+        for (int k = 0; k < dl::kLineParams; ++k)
+            if (k != dl::kSolo) nova::setParam (host(), dl::lineParam (selected_, k), clip_[static_cast<std::size_t> (k)]);
+    };
+    resetPill_ = add<nova::Pill> (1, skin());
+    resetPill_->setText (tx ("dl.reset"));
+    resetPill_->onClick = [this]
+    {
+        for (int k = 0; k < dl::kLineParams; ++k)
+            if (const auto* spec = host().parameters().find (dl::lineParam (selected_, k))) nova::setParam (host(), spec->id, spec->defaultValue);
+    };
+    addInfo (1, copyPill_, "hlp.dl_copy");
 }
 
 void NovaDelayEditor::buildGlobalPage()
@@ -621,10 +806,13 @@ void NovaDelayEditor::layout()
 
     // ---- page TAPS
     tapsPanel_->setBounds (R (204, 72, 942, 638));
-    rowTaps_->setBounds (R (220, 108, 910, 56));
+    matrix_->setBounds (R (220, 104, 910, 28.0f + 30.0f * 8.0f));
     const float cw = (910.0f - 12.0f * 4.0f) / 5.0f;
-    for (std::size_t i = 0; i < tapsCards_.size(); ++i) tapsCards_[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + 12.0f), 190, cw, 150));
-    invertPill_->setBounds (R (220, 372, 170, 32));
+    for (std::size_t i = 0; i < tapsCards_.size(); ++i) tapsCards_[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + 12.0f), 394, cw, 150));
+    invertPill_->setBounds (R (220, 570, 170, 32));
+    copyPill_->setBounds (R (750, 570, 120, 32));
+    pastePill_->setBounds (R (884, 570, 120, 32));
+    resetPill_->setBounds (R (1018, 570, 112, 32));
 
     // ---- page GLOBAL
     globalPanel_->setBounds (R (204, 72, 942, 638));
@@ -676,7 +864,7 @@ void NovaDelayEditor::tick()
     }
     if (currentPage() == 1)
     {
-        rowTaps_->update();
+        matrix_->update();
         invertPill_->setText (tx ("dl.invert") + "  " + (value (dl::lineParam (selected_, dl::kInvert)) >= 0.5 ? "ON" : "OFF"));
         invertPill_->setOn (value (dl::lineParam (selected_, dl::kInvert)) >= 0.5);
         const bool anyOn = value (dl::lineParam (selected_, dl::kOn)) >= 0.5;

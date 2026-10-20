@@ -498,3 +498,9 @@ Décisions de l'utilisateur (questions du 2026-10-20) : livraison en deux temps 
 - **Interface** : potard PITCH (suit la ligne choisie) entre FEEDBACK et MIX ; qualité du pitch dans SETTINGS ; aides `hlp.dl_pitch` et `hlp.dl_pitchquality`. Preset d'usine « Shimmer Pad » ajouté.
 - **Tests** : +12, -12 et +7 demi-tons donnent la bonne fréquence (mesure par fenêtres de 20 ms : les sauts de phase à chaque grain interdisent une mesure cohérente sur une longue durée), l'écho décalé reste sur le temps de la ligne, le feedback décalé monte à chaque répétition et reste borné, les deux qualités.
 - **Limites connues** : un décaleur à grains croisés colore les sons tonaux (modulation d'amplitude légère à la cadence des grains) ; le passage d'un temps long à un temps court avec PITCH actif fait glisser la hauteur (Glide) comme tout changement de temps ; coût CPU de 8 lignes décalées non mesuré.
+
+### Delay : matrice TAPS (2026-10-20, à valider dans Reaper)
+
+- Page TAPS = tableau des huit lignes (numéro, ON, SOLO, TEMPS ou DIVISION, NIVEAU, PAN, DÉCALAGE D, FEEDBACK, PITCH, COUPE-BAS, COUPE-HAUT, INVERSION, PROFONDEUR et VITESSE DE MOD). Un clic sur une ligne la choisit ; un clic sur un interrupteur le bascule ; glisser une valeur vers le haut ou le bas la règle (160 px = toute la plage, Maj = dix fois plus fin) ; la molette aussi ; un double-clic remet la valeur par défaut. Les valeurs neutres sont plus discrètes.
+- Dessous : les potards de la ligne choisie (coupe-bas, coupe-haut, profondeur et vitesse de modulation, décalage droit), INVERSION, **COPIER / COLLER / REMETTRE** (la copie ne reprend pas l'état solo ; REMETTRE rend à la ligne ses valeurs d'usine, celles de sa position).
+- Pas fait : simulation d'un coup d'entrée et courbe de ducking sur la page GLOBAL, changement de temps par fondu (Crossfade), sections de SETTINGS manquantes, loi de pan.
