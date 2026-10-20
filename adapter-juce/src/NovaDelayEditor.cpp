@@ -888,6 +888,9 @@ void NovaDelayEditor::buildSettingsExtras()
     qualityPill_ = add<nova::Pill> (3, skin());
     qualityPill_->bindChoice (host(), dl::pitchQuality, tx ("dl.pitch_quality"), { tx ("dl.q_standard"), tx ("dl.q_high") });
     addInfo (3, qualityPill_, "hlp.dl_pitchquality");
+    timeModePill_ = add<nova::Pill> (3, skin());
+    timeModePill_->bindChoice (host(), dl::timeMode, tx ("dl.time_mode"), { tx ("dl.tm_glide"), tx ("dl.tm_cross") });
+    addInfo (3, timeModePill_, "hlp.dl_timemode");
     addInfo (3, limiterPill_, "hlp.dl_limiter");
     addInfo (3, glideSlider_, "hlp.dl_glide");
 }
@@ -962,6 +965,7 @@ void NovaDelayEditor::layout()
     limiterPill_->setBounds (R (220, 568, 250, 34));
     glideSlider_->setBounds (R (510, 560, 300, 48));
     qualityPill_->setBounds (R (220, 618, 300, 34));
+    timeModePill_->setBounds (R (510, 618, 300, 34));
 
     // ---- barre du bas
     abPill()->setBounds (R (14, 724 + 12, 40, 32));

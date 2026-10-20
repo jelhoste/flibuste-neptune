@@ -66,7 +66,7 @@ private:
 
     // page SETTINGS (en plus des sections communes)
     nova::Text* delaySection_ = nullptr;
-    nova::Pill *limiterPill_ = nullptr, *qualityPill_ = nullptr;
+    nova::Pill *limiterPill_ = nullptr, *qualityPill_ = nullptr, *timeModePill_ = nullptr;
     nova::SubSlider* glideSlider_ = nullptr;
 
     juce::String metaText_, tempoText_;

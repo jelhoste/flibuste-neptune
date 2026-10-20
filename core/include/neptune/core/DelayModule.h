@@ -4,7 +4,8 @@
 // Réglages communs : routage parallèle ou en cascade, feedback global, ping-pong, saturation de la boucle, freeze, ducking, largeur.
 // Description de référence : design/nova/docs/NOVA_Delay_params_v0.1.md. Le module ne produit que le signal retardé (« mouillé ») : le mélange avec le
 // signal sec, le gain d'entrée et le gain de sortie sont ceux, communs, du ModuleRunner (stock::mix, stock::inputTrim, stock::outputTrim).
-// Décalage de hauteur (PITCH) : décaleur à deux grains croisés (fenêtres de Hann) dans la ligne, avant les filtres, dans la boucle de feedback (chaque
+// Changement de temps : Glide (le temps glisse, la hauteur des échos bouge comme sur un delay à bande) ou Crossfade (fondu entre l'ancien et le nouveau temps,
+// sans variation de hauteur). Décalage de hauteur (PITCH) : décaleur à deux grains croisés (fenêtres de Hann) dans la ligne, avant les filtres, dans la boucle de feedback (chaque
 // répétition est décalée de nouveau : effet « shimmer »). Pas encore de changement de temps par fondu (Crossfade).
 #include <array>
 #include <atomic>
@@ -21,7 +22,8 @@ namespace delay
 constexpr ParamId sync = 100, routing = 101, freeze = 102, duckAmount = 103, duckThreshold = 104, duckRelease = 105;
 constexpr ParamId feedbackGlobal = 106, pingPong = 107, drive = 108, width = 109;
 // Réglages de Settings (non automatisables).
-constexpr ParamId glideMs = 110, safetyLimiter = 111, pitchQuality = 112;   // qualité du décalage : 0 Standard (grain de 40 ms), 1 High (80 ms)
+constexpr ParamId glideMs = 110, safetyLimiter = 111, pitchQuality = 112, timeMode = 113;
+// pitchQuality : 0 Standard (grain de 40 ms), 1 High (80 ms) ; timeMode : 0 Glide, 1 Crossfade (glideMs sert aux deux)
 
 constexpr int kLines = 8;
 constexpr ParamId lineBase = 200, lineStride = 16;
@@ -75,6 +77,7 @@ private:
         double phase = 0.0, hpDesigned = -1.0, lpDesigned = -1.0;
         std::array<std::vector<float>, 2> shifter;   // entrée du décaleur de hauteur (grain de 80 ms au plus)
         std::size_t shPos = 0;
+        double timeOld = 0.0, xf = 1.0;                // changement de temps par fondu : ancien temps, avancement du fondu (1 = terminé)
         double pitchSm = 0.0, pitchAct = 0.0, shPhi = 0.0;   // hauteur lissée (demi-tons), part du signal décalé (fondu), phase des deux têtes
         bool shEngaged = false;
         bool active = false;

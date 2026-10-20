@@ -68,6 +68,7 @@ bool DelayModule::declareParams (ParameterSet& set, std::string* error) const
     add (fixed (P::continuous (glideMs, "Glide Time", Unit::Milliseconds, 20.0, 500.0, 120.0)));
     add (fixed (P::toggle (safetyLimiter, "Feedback Safety Limiter", true)));
     add (fixed (P::choice (pitchQuality, "Pitch Quality", { "Standard", "High" }, 0)));
+    add (fixed (P::choice (timeMode, "Time Change", { "Glide", "Crossfade" }, 0)));
 
     for (int n = 0; n < kLines; ++n)
     {
@@ -151,6 +152,8 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
     const double fbGlobalTarget = param (feedbackGlobal) * 0.01;
     const double duckAmountTarget = param (duckAmount) * 0.01, duckThr = param (duckThreshold);
     const double duckAtt = coef (0.005, fs), duckRel = coef (param (duckRelease) * 0.001, fs);
+    const bool crossfade = param (timeMode) >= 0.5;
+    const double xfStep = 1.0 / std::max (1.0, param (glideMs) * 0.001 * fs);
     const bool highQuality = param (pitchQuality) >= 0.5;
     const double grain = (highQuality ? 0.08 : 0.04) * fs;      // taille de grain (échantillons)
     const double kSm = coef (0.02, fs), kGlide = coef (param (glideMs) * 0.001, fs), kFreeze = coef (0.02, fs);
@@ -190,7 +193,7 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
             l.y = { 0.0, 0.0 };
             for (auto& f : l.hp) f.reset();
             for (auto& f : l.lp) f.reset();
-            l.timeSmp = t.time; l.offsetSmp = t.offset; l.level = t.level; l.panL = t.panL; l.panR = t.panR; l.fb = t.fb;
+            l.timeSmp = l.timeOld = t.time; l.xf = 1.0; l.offsetSmp = t.offset; l.level = t.level; l.panL = t.panL; l.panR = t.panR; l.fb = t.fb;
             l.lowHz = t.low; l.highHz = t.high; l.hpDesigned = l.lpDesigned = -1.0;
             for (auto& b : l.shifter) std::fill (b.begin(), b.end(), 0.0f);
             l.shPos = 0; l.pitchSm = t.pitch; l.pitchAct = 0.0; l.shPhi = 0.0; l.shEngaged = false;
@@ -229,7 +232,20 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
             if (! l.active) continue;
             const auto& t = tg[static_cast<std::size_t> (k)];
             l.src = { cascade ? chain[0] : x[0], cascade ? chain[1] : x[1] };
-            l.timeSmp += kGlide * (t.time - l.timeSmp);
+            if (crossfade)
+            {
+                if (l.xf >= 1.0)
+                {
+                    if (std::fabs (t.time - l.timeSmp) > 2.0) { l.timeOld = l.timeSmp; l.timeSmp = t.time; l.xf = 0.0; }   // nouveau temps : fondu depuis l'ancien
+                }
+                else l.xf = std::min (1.0, l.xf + xfStep);
+            }
+            else
+            {
+                l.timeSmp += kGlide * (t.time - l.timeSmp);
+                l.timeOld = l.timeSmp;
+                l.xf = 1.0;
+            }
             l.offsetSmp += kSm * (t.offset - l.offsetSmp);
             l.level += kSm * (t.level - l.level);
             l.panL += kSm * (t.panL - l.panL);
@@ -242,9 +258,22 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
             const double lfo = l.modDepth > 0.0 ? std::sin (l.phase) : 0.0;
             l.phase += 2.0 * kPi * l.modRate / fs;
             if (l.phase > 2.0 * kPi) l.phase -= 2.0 * kPi;
-            const double dl = std::clamp (l.timeSmp + excursion * lfo, 3.0, static_cast<double> (bufSize_) - 8.0);
-            const double dr = std::clamp (std::max (0.0, l.timeSmp + l.offsetSmp) + excursion * lfo, 3.0, static_cast<double> (bufSize_) - 8.0);
-            double yr[2] = { readHermite (l.buf[0], l.pos, dl), readHermite (l.buf[1], l.pos, dr) };
+            const double maxD = static_cast<double> (bufSize_) - 8.0;
+            auto delayFor = [&] (double timeSmp, int c)
+            {
+                const double base = c == 0 ? timeSmp : std::max (0.0, timeSmp + l.offsetSmp);
+                return std::clamp (base + excursion * lfo, 3.0, maxD);
+            };
+            // lecture de la ligne (retranche `comp` échantillons) ; pendant un fondu, mélange de l'ancien et du nouveau temps
+            auto readLine = [&] (int c, double comp)
+            {
+                const auto& b = l.buf[static_cast<std::size_t> (c)];
+                const double now = readHermite (b, l.pos, std::max (3.0, delayFor (l.timeSmp, c) - comp));
+                if (l.xf >= 1.0) return now;
+                const double g = l.xf * l.xf * (3.0 - 2.0 * l.xf);
+                return (1.0 - g) * readHermite (b, l.pos, std::max (3.0, delayFor (l.timeOld, c) - comp)) + g * now;
+            };
+            double yr[2] = { readLine (0, 0.0), readLine (1, 0.0) };
             // décalage de hauteur : deux têtes de lecture à fenêtres de Hann sur un court tampon, lues sur le signal de la ligne avancé de la demi-longueur
             // d'un grain (le retard moyen du décaleur est ainsi absorbé dans le temps de la ligne) ; fondu de 20 ms avec le chemin direct
             l.pitchSm += kSm * (t.pitch - l.pitchSm);
@@ -261,7 +290,7 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
                 l.pitchAct += kSm * ((wantShift ? 1.0 : 0.0) - l.pitchAct);
                 const double comp = 0.5 * grain + 3.0;
                 const double ratio = std::exp2 (l.pitchSm / 12.0);
-                const double bIn[2] = { readHermite (l.buf[0], l.pos, std::max (3.0, dl - comp)), readHermite (l.buf[1], l.pos, std::max (3.0, dr - comp)) };
+                const double bIn[2] = { readLine (0, comp), readLine (1, comp) };
                 for (int c = 0; c < 2; ++c) l.shifter[static_cast<std::size_t> (c)][l.shPos] = static_cast<float> (bIn[c]);
                 l.shPos = (l.shPos + 1) % shifterSize_;
                 l.shPhi += (1.0 - ratio) / grain;

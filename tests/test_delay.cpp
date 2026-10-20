@@ -419,6 +419,40 @@ TEST_CASE ("delay: pitch quality High uses longer grains and both settings are b
     }
 }
 
+TEST_CASE ("delay: Crossfade changes the time without gliding; Glide is the default", "[delay]")
+{
+    DelayRig r;
+    CHECK (r.runner.params().get (d::timeMode) == Approx (0.0));
+    CHECK (r.runner.params().find (d::timeMode)->automatable == false);
+    r.set (d::timeMode, 1.0);
+    r.line (0, 100.0);
+    r.set (d::glideMs, 60.0);
+    // un sinus continu : changer le temps ne fait ni glisser la hauteur ni dépasser le niveau (deux copies décorrélées en phase restent <= 2 x 0,5)
+    std::vector<float> l (ms (1200), 0.0f), rr (ms (1200), 0.0f);
+    const auto tonein = sine (440.0, ms (1200));
+    for (std::size_t i = 0; i < tonein.size(); ++i) l[i] = rr[i] = tonein[i];
+    float peak = 0.0f;
+    for (std::size_t off = 0; off < l.size(); off += 512)
+    {
+        if (off >= ms (400) && off < ms (400) + 512) r.set (d::lineParam (0, d::kTime), 237.0);
+        const int n = static_cast<int> (std::min<std::size_t> (512, l.size() - off));
+        r.runner.process (l.data() + off, rr.data() + off, n, false);
+    }
+    for (const auto v : l) { REQUIRE (std::isfinite (v)); peak = std::max (peak, std::fabs (v)); }
+    CHECK (peak <= 1.05f);
+    // une fois le fondu terminé, l'écho est au nouveau temps
+    DelayRig e;
+    e.set (d::timeMode, 1.0);
+    e.set (d::glideMs, 40.0);
+    e.line (0, 100.0);
+    e.play (std::vector<float> (1, 0.0f), ms (300));
+    e.set (d::lineParam (0, d::kTime), 300.0);
+    e.play (std::vector<float> (1, 0.0f), ms (200));        // fondu terminé
+    const auto [el, er] = e.play (impulse(), ms (600));
+    (void) er;
+    CHECK (peakIndex (el, 10, ms (600)) == ms (300));
+}
+
 #include "neptune/core/DelayPresets.h"
 
 TEST_CASE ("delay: factory presets apply cleanly and Default restores the defaults", "[delay][presets]")
