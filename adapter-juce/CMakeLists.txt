@@ -358,8 +358,8 @@ clap_juce_extensions_plugin(
   CLAP_FEATURES audio-effect pitch-correction stereo)
 
 target_sources(Microdecale PRIVATE
-  src/MicrusPlugin.cpp
-  src/NovaMicrusEditor.cpp
+  src/MicrodecalePlugin.cpp
+  src/NovaMicrodecaleEditor.cpp
   src/NovaEditor.cpp
   src/NovaKit.cpp
   src/NeptuneKnob.cpp
