@@ -20,6 +20,7 @@ private:
     class DelayView;
     class LineRow;
     class TapsMatrix;
+    class GlobalSim;
 
     void layout() override;
     void tick() override;
@@ -61,6 +62,7 @@ private:
     nova::Pill *syncPill_ = nullptr, *routingPill_ = nullptr, *freezePill_ = nullptr;
     std::vector<nova::KnobCard*> globalCards_;
     nova::Text* syncNote_ = nullptr;
+    GlobalSim* sim_ = nullptr;
 
     // page SETTINGS (en plus des sections communes)
     nova::Text* delaySection_ = nullptr;

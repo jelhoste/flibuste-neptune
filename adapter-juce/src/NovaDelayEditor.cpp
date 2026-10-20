@@ -193,7 +193,7 @@ public:
         const bool syncOn = host_.parameters().get (dl::sync) >= 0.5;
         skin_.fill (g, Token::StageBg, getLocalBounds().toFloat(), skin_.px (6.0f));
         // en-tête
-        g.setFont (skin_.font (10.0f, true));
+        g.setFont (skin_.font (11.0f, true));
         g.setColour (skin_.colour (Token::TextDim2));
         for (int c = 0; c < kCols; ++c)
         {
@@ -231,7 +231,7 @@ public:
                 }
                 const bool neutral = isNeutral (id);
                 g.setColour (skin_.colour (neutral ? Token::TextDim2 : Token::Text, on ? 1.0f : 0.45f));
-                g.setFont (skin_.font (11.0f, ! neutral));
+                g.setFont (skin_.font (13.0f, ! neutral));
                 g.drawText (juce::String::fromUTF8 (host_.parameters().toText (id).c_str()), r, juce::Justification::centred, true);
             }
         }
@@ -297,8 +297,8 @@ private:
     struct Drag { ParamId id = 0; double start = 0.0; };
     struct At { int row = -1, col = -1; };
 
-    float rowH() const { return skin_.px (30.0f); }
-    float headH() const { return skin_.px (28.0f); }
+    float rowH() const { return skin_.px (40.0f); }
+    float headH() const { return skin_.px (32.0f); }
     juce::Rectangle<float> cell (int row, int col) const
     {
         float total = 0.0f;
@@ -604,6 +604,135 @@ private:
     double frozenMax_ = 0.0;
 };
 
+// ------------------------------------------------------------------------------------------------ simulation d'un coup d'entrée (page GLOBAL)
+// Un second module de delay, à 16 kHz, reçoit les mêmes réglages et traite un court coup de sinus : l'enveloppe des échos (gauche en haut, droite en bas) et le
+// gain de ducking sont tracés. Recalculé quand un réglage change (au plus dix fois par seconde), donc toujours fidèle au vrai module (feedback, routage,
+// ping-pong, filtres, pitch, ducking).
+class NovaDelayEditor::GlobalSim : public juce::Component
+{
+public:
+    GlobalSim (const nova::Skin& s, ParamHost& h, const DelayModule* m) : skin_ (s), host_ (h), module_ (m), sim_ (std::make_unique<DelayModule>())
+    {
+        sim_.prepare (kFs, kBlock);
+    }
+
+    void update()
+    {
+        std::uint32_t key = static_cast<std::uint32_t> (std::lround ((module_ != nullptr ? module_->tempo() : 0.0) * 10.0));
+        const auto& set = host_.parameters();
+        for (std::size_t i = 0; i < set.size(); ++i) key = key * 31u + set.version (set.spec (i).id);
+        if (key == key_ && ! dirty_) return;
+        if (key != key_) { key_ = key; dirty_ = true; }
+        const auto now = juce::Time::getMillisecondCounter();
+        if (dirty_ && now - lastMs_ >= 100) { recompute(); lastMs_ = now; dirty_ = false; repaint(); }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto b = getLocalBounds().toFloat();
+        skin_.fill (g, Token::StageBg, b, skin_.px (6.0f));
+        const auto plot = juce::Rectangle<float> (b.getX() + skin_.px (36.0f), b.getY() + skin_.px (10.0f), b.getWidth() - skin_.px (50.0f), b.getHeight() - skin_.px (10.0f + 22.0f));
+        const float duckH = skin_.px (34.0f), echoH = plot.getHeight() - duckH - skin_.px (8.0f);
+        const float centre = plot.getY() + echoH * 0.5f, half = echoH * 0.5f * 0.95f;
+        g.setFont (skin_.font (9.0f));
+        for (int t = 0; t <= 8; ++t)
+        {
+            const float x = plot.getX() + plot.getWidth() * static_cast<float> (t) / 8.0f;
+            g.setColour (skin_.colour (Token::Grid, 0.6f));
+            g.fillRect (x - 0.5f, plot.getY(), std::max (1.0f, skin_.px (1.0f)), plot.getHeight());
+            g.setColour (skin_.colour (Token::TextDim2));
+            g.drawText (juce::String (span_ * t / 8.0, span_ >= 4.0 ? 1 : 2) + " s", juce::Rectangle<float> (x - skin_.px (24.0f), plot.getBottom() + skin_.px (4.0f), skin_.px (48.0f), skin_.px (12.0f)), juce::Justification::centred);
+        }
+        g.setColour (skin_.colour (Token::Grid));
+        g.fillRect (plot.getX(), centre - 0.5f, plot.getWidth(), std::max (1.0f, skin_.px (1.0f)));
+        g.setColour (skin_.colour (Token::TextDim2));
+        g.setFont (skin_.font (11.0f, true));
+        g.drawText ("L", juce::Rectangle<float> (plot.getX() - skin_.px (28.0f), plot.getY(), skin_.px (22.0f), skin_.px (16.0f)), juce::Justification::centredRight);
+        g.drawText ("R", juce::Rectangle<float> (plot.getX() - skin_.px (28.0f), plot.getY() + echoH - skin_.px (16.0f), skin_.px (22.0f), skin_.px (16.0f)), juce::Justification::centredRight);
+        g.drawText ("DUCK", juce::Rectangle<float> (b.getX() + skin_.px (2.0f), plot.getBottom() - duckH, skin_.px (34.0f), skin_.px (14.0f)), juce::Justification::centred);
+        const std::size_t n = peaksL_.size();
+        if (n == 0) return;
+        const float colW = plot.getWidth() / static_cast<float> (n);
+        auto frac = [] (float lin) { return std::clamp ((20.0f * std::log10 (std::max (lin, 1.0e-6f)) + 48.0f) / 48.0f, 0.0f, 1.0f); };
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            const float x = plot.getX() + static_cast<float> (i) * colW;
+            g.setColour (skin_.colour (Token::Accent, 0.9f));
+            const float hl = frac (peaksL_[i]) * half, hr = frac (peaksR_[i]) * half;
+            if (hl > 0.5f) g.fillRect (x, centre - hl, std::max (1.0f, colW), hl);
+            g.setColour (skin_.colour (Token::Pink2, 0.9f));
+            if (hr > 0.5f) g.fillRect (x, centre, std::max (1.0f, colW), hr);
+        }
+        // coup d'entrée (repère) et courbe de ducking : 0 dB en haut de la bande, -24 dB en bas
+        g.setColour (skin_.colour (Token::Handle, 0.9f));
+        g.fillRect (plot.getX(), plot.getY(), std::max (2.0f, skin_.px (2.0f)), echoH);
+        juce::Path duck;
+        const float dTop = plot.getBottom() - duckH;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            const float x = plot.getX() + (static_cast<float> (i) + 0.5f) * colW, y = dTop + (-duckDb_[i] / 24.0f) * duckH;
+            if (i == 0) duck.startNewSubPath (x, y); else duck.lineTo (x, y);
+        }
+        g.setColour (skin_.colour (Token::KnobHot, 1.0f));
+        g.strokePath (duck, juce::PathStrokeType (skin_.px (1.8f)));
+    }
+
+private:
+    static constexpr double kFs = 16000.0;
+    static constexpr int kBlock = 128;
+
+    void recompute()
+    {
+        const auto& set = host_.parameters();
+        auto& dst = sim_.params();
+        for (std::size_t i = 0; i < set.size(); ++i) dst.set (set.spec (i).id, set.getAt (i));
+        dst.set (stock::mix, 100.0);
+        dst.set (stock::bypass, 0.0);
+        auto& mod = static_cast<DelayModule&> (sim_.module());
+        mod.setTempo (module_ != nullptr ? module_->tempo() : 0.0);
+        // durée affichée : le plus long premier écho x 3, entre 1 et 6 s
+        double longest = 0.3;
+        const bool syncOn = set.get (dl::sync) >= 0.5;
+        const double bpm = module_ != nullptr && module_->tempo() > 1.0 ? module_->tempo() : 120.0;
+        for (int n = 0; n < dl::kLines; ++n)
+            if (set.get (dl::lineParam (n, dl::kOn)) >= 0.5)
+                longest = std::max (longest, (syncOn ? dl::divisionBeats (static_cast<int> (std::lround (set.get (dl::lineParam (n, dl::kDiv))))) * 60.0 / bpm : set.get (dl::lineParam (n, dl::kTime)) * 0.001));
+        span_ = std::clamp (longest * 3.0, 1.0, 6.0);
+        const int blocks = static_cast<int> (span_ * kFs / kBlock);
+        sim_.reset();
+        peaksL_.assign (static_cast<std::size_t> (blocks), 0.0f);
+        peaksR_.assign (static_cast<std::size_t> (blocks), 0.0f);
+        duckDb_.assign (static_cast<std::size_t> (blocks), 0.0f);
+        std::vector<float> l (kBlock), r (kBlock);
+        long sampleIndex = 0;
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int i = 0; i < kBlock; ++i, ++sampleIndex)
+            {
+                const double t = static_cast<double> (sampleIndex) / kFs;
+                const double v = t < 0.02 ? 0.7 * std::sin (3.14159265358979 * t / 0.02) * std::sin (2.0 * 3.14159265358979 * 1000.0 * t) : 0.0;
+                l[static_cast<std::size_t> (i)] = r[static_cast<std::size_t> (i)] = static_cast<float> (v);
+            }
+            sim_.process (l.data(), r.data(), kBlock, false);
+            float pl = 0.0f, pr = 0.0f;
+            for (int i = 0; i < kBlock; ++i) { pl = std::max (pl, std::fabs (l[static_cast<std::size_t> (i)])); pr = std::max (pr, std::fabs (r[static_cast<std::size_t> (i)])); }
+            peaksL_[static_cast<std::size_t> (b)] = pl;
+            peaksR_[static_cast<std::size_t> (b)] = pr;
+            duckDb_[static_cast<std::size_t> (b)] = std::min (0.0f, mod.meter (dl::kDuckDb));
+        }
+    }
+
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    const DelayModule* module_;
+    ModuleRunner sim_;
+    std::vector<float> peaksL_, peaksR_, duckDb_;
+    double span_ = 2.0;
+    std::uint32_t key_ = 0xFFFFFFFFu;
+    std::uint32_t lastMs_ = 0;
+    bool dirty_ = true;
+};
+
 // ------------------------------------------------------------------------------------------------ éditeur
 NovaDelayEditor::NovaDelayEditor (ParamHost& host, const DelayModule* module, const theme::Palette& palette, theme::KnobStyle knob,
                                   const i18n::Translator& tr, Options options)
@@ -725,6 +854,7 @@ void NovaDelayEditor::buildGlobalPage()
 {
     globalPanel_ = add<nova::Panel> (2, skin());
     globalPanel_->setTitle (tx ("dl.global_title"));
+    sim_ = add<GlobalSim> (2, skin(), host(), module_);
     syncPill_ = add<nova::Pill> (2, skin());
     syncPill_->bindToggle (host(), dl::sync, tx ("dl.sync"));
     routingPill_ = add<nova::Pill> (2, skin());
@@ -806,13 +936,13 @@ void NovaDelayEditor::layout()
 
     // ---- page TAPS
     tapsPanel_->setBounds (R (204, 72, 942, 638));
-    matrix_->setBounds (R (220, 104, 910, 28.0f + 30.0f * 8.0f));
+    matrix_->setBounds (R (220, 104, 910, 32.0f + 40.0f * 8.0f));
     const float cw = (910.0f - 12.0f * 4.0f) / 5.0f;
-    for (std::size_t i = 0; i < tapsCards_.size(); ++i) tapsCards_[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + 12.0f), 394, cw, 150));
-    invertPill_->setBounds (R (220, 570, 170, 32));
-    copyPill_->setBounds (R (750, 570, 120, 32));
-    pastePill_->setBounds (R (884, 570, 120, 32));
-    resetPill_->setBounds (R (1018, 570, 112, 32));
+    for (std::size_t i = 0; i < tapsCards_.size(); ++i) tapsCards_[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + 12.0f), 474, cw, 150));
+    invertPill_->setBounds (R (220, 650, 170, 32));
+    copyPill_->setBounds (R (750, 650, 120, 32));
+    pastePill_->setBounds (R (884, 650, 120, 32));
+    resetPill_->setBounds (R (1018, 650, 112, 32));
 
     // ---- page GLOBAL
     globalPanel_->setBounds (R (204, 72, 942, 638));
@@ -820,10 +950,11 @@ void NovaDelayEditor::layout()
     routingPill_->setBounds (R (372, 108, 210, 30));
     freezePill_->setBounds (R (624, 108, 120, 30));
     syncNote_->setBounds (R (780, 108, 350, 30));
+    sim_->setBounds (R (220, 148, 910, 180));
     for (std::size_t i = 0; i < globalCards_.size(); ++i)
     {
-        const float x = 220.0f + static_cast<float> (i % 5) * (cw + 12.0f), y = (i < 5 ? 170.0f : 360.0f);
-        globalCards_[i]->setBounds (R (x, y, cw, 160));
+        const float x = 220.0f + static_cast<float> (i % 5) * (cw + 12.0f), y = (i < 5 ? 340.0f : 522.0f);
+        globalCards_[i]->setBounds (R (x, y, cw, 164));
     }
 
     // ---- page SETTINGS (en plus des sections communes)
@@ -872,6 +1003,7 @@ void NovaDelayEditor::tick()
     }
     if (currentPage() == 2)
     {
+        sim_->update();
         syncPill_->setEnabled (options().hostTempo);
         syncPill_->setAlpha (options().hostTempo ? 1.0f : 0.4f);
         syncNote_->setVisible (! options().hostTempo);
