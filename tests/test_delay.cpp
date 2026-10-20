@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <cmath>
+#include <tuple>
 #include <vector>
 
 #include "neptune/core/DelayModule.h"
@@ -319,13 +320,112 @@ TEST_CASE ("delay: modulation keeps the echo finite and moves its timing slightl
     CHECK (peak < 0.7f);
 }
 
+namespace
+{
+// puissance de la composante de fréquence f (Goertzel) sur [from, to)
+double tone (const std::vector<float>& v, std::size_t from, std::size_t to, double f)
+{
+    double re = 0.0, im = 0.0;
+    for (std::size_t i = from; i < to; ++i)
+    {
+        const double a = 2.0 * 3.14159265358979 * f * static_cast<double> (i) / kRate;
+        re += v[i] * std::cos (a);
+        im += v[i] * std::sin (a);
+    }
+    return (re * re + im * im) / static_cast<double> ((to - from) * (to - from));
+}
+// puissance moyenne autour de f sur de courtes fenêtres de 20 ms (les sauts de phase du décaleur à chaque grain interdisent une intégration longue)
+double toneAvg (const std::vector<float>& v, std::size_t from, std::size_t to, double f)
+{
+    double sum = 0.0;
+    int count = 0;
+    for (std::size_t s0 = from; s0 + ms (20) <= to; s0 += ms (20)) { sum += tone (v, s0, s0 + ms (20), f); ++count; }
+    return sum / std::max (1, count);
+}
+std::vector<float> sine (double f, std::size_t n, float amp = 0.5f)
+{
+    std::vector<float> v (n);
+    for (std::size_t i = 0; i < n; ++i) v[i] = amp * static_cast<float> (std::sin (2.0 * 3.14159265358979 * f * static_cast<double> (i) / kRate));
+    return v;
+}
+} // namespace
+
+TEST_CASE ("delay: PITCH shifts the echoes by the requested interval", "[delay][pitch]")
+{
+    for (const auto& [semitones, expected, other] : { std::tuple { 12.0, 880.0, 440.0 }, std::tuple { -12.0, 220.0, 440.0 }, std::tuple { 7.0, 659.26, 440.0 } })
+    {
+        DelayRig r;
+        r.line (0, 100.0);
+        r.set (d::lineParam (0, d::kPitch), semitones);
+        const auto [l, rr] = r.play (sine (440.0, ms (1500)), ms (1500));
+        (void) rr;
+        INFO ("semitones " << semitones);
+        const double at = toneAvg (l, ms (600), ms (1400), expected);
+        CHECK (at > 4.0 * toneAvg (l, ms (600), ms (1400), other));   // la hauteur d'origine a disparu au profit de la nouvelle
+        CHECK (at > 5.0e-3);
+    }
+}
+
+TEST_CASE ("delay: PITCH at zero is a plain delay and the shifted echo stays on the line time", "[delay][pitch]")
+{
+    DelayRig plain;
+    plain.line (0, 200.0);
+    const auto [pl, pr] = plain.play (sine (440.0, ms (300)), ms (700));
+    (void) pr;
+    // le chemin direct n'est pas touché quand PITCH vaut 0 : écho exact à 200 ms, d'amplitude 0,5
+    CHECK (std::fabs (pl[ms (260)] - 0.5f * static_cast<float> (std::sin (2.0 * 3.14159265358979 * 440.0 * static_cast<double> (ms (60)) / kRate))) < 0.02f);
+    DelayRig up;
+    up.line (0, 200.0);
+    up.set (d::lineParam (0, d::kPitch), 12.0);
+    const auto [ul, ur] = up.play (sine (440.0, ms (300)), ms (700));
+    (void) ur;
+    // silence avant l'écho (moins la demi-longueur d'un grain) puis de l'énergie autour du temps de la ligne
+    float early = 0.0f, mid = 0.0f;
+    for (std::size_t i = 0; i < ms (170); ++i) early = std::max (early, std::fabs (ul[i]));
+    for (std::size_t i = ms (230); i < ms (400); ++i) mid = std::max (mid, std::fabs (ul[i]));
+    CHECK (early < 0.05f);
+    CHECK (mid > 0.2f);
+}
+
+TEST_CASE ("delay: a pitch-shifted feedback climbs by the interval at each repeat (shimmer)", "[delay][pitch]")
+{
+    DelayRig r;
+    r.line (0, 150.0, 0.0, 70.0);
+    r.set (d::lineParam (0, d::kPitch), 12.0);
+    const auto [l, rr] = r.play (sine (300.0, ms (100)), ms (2500));
+    (void) rr;
+    float peak = 0.0f;
+    for (const auto v : l) { REQUIRE (std::isfinite (v)); peak = std::max (peak, std::fabs (v)); }
+    CHECK (peak > 0.1f);
+    CHECK (peak < 2.0f);
+    // le premier écho tourne autour de 600 Hz, le deuxième autour de 1200 Hz
+    CHECK (toneAvg (l, ms (190), ms (250), 600.0) > 2.0 * toneAvg (l, ms (190), ms (250), 300.0));
+}
+
+TEST_CASE ("delay: pitch quality High uses longer grains and both settings are bounded", "[delay][pitch]")
+{
+    for (const double quality : { 0.0, 1.0 })
+    {
+        DelayRig r;
+        r.set (d::pitchQuality, quality);
+        r.line (0, 120.0, 0.0, 50.0);
+        r.set (d::lineParam (0, d::kPitch), -5.0);
+        const auto [l, rr] = r.play (sine (500.0, ms (400)), ms (1500));
+        (void) rr;
+        float peak = 0.0f;
+        for (const auto v : l) { REQUIRE (std::isfinite (v)); peak = std::max (peak, std::fabs (v)); }
+        CHECK (peak < 1.5f);
+        CHECK (peak > 0.05f);
+    }
+}
+
 #include "neptune/core/DelayPresets.h"
 
 TEST_CASE ("delay: factory presets apply cleanly and Default restores the defaults", "[delay][presets]")
 {
     DelayRig r;
     const auto& list = delay::factoryPresets();
-    REQUIRE (list.size() >= 6);
+    REQUIRE (list.size() >= 8);
     CHECK (std::string (list[0].name) == "Default");
     for (const auto& p : list)
         for (const auto& [id, v] : p.values)

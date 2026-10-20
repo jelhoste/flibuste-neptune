@@ -67,6 +67,7 @@ bool DelayModule::declareParams (ParameterSet& set, std::string* error) const
     add (pct (width, "Width", 0.0, 200.0, 100.0));
     add (fixed (P::continuous (glideMs, "Glide Time", Unit::Milliseconds, 20.0, 500.0, 120.0)));
     add (fixed (P::toggle (safetyLimiter, "Feedback Safety Limiter", true)));
+    add (fixed (P::choice (pitchQuality, "Pitch Quality", { "Standard", "High" }, 0)));
 
     for (int n = 0; n < kLines; ++n)
     {
@@ -81,6 +82,7 @@ bool DelayModule::declareParams (ParameterSet& set, std::string* error) const
         add (pct (id (kPan), name + "Pan", -100.0, 100.0, 0.0));
         add (P::continuous (id (kOffset), name + "R Offset", Unit::Milliseconds, -maxOffsetMs, maxOffsetMs, 0.0));
         add (pct (id (kFeedback), name + "Feedback", -95.0, 95.0, 30.0));
+        add (P::continuous (id (kPitch), name + "Pitch", Unit::None, -24.0, 24.0, 0.0));
         add (P::continuous (id (kLowCut), name + "Low Cut", Unit::Hertz, 20.0, 2000.0, 20.0, Curve::Exponential));
         add (P::continuous (id (kHighCut), name + "High Cut", Unit::Hertz, 500.0, 20000.0, 20000.0, Curve::Exponential));
         add (P::toggle (id (kInvert), name + "Invert"));
@@ -104,6 +106,9 @@ void DelayModule::prepare (double sampleRate, int)
     bufSize_ = static_cast<std::size_t> (std::ceil ((maxTimeMs + maxOffsetMs + maxModMs + 4.0) * 0.001 * sampleRate_)) + 8;
     for (auto& l : lines_)
         for (auto& b : l.buf) b.assign (bufSize_, 0.0f);
+    shifterSize_ = static_cast<std::size_t> (std::ceil (0.08 * sampleRate_)) + 16;
+    for (auto& l : lines_)
+        for (auto& b : l.shifter) b.assign (shifterSize_, 0.0f);
     reset();
 }
 
@@ -118,6 +123,10 @@ void DelayModule::reset() noexcept
         l.y = { 0.0, 0.0 };
         l.active = false;
         l.hpDesigned = l.lpDesigned = -1.0;
+        for (auto& b : l.shifter) std::fill (b.begin(), b.end(), 0.0f);
+        l.shPos = 0;
+        l.pitchSm = l.pitchAct = l.shPhi = 0.0;
+        l.shEngaged = false;
     }
     freezeSm_ = 0.0;
     fbGlobalSm_ = 0.0;
@@ -142,6 +151,8 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
     const double fbGlobalTarget = param (feedbackGlobal) * 0.01;
     const double duckAmountTarget = param (duckAmount) * 0.01, duckThr = param (duckThreshold);
     const double duckAtt = coef (0.005, fs), duckRel = coef (param (duckRelease) * 0.001, fs);
+    const bool highQuality = param (pitchQuality) >= 0.5;
+    const double grain = (highQuality ? 0.08 : 0.04) * fs;      // taille de grain (échantillons)
     const double kSm = coef (0.02, fs), kGlide = coef (param (glideMs) * 0.001, fs), kFreeze = coef (0.02, fs);
     const double outGainMeter = dbToLin (idxOut_ == ParameterSet::npos ? 0.0 : params.getAt (idxOut_));
     const double inGainInv = 1.0 / std::max (1.0e-6, dbToLin (idxIn_ == ParameterSet::npos ? 0.0 : params.getAt (idxIn_)));
@@ -151,7 +162,7 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
     bool anySolo = false;
     for (int n8 = 0; n8 < kLines; ++n8)
         if (lineValue (n8, kOn) >= 0.5 && lineValue (n8, kSolo) >= 0.5) anySolo = true;
-    struct Target { bool active; double time, offset, level, panL, panR, fb, low, high, depth, rate; bool invert; };
+    struct Target { bool active; double time, offset, level, panL, panR, fb, low, high, depth, rate, pitch; bool invert; };
     std::array<Target, kLines> tg {};
     for (int k = 0; k < kLines; ++k)
     {
@@ -169,6 +180,7 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
         t.high = lineValue (k, kHighCut);
         t.depth = lineValue (k, kModDepth) * 0.01;
         t.rate = lineValue (k, kModRate);
+        t.pitch = lineValue (k, kPitch);
         t.invert = lineValue (k, kInvert) >= 0.5;
         auto& l = lines_[static_cast<std::size_t> (k)];
         if (t.active && ! l.active)   // la ligne vient d'être activée : contenu vide, valeurs lissées directement à leur cible
@@ -180,6 +192,8 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
             for (auto& f : l.lp) f.reset();
             l.timeSmp = t.time; l.offsetSmp = t.offset; l.level = t.level; l.panL = t.panL; l.panR = t.panR; l.fb = t.fb;
             l.lowHz = t.low; l.highHz = t.high; l.hpDesigned = l.lpDesigned = -1.0;
+            for (auto& b : l.shifter) std::fill (b.begin(), b.end(), 0.0f);
+            l.shPos = 0; l.pitchSm = t.pitch; l.pitchAct = 0.0; l.shPhi = 0.0; l.shEngaged = false;
         }
         l.active = t.active;
         l.modDepth = t.depth;
@@ -231,6 +245,38 @@ void DelayModule::process (float* left, float* right, int n, const ParameterSet&
             const double dl = std::clamp (l.timeSmp + excursion * lfo, 3.0, static_cast<double> (bufSize_) - 8.0);
             const double dr = std::clamp (std::max (0.0, l.timeSmp + l.offsetSmp) + excursion * lfo, 3.0, static_cast<double> (bufSize_) - 8.0);
             double yr[2] = { readHermite (l.buf[0], l.pos, dl), readHermite (l.buf[1], l.pos, dr) };
+            // décalage de hauteur : deux têtes de lecture à fenêtres de Hann sur un court tampon, lues sur le signal de la ligne avancé de la demi-longueur
+            // d'un grain (le retard moyen du décaleur est ainsi absorbé dans le temps de la ligne) ; fondu de 20 ms avec le chemin direct
+            l.pitchSm += kSm * (t.pitch - l.pitchSm);
+            const bool wantShift = std::fabs (t.pitch) > 0.001 || std::fabs (l.pitchSm) > 0.001;
+            if (wantShift && ! l.shEngaged)
+            {
+                for (auto& b : l.shifter) std::fill (b.begin(), b.end(), 0.0f);
+                l.shPos = 0;
+                l.shPhi = 0.0;
+                l.shEngaged = true;
+            }
+            if (l.shEngaged)
+            {
+                l.pitchAct += kSm * ((wantShift ? 1.0 : 0.0) - l.pitchAct);
+                const double comp = 0.5 * grain + 3.0;
+                const double ratio = std::exp2 (l.pitchSm / 12.0);
+                const double bIn[2] = { readHermite (l.buf[0], l.pos, std::max (3.0, dl - comp)), readHermite (l.buf[1], l.pos, std::max (3.0, dr - comp)) };
+                for (int c = 0; c < 2; ++c) l.shifter[static_cast<std::size_t> (c)][l.shPos] = static_cast<float> (bIn[c]);
+                l.shPos = (l.shPos + 1) % shifterSize_;
+                l.shPhi += (1.0 - ratio) / grain;
+                l.shPhi -= std::floor (l.shPhi);
+                const double phi2 = l.shPhi + 0.5 - std::floor (l.shPhi + 0.5);
+                const double w1 = 0.5 - 0.5 * std::cos (2.0 * kPi * l.shPhi), w2 = 0.5 - 0.5 * std::cos (2.0 * kPi * phi2);
+                const double d1 = 3.0 + l.shPhi * grain, d2 = 3.0 + phi2 * grain;
+                for (int c = 0; c < 2; ++c)
+                {
+                    const auto& sb = l.shifter[static_cast<std::size_t> (c)];
+                    const double shifted = w1 * readHermite (sb, l.shPos, d1) + w2 * readHermite (sb, l.shPos, d2);
+                    yr[c] = (1.0 - l.pitchAct) * yr[c] + l.pitchAct * shifted;
+                }
+                if (! wantShift && l.pitchAct < 0.0005) l.shEngaged = false;   // retour au chemin direct : plus de calcul
+            }
             // filtres : coefficients recalculés seulement quand la coupure a bougé
             if (l.lowHz > 20.5)
             {

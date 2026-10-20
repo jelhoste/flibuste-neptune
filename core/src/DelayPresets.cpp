@@ -79,6 +79,18 @@ const std::vector<FactoryPreset>& factoryPresets()
         }
         {
             Values v;
+            line (v, 0, 500.0, 0.0, 0.0, 60.0, 4.0);       // 1/4
+            line (v, 1, 500.0, -4.0, 60.0, 60.0, 1.0);     // 1/2
+            v.push_back ({ lineParam (0, kPitch), 12.0 });
+            v.push_back ({ lineParam (1, kPitch), 7.0 });
+            v.push_back ({ lineParam (0, kModDepth), 25.0 });
+            v.push_back ({ lineParam (1, kModDepth), 25.0 });
+            v.push_back ({ sync, 1.0 });
+            v.push_back ({ stock::mix, 40.0 });
+            p.push_back ({ "Shimmer Pad", v });
+        }
+        {
+            Values v;
             line (v, 0, 25.0, 0.0, -100.0, 0.0);
             line (v, 1, 35.0, 0.0, 100.0, 0.0);
             v.push_back ({ width, 150.0 });
@@ -96,7 +108,7 @@ const std::vector<ParamId>& presetParams()
         std::vector<ParamId> v = { sync, routing, freeze, duckAmount, duckThreshold, duckRelease, feedbackGlobal, pingPong, drive, width, stock::mix, stock::outputTrim };
         for (int n = 0; n < kLines; ++n)
             for (int k = 0; k < kLineParams; ++k)
-                if (k != kPitchReserved) v.push_back (lineParam (n, k));
+                v.push_back (lineParam (n, k));
         return v;
     }();
     return ids;

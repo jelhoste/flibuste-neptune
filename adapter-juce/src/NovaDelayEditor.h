@@ -2,7 +2,7 @@
 // Interface du delay à huit lignes au style NOVA (maquette design/nova/ui/nova_delay_ui.html), sur le socle commun nova::EditorBase : page DELAY (timeline des
 // huit lignes avec barres déplaçables, vue FILTERS, sélecteur de ligne, potards de la ligne choisie), page TAPS (réglages secondaires de la ligne choisie ; la
 // matrice des huit lignes viendra ensuite), page GLOBAL (routage, feedback global, ping-pong, saturation, largeur, ducking, freeze) et page SETTINGS.
-// Même code pour le plugin séparé et pour l'insert de Neptune (SYNC n'est utilisable que dans le plugin séparé, qui reçoit le tempo de l'hôte).
+// Le potard PITCH (décalage de hauteur) suit la ligne choisie. Même code pour le plugin séparé et pour l'insert de Neptune (SYNC n'est utilisable que dans le plugin séparé, qui reçoit le tempo de l'hôte).
 #include "NovaEditor.h"
 #include "neptune/core/DelayModule.h"
 
@@ -61,7 +61,7 @@ private:
 
     // page SETTINGS (en plus des sections communes)
     nova::Text* delaySection_ = nullptr;
-    nova::Pill* limiterPill_ = nullptr;
+    nova::Pill *limiterPill_ = nullptr, *qualityPill_ = nullptr;
     nova::SubSlider* glideSlider_ = nullptr;
 
     juce::String metaText_, tempoText_;

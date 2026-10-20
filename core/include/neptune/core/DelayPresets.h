@@ -1,6 +1,6 @@
 #pragma once
 // Presets d'usine du delay : de simples jeux de valeurs (identifiant -> valeur réelle) appliqués sur le jeu de paramètres du module. Points de départ à caler à
-// l'écoute. Le preset « Shimmer Pad » de la spécification attend le décalage de hauteur (PITCH), pas encore écrit.
+// l'écoute.
 #include <string>
 #include <utility>
 #include <vector>

@@ -4,7 +4,8 @@
 // Réglages communs : routage parallèle ou en cascade, feedback global, ping-pong, saturation de la boucle, freeze, ducking, largeur.
 // Description de référence : design/nova/docs/NOVA_Delay_params_v0.1.md. Le module ne produit que le signal retardé (« mouillé ») : le mélange avec le
 // signal sec, le gain d'entrée et le gain de sortie sont ceux, communs, du ModuleRunner (stock::mix, stock::inputTrim, stock::outputTrim).
-// Premier jet : sans décalage de hauteur (PITCH) ni changement de temps par fondu (Crossfade), prévus ensuite ; les identifiants 8 de chaque ligne sont réservés.
+// Décalage de hauteur (PITCH) : décaleur à deux grains croisés (fenêtres de Hann) dans la ligne, avant les filtres, dans la boucle de feedback (chaque
+// répétition est décalée de nouveau : effet « shimmer »). Pas encore de changement de temps par fondu (Crossfade).
 #include <array>
 #include <atomic>
 #include <vector>
@@ -20,12 +21,12 @@ namespace delay
 constexpr ParamId sync = 100, routing = 101, freeze = 102, duckAmount = 103, duckThreshold = 104, duckRelease = 105;
 constexpr ParamId feedbackGlobal = 106, pingPong = 107, drive = 108, width = 109;
 // Réglages de Settings (non automatisables).
-constexpr ParamId glideMs = 110, safetyLimiter = 111;
+constexpr ParamId glideMs = 110, safetyLimiter = 111, pitchQuality = 112;   // qualité du décalage : 0 Standard (grain de 40 ms), 1 High (80 ms)
 
 constexpr int kLines = 8;
 constexpr ParamId lineBase = 200, lineStride = 16;
 constexpr ParamId lineParam (int line, int k) { return lineBase + static_cast<ParamId> (line) * lineStride + static_cast<ParamId> (k); }   // line : 0..7
-enum LineParam : int { kOn = 0, kSolo, kTime, kDiv, kLevel, kPan, kOffset, kFeedback, kPitchReserved, kLowCut, kHighCut, kInvert, kModDepth, kModRate, kLineParams };
+enum LineParam : int { kOn = 0, kSolo, kTime, kDiv, kLevel, kPan, kOffset, kFeedback, kPitch, kLowCut, kHighCut, kInvert, kModDepth, kModRate, kLineParams };
 
 constexpr double maxTimeMs = 4000.0, maxOffsetMs = 100.0, maxModMs = 8.0;
 constexpr int kDivisions = 12;
@@ -72,6 +73,10 @@ private:
         std::array<double, 2> src { 0.0, 0.0 };        // entrée de la ligne à cet échantillon (signal d'entrée, ou sortie de la ligne précédente en cascade)
         double timeSmp = 0.0, level = 1.0, panL = 1.0, panR = 1.0, fb = 0.0, offsetSmp = 0.0, lowHz = 20.0, highHz = 20000.0, modDepth = 0.0, modRate = 0.5;
         double phase = 0.0, hpDesigned = -1.0, lpDesigned = -1.0;
+        std::array<std::vector<float>, 2> shifter;   // entrée du décaleur de hauteur (grain de 80 ms au plus)
+        std::size_t shPos = 0;
+        double pitchSm = 0.0, pitchAct = 0.0, shPhi = 0.0;   // hauteur lissée (demi-tons), part du signal décalé (fondu), phase des deux têtes
+        bool shEngaged = false;
         bool active = false;
     };
     double param (ParamId id) const noexcept { return values_[static_cast<std::size_t> (id - 100)]; }
@@ -83,7 +88,7 @@ private:
     std::size_t idxIn_ = ParameterSet::npos, idxOut_ = ParameterSet::npos, idxMix_ = ParameterSet::npos;
 
     double sampleRate_ = 48000.0;
-    std::size_t bufSize_ = 0;
+    std::size_t bufSize_ = 0, shifterSize_ = 0;
     std::array<Line, delay::kLines> lines_;
     double freezeSm_ = 0.0, fbGlobalSm_ = 0.0, duckEnv_ = 0.0, duckGain_ = 1.0, duckAmountSm_ = 0.0;
     std::atomic<double> tempo_ { 0.0 };

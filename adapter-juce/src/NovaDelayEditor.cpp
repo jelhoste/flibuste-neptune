@@ -499,8 +499,9 @@ void NovaDelayEditor::buildDelayPage()
 
     // quatre potards qui suivent la ligne choisie, puis MIX et OUTPUT
     struct Spec { ParamId id; const char* title; bool pink; const char* help; };
-    const Spec specs[6] = { { dl::lineParam (0, dl::kTime), "dl.time", false, "hlp.dl_time" }, { dl::lineParam (0, dl::kLevel), "dl.level", false, "hlp.dl_level" },
+    const Spec specs[7] = { { dl::lineParam (0, dl::kTime), "dl.time", false, "hlp.dl_time" }, { dl::lineParam (0, dl::kLevel), "dl.level", false, "hlp.dl_level" },
                             { dl::lineParam (0, dl::kPan), "dl.pan", false, "hlp.dl_pan" }, { dl::lineParam (0, dl::kFeedback), "dl.feedback", false, "hlp.dl_feedback" },
+                            { dl::lineParam (0, dl::kPitch), "dl.pitch", false, "hlp.dl_pitch" },
                             { stock::mix, "dl.mix", true, "hlp.dl_mix" }, { stock::outputTrim, "dl.output", true, "hlp.dl_output" } };
     for (const auto& s : specs)
     {
@@ -569,6 +570,9 @@ void NovaDelayEditor::buildSettingsExtras()
     limiterPill_ = add<nova::Pill> (3, skin());
     limiterPill_->bindToggle (host(), dl::safetyLimiter, tx ("dl.limiter"));
     glideSlider_ = add<nova::SubSlider> (3, skin(), host(), dl::glideMs, tx ("dl.glide"));
+    qualityPill_ = add<nova::Pill> (3, skin());
+    qualityPill_->bindChoice (host(), dl::pitchQuality, tx ("dl.pitch_quality"), { tx ("dl.q_standard"), tx ("dl.q_high") });
+    addInfo (3, qualityPill_, "hlp.dl_pitchquality");
     addInfo (3, limiterPill_, "hlp.dl_limiter");
     addInfo (3, glideSlider_, "hlp.dl_glide");
 }
@@ -581,6 +585,7 @@ void NovaDelayEditor::rebindLineControls()
     columns_[1].knob->setParam (dl::lineParam (n, dl::kLevel), tx ("dl.level"));
     columns_[2].knob->setParam (dl::lineParam (n, dl::kPan), tx ("dl.pan"));
     columns_[3].knob->setParam (dl::lineParam (n, dl::kFeedback), tx ("dl.feedback"));
+    columns_[4].knob->setParam (dl::lineParam (n, dl::kPitch), tx ("dl.pitch"));
     const int ks[5] = { dl::kLowCut, dl::kHighCut, dl::kModDepth, dl::kModRate, dl::kOffset };
     const char* titles[5] = { "dl.lowcut", "dl.highcut", "dl.moddepth", "dl.modrate", "dl.offset" };
     for (std::size_t i = 0; i < tapsCards_.size(); ++i) tapsCards_[i]->setParam (dl::lineParam (n, ks[i]), tx (titles[i]));
@@ -606,7 +611,7 @@ void NovaDelayEditor::layout()
     view_->setBounds (R (220, 104, 910, 300));
     rowDelay_->setBounds (R (220, 414, 910, 56));
     viewPill_->setBounds (R (1146 - 14 - 112, 76, 112, 24));
-    const float colW = (942.0f - 12.0f * 5.0f) / 6.0f;
+    const float colW = (942.0f - 12.0f * 6.0f) / 7.0f;
     for (std::size_t i = 0; i < columns_.size(); ++i)
     {
         const float x = 204.0f + static_cast<float> (i) * (colW + 12.0f);
@@ -637,6 +642,7 @@ void NovaDelayEditor::layout()
     delaySection_->setBounds (R (220, 540, 400, 16));
     limiterPill_->setBounds (R (220, 568, 250, 34));
     glideSlider_->setBounds (R (510, 560, 300, 48));
+    qualityPill_->setBounds (R (220, 618, 300, 34));
 
     // ---- barre du bas
     abPill()->setBounds (R (14, 724 + 12, 40, 32));
