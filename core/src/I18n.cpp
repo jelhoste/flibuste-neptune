@@ -664,6 +664,7 @@ const Entry kEntries[] = {
     { "module.equalizer", { "Equalizer", "Égaliseur" } },
     { "module.shaper", { "Transient shaper", "Shaper de transitoires" } },
     { "module.delay", { "Delay", "Délai" } },
+    { "module.chorus", { "Chorus", "Chœur" } },
     { "fm.import_failed", { "This file does not contain a DX7 voice or bank.", "Ce fichier ne contient ni voix ni banque DX7." } },
     { "fm.checksum_warning", { "The checksum of this DX7 file is wrong; the voice was loaded anyway.", "La somme de contrôle de ce fichier DX7 est fausse ; la voix est chargée quand même." } },
     { "fm.no_free_bank", { "No free bank to receive the 32 voices.", "Aucune banque libre pour recevoir les 32 voix." } },

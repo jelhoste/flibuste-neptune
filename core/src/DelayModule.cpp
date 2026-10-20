@@ -1,4 +1,5 @@
 #include "neptune/core/DelayModule.h"
+#include "neptune/core/DelayRead.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,19 +27,6 @@ inline double softLimit (double x) noexcept
     const double a = std::fabs (x);
     if (a <= 1.0) return x;
     return std::copysign (1.0 + 0.5 * std::tanh ((a - 1.0) / 0.5), x);
-}
-// Lecture interpolée (Hermite à 4 points) à `d` échantillons derrière l'indice d'écriture `pos` (d >= 3).
-inline float readHermite (const std::vector<float>& b, std::size_t pos, double d) noexcept
-{
-    const auto size = static_cast<std::int64_t> (b.size());
-    const double rp = static_cast<double>(pos) - d;
-    const double fl = std::floor (rp);
-    const auto frac = static_cast<float> (rp - fl);
-    auto at = [&] (std::int64_t i) { return b[static_cast<std::size_t> (((i % size) + size) % size)]; };
-    const auto i1 = static_cast<std::int64_t> (fl);
-    const float y0 = at (i1 - 1), y1 = at (i1), y2 = at (i1 + 1), y3 = at (i1 + 2);
-    const float c0 = y1, c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
-    return ((c3 * frac + c2) * frac + c1) * frac + c0;
 }
 } // namespace
 

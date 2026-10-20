@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "neptune/core/Mixer.h"
+#include "neptune/core/ChorusModule.h"
 #include "neptune/core/CompressorModule.h"
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/EqualizerModule.h"
@@ -130,7 +131,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
 // ---- registre ----
 const std::vector<ModuleInfo>& availableModules()
 {
-    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" } };
+    static const std::vector<ModuleInfo> modules = { { "utility", "module.utility" }, { "shaper", "module.shaper" }, { "compressor", "module.compressor" }, { "equalizer", "module.equalizer" }, { "delay", "module.delay" }, { "chorus", "module.chorus" } };
     return modules;
 }
 
@@ -141,6 +142,7 @@ std::unique_ptr<StockModule> createModule (std::string_view typeId)
     if (typeId == "compressor") return std::make_unique<CompressorModule>();
     if (typeId == "equalizer") return std::make_unique<EqualizerModule>();
     if (typeId == "delay") return std::make_unique<DelayModule>();
+    if (typeId == "chorus") return std::make_unique<ChorusModule>();
     return nullptr;
 }
 
