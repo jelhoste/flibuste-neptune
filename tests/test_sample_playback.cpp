@@ -265,3 +265,68 @@ TEST_CASE ("extra loops and pan survive JSON and are built into the instrument")
     CHECK (rt.panR == 1.0f);
     std::filesystem::remove (path);
 }
+
+TEST_CASE ("a release zone can follow the level of the interrupted voice")
+{
+    auto run = [] (bool follow, int meter, float attackAmp, bool)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto attack = makeFullKeyboardZone (makeConstant (96000, attackAmp), 60, PlayMode::Loop);
+        attack.panL = 1.0f; attack.panR = 0.0f;                       // l'attaque sort à gauche seulement
+        auto rel = makeFullKeyboardZone (makeConstant (96000, 1.0f), 60, PlayMode::OneShot);
+        rel.onRelease = true; rel.panL = 0.0f; rel.panR = 1.0f;       // le relâchement sort à droite seulement
+        rel.releaseFollowsLevel = follow; rel.releaseMeter = meter;
+        inst->zones.push_back (std::move (attack));
+        inst->zones.push_back (std::move (rel));
+        inst->finalize();
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        v.noteOn (0, 60, 1.0f);
+        std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
+        for (int pos = 0; pos < 24000; pos += 256) v.render (l.data() + pos, r.data() + pos, std::min (256, 24000 - pos), 1.0f, 1.0f, 0.0);
+        v.noteOff (0, 60);
+        std::fill (r.begin(), r.end(), 0.0f);
+        v.render (l.data(), r.data(), 2048, 1.0f, 1.0f, 0.0);
+        return r[1500];   // quelques ms après le Note Off, le relâchement sonne seul à droite
+    };
+    // sans option : le relâchement joue à plein volume
+    CHECK_THAT (run (false, 0, 0.5f, true), WithinAbs (1.0, 0.02));
+    // crête de 0,5 = -6,02 dB, plancher -48 dB : (-6,02 + 48) / 48 = 0,8746
+    CHECK_THAT (run (true, 0, 0.5f, true), WithinAbs (0.8746, 0.02));
+    // une attaque plus faible donne un relâchement plus faible
+    CHECK (run (true, 0, 0.1f, true) < run (true, 0, 0.5f, true) - 0.2f);
+    // RMS d'une constante 0,5 : -6,02 dB également ; LUFS : plus bas (la pondération K coupe le continu), donc un relâchement plus faible
+    CHECK_THAT (run (true, 1, 0.5f, true), WithinAbs (0.8746, 0.03));
+    CHECK (run (true, 2, 0.5f, true) < 0.8f);
+}
+
+TEST_CASE ("a release zone with nothing to follow stays silent")
+{
+    auto inst = std::make_shared<Instrument>();
+    auto rel = makeFullKeyboardZone (makeConstant (96000, 1.0f), 60, PlayMode::OneShot);
+    rel.onRelease = true; rel.releaseFollowsLevel = true;
+    inst->zones.push_back (std::move (rel));
+    inst->finalize();
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    v.noteOn (0, 60, 1.0f);
+    v.noteOff (0, 60);
+    std::vector<float> l (2048, 0.0f), r (l);
+    v.render (l.data(), r.data(), 2048, 1.0f, 1.0f, 0.0);
+    for (std::size_t i = 0; i < l.size(); ++i) REQUIRE (l[i] == 0.0f);
+}
+
+TEST_CASE ("release-level settings and the replace option survive JSON")
+{
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = "r.wav"; z.onRelease = true; z.releaseFollowsLevel = true; z.releaseMeter = 1; z.releaseFloorDb = -40.0; z.releaseCurve = 2.0;
+    d.zones.push_back (z);
+    d.compensateOnReplace = false;
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back.zones[0] == sanitised (z));
+    CHECK_FALSE (back.compensateOnReplace);
+    CHECK (instrumentFromJson (toJson (InstrumentDescription {})).compensateOnReplace);
+}

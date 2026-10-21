@@ -90,6 +90,13 @@ struct ZoneDescription
     static constexpr std::size_t maxExtraLoops = 3;
     std::vector<LoopRegion> extraLoops;
     int loopRepeats = 0;
+    // Volume de relâchement lié au niveau (zones déclenchées au Note Off) : le niveau réellement entendu des voix interrompues, capturé au Note Off, règle le volume
+    // de la zone de relâchement. `releaseMeter` : 0 crête, 1 RMS, 2 LUFS (pondération K). Correspondance : niveau en dB de `releaseFloorDb` (silence) à 0 dB -> 0..1, puis
+    // élevé à `releaseCurve` (1 = linéaire en dB, > 1 = plus doux en bas, < 1 = plus fort en bas).
+    bool releaseFollowsLevel = false;
+    int releaseMeter = 2;
+    double releaseFloorDb = -48.0;
+    double releaseCurve = 1.0;
     double pan = 0.0;              // -1 (gauche) .. +1 (droite) ; loi de balance en cosinus, neutre au centre
     bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
@@ -104,7 +111,8 @@ struct ZoneDescription
             && filterOverride == o.filterOverride && filters == o.filters
             && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
             && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs
-            && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan;
+            && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
+            && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve;
     }
 };
 
@@ -122,6 +130,7 @@ struct InstrumentDescription
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
 
     // Ce qui est chargé en mémoire (réglable en cours d'utilisation ; les zones restent toutes dans la description) :
+    bool compensateOnReplace = true;           // remplacer le fichier d'une zone compense la différence de niveau (gain de la zone)
     bool mainRoundRobinOnly = false;           // ne charger que l'échantillon principal de chaque place
     bool loadReleaseSamples = true;            // zones déclenchées au relâchement
     std::vector<std::string> unloadedGroups;   // noms de Groupe (articulations, pédales...) laissés sur le disque
@@ -177,7 +186,7 @@ struct InstrumentDescription
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
             && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
-            && defaultFilters == o.defaultFilters && slots == o.slots;
+            && defaultFilters == o.defaultFilters && slots == o.slots && compensateOnReplace == o.compensateOnReplace;
     }
     bool empty() const noexcept { return zones.empty(); }
 
@@ -238,6 +247,9 @@ struct Zone
     int moreLoopCount = 0;
     int loopRepeats = 0;                  // répétitions de la boucle 1 quand il y en a d'autres (0 = sans fin)
     float panL = 1.0f, panR = 1.0f;       // gains de balance
+    bool releaseFollowsLevel = false;     // voir ZoneDescription
+    int releaseMeter = 2;
+    float releaseFloorDb = -48.0f, releaseCurve = 1.0f;
     int roundRobin = 0;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;
@@ -251,6 +263,7 @@ struct Instrument
 {
     std::vector<Zone> zones;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    bool trackLevels = false;   // une zone de relâchement suit le niveau des voix : les voix mesurent leur niveau entendu (rempli par finalize)
     SlotRuntimes slots;   // emplacements assignables résolus (voir ZoneSlots.h)
 
     // Première zone qui couvre la note et la vélocité (0..1 -> 1..127) ; nul si aucune. Ignore le round-robin et

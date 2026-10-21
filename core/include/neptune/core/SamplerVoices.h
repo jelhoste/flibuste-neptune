@@ -89,6 +89,12 @@ public:
     int heldVoices() const noexcept;      // voix comptées dans la limite (ni relâchées ni en fondu de vol)
 
 private:
+    // Pondération K (BS.1770) pour le niveau LUFS des voix ; coefficients refaits à prepare()
+    struct KCoefs { double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
+    KCoefs kShelf_, kHigh_;
+    float peakDecay_ = 0.999f, rmsCoef_ = 0.001f, lufsCoef_ = 0.0005f;
+    float heardGain (const Zone&, int channel, int key) const noexcept;   // volume de relâchement lié au niveau (0 : rien ne sonnait)
+
     struct Voice
     {
         const Zone* zone = nullptr;
@@ -115,6 +121,9 @@ private:
         std::array<float, 2> fenvValue { 0.0f, 0.0f };
         SlotMods mods;                      // effet des emplacements assignables, fixé au Note On
         int fcount = 0;
+        // niveau entendu de la voix (suivi seulement si une zone de relâchement le demande) : crête, énergie, énergie pondérée K
+        float heardPeak = 0.0f, heardMs = 0.0f, heardMsK = 0.0f;
+        std::array<std::array<float, 2>, 2> kState {};   // deux étages de la pondération K (état transposé, 2 valeurs chacun)
         int loopIdx = 0;                    // boucle en cours (0 = la première) quand la zone en a plusieurs
         int repsLeft = -1;                  // retours restants de la boucle en cours ; -1 = sans fin, 0 = passer à la suivante
         int delayLeft = 0;                  // délai de lecture : échantillons de silence restant avant le début du son

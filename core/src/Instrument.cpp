@@ -88,6 +88,9 @@ ZoneDescription sanitised (ZoneDescription z)
     z.fadeOutMs = std::isfinite (z.fadeOutMs) ? std::clamp (z.fadeOutMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeOutMs;
     z.delayMs = std::isfinite (z.delayMs) ? std::clamp (z.delayMs, 0.0, ZoneDescription::maxDelayMs) : 0.0;
     z.pan = std::isfinite (z.pan) ? std::clamp (z.pan, -1.0, 1.0) : 0.0;
+    z.releaseMeter = std::clamp (z.releaseMeter, 0, 2);
+    z.releaseFloorDb = std::isfinite (z.releaseFloorDb) ? std::clamp (z.releaseFloorDb, -96.0, -6.0) : -48.0;
+    z.releaseCurve = std::isfinite (z.releaseCurve) ? std::clamp (z.releaseCurve, 0.25, 4.0) : 1.0;
     z.loopRepeats = std::clamp (z.loopRepeats, 0, 1000);
     if (z.extraLoops.size() > ZoneDescription::maxExtraLoops) z.extraLoops.resize (ZoneDescription::maxExtraLoops);
     for (auto& l : z.extraLoops)
@@ -217,6 +220,13 @@ std::string toJson (const InstrumentDescription& d)
         if (z.reverse) o["reverse"] = true;
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.pan != 0.0) o["pan"] = z.pan;
+        if (z.releaseFollowsLevel)
+        {
+            o["release_follows_level"] = true;
+            o["release_meter"] = z.releaseMeter;
+            o["release_floor_db"] = z.releaseFloorDb;
+            o["release_curve"] = z.releaseCurve;
+        }
         if (z.loopRepeats != 0) o["loop_repeats"] = z.loopRepeats;
         if (! z.extraLoops.empty())
         {
@@ -244,6 +254,7 @@ std::string toJson (const InstrumentDescription& d)
     nlohmann::json doc;
     doc["round_robin_mode"] = toString (d.roundRobinMode);
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
+    if (! d.compensateOnReplace) doc["compensate_on_replace"] = false;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
     if (d.polyphony != PolyphonyMode::Poly) doc["polyphony"] = toString (d.polyphony);
@@ -357,6 +368,10 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     if (const auto it = o.find ("reverse"); it != o.end() && it->is_boolean()) z.reverse = it->get<bool>();
     z.delayMs = readNum (o, "delay_ms", z.delayMs);
     z.pan = readNum (o, "pan", z.pan);
+    if (const auto it = o.find ("release_follows_level"); it != o.end() && it->is_boolean()) z.releaseFollowsLevel = it->get<bool>();
+    z.releaseMeter = readInt (o, "release_meter", z.releaseMeter);
+    z.releaseFloorDb = readNum (o, "release_floor_db", z.releaseFloorDb);
+    z.releaseCurve = readNum (o, "release_curve", z.releaseCurve);
     z.loopRepeats = readInt (o, "loop_repeats", z.loopRepeats);
     if (const auto it = o.find ("extra_loops"); it != o.end() && it->is_array())
         for (const auto& lo : *it)
@@ -402,6 +417,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("round_robin_mode"); m != doc.end() && m->is_string())
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
+    if (const auto m = doc.find ("compensate_on_replace"); m != doc.end() && m->is_boolean()) d.compensateOnReplace = m->get<bool>();
     if (const auto m = doc.find ("load_release_samples"); m != doc.end() && m->is_boolean()) d.loadReleaseSamples = m->get<bool>();
     auto readString = [&] (const char* k) -> std::string
     {
@@ -503,6 +519,8 @@ const Zone* Instrument::find (int key, float velocity) const noexcept
 
 void Instrument::finalize()
 {
+    trackLevels = false;
+    for (const auto& z : zones) trackLevels = trackLevels || (z.onRelease && z.releaseFollowsLevel);
     rrSets_.clear();
     zoneSet_.assign (zones.size(), -1);
     zoneFamily_.assign (zones.size(), -1);
@@ -831,6 +849,10 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             const double pan = std::clamp (zd.pan, -1.0, 1.0);
             z.panL = pan > 0.0 ? static_cast<float> (std::cos (pan * 1.5707963267948966)) : 1.0f;
             z.panR = pan < 0.0 ? static_cast<float> (std::cos (-pan * 1.5707963267948966)) : 1.0f;
+            z.releaseFollowsLevel = zd.releaseFollowsLevel && zd.onRelease;
+            z.releaseMeter = zd.releaseMeter;
+            z.releaseFloorDb = static_cast<float> (zd.releaseFloorDb);
+            z.releaseCurve = static_cast<float> (zd.releaseCurve);
         }
         inst->zones.push_back (std::move (z));
     }

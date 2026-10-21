@@ -88,6 +88,94 @@ struct NovaSamplerEditor::GroupMenuListener : public juce::MouseListener
     NovaSamplerEditor& owner;
 };
 
+// Niveau en dB (RMS) d'une courte fenêtre d'un fichier, à partir de `start` ; faux si illisible ou silencieux.
+static bool windowLevelDb (const std::string& path, std::int64_t start, double ms, double& db)
+{
+    AudioStreamReader reader;
+    if (! reader.open (std::filesystem::u8path (path))) return false;
+    const auto info = probeAudioFile (std::filesystem::u8path (path));
+    const double rate = info.ok && info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
+    const std::int64_t n = std::min<std::int64_t> (std::max<std::int64_t> (64, static_cast<std::int64_t> (ms * rate / 1000.0)), reader.totalFrames() - start);
+    if (n < 64 || ! reader.seek (start)) return false;
+    std::vector<float> buf (static_cast<std::size_t> (n * reader.channels()));
+    const auto got = reader.read (buf.data(), n);
+    if (got < 64) return false;
+    double sum = 0.0;
+    for (std::int64_t i = 0; i < got * reader.channels(); ++i) sum += static_cast<double> (buf[static_cast<std::size_t> (i)]) * buf[static_cast<std::size_t> (i)];
+    const double rms = std::sqrt (sum / static_cast<double> (got * reader.channels()));
+    if (rms < 1.0e-5) return false;
+    db = 20.0 * std::log10 (rms);
+    return true;
+}
+
+// Fenêtre « Niveaux » : compensation au remplacement de fichier (instrument) et volume de relâchement lié au niveau (zones déclenchées au Note Off).
+class LevelsPanel : public juce::Component
+{
+public:
+    std::function<void (bool)> onCompensate;
+    std::function<void (bool follow, int meter, double floorDb, double curve)> onRelease;
+
+    LevelsPanel (const nova::Skin& skin, const i18n::Translator& tr, bool compensate, const ZoneDescription* zone)
+        : skin_ (skin), look_ (skin_), tr_ (tr)
+    {
+        setLookAndFeel (&look_);
+        auto text = [&] (const char* key) { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); };
+        compensate_.setButtonText (text ("sm.lv_compensate"));
+        compensate_.setToggleState (compensate, juce::dontSendNotification);
+        compensate_.onClick = [this] { if (onCompensate) onCompensate (compensate_.getToggleState()); };
+        follow_.setButtonText (text ("sm.lv_follow"));
+        meter_.addItem (text ("sm.lv_peak"), 1);
+        meter_.addItem ("RMS", 2);
+        meter_.addItem (text ("sm.lv_lufs"), 3);
+        meterLabel_.setText (text ("sm.lv_meter"), juce::dontSendNotification);
+        floorLabel_.setText (text ("sm.lv_floor"), juce::dontSendNotification);
+        curveLabel_.setText (text ("sm.lv_curve"), juce::dontSendNotification);
+        hint_.setText (text ("sm.lv_hint"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (11.5f));
+        hint_.setJustificationType (juce::Justification::topLeft);
+        floor_.setRange (-96.0, -6.0, 1.0);
+        floor_.setTextValueSuffix (" dB");
+        curve_.setRange (0.25, 4.0, 0.05);
+        const bool release = zone != nullptr && zone->onRelease;
+        follow_.setToggleState (release && zone->releaseFollowsLevel, juce::dontSendNotification);
+        meter_.setSelectedId (zone != nullptr ? zone->releaseMeter + 1 : 3, juce::dontSendNotification);
+        floor_.setValue (zone != nullptr ? zone->releaseFloorDb : -48.0, juce::dontSendNotification);
+        curve_.setValue (zone != nullptr ? zone->releaseCurve : 1.0, juce::dontSendNotification);
+        for (auto* c : std::initializer_list<juce::Component*> { &follow_, &meter_, &floor_, &curve_, &meterLabel_, &floorLabel_, &curveLabel_ }) c->setEnabled (release);
+        auto changed = [this] { if (onRelease) onRelease (follow_.getToggleState(), meter_.getSelectedId() - 1, floor_.getValue(), curve_.getValue()); };
+        follow_.onClick = changed;
+        meter_.onChange = changed;
+        floor_.onValueChange = changed;
+        curve_.onValueChange = changed;
+        for (auto* c : std::initializer_list<juce::Component*> { &compensate_, &follow_, &meter_, &floor_, &curve_, &meterLabel_, &floorLabel_, &curveLabel_, &hint_ }) addAndMakeVisible (*c);
+        setSize (420, 280);
+    }
+    ~LevelsPanel() override { setLookAndFeel (nullptr); }
+    void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (12);
+        compensate_.setBounds (r.removeFromTop (26));
+        r.removeFromTop (10);
+        follow_.setBounds (r.removeFromTop (26));
+        auto row = [&] (juce::Component& label, juce::Component& c) { auto line = r.removeFromTop (28); label.setBounds (line.removeFromLeft (130)); c.setBounds (line); r.removeFromTop (4); };
+        row (meterLabel_, meter_);
+        row (floorLabel_, floor_);
+        row (curveLabel_, curve_);
+        r.removeFromTop (6);
+        hint_.setBounds (r);
+    }
+
+private:
+    nova::Skin skin_;
+    nova::LookAndFeel look_;
+    const i18n::Translator& tr_;
+    juce::ToggleButton compensate_, follow_;
+    juce::ComboBox meter_;
+    juce::Slider floor_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, curve_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label meterLabel_, floorLabel_, curveLabel_, hint_;
+};
+
 // ------------------------------------------------------------------------------------------------ construction
 NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
     : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("SAMPLER")), proc_ (p)
@@ -224,6 +312,7 @@ void NovaSamplerEditor::buildZonesPage()
         [this] { const auto* z = shownZone(); return z != nullptr && z->chokeCuts == z->chokeCutBy ? z->chokeCuts : 0; },
         [this] (int g) { editZone ([g] (Zone& z) { z.chokeCuts = g; z.chokeCutBy = g; }); });
     chokeMorePill_ = pill (0, "...", [this] { openChokePanel (*chokeMorePill_); });
+    levelsPill_ = pill (0, tx ("sm.levels"), [this] { openLevelsPanel (*levelsPill_); });
 
     tablePanel_ = add<nova::Panel> (0, skin());
     tablePanel_->setTitle (tx ("sm.table").toUpperCase());
@@ -1156,10 +1245,19 @@ void NovaSamplerEditor::chooseSample()
                                ZoneDescription z = d.zones.empty() ? ZoneDescription {} : d.zones.front();
                                z.samplePath = file.getFullPathName().toStdString();
                                z.keyLow = 0; z.keyHigh = 127; z.velLow = 1; z.velHigh = 127; z.roundRobin = 0; z.group.clear(); z.onRelease = false;
+                               // compensation : le niveau du nouveau fichier est comparé à celui de l'ancien sur les mêmes 100 premières ms de la région jouée
+                               double oldDb = 0.0, newDb = 0.0, delta = 0.0;
+                               const bool compensate = d.compensateOnReplace && ! d.zones.empty() && ! d.zones.front().samplePath.empty()
+                                                       && windowLevelDb (d.zones.front().samplePath, d.zones.front().startFrame, 100.0, oldDb)
+                                                       && windowLevelDb (z.samplePath, 0, 100.0, newDb);
+                               if (compensate) delta = std::clamp (oldDb - newDb, -24.0, 24.0);
                                z.startFrame = 0; z.endFrame = -1; z.loopStart = 0; z.loopEnd = -1; z.loopCrossfade = 0;   // les repères de l'ancien fichier n'ont plus de sens
+                               z.extraLoops.clear(); z.loopRepeats = 0;
+                               if (compensate) z.gainDb = std::clamp (z.gainDb + delta, -60.0, 60.0);
                                d.zones.assign (1, z);
                                safe->proc_.uiEditInstrument (std::move (d), "Replace sample");
                                safe->lastRevision_ = 0xFFFFFFFFu;
+                               if (compensate) safe->setToolStatus (U (safe->translator().format ("sm.st_compensated", { numberText (delta).toStdString() })));
                            });
 }
 
@@ -1255,6 +1353,27 @@ void NovaSamplerEditor::openChokePanel (juce::Component& anchor)
     juce::Component::SafePointer<ChokePanel> focus (panel.get());
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
     juce::MessageManager::callAsync ([focus] { if (focus != nullptr) focus->grabKeyboardFocus(); });
+}
+
+void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
+{
+    const auto* z = shownZone();
+    auto panel = std::make_unique<LevelsPanel> (skin(), translator(), cached_.compensateOnReplace, z);
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    panel->onCompensate = [safe] (bool on)
+    {
+        if (safe == nullptr) return;
+        auto d = safe->proc_.instrumentDescription();
+        d.compensateOnReplace = on;
+        safe->proc_.uiEditInstrument (std::move (d), "Compensate on replace");
+        safe->lastRevision_ = 0xFFFFFFFFu;
+    };
+    panel->onRelease = [safe] (bool follow, int meter, double floorDb, double curve)
+    {
+        if (safe == nullptr) return;
+        safe->editZone ([=] (Zone& zone) { zone.releaseFollowsLevel = follow; zone.releaseMeter = meter; zone.releaseFloorDb = floorDb; zone.releaseCurve = curve; });
+    };
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
 }
 
 // Emplacements assignables : fenêtre flottante (les 16 lignes) ou menu contextuel d'une zone / d'un Groupe.
@@ -1680,6 +1799,7 @@ void NovaSamplerEditor::layout()
     triggerChoice_->pill->setBounds (R (X0 + 344, 144, 250, 30));
     chokeChoice_->pill->setBounds (R (X0 + 600, 144, 170, 30));
     chokeMorePill_->setBounds (R (X0 + 776, 144, 44, 30));
+    levelsPill_->setBounds (R (X0 + 826, 144, 106, 30));
     if (listVisible_ && ! showVoices_)
     {
         tablePanel_->setBounds (R (X0, 196, 330, 514));

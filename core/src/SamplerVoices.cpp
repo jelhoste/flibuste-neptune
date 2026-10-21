@@ -26,6 +26,21 @@ void SamplerVoices::discard (Voice& v) noexcept
 void SamplerVoices::prepare (double sampleRate) noexcept
 {
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    // pondération K (BS.1770-4) : étage 1 = étagère aiguë, étage 2 = passe-haut ; mêmes formules que libebur128
+    {
+        constexpr double kPi = 3.14159265358979323846;
+        const double f1 = 1681.974450955533, g1 = 3.999843853973347, q1 = 0.7071752369554196;
+        const double k1 = std::tan (kPi * f1 / sampleRate_), vh = std::pow (10.0, g1 / 20.0), vb = std::pow (vh, 0.4996667741545416);
+        const double a0 = 1.0 + k1 / q1 + k1 * k1;
+        kShelf_ = { (vh + vb * k1 / q1 + k1 * k1) / a0, 2.0 * (k1 * k1 - vh) / a0, (vh - vb * k1 / q1 + k1 * k1) / a0, 2.0 * (k1 * k1 - 1.0) / a0, (1.0 - k1 / q1 + k1 * k1) / a0 };
+        const double f2 = 38.13547087602444, q2 = 0.5003270373238773;
+        const double k2 = std::tan (kPi * f2 / sampleRate_);
+        const double c0 = 1.0 + k2 / q2 + k2 * k2;
+        kHigh_ = { 1.0, -2.0, 1.0, 2.0 * (k2 * k2 - 1.0) / c0, (1.0 - k2 / q2 + k2 * k2) / c0 };
+        peakDecay_ = static_cast<float> (std::exp (-1.0 / (0.05 * sampleRate_)));
+        rmsCoef_ = static_cast<float> (1.0 - std::exp (-1.0 / (0.05 * sampleRate_)));
+        lufsCoef_ = static_cast<float> (1.0 - std::exp (-1.0 / (0.1 * sampleRate_)));
+    }
     allSoundOff();
 }
 
@@ -477,7 +492,37 @@ void SamplerVoices::releaseZonesFor (int channel, int key) noexcept
     Instrument::Pick picks[Instrument::maxPicks];
     const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks);
     for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone);
-    for (int i = 0; i < n; ++i) startVoice (channel, key, v, *picks[i].zone, picks[i].gain);
+    for (int i = 0; i < n; ++i)
+    {
+        float g = picks[i].gain;
+        if (picks[i].zone->releaseFollowsLevel)
+        {
+            g *= heardGain (*picks[i].zone, channel, key);   // volume lié au niveau réellement entendu de la voix interrompue
+            if (g < 1.0e-4f) continue;                       // rien ne sonnait plus : pas de bruit de relâchement
+        }
+        startVoice (channel, key, v, *picks[i].zone, g);
+    }
+}
+
+float SamplerVoices::heardGain (const Zone& zone, int channel, int key) const noexcept
+{
+    float peak = 0.0f, ms = 0.0f, msK = 0.0f;
+    bool any = false;
+    for (const auto& v : voices_)
+    {
+        if (! v.active || v.zone == nullptr || v.zone->onRelease || v.channel != channel || v.key != key) continue;
+        any = true;
+        peak = std::max (peak, v.heardPeak);
+        ms = std::max (ms, v.heardMs);
+        msK = std::max (msK, v.heardMsK);
+    }
+    if (! any) return 0.0f;
+    const double db = zone.releaseMeter == 0 ? 20.0 * std::log10 (std::max (1.0e-9f, peak))
+                    : zone.releaseMeter == 1 ? 10.0 * std::log10 (std::max (1.0e-12f, ms))
+                                             : -0.691 + 10.0 * std::log10 (std::max (1.0e-12f, msK));
+    const double floorDb = std::min (-1.0, static_cast<double> (zone.releaseFloorDb));
+    const double t = std::clamp ((db - floorDb) / (0.0 - floorDb), 0.0, 1.0);
+    return static_cast<float> (std::pow (t, static_cast<double> (std::max (0.05f, zone.releaseCurve))));
 }
 
 void SamplerVoices::renderVoice (Voice& v, float* left, float* right, int numFrames, float g0, float g1, double pitchFactor) noexcept
@@ -535,6 +580,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     useLoop (v.loopIdx);
     // la boucle revient en arrière tant qu'il reste des retours, ou si c'est la dernière
     auto wrapping = [&] () noexcept { return loop && (v.repsLeft != 0 || v.loopIdx >= z.moreLoopCount); };
+    const bool trackLevels = instrument_ != nullptr && instrument_->trackLevels;
     const float gStep = numFrames > 0 ? (g1 - g0) / static_cast<float> (numFrames) : 0.0f;
     float mg = g0;
 
@@ -664,6 +710,20 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
             v.fade -= v.fadeStep;
             if (v.fade <= 0.0f) { v.active = false; return; }
             e *= v.fade;
+        }
+        if (trackLevels)
+        {
+            const float xl = l * e * z.panL, xr = r * e * z.panR, m = 0.70710678f * (xl + xr);   // m : somme en puissance pour des voies semblables (comme LUFS)
+            v.heardPeak = std::max (std::max (std::fabs (xl), std::fabs (xr)), v.heardPeak * peakDecay_);
+            v.heardMs += rmsCoef_ * (std::max (xl * xl, xr * xr) - v.heardMs);   // RMS de la voie la plus forte
+            // pondération K en forme transposée II, deux étages
+            const double y1 = kShelf_.b0 * m + v.kState[0][0];
+            v.kState[0][0] = static_cast<float> (kShelf_.b1 * m - kShelf_.a1 * y1 + v.kState[0][1]);
+            v.kState[0][1] = static_cast<float> (kShelf_.b2 * m - kShelf_.a2 * y1);
+            const double y2 = kHigh_.b0 * y1 + v.kState[1][0];
+            v.kState[1][0] = static_cast<float> (kHigh_.b1 * y1 - kHigh_.a1 * y2 + v.kState[1][1]);
+            v.kState[1][1] = static_cast<float> (kHigh_.b2 * y1 - kHigh_.a2 * y2);
+            v.heardMsK += lufsCoef_ * (static_cast<float> (y2 * y2) - v.heardMsK);
         }
         if (right != nullptr)
         {

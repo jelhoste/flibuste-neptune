@@ -61,6 +61,7 @@ private:
     void applyImport (const ImportWizard::Result&);
     void removeSelectedZones();
     void openChokePanel (juce::Component& anchor);
+    void openLevelsPanel (juce::Component& anchor);
     void openSlotsPanel (juce::Component& anchor);
     void showSlotAssignMenu (int zone, const std::string& group);
     void openFilterEditor();
@@ -149,7 +150,7 @@ private:
 
     // page ZONES
     nova::Panel *zonePanel_ = nullptr, *tablePanel_ = nullptr, *matrixPanel_ = nullptr;
-    nova::Pill *loadPill_ = nullptr, *importPill_ = nullptr, *removePill_ = nullptr, *listPill_ = nullptr, *monitorPill_ = nullptr, *modePill_ = nullptr, *chokeMorePill_ = nullptr;
+    nova::Pill *loadPill_ = nullptr, *importPill_ = nullptr, *removePill_ = nullptr, *listPill_ = nullptr, *monitorPill_ = nullptr, *modePill_ = nullptr, *chokeMorePill_ = nullptr, *levelsPill_ = nullptr;
     nova::Text* selectionText_ = nullptr;
     nova::NumberPill* rootNumber_ = nullptr;
     nova::ChoicePill *triggerChoice_ = nullptr, *chokeChoice_ = nullptr;
