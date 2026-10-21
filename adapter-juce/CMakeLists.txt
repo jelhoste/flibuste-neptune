@@ -46,13 +46,14 @@ target_sources(Neptune PRIVATE
   src/FilterEditor.cpp
   src/MixerView.cpp
   src/SynthKeyboard.cpp
-  src/PresetBar.cpp
   src/PresetManager.cpp
   src/MidiFilterEditor.cpp
   src/FmSysexIO.cpp
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
   src/InstrumentPanel.cpp
+  src/NovaSamplerEditor.cpp
+  src/NovaWaveView.cpp
   src/NovaSynthEditor.cpp
   src/NovaFmEditor.cpp
   src/NovaInstrumentBase.cpp

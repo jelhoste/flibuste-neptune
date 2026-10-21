@@ -22,6 +22,8 @@ public:
         bool brand = false;    // plugin séparé : marque et bouton de bypass dans l'en-tête (dans un insert, la fenêtre du plugin les fournit)
         std::function<double()> sampleRate;
         bool externalKey = false;   // entrée sidechain de l'hôte disponible (plugin séparé) ; faux dans un insert de Neptune (shaper)
+        bool noPresets = false;     // pas de pastille de preset (le Sampler n'a pas de presets)
+        bool noAB = false;          // pas de bouton A/B
         bool noBypass = false;      // pas de pastille de bypass (instrument : aucun paramètre `stock::bypass`)
         std::function<void (juce::Component* anchor)> presetMenu;   // remplace le menu de presets NOVA (presets d'usine + fichiers utilisateur), par exemple par une bibliothèque
         bool hostTempo = false;     // le tempo de l'hôte est disponible (plugin séparé) : SYNC du delay utilisable

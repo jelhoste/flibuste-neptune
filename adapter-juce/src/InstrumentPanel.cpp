@@ -83,6 +83,17 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
         organ_ = std::make_unique<NovaOrganEditor> (proc, proc, std::move (link), palette_, knobStyle, tr_, opt);
         addAndMakeVisible (*organ_);
     }
+    else if (type_ == TrackType::Sampler)
+    {
+        NovaSamplerEditor::Options opt;
+        opt.noBypass = true;
+        opt.noPresets = true;
+        opt.noAB = true;
+        opt.moduleName = "sampler";
+        opt.sampleRate = [&proc] { return proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0; };
+        sampler_ = std::make_unique<NovaSamplerEditor> (proc, palette_, knobStyle, tr_, opt);
+        addAndMakeVisible (*sampler_);
+    }
 }
 
 void InstrumentPanel::resized()
@@ -90,6 +101,7 @@ void InstrumentPanel::resized()
     if (synth_ != nullptr) synth_->setBounds (getLocalBounds());
     if (fm_ != nullptr) fm_->setBounds (getLocalBounds());
     if (organ_ != nullptr) organ_->setBounds (getLocalBounds());
+    if (sampler_ != nullptr) sampler_->setBounds (getLocalBounds());
 }
 
 bool InstrumentPanel::keyPressed (const juce::KeyPress& k)
@@ -97,5 +109,6 @@ bool InstrumentPanel::keyPressed (const juce::KeyPress& k)
     if (synth_ != nullptr) return synth_->keyPressed (k);
     if (fm_ != nullptr) return fm_->keyPressed (k);
     if (organ_ != nullptr) return organ_->keyPressed (k);
+    if (sampler_ != nullptr) return sampler_->keyPressed (k);
     return false;
 }

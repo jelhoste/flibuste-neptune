@@ -126,6 +126,8 @@ void EditorBase::setPage (int p)
     page_ = juce::jlimit (0, juce::jmax (0, numPages() - 1), p);
     for (std::size_t i = 0; i < navs_.size(); ++i) navs_[i]->setActive (static_cast<int> (i) == page_);
     for (auto& it : items_) it.c->setVisible (it.page == -1 || it.page == page_ || (it.page == -2 && page_ != settingsPage_));
+    if (options_.noPresets && preset_ != nullptr) preset_->setVisible (false);
+    if (options_.noAB && ab_ != nullptr) ab_->setVisible (false);
     if (modal_ != nullptr) modal_->setVisible (true);
     pageChanged();
     repaint();
