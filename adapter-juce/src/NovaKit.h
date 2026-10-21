@@ -291,6 +291,7 @@ class InfoButton : public juce::Component
 {
 public:
     InfoButton (const Skin&, juce::String title, juce::String body);
+    void setTexts (juce::String title, juce::String body) { title_ = std::move (title); body_ = std::move (body); }   // le potard rebranché change de sujet
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override { hover_ = true; repaint(); }
     void mouseExit (const juce::MouseEvent&) override { hover_ = false; repaint(); }

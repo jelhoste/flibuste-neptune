@@ -415,6 +415,7 @@ std::vector<ParamId> NovaChorusEditor::presetParamIds() const { return ch::prese
 void NovaChorusEditor::buildChorusPage()
 {
     metersPanel_ = add<nova::Panel> (-1, skin());
+    addInfo (-1, metersPanel_, "hlp.ch_meters", true);
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
     viewPanel_ = add<nova::Panel> (0, skin());

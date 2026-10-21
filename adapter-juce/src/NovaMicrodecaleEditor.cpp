@@ -216,6 +216,7 @@ std::vector<ParamId> NovaMicrodecaleEditor::presetParamIds() const { return md::
 void NovaMicrodecaleEditor::buildMicroPage()
 {
     metersPanel_ = add<nova::Panel> (-1, skin());
+    addInfo (-1, metersPanel_, "hlp.md_meters", true);
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
     viewPanel_ = add<nova::Panel> (0, skin());

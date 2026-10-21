@@ -621,6 +621,7 @@ void NovaEqualizerEditor::showBandMenu (int band)
 void NovaEqualizerEditor::buildMain()
 {
     metersPanel_ = add<nova::Panel> (-1, skin());
+    addInfo (-1, metersPanel_, "hlp.eq_meters", true);
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();
     inMeter_ = add<nova::VMeter> (-1, skin(), tx ("nv.in"), nova::VMeter::Kind::Level, false);
@@ -718,6 +719,7 @@ void NovaEqualizerEditor::buildMain()
         auto* k = add<nova::KnobCard> (-2, skin(), host(), eq::bandParam (0, eq::kFreq), juce::String(), modalOpener(), false);
         k->setAutoRange (true);
         knobs_.push_back (k);
+        addInfo (-2, k, "hlp.eq_freq", true);   // le sujet suit le paramètre affiché (assignKnobs)
     }
 }
 
@@ -739,10 +741,11 @@ void NovaEqualizerEditor::buildDynamics()
                             { tx ("nv.slope_6"), tx ("nv.slope_12"), tx ("nv.slope_24"), tx ("nv.slope_36"), tx ("nv.slope_48"), tx ("nv.slope_72"), tx ("nv.slope_96") });
     };
     detLinkPill_ = add<nova::Pill> (1, skin());
+    addInfo (1, dynBypassPill_, "hlp.eq_dynbypass");
     addInfo (1, detTypePill_, "hlp.detect");
     addInfo (1, detLinkPill_, "hlp.detlink");
     const char* const keys[10] = { "nv.thresh", "nv.range", "nv.attack", "nv.release", "nv.knee", "nv.smooth", "nv.rms_len", "nv.rms_mix", "nv.det_freq", "nv.det_q" };
-    const char* const helps[10] = { "hlp.dtthresh", "hlp.dtrange", nullptr, nullptr, "hlp.dtknee", "hlp.dtsmooth", "hlp.dtrms", nullptr, "hlp.detect", nullptr };
+    const char* const helps[10] = { "hlp.dtthresh", "hlp.dtrange", "hlp.dtattack", "hlp.dtrelease", "hlp.dtknee", "hlp.dtsmooth", "hlp.dtrms", "hlp.dtrmsmix", "hlp.detect", "hlp.dtq" };
     for (int i = 0; i < 10; ++i)
     {
         auto* k = add<nova::KnobCard> (1, skin(), host(), eq::bandParam (0, eq::kFreq), tx (keys[i]), modalOpener(), false);
@@ -814,7 +817,13 @@ void NovaEqualizerEditor::assignKnobs()
     {
         const bool used = ok && i < defs.size() && currentPage() != 2;
         knobs_[i]->setVisible (used);
-        if (used) knobs_[i]->setParam (eq::bandParam (selected_, defs[i].k), tx (defs[i].key));
+        if (used)
+        {
+            knobs_[i]->setParam (eq::bandParam (selected_, defs[i].k), tx (defs[i].key));
+            const int k = defs[i].k;
+            setInfoText (knobs_[i], k == eq::kFreq ? "hlp.eq_freq" : k == eq::kGain ? "hlp.eq_gain" : k == eq::kOrder ? "hlp.eq_slope" : k == eq::kQ ? "hlp.eq_q"
+                                  : k == eq::kThreshold ? "hlp.dtthresh" : k == eq::kTarget ? "hlp.dtrange" : k == eq::kAttack ? "hlp.dtattack" : "hlp.dtrelease");
+        }
     }
     if (ok)
         for (std::size_t i = 0; i < detKnobs_.size(); ++i)

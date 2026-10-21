@@ -632,6 +632,8 @@ void NovaOrganEditor::buildLeftColumn()
     for (const char* letter : { "U", "L", "P" }) midiBars_.push_back (add<MidiBar> (-1, skin(), juce::String (letter)));
     notesText_ = add<nova::Text> (-1, skin(), Token::TextDim2, 11.0f, true);
     leftLeslie_ = makeLeslie (-1);
+    addInfo (-1, metersPanel_, "hlp.og_meters", true);
+    addInfo (-1, lesliePanel_, "hlp.og_leslie", true);
 }
 
 // ------------------------------------------------------------------------------------------------ page DRAWBARS
@@ -647,6 +649,10 @@ void NovaOrganEditor::buildDrawbarsPage()
     manualsPanel_ = add<nova::Panel> (0, skin());
     manualsPanel_->setTitle (tx ("organ.keyboards").toUpperCase());
     toggles_ = makeToggles (0, false);
+    addInfo (0, drawbarsPanel_, "hlp.og_drawbars", true);
+    addInfo (0, percPanel_, "hlp.og_percussion", true);
+    addInfo (0, vibPanel_, "hlp.og_vibrato", true);
+    addInfo (0, manualsPanel_, "hlp.og_manuals", true);
 
     // canaux MIDI et transpositions des trois claviers
     const char* names[3] = { "U", "L", "P" };
@@ -694,17 +700,18 @@ void NovaOrganEditor::buildDrawbarsPage()
     addInfo (0, numPills_[0], "hlp.og_split");
 
     // potards : vibrato (profondeur), overdrive (3), Leslie (mélange), réverbération, puis volume et gain du plugin
-    struct Spec { ParamId id; const char* title; bool pink; };
-    const Spec specs[8] = { { mx::organParam (0, mx::kOrgVibDepth), "og.vib_depth", false }, { mx::organParam (0, mx::kOrgDriveInput), "og.drive_in", false },
-                            { mx::organParam (0, mx::kOrgDriveCharacter), "og.drive_char", false }, { mx::organParam (0, mx::kOrgDriveOutput), "og.drive_out", false },
-                            { mx::organParam (0, mx::kOrgLeslieMix), "og.leslie_mix", false }, { mx::organParam (0, mx::kOrgReverb), "og.reverb", false },
-                            { organ::synthVolume, "og.volume", true }, { static_cast<ParamId> (sampler::gain), "og.gain", true } };
+    struct Spec { ParamId id; const char* title; bool pink; const char* help; };
+    const Spec specs[8] = { { mx::organParam (0, mx::kOrgVibDepth), "og.vib_depth", false, "hlp.og_vibdepth" }, { mx::organParam (0, mx::kOrgDriveInput), "og.drive_in", false, "hlp.og_drive" },
+                            { mx::organParam (0, mx::kOrgDriveCharacter), "og.drive_char", false, "hlp.og_drivechar" }, { mx::organParam (0, mx::kOrgDriveOutput), "og.drive_out", false, "hlp.og_driveout" },
+                            { mx::organParam (0, mx::kOrgLeslieMix), "og.leslie_mix", false, "hlp.og_lesliemix" }, { mx::organParam (0, mx::kOrgReverb), "og.reverb", false, "hlp.og_reverb" },
+                            { organ::synthVolume, "og.volume", true, "hlp.og_volume" }, { static_cast<ParamId> (sampler::gain), "og.gain", true, "hlp.og_gain" } };
     for (const auto& s : specs)
     {
         Column c {};
         c.card = add<nova::Panel> (0, skin());
         c.knob = add<nova::KnobCard> (0, skin(), host(), s.id, tx (s.title), modalOpener(), s.pink);
         c.knob->setPlain (true);
+        addInfo (0, c.card, s.help, 1);
         columns_.push_back (c);
     }
     drivePill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
@@ -738,6 +745,7 @@ void NovaOrganEditor::buildLeslieAndLivePages()
         auto* sl = add<DescSlider> (1, skin(), tx (d.group) + " - " + tx (d.key), d.lo, d.hi, d.step, juce::String (d.suffix),
                                     [this, field] { return desc_.*field; },
                                     [this, field] (double v) { editDesc ([field, v] (organ::OrganDescription& x) { x.*field = v; }); }, false, defaults.*(d.field));
+        addInfo (1, sl, d.field == &organ::OrganDescription::hornLevel ? "hlp.og_hornlevel" : (d.field == &organ::OrganDescription::hornAcc || d.field == &organ::OrganDescription::hornDec || d.field == &organ::OrganDescription::drumAcc || d.field == &organ::OrganDescription::drumDec) ? "hlp.og_leslietime" : "hlp.og_leslierpm", 2);
         leslieSliders_.push_back (sl);
     }
     // LIVE
@@ -756,6 +764,7 @@ void NovaOrganEditor::buildMatrixPage()
     matrixPanel_->setTitle (tx ("og.matrix_title").toUpperCase());
     tiles_ = add<TileGrid> (3, skin(), proc_);
     tiles_->onLoaded = [this] { desc_ = proc_.organDescription(); };
+    addInfo (3, matrixPanel_, "hlp.og_matrix", true);
     bankPrev_ = add<nova::Pill> (3, skin(), nova::Pill::Look::Small);
     bankPrev_->setText ("<");
     bankPrev_->onClick = [this] { tiles_->bank = (tiles_->bank + preset::numBanks - 1) % preset::numBanks; };
@@ -790,6 +799,7 @@ void NovaOrganEditor::buildSettingsExtras()
     midiText_->setText (tx ("organ.midi_hint"));
     organ_settings_panel_ = panel;
 
+    addInfo (page, panel, "hlp.og_organpage", true);
     settingsSliders_.push_back (add<DescSlider> (page, skin(), tx ("organ.tune"), -100.0, 100.0, 1.0, " cents", [this] { return static_cast<double> (desc_.tuningCents); },
                                                  [this] (double v) { editDesc ([v] (organ::OrganDescription& d) { d.tuningCents = static_cast<int> (v); }); }, true, 0.0));
     settingsSliders_.push_back (add<DescSlider> (page, skin(), tx ("organ.click_level"), 0.0, 100.0, 1.0, " %", [this] { return static_cast<double> (desc_.clickLevel); },
@@ -798,9 +808,12 @@ void NovaOrganEditor::buildSettingsExtras()
                                                  [this] (double v) { editDesc ([v] (organ::OrganDescription& d) { d.clickLength = static_cast<int> (v); }); }, true, 100.0));
     settingsSliders_.push_back (add<DescSlider> (page, skin(), tx ("organ.click_release"), 0.0, 100.0, 1.0, " %", [this] { return static_cast<double> (desc_.clickRelease); },
                                                  [this] (double v) { editDesc ([v] (organ::OrganDescription& d) { d.clickRelease = static_cast<int> (v); }); }, true, 0.0));
+    addInfo (page, settingsSliders_[0], "hlp.og_tune", 2);
+    for (std::size_t i = 1; i < settingsSliders_.size(); ++i) addInfo (page, settingsSliders_[i], "hlp.og_click", 2);
     wiringMode_ = makeMenuPill (page, [this] { return tx ("organ.wiring"); }, { tx ("organ.wiring_classic"), tx ("organ.wiring_extended") },
                                 [this] { return desc_.extended ? 1 : 0; }, [this] (int v) { editDesc ([v] (organ::OrganDescription& d) { d.extended = v == 1; }); });
     foldbackPill_ = add<nova::Pill> (page, skin());
+    addInfo (page, wiringMode_->pill, "hlp.og_wiring");
     foldbackPill_->onClick = [this] { editDesc ([] (organ::OrganDescription& d) { d.foldback = ! d.foldback; }); };
     taperGrid_ = add<TaperGrid> (page, skin(),
                                  [this] { TaperGrid::Table t {}; for (std::size_t b = 0; b < 9; ++b) for (std::size_t k = 0; k < 5; ++k) t[b][k] = desc_.taperDb[b][k]; return t; },

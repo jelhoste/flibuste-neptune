@@ -382,6 +382,7 @@ std::vector<ParamId> NovaCompressorEditor::presetParamIds() const { return cm::p
 void NovaCompressorEditor::buildCompressorPage()
 {
     metersPanel_ = add<nova::Panel> (-1, skin());
+    addInfo (-1, metersPanel_, "hlp.cp_meters", true);
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
     curvePanel_ = add<nova::Panel> (0, skin());
@@ -437,7 +438,9 @@ void NovaCompressorEditor::buildCompressorPage()
             const char* key = s.sub == cm::kneeWidth ? "hlp.knee" : s.sub == cm::curve ? "hlp.curve" : s.sub == cm::pump ? "hlp.pump" : s.sub == cm::smooth ? "hlp.smooth" : "hlp.clip";
             addInfo (0, c.sub, key, 2);   // sous le curseur, pas dessus
         }
-        else addInfo (0, c.card, "hlp.mix", true);
+        const char* mainHelp = s.id == cm::threshold ? "hlp.cp_threshold" : s.id == cm::ratio ? "hlp.cp_ratio" : s.id == cm::attack ? "hlp.cp_attack"
+                             : s.id == cm::release ? "hlp.cp_release" : s.id == cm::makeup ? "hlp.cp_makeup" : "hlp.mix";
+        addInfo (0, c.card, mainHelp, true);
         columns_.push_back (c);
     }
 }
@@ -488,6 +491,7 @@ void NovaCompressorEditor::buildSidechainPage()
     };
     midiNote_ = add<nova::Text> (1, skin(), Token::TextDim, 12.0f, true);
     midiNote_->setText (tx ("nv.midi_note"));
+    addInfo (1, channelPill_, "hlp.cp_midichannel");
     addInfo (1, sourcePill_, "hlp.source");
     addInfo (1, listenPill_, "hlp.listen");
     addInfo (1, eqPill_, "hlp.eqswitch");
@@ -533,6 +537,7 @@ void NovaCompressorEditor::buildSidechainPage()
             zone->slope->bindChoice (host(), cm::bandParam (z.band, cm::kOrder), tx ("nv.slope"),
                                      { tx ("nv.slope_6"), tx ("nv.slope_12"), tx ("nv.slope_24"), tx ("nv.slope_48"), tx ("nv.slope_72"), tx ("nv.slope_96") });
         }
+        addInfo (1, zone->knobs[0], z.type == cm::kHighPass ? "hlp.cp_zone_hp" : z.type == cm::kLowPass ? "hlp.cp_zone_lp" : "hlp.cp_zone_band", true);
         zones_.push_back (std::move (zone));
     }
 }

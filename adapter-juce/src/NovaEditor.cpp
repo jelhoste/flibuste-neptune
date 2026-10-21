@@ -92,6 +92,12 @@ void EditorBase::setInfoVisible (juce::Component* target, bool visible)
         if (i.target == target) i.button->setVisible (visible);
 }
 
+void EditorBase::setInfoText (juce::Component* target, const char* key)
+{
+    for (auto& i : infos_)
+        if (i.target == target) i.button->setTexts (tx ((std::string (key) + ".t").c_str()), tx (key));
+}
+
 void EditorBase::placeInfos()
 {
     const int d = skin_.ipx (16.0f);

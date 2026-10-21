@@ -88,6 +88,8 @@ protected:
     InfoButton* addInfo (int page, juce::Component* target, const char* key, int pos = 0);
     // Montre ou cache le bouton « ? » rattaché à `target` (en plus de la visibilité du composant lui-même)
     void setInfoVisible (juce::Component* target, bool visible);
+    // Change le sujet du bouton « ? » rattaché à `target` (clés `<key>.t` et `<key>`), par exemple quand un potard est rebranché sur un autre paramètre
+    void setInfoText (juce::Component* target, const char* key);
     int addPage (juce::String label, juce::Path icon);
     // Page SETTINGS commune : thème, contraste, langue (plugin séparé), dossier des presets utilisateur, à propos. À appeler après addPage.
     void buildSettingsPage (int page);

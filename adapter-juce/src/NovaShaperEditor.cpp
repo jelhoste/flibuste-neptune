@@ -401,6 +401,7 @@ std::vector<ParamId> NovaShaperEditor::presetParamIds() const { return sh::prese
 void NovaShaperEditor::buildShaperPage()
 {
     metersPanel_ = add<nova::Panel> (-1, skin());
+    addInfo (-1, metersPanel_, "hlp.sh_meters", true);
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
     detPanel_ = add<nova::Panel> (0, skin());
@@ -447,7 +448,7 @@ void NovaShaperEditor::buildShaperPage()
             c.knob->setRangeLabels (juce::String::fromUTF8 (host().parameters().toText (*spec, spec->min).c_str()),
                                     juce::String::fromUTF8 (host().parameters().toText (*spec, spec->max).c_str()));
         const char* hk = s.id == sh::attackGain1 ? "hlp.sh_attack" : s.id == sh::sustainGain1 ? "hlp.sh_sustain" : s.id == sh::levelDependency ? "hlp.sh_level"
-                       : s.id == sh::levelThreshold ? "hlp.sh_threshold" : nullptr;   // MIX et OUTPUT : pas de texte propre au shaper pour l'instant
+                       : s.id == sh::levelThreshold ? "hlp.sh_threshold" : s.id == stock::outputTrim ? "hlp.sh_output" : s.id == stock::mix ? "hlp.sh_mix" : nullptr;
         if (hk != nullptr) addInfo (0, c.card, hk, 1);
         if (s.sub != 0)
         {
@@ -472,6 +473,7 @@ void NovaShaperEditor::buildSidechainPage()
         sourcePill_->setText (tx ("nv.source") + "  " + tx ("shp.sc_internal"));
         sourcePill_->setStatic (true);   // External et Mix n'existent pas dans un insert de Neptune
     }
+    addInfo (1, sourcePill_, "hlp.sh_source");
     listenPill_ = add<nova::Pill> (1, skin());
     listenPill_->bindToggle (host(), sh::scListen, tx ("shp.sc_listen"));
     eqPill_ = add<nova::Pill> (1, skin());
@@ -487,6 +489,10 @@ void NovaShaperEditor::buildSidechainPage()
     phaseExtPill_->bindToggle (host(), sh::scPhaseExt, tx ("shp.sc_phase_ext"));
     extMsPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     extMsPill_->bindToggle (host(), sh::scExtMs, tx ("shp.sc_ext_ms"));
+    addInfo (1, gainSlider_, "hlp.sh_scgain", 2);
+    addInfo (1, intVolSlider_, "hlp.sh_mixvol", 2);
+    addInfo (1, extVolSlider_, "hlp.sh_mixvol", 2);
+    addInfo (1, spectrumPill_, "hlp.sh_spectrum");
     scNote_ = add<nova::Text> (1, skin(), Token::TextDim2, 11.0f);
     scNote_->setText (tx ("nv.sh_insert_note"));
     addInfo (1, listenPill_, "hlp.listen");
@@ -556,6 +562,7 @@ void NovaShaperEditor::buildBottomBar()
     lookPill_ = add<nova::Pill> (-1, skin());
     lookPill_->bindValue (host(), sh::lookahead, tx ("nv.lookahead"));   // glisser pour régler ; double-clic : saisie
     lookPill_->onClick = [this] { openModal (sh::lookahead, uistate::Terminal::Pointer); };
+    addInfo (-1, chPill_, "hlp.sh_channel");
     addInfo (-1, deltaPill_, "hlp.delta");
     addInfo (-1, osPill_, "hlp.oversampling");
     addInfo (-1, lookPill_, "hlp.lookahead");
