@@ -322,6 +322,16 @@ public:
     juce::Font getPopupMenuFont() override;
     void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height, bool vertical, int thumbStart,
                         int thumbSize, bool isMouseOver, bool isMouseDown) override;
+    // Commandes JUCE d'origine posées dans un éditeur NOVA (matrice, panneaux de vélocité, de polyphonie, de filtres...) : même habillage que les pastilles.
+    void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool highlighted, bool down) override;
+    juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool highlighted, bool down) override;
+    void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
+    void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown, int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox&) override;
+    juce::Font getComboBoxFont (juce::ComboBox&) override;
+    void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos, float minSliderPos, float maxSliderPos,
+                           juce::Slider::SliderStyle, juce::Slider&) override;
 
 private:
     const Skin& skin_;

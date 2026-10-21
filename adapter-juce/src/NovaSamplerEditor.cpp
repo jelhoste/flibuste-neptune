@@ -72,14 +72,6 @@ struct NovaSamplerEditor::GroupMenuListener : public juce::MouseListener
     NovaSamplerEditor& owner;
 };
 
-// Bouton « maintenu » : appuyé = la note démarre, relâché = Note Off (une boucle se relâche, un one-shot va au bout).
-struct NovaSamplerEditor::HoldListener : public juce::MouseListener
-{
-    std::function<void()> down, up;
-    void mouseDown (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu() && down) down(); }
-    void mouseUp (const juce::MouseEvent&) override { if (up) up(); }
-};
-
 // ------------------------------------------------------------------------------------------------ construction
 NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
     : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("SAMPLER")), proc_ (p)
@@ -303,22 +295,25 @@ void NovaSamplerEditor::buildSamplePage()
     reversePill_->setText (tx ("sm.reverse"));
     reversePill_->onClick = [this] { const auto* z = shownZone(); const bool now = z != nullptr && ! z->reverse; editZone ([now] (Zone& d) { d.reverse = now; }); };
     addInfo (1, reversePill_, "hlp.sm_reverse", 1);
-    playPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    // Bouton PLAY / STOP : dans la barre du bas, visible sur toutes les pages (page -1)
+    playPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
     playPill_->setText (tx ("sm.play_button"));
-    addInfo (1, playPill_, "hlp.sm_playbtn", 1);
-    playListener_ = std::make_unique<HoldListener>();
-    playListener_->down = [this]
+    addInfo (-1, playPill_, "hlp.sm_playbtn", 1);
+    playPill_->onClick = [this]
     {
+        if (previewing_)
+        {
+            proc_.uiPreviewStop();
+            previewing_ = false;
+            return;
+        }
         if (cached_.zones.empty()) return;
         const auto sel = zones_->selectedRows();
         const int row = (! sel.empty() && sel.front() >= 0 && sel.front() < static_cast<int> (cached_.zones.size())) ? sel.front() : 0;
         proc_.uiPreviewZone (row);
+        previewing_ = true;
+        previewStartMs_ = juce::Time::getMillisecondCounter();
     };
-    playListener_->up = [this] { proc_.uiPreviewRelease(); };
-    playPill_->addMouseListener (playListener_.get(), false);
-    stopPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
-    stopPill_->setText (tx ("sm.stop_button"));
-    stopPill_->onClick = [this] { proc_.uiPreviewStop(); };
     showAllPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     showAllPill_->setText (tx ("sm.show_all"));
     showAllPill_->onClick = [this] { wave_->showAll(); };
@@ -1092,8 +1087,7 @@ void NovaSamplerEditor::layout()
     loopPill_->setBounds (R (X0 + 12, 504, 170, 30));
     reversePill_->setBounds (R (X0 + 188, 504, 150, 30));
     showAllPill_->setBounds (R (X0 + 344, 504, 130, 30));
-    playPill_->setBounds (R (X0 + 640, 504, 140, 30));
-    stopPill_->setBounds (R (X0 + 786, 504, 100, 30));
+    playPill_->setBounds (R (1006, 736, 140, 32));
     rootNumber2_->setBounds (R (X0 + 480, 504, 154, 30));
     fadeIn_->setBounds (R (X0 + 12, 552, 214, 46));
     fadeOut_->setBounds (R (X0 + 240, 552, 214, 46));
@@ -1131,6 +1125,22 @@ void NovaSamplerEditor::layout()
     if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
 }
 
+// Un one-shot qui finit seul remet le bouton à « play » : on regarde si une voix d'écoute de la piste sonne encore.
+void NovaSamplerEditor::updatePlayButton()
+{
+    if (previewing_ && juce::Time::getMillisecondCounter() - previewStartMs_ > 250)
+    {
+        Engine::VoiceInfo info[Engine::kVoiceSnapshot];
+        const int n = proc_.readVoices (info, Engine::kVoiceSnapshot);
+        bool any = false;
+        for (int i = 0; i < n; ++i) any = any || (info[i].preview && info[i].track == proc_.selectedTrack());
+        if (! any) previewing_ = false;
+    }
+    playPill_->setText (tx (previewing_ ? "sm.stop_button" : "sm.play_button"));
+    playPill_->setOn (previewing_);
+    playPill_->setAlpha (cached_.zones.empty() && ! previewing_ ? 0.4f : 1.0f);
+}
+
 void NovaSamplerEditor::tick()
 {
     for (int t = 0, k = 0, v = 0; proc_.popNoteTrace (t, k, v);)
@@ -1149,6 +1159,7 @@ void NovaSamplerEditor::tick()
         }
     }
     updateVoices();
+    updatePlayButton();
     updateFilterEditor();
     if (chokePanel_ != nullptr && has) chokePanel_->setValues (z->chokeCuts, z->chokeCutBy);
 

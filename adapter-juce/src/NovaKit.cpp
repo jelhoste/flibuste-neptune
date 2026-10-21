@@ -764,6 +764,15 @@ LookAndFeel::LookAndFeel (const Skin& s) : skin_ (s)
     setColour (juce::TextEditor::outlineColourId, s.colour (Token::CtlBd));
     setColour (juce::TextEditor::focusedOutlineColourId, s.colour (Token::Accent));
     setColour (juce::ScrollBar::thumbColourId, s.colour (Token::TextDim2));
+    setColour (juce::ComboBox::textColourId, s.colour (Token::Text));
+    setColour (juce::ComboBox::arrowColourId, s.colour (Token::TextDim));
+    setColour (juce::TextButton::textColourOffId, s.colour (Token::TextDim));
+    setColour (juce::TextButton::textColourOnId, s.colour (Token::Text));
+    setColour (juce::ToggleButton::textColourId, s.colour (Token::Text));
+    setColour (juce::Label::textColourId, s.colour (Token::TextDim));
+    setColour (juce::Slider::textBoxTextColourId, s.colour (Token::Text));
+    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
 }
 
 void LookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
@@ -781,5 +790,91 @@ void LookAndFeel::drawScrollbar (juce::Graphics& g, juce::ScrollBar&, int x, int
     const auto thumb = vertical ? juce::Rectangle<int> (x, y + thumbStart, width, thumbSize) : juce::Rectangle<int> (x + thumbStart, y, thumbSize, height);
     g.setColour (skin_.colour (Token::TextDim2, over || down ? 0.9f : 0.55f));
     g.fillRoundedRectangle (thumb.toFloat().reduced (1.0f), skin_.px (static_cast<float> (skin_.metrics().scrollbarRadius)));
+}
+
+void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool highlighted, bool down)
+{
+    const auto r = b.getLocalBounds().toFloat().reduced (0.5f);
+    const float rad = skin_.px (5.0f);
+    const bool on = b.getToggleState();
+    skin_.fill (g, Token::BgCard, r, rad);
+    if (on) skin_.fillActive (g, r, rad);
+    else if (down) { g.setColour (skin_.colour (Token::Accent, 0.18f)); g.fillRoundedRectangle (r, rad); }
+    g.setColour (on ? skin_.colour (Token::Accent, 0.5f) : highlighted || down ? skin_.colour (Token::Accent, 0.4f) : skin_.colour (Token::CtlBd));
+    g.drawRoundedRectangle (r, rad, skin_.borderWidth());
+}
+
+juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int) { return juce::Font (skin_.font (10.5f, true)); }
+
+void LookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool highlighted, bool)
+{
+    g.setFont (skin_.font (10.5f, true));
+    g.setColour (skin_.colour (b.getToggleState() ? Token::Accent : highlighted ? Token::Text : Token::TextDim).withMultipliedAlpha (b.isEnabled() ? 1.0f : 0.4f));
+    g.drawText (b.getButtonText(), b.getLocalBounds().reduced (skin_.ipx (4.0f), 0), juce::Justification::centred, true);
+}
+
+void LookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool)
+{
+    const float side = std::min (skin_.px (16.0f), static_cast<float> (b.getHeight()) - 2.0f);
+    const juce::Rectangle<float> box (skin_.px (2.0f), (static_cast<float> (b.getHeight()) - side) / 2.0f, side, side);
+    const float rad = skin_.px (4.0f);
+    skin_.fill (g, Token::BgCard, box, rad);
+    if (b.getToggleState())
+    {
+        skin_.fillActive (g, box, rad);
+        juce::Path tick;
+        tick.startNewSubPath (box.getX() + side * 0.25f, box.getCentreY());
+        tick.lineTo (box.getX() + side * 0.43f, box.getY() + side * 0.72f);
+        tick.lineTo (box.getX() + side * 0.78f, box.getY() + side * 0.28f);
+        g.setColour (skin_.colour (Token::Accent));
+        g.strokePath (tick, juce::PathStrokeType (skin_.px (1.8f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+    g.setColour (b.getToggleState() ? skin_.colour (Token::Accent, 0.5f) : highlighted ? skin_.colour (Token::Accent, 0.4f) : skin_.colour (Token::CtlBd));
+    g.drawRoundedRectangle (box.reduced (0.5f), rad, skin_.borderWidth());
+    g.setFont (skin_.font (11.5f));
+    g.setColour (b.findColour (juce::ToggleButton::textColourId).withMultipliedAlpha (b.isEnabled() ? 1.0f : 0.4f));
+    g.drawText (b.getButtonText(), b.getLocalBounds().withTrimmedLeft (static_cast<int> (side + skin_.px (10.0f))), juce::Justification::centredLeft, true);
+}
+
+void LookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool down, int, int, int, int, juce::ComboBox& box)
+{
+    const auto r = juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (w), static_cast<float> (h)).reduced (0.5f);
+    const float rad = skin_.px (5.0f);
+    skin_.fill (g, Token::BgCard, r, rad);
+    g.setColour (down || box.hasKeyboardFocus (true) ? skin_.colour (Token::Accent, 0.5f) : skin_.colour (Token::CtlBd));
+    g.drawRoundedRectangle (r, rad, skin_.borderWidth());
+    const float c = static_cast<float> (w) - skin_.px (14.0f), m = static_cast<float> (h) / 2.0f, a = skin_.px (3.5f);
+    juce::Path arrow;
+    arrow.startNewSubPath (c - a, m - a * 0.5f);
+    arrow.lineTo (c, m + a * 0.5f);
+    arrow.lineTo (c + a, m - a * 0.5f);
+    g.setColour (skin_.colour (Token::TextDim).withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
+    g.strokePath (arrow, juce::PathStrokeType (skin_.px (1.5f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+juce::Font LookAndFeel::getComboBoxFont (juce::ComboBox&) { return juce::Font (skin_.font (11.5f)); }
+
+void LookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
+{
+    label.setBounds (skin_.ipx (8.0f), 1, box.getWidth() - skin_.ipx (26.0f), box.getHeight() - 2);
+    label.setFont (getComboBoxFont (box));
+}
+
+void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float, juce::Slider::SliderStyle style, juce::Slider& s)
+{
+    if (style != juce::Slider::LinearHorizontal)
+    {
+        LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0.0f, 0.0f, style, s);
+        return;
+    }
+    const float cy = static_cast<float> (y) + static_cast<float> (h) / 2.0f, th = skin_.px (4.0f);
+    const juce::Rectangle<float> track (static_cast<float> (x), cy - th / 2.0f, static_cast<float> (w), th);
+    g.setColour (skin_.colour (Token::Grid));
+    g.fillRoundedRectangle (track, th / 2.0f);
+    g.setColour (skin_.colour (Token::Accent, s.isEnabled() ? 1.0f : 0.4f));
+    g.fillRoundedRectangle (track.withRight (pos), th / 2.0f);
+    const float d = skin_.px (11.0f);
+    g.setColour (skin_.colour (Token::Text, s.isEnabled() ? 1.0f : 0.5f));
+    g.fillEllipse (pos - d / 2.0f, cy - d / 2.0f, d, d);
 }
 } // namespace nova

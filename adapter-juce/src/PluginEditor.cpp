@@ -136,6 +136,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
     updateViewVisibility();
     root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
+    root_.setLookAndFeel (&novaLook_);
     root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
     setResizable (true, true);
     setResizeLimits (420, 300, 3000, 2000); // en dessous de la taille de conception, l'interface est réduite (voir resized)
