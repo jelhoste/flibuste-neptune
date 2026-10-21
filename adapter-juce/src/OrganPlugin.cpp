@@ -1,4 +1,5 @@
 #include "OrganPlugin.h"
+#include "NovaOrganEditor.h"
 #include "NeptuneParameter.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/SamplerParams.h"
@@ -94,6 +95,12 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
     }
     if (pos < n) engine_.process (left + pos, right != nullptr ? right + pos : nullptr, n - pos);
+    {
+        float pl = 0.0f, pr = 0.0f;
+        for (int i = 0; i < n; ++i) { pl = std::max (pl, std::fabs (left[i])); pr = std::max (pr, std::fabs (right != nullptr ? right[i] : left[i])); }
+        outPeak_[0].store (pl, std::memory_order_relaxed);
+        outPeak_[1].store (pr, std::memory_order_relaxed);
+    }
     midi.clear();
 }
 
@@ -292,171 +299,13 @@ bool OrganProcessor::saveConfig (const preset::LibraryConfig& c)
     return ok;
 }
 
-juce::AudioProcessorEditor* OrganProcessor::createEditor() { return new OrganEditor (*this); }
+juce::AudioProcessorEditor* OrganProcessor::createEditor() { return new NovaOrganPluginEditor (*this); }
 
-// ---------------------------------------------------------------------------------------------------- éditeur
-
-juce::Colour OrganEditor::colour (Token t) const
+void OrganProcessor::applySettings (const settings::GlobalSettings& s)
 {
-    const auto& c = palette_.color (t);
-    return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
-}
-
-OrganEditor::OrganEditor (OrganProcessor& p)
-    : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
-{
-    setWantsKeyboardFocus (true);
-    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
-    knobStyle_ = def.knob;
-
-    // volume et gain du plugin : les paramètres de la piste 0 (mêmes identifiants que dans Neptune)
-    OrganView::KnobIds extra;
-    extra.push_back ([] (int) { return organ::synthVolume; });
-    extra.push_back ([] (int) { return static_cast<ParamId> (sampler::gain); });
-    view_ = std::make_unique<OrganView> (processor_, palette_, tr_, knobStyle_, std::move (extra),
-                                         [this] (ParamId id, uistate::Terminal t) { openModal (id, t); });
-    view_->onChange = [this] (const organ::OrganDescription& d) { processor_.uiEditOrgan (d, "Organ keyboards", "organ"); };
-    view_->onNoteOn = [this] (int key, int channel) { processor_.uiNoteOn (channel, key); };
-    view_->onNoteOff = [this] (int key, int channel) { processor_.uiNoteOff (channel, key); };
-    view_->setDescription (processor_.organDescription());
-    addAndMakeVisible (*view_);
-
-    presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
-    presetBar_->onOpenManager = [this] (bool saveAs) { openManager (saveAs); };
-    presetBar_->onStatus = [this] (const juce::String& m) { infoLabel_.setText (m, juce::dontSendNotification); };
-    addAndMakeVisible (*presetBar_);
-
-    brandLabel_.setText ("ORGAMON", juce::dontSendNotification);
-    brandLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
-    brandLabel_.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
-    addAndMakeVisible (brandLabel_);
-    infoLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
-    infoLabel_.setFont (juce::FontOptions (11.0f));
-    infoLabel_.setJustificationType (juce::Justification::centredRight);
-    addAndMakeVisible (infoLabel_);
-    undoButton_.setButtonText (text ("undo.undo"));
-    undoButton_.onClick = [this] { processor_.uiUndo(); };
-    redoButton_.setButtonText (text ("undo.redo"));
-    redoButton_.onClick = [this] { processor_.uiRedo(); };
-    panicButton_.setButtonText (text ("panic.button"));
-    panicButton_.onClick = [this] { processor_.uiPanic(); view_->releaseKeys(); };
-    ccButton_.setButtonText (text ("control.button"));
-    ccButton_.setTooltip (text ("control.title"));
-    ccButton_.setClickingTogglesState (true);
-    ccButton_.setToggleState (processor_.ccEnabled(), juce::dontSendNotification);
-    ccButton_.onClick = [this] { processor_.uiSetCcEnabled (ccButton_.getToggleState()); };
-    for (auto* b : { &undoButton_, &redoButton_, &panicButton_, &ccButton_ }) addAndMakeVisible (b);
-
-    startTimerHz (15);
-
-    root_.onPaint = [this] (juce::Graphics& g) { g.fillAll (colour (Token::BgApp)); };
-    root_.adopt (*this);
-    setResizable (true, true);
-    setResizeLimits (360, 240, 2400, 1400);
-    {
-        int w = OrganView::designWidth + 40, h = OrganView::designHeight + 70;
-        if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        {
-            w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
-            h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
-        }
-        setSize (juce::jmax (360, w), juce::jmax (240, h));
-    }
-}
-
-void OrganEditor::resized()
-{
-    const auto logical = root_.fit (getWidth(), getHeight(), OrganView::designWidth + 40, OrganView::designHeight + 70);
-    auto r = logical.reduced (20, 10);
-    auto top = r.removeFromTop (36);
-    brandLabel_.setBounds (top.removeFromLeft (150));
-    redoButton_.setBounds (top.removeFromRight (64).reduced (2));
-    undoButton_.setBounds (top.removeFromRight (64).reduced (2));
-    panicButton_.setBounds (top.removeFromRight (120).reduced (2));
-    ccButton_.setBounds (top.removeFromRight (52).reduced (2));
-    presetBar_->setBounds (top.removeFromLeft (juce::jmin (560, top.getWidth() - 120)));
-    infoLabel_.setBounds (top);
-    r.removeFromTop (8);
-    view_->placeScaled (r);
-    if (modal_) modal_->setBounds (logical);
-    if (manager_) manager_->setBounds (logical);
-}
-
-void OrganEditor::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgApp)); }
-
-bool OrganEditor::keyPressed (const juce::KeyPress& k)
-{
-    const auto m = k.getModifiers();
-    if (! m.isCommandDown()) return false;
-    const int code = k.getKeyCode();
-    if (code == 'Z' || code == 'z')
-    {
-        if (m.isShiftDown()) processor_.uiRedo(); else processor_.uiUndo();
-        return true;
-    }
-    if (code == 'Y' || code == 'y') { processor_.uiRedo(); return true; }
-    if (code == 'S' || code == 's') { presetBar_->quickSave(); return true; }
-    return false;
-}
-
-void OrganEditor::openModal (ParamId id, uistate::Terminal terminal)
-{
-    if (modal_ || manager_) return;
-    modal_ = std::make_unique<KnobModal> (processor_, id, terminal, palette_, tr_,
-                                          [safe = juce::Component::SafePointer<OrganEditor> (this)]
-                                          {
-                                              juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
-                                          });
-    root_.addAndMakeVisible (*modal_);
-    modal_->setBounds (root_.getLocalBounds());
-    modal_->toFront (true);
-}
-
-void OrganEditor::openManager (bool saveAs)
-{
-    if (manager_ || modal_) return;
-    manager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
-    manager_->onClose = [safe = juce::Component::SafePointer<OrganEditor> (this)]
-    {
-        juce::MessageManager::callAsync ([safe]
-        {
-            if (safe == nullptr) return;
-            safe->manager_.reset();
-            safe->presetBar_->refresh();
-            safe->grabKeyboardFocus();
-        });
-    };
-    manager_->onChanged = [safe = juce::Component::SafePointer<OrganEditor> (this)] { if (safe != nullptr) safe->presetBar_->refresh(); };
-    root_.addAndMakeVisible (*manager_);
-    manager_->setBounds (root_.getLocalBounds());
-    manager_->toFront (true);
-    if (saveAs) manager_->showSaveAs();
-}
-
-void OrganEditor::closeModal()
-{
-    if (! modal_) return;
-    processor_.setModalSize (modal_->terminal(), modal_->panelSize());
-    modal_.reset();
-    grabKeyboardFocus();
-}
-
-void OrganEditor::timerCallback()
-{
-    processor_.engine().collect(); // libère l'orgue remplacé après un changement d'accord ou de câblage
-    if (presetBar_->needsRefresh()) presetBar_->refresh();
-    const auto rev = static_cast<std::uint32_t> (processor_.undoManager().revision());
-    if (rev != lastUndoRevision_)
-    {
-        lastUndoRevision_ = rev;
-        view_->setDescription (processor_.organDescription());
-    }
-    view_->refreshFromParameters();
-    view_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1)); // notes MIDI reçues
-    undoButton_.setEnabled (processor_.undoManager().canUndo());
-    redoButton_.setEnabled (processor_.undoManager().canRedo());
-    infoLabel_.setText ("Orgamon - " + juce::String (processor_.engine().heldKeys()), juce::dontSendNotification);
-    root_.repaint();
+    settings_ = s;
+    std::string error;
+    settings::saveFile (configDirectory() / "settings.json", s, &error);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new OrganProcessor(); }

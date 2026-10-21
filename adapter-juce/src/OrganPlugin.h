@@ -10,12 +10,9 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "HostProbe.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
-#include "OrganView.h"
 #include "ParamHost.h"
-#include "PresetBar.h"
 #include "PresetHost.h"
 #include "PresetManager.h"
-#include "ScaledRoot.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/OrganPreset.h"
 #include "neptune/core/OrganSynth.h"
@@ -100,6 +97,8 @@ public:
 
     neptune::core::organ::OrganSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
+    float outPeak (int channel) const noexcept { return outPeak_[channel & 1].load (std::memory_order_relaxed); }   // crête du dernier bloc, pour le vu-mètre
 
 private:
     static BusesProperties makeBuses();
@@ -116,43 +115,9 @@ private:
     std::string currentPresetId_;
     std::uint32_t presetRevision_ = 1;
     std::atomic<int> midiBank_ { 0 };
+    std::atomic<float> outPeak_[2] { 0.0f, 0.0f };
     std::atomic<bool> ccEnabled_ { false }; // contrôleurs MIDI (hors banque et notes) : désactivés par défaut
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)
-};
-
-class OrganEditor : public juce::AudioProcessorEditor, private juce::Timer
-{
-public:
-    explicit OrganEditor (OrganProcessor&);
-    ~OrganEditor() override { stopTimer(); }
-
-    void resized() override;
-    void paint (juce::Graphics&) override;
-    bool keyPressed (const juce::KeyPress&) override;
-
-private:
-    void timerCallback() override;
-    void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
-    void closeModal();
-    void openManager (bool saveAs);
-    juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
-    juce::Colour colour (neptune::core::theme::Token t) const;
-
-    ScaledRoot root_;
-    OrganProcessor& processor_;
-    neptune::core::i18n::Translator tr_;
-    neptune::core::theme::Palette palette_;
-    neptune::core::theme::KnobStyle knobStyle_;
-
-    std::unique_ptr<OrganView> view_;
-    std::unique_ptr<PresetBar> presetBar_;
-    std::unique_ptr<PresetManager> manager_;
-    juce::Label brandLabel_, infoLabel_;
-    juce::TextButton undoButton_, redoButton_, panicButton_, ccButton_;
-    std::unique_ptr<KnobModal> modal_;
-    std::uint32_t lastUndoRevision_ = 0;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganEditor)
 };

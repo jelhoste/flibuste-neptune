@@ -492,9 +492,10 @@ clap_juce_extensions_plugin(
 
 target_sources(Orgamon PRIVATE
   src/OrganPlugin.cpp
-  src/PresetBar.cpp
+  src/NovaOrganEditor.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
   src/PresetManager.cpp
-  src/OrganView.cpp
   src/SynthKeyboard.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)

@@ -18,14 +18,14 @@ EditorBase::EditorBase (ParamHost& host, const theme::Palette& palette, theme::K
 
     preset_ = add<Pill> (-1, skin_);
     preset_->setText (juce::String::fromUTF8 ("--"));
-    preset_->onClick = [this] { showPresetMenu(); };
+    preset_->onClick = [this] { if (options_.presetMenu) options_.presetMenu (preset_); else showPresetMenu(); };
 
     ab_ = add<Pill> (-1, skin_, Pill::Look::Small);
     ab_->setText ("A");
     ab_->setFontSize (18.0f);
     ab_->onClick = [this] { toggleAB(); };
 
-    if (options_.brand)
+    if (options_.brand && ! options_.noBypass)
     {
         bypass_ = add<Pill> (-1, skin_, Pill::Look::Icon);
         juce::Path power;
