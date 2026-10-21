@@ -8,6 +8,7 @@
 #include "../src/NovaChorusEditor.h"
 #include "../src/NovaDelayEditor.h"
 #include "../src/NovaMicrodecaleEditor.h"
+#include "../src/NovaSynthEditor.h"
 #include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
@@ -16,6 +17,8 @@
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/StockModule.h"
+#include "neptune/core/AnalogSynth.h"
+#include "neptune/core/SamplerParams.h"
 #include <cmath>
 #include <memory>
 
@@ -43,6 +46,26 @@ struct RunnerHost : ParamHost
     void uiSetNormalised (ParamId id, double n) override { runner.params().setNormalized (id, n); }
     void uiEndEdit (ParamId) override {}
     void uiResetToDefault (ParamId id) override { runner.params().reset (id); }
+};
+
+struct FakePresets : PresetHost
+{
+    preset::Library lib;
+    explicit FakePresets (std::filesystem::path root) : lib (std::move (root), analogsynth::factoryPresets()) { lib.open(); }
+    preset::Library& library() override { return lib; }
+    std::string currentPresetId() const override { return lib.factoryPresets().empty() ? std::string() : lib.factoryPresets().front().id; }
+    const preset::Preset* currentPreset() const override { return lib.factoryPresets().empty() ? nullptr : &lib.factoryPresets().front(); }
+    std::uint32_t presetRevision() const override { return 1; }
+    void touchPresets() override {}
+    bool loadPreset (const std::string&) override { return true; }
+    bool stepPreset (int) override { return true; }
+    bool isModified() const override { return false; }
+    bool canSaveCurrent() const override { return false; }
+    bool saveCurrent (std::string*) override { return false; }
+    bool overwritePreset (const std::string&, std::string*) override { return false; }
+    bool saveCurrentAs (const std::string&, const std::string&, preset::Preset*, std::string*) override { return false; }
+    bool saveConfig (const preset::LibraryConfig&) override { return true; }
+    const preset::LibraryConfig& presetConfig() const override { return lib.config(); }
 };
 
 juce::Path iconPath (int kind)
@@ -423,6 +446,68 @@ int main (int argc, char** argv)
                 std::vector<float> l (512, 0.0f), r (512, 0.0f);
                 for (int b = 0; b < 40; ++b) cRunner.process (l.data(), r.data(), 512, false);   // fait avancer la phase du LFO
             }
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel d'AnalogSynth
+    {
+        analogsynth::AnalogSynthEngine engine;
+        engine.prepare (48000.0, 512);
+        struct SHost : ParamHost
+        {
+            ParameterSet& set;
+            explicit SHost (ParameterSet& s) : set (s) {}
+            ParameterSet& parameters() override { return set; }
+            void uiBeginEdit (ParamId) override {}
+            void uiSetNormalised (ParamId id, double n) override { set.setNormalized (id, n); }
+            void uiEndEdit (ParamId) override {}
+            void uiResetToDefault (ParamId id) override { set.reset (id); }
+        } sh (engine.params());
+        FakePresets presets (std::filesystem::path (out.getChildFile ("synth-presets").getFullPathName().toStdString()));
+        SynthDescription desc;
+        desc.osc[0].wave = kWaveSaw;
+        desc.osc[0].unison = 5;
+        desc.osc[1].wave = kWavePulse;
+        desc.osc[1].octave = -1;
+        desc.osc[1].sync = true;
+        desc.osc[2].wave = kWaveSine;
+        desc.filters.filter[1].on = true;
+        desc.filters.parallel = true;
+        desc.ampEnv.attack.ms = 40.0;
+        desc.ampEnv.decay.ms = 300.0;
+        desc.ampEnv.sustain = 0.6;
+        desc.filters.filter[0].env.decay.ms = 500.0;
+        desc.filters.filter[0].envDepthOctaves = 3.0;
+        engine.setDescription (desc);
+        struct SCase { const char* name; th::ThemeId id; float scale; int page; bool keyboard; };
+        const SCase scs[] = { { "synth-dark-p0", th::ThemeId::Dark, 1.0f, 0, true }, { "synth-dark-p0-nokb", th::ThemeId::Dark, 1.0f, 0, false }, { "synth-dark-p1", th::ThemeId::Dark, 1.0f, 1, true },
+                              { "synth-dark-p2", th::ThemeId::Dark, 1.0f, 2, true }, { "synth-dark-p3", th::ThemeId::Dark, 1.0f, 3, true }, { "synth-dark-p4", th::ThemeId::Dark, 1.0f, 4, true },
+                              { "synth-light-p0", th::ThemeId::Light, 1.0f, 0, true }, { "synth-hammond-p1", th::ThemeId::Hammond, 1.0f, 1, false }, { "synth-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, true } };
+        for (const auto& c : scs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaSynthEditor::Options opt;
+            opt.brand = true;
+            opt.noBypass = true;
+            opt.moduleName = "analogsynth";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            SynthLink link;
+            link.description = [&desc] { return desc; };
+            link.edit = [] (SynthDescription) {};
+            link.heldKeys = [] (int) { return std::uint64_t (0); };
+            link.outputs = { analogsynth::volume, analogsynth::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
+            NovaSynthEditor ed (sh, presets, link, th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            ed.setKeyboardShownForTest (c.keyboard);
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;

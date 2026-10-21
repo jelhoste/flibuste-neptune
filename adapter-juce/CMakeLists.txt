@@ -382,7 +382,7 @@ target_link_libraries(Microdecale
     juce::juce_recommended_warning_flags)
 
 # ---- AnalogSynth (nom provisoire) : le synthé soustractif de Neptune, plugin CLAP instrument indépendant --------------------
-# Même moteur (neptune_core : AnalogSynth.h, Synth.h, SynthVoices.h) et même vue (SynthView) que la piste Synthé de Neptune ;
+# Même moteur (neptune_core : AnalogSynth.h, Synth.h, SynthVoices.h) que la piste Synthé de Neptune, interface NOVA (NovaSynthEditor) ;
 # en plus, le système de presets (Preset.h, PresetLibrary.h : banques MIDI, grille concert, corbeille) et son gestionnaire.
 set(ANALOGSYNTH_CLAP_ID "com.tournedosrossini.analogsynth" CACHE STRING "Identifiant CLAP du synthé indépendant")
 
@@ -402,9 +402,11 @@ clap_juce_extensions_plugin(
 
 target_sources(AnalogSynth PRIVATE
   src/AnalogSynthPlugin.cpp
+  src/NovaSynthEditor.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
+  src/NovaPresetUi.cpp
   src/PresetManager.cpp
-  src/PresetBar.cpp
-  src/SynthView.cpp
   src/SynthKeyboard.cpp
   src/EnvelopeEditor.cpp
   src/NeptuneKnob.cpp
@@ -519,7 +521,7 @@ target_link_libraries(Orgamon
 # ---- NovaGallery : rendu hors-ligne en PNG des composants communs NOVA (NovaKit), pour la comparaison avec les maquettes HTML ----------
 # Outil de développement (CI Linux : exécuté sous xvfb, images archivées) ; non installé.
 juce_add_console_app(NovaGallery PRODUCT_NAME "NovaGallery")
-target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/NovaSpectrum.cpp src/NovaShaperEditor.cpp src/NovaShaperWaveView.cpp src/NovaDelayEditor.cpp src/NovaChorusEditor.cpp src/NovaMicrodecaleEditor.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
+target_sources(NovaGallery PRIVATE tools/NovaGallery.cpp src/NovaKit.cpp src/NovaEditor.cpp src/NovaCompressorEditor.cpp src/NovaHistoryView.cpp src/NovaEqualizerEditor.cpp src/NovaSpectrum.cpp src/NovaShaperEditor.cpp src/NovaShaperWaveView.cpp src/NovaDelayEditor.cpp src/NovaChorusEditor.cpp src/NovaMicrodecaleEditor.cpp src/NovaSynthEditor.cpp src/NovaPresetUi.cpp src/PresetManager.cpp src/EnvelopeEditor.cpp src/SynthKeyboard.cpp src/KnobModal.cpp src/NeptuneKnob.cpp)
 target_compile_definitions(NovaGallery PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1)
 target_link_libraries(NovaGallery
   PRIVATE

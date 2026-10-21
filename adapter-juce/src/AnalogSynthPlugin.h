@@ -8,14 +8,10 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <string>
 #include <vector>
 #include "HostProbe.h"
-#include "KnobModal.h"
-#include "NeptuneKnob.h"
 #include "ParamHost.h"
-#include "ScaledRoot.h"
-#include "PresetBar.h"
+#include "NovaSynthEditor.h"
 #include "PresetHost.h"
 #include "PresetManager.h"
-#include "SynthView.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Preset.h"
@@ -25,7 +21,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Undo.h"
 
 // « AnalogSynth » (nom provisoire) : le synthé soustractif de Neptune publié comme plugin CLAP instrument indépendant.
-// Même moteur (neptune::core::analogsynth), même vue (SynthView), plus le système de presets (Preset.h) : banques 0..127 pilotées
+// Même moteur (neptune::core::analogsynth), interface NOVA (NovaSynthEditor), plus le système de presets (Preset.h) : banques 0..127 pilotées
 // par MIDI Bank Select / Program Change, grille concert, bibliothèque utilisateur sur disque, presets livrés en lecture seule.
 class AnalogSynthProcessor : public juce::AudioProcessor,
                              public clap_juce_extensions::clap_juce_audio_processor_capabilities,
@@ -112,6 +108,7 @@ public:
 
     neptune::core::analogsynth::AnalogSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
 
 private:
     static BusesProperties makeBuses();
@@ -134,43 +131,19 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AnalogSynthProcessor)
 };
 
-class AnalogSynthEditor : public juce::AudioProcessorEditor, private juce::Timer
+// Fenêtre du plugin AnalogSynth : thème, contraste, langue ; reconstruit l'interface quand ils changent.
+class NovaSynthPluginEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit AnalogSynthEditor (AnalogSynthProcessor&);
-    ~AnalogSynthEditor() override { stopTimer(); }
-
+    explicit NovaSynthPluginEditor (AnalogSynthProcessor&);
     void resized() override;
     void paint (juce::Graphics&) override;
     bool keyPressed (const juce::KeyPress&) override;
 
 private:
-    void timerCallback() override;
-    void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
-    void closeModal();
-    void refreshPresetBar();
-    void openManager (bool saveAs = false);
-    juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
-    juce::Colour colour (neptune::core::theme::Token t) const;
-    void paintContent (juce::Graphics&);
-
-    ScaledRoot root_;
+    void buildContent();
     AnalogSynthProcessor& processor_;
     neptune::core::i18n::Translator tr_;
-    neptune::core::theme::Palette palette_;
-    neptune::core::theme::KnobStyle knobStyle_;
-
-    std::unique_ptr<SynthView> synthView_;
-    juce::OwnedArray<NeptuneKnob> knobs_;
-    juce::TextButton undoButton_, redoButton_, panicButton_;
-    std::unique_ptr<PresetBar> presetBar_;
-    juce::Label brandLabel_, infoLabel_;
-    std::unique_ptr<KnobModal> modal_;
-    std::unique_ptr<PresetManager> manager_;
-
-    std::uint32_t lastUndoRevision_ = 0;
-    std::uint32_t lastEnvVersions_ = 0;
-    int lastVoices_ = -1;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AnalogSynthEditor)
+    std::unique_ptr<NovaSynthEditor> content_;
+    juce::ComponentBoundsConstrainer constrainer_;
 };

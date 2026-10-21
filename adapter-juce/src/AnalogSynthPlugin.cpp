@@ -1,4 +1,5 @@
 #include "AnalogSynthPlugin.h"
+#include "NovaSynthEditor.h"
 #include <nlohmann/json.hpp>
 #include "NeptuneParameter.h"
 #include "neptune/core/SamplerParams.h"
@@ -19,14 +20,6 @@ std::filesystem::path configDirectory()
     return std::filesystem::u8path (base.getChildFile ("Neptune").getFullPathName().toStdString());
 }
 
-theme::Palette makePalette (const settings::GlobalSettings& st)
-{
-    const auto id = theme::themeFromString (st.theme).value_or (theme::ThemeId::Dark);
-    return theme::withContrast (theme::definition (id), st.contrast);
-}
-
-constexpr int kKnobCell = 118;
-constexpr int kBottomHeight = 120;
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------- processeur
@@ -300,225 +293,64 @@ bool AnalogSynthProcessor::saveConfig (const preset::LibraryConfig& c)
     return ok;
 }
 
-juce::AudioProcessorEditor* AnalogSynthProcessor::createEditor() { return new AnalogSynthEditor (*this); }
+juce::AudioProcessorEditor* AnalogSynthProcessor::createEditor() { return new NovaSynthPluginEditor (*this); }
 
-// ---------------------------------------------------------------------------------------------------- éditeur
-
-juce::Colour AnalogSynthEditor::colour (Token t) const
+void AnalogSynthProcessor::applySettings (const settings::GlobalSettings& s)
 {
-    const auto& c = palette_.color (t);
-    return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
+    settings_ = s;
+    std::string error;
+    settings::saveFile (configDirectory() / "settings.json", s, &error);
 }
 
-AnalogSynthEditor::AnalogSynthEditor (AnalogSynthProcessor& p)
-    : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
+// ------------------------------------------------------------------------------------------------ fenêtre du plugin
+NovaSynthPluginEditor::NovaSynthPluginEditor (AnalogSynthProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
 {
+    buildContent();
     setWantsKeyboardFocus (true);
-    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
-    knobStyle_ = def.knob;
-
-    synthView_ = std::make_unique<SynthView> (processor_, palette_, tr_, knobStyle_);
-    synthView_->onChange = [this] (const SynthDescription& d) { processor_.uiEditSynth (d, "Synth", "synth"); };
-    synthView_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
-    synthView_->onGestureEnd = [this] { processor_.uiEndGesture(); };
-    synthView_->onNoteOn = [this] (int key, float velocity) { processor_.uiNoteOn (key, velocity); };
-    synthView_->onNoteOff = [this] (int key) { processor_.uiNoteOff (key); };
-    synthView_->setTrack (0);
-    addAndMakeVisible (*synthView_);
-
-    for (const ParamId id : { analog::volume, analog::pan, sampler::gain, sampler::tuneSemitones, sampler::tuneCents })
-        addAndMakeVisible (knobs_.add (new NeptuneKnob (processor_, id, palette_, knobStyle_,
-                                                        [this] (ParamId pid, uistate::Terminal t) { openModal (pid, t); })));
-
-    brandLabel_.setText ("ANALOGSYNTH", juce::dontSendNotification);
-    brandLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
-    brandLabel_.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
-    addAndMakeVisible (brandLabel_);
-    infoLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
-    infoLabel_.setFont (juce::FontOptions (11.0f));
-    infoLabel_.setJustificationType (juce::Justification::centredRight);
-    addAndMakeVisible (infoLabel_);
-
-    presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
-    presetBar_->onOpenManager = [this] (bool saveAs) { openManager (saveAs); };
-    presetBar_->onLoaded = [this] { synthView_->setDescription (processor_.synthDescription()); };
-    presetBar_->onStatus = [this] (const juce::String& m) { infoLabel_.setText (m, juce::dontSendNotification); };
-    addAndMakeVisible (*presetBar_);
-    undoButton_.setButtonText (text ("undo.undo"));
-    undoButton_.onClick = [this] { processor_.uiUndo(); };
-    redoButton_.setButtonText (text ("undo.redo"));
-    redoButton_.onClick = [this] { processor_.uiRedo(); };
-    panicButton_.setButtonText (text ("panic.button"));
-    panicButton_.onClick = [this] { processor_.uiPanic(); synthView_->releaseKeys(); };
-    for (auto* b : { &undoButton_, &redoButton_, &panicButton_ }) addAndMakeVisible (b);
-
-    synthView_->setDescription (processor_.synthDescription());
-    startTimerHz (15);
-
-    root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
-    root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
+    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    setConstrainer (&constrainer_);
     setResizable (true, true);
-    setResizeLimits (360, 240, 2400, 1400); // en dessous de la taille de conception (820 x 600), tout est réduit
+    setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
+}
+
+void NovaSynthPluginEditor::buildContent()
+{
+    auto& p = processor_;
+    tr_ = i18n::Translator (p.settings().language);
+    const auto id = theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark);
+    const auto palette = theme::withContrast (theme::definition (id), p.settings().contrast);
+    const auto& def = theme::definition (id);
+    NovaSynthEditor::Options opt;
+    opt.brand = true;
+    opt.noBypass = true;
+    opt.moduleName = "analogsynth";
+    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
+    opt.getSettings = [&p] { return p.settings(); };
+    opt.applySettings = [&p, safe = juce::Component::SafePointer<NovaSynthPluginEditor> (this)] (const settings::GlobalSettings& s)
     {
-        // taille de départ : 1180 x 700 au plus, jamais plus de 90 % de l'écran utile
-        int w = 1180, h = 700;
-        if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        {
-            w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
-            h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
-        }
-        setSize (juce::jmax (360, w), juce::jmax (240, h)); // en dernier : resized() place les composants créés ci-dessus
-    }
-}
-
-void AnalogSynthEditor::resized()
-{
-    const auto logical = root_.fit (getWidth(), getHeight(), 820, 600);
-    auto r = logical.reduced (24, 12);
-    auto top = r.removeFromTop (40);
-    brandLabel_.setBounds (top.removeFromLeft (190));
-    presetBar_->setBounds (top.removeFromLeft (juce::jmin (620, top.getWidth() - 110 - 140)));
-    panicButton_.setBounds (top.removeFromRight (110).reduced (2));
-    infoLabel_.setBounds (top);
-    r.removeFromTop (8);
-
-    auto bottom = r.removeFromBottom (kBottomHeight);
-    synthView_->placeScaled (r);
-
-    const int knobSide = static_cast<int> (ui::effectiveHitSize (48.0, ui::KnobConfig {}));
-    int x = bottom.getX();
-    const int y = bottom.getY() + 22;
-    for (auto* k : knobs_)
-    {
-        k->setBounds (x + (kKnobCell - knobSide) / 2, y, knobSide, knobSide);
-        x += kKnobCell;
-    }
-    // annuler / rétablir : petits, sur la rangée des potards, à droite
-    redoButton_.setBounds (bottom.getRight() - 64, y + (knobSide - 22) / 2, 64, 22);
-    undoButton_.setBounds (bottom.getRight() - 64 - 4 - 64, y + (knobSide - 22) / 2, 64, 22);
-
-    if (modal_) modal_->setBounds (logical);
-    if (manager_) manager_->setBounds (logical);
-}
-
-void AnalogSynthEditor::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgApp)); }
-
-void AnalogSynthEditor::paintContent (juce::Graphics& g)
-{
-    g.fillAll (colour (Token::BgApp));
-    // noms et valeurs sous / sur les potards de la rangée du bas
-    const auto& set = processor_.parameters();
-    g.setFont (juce::FontOptions (11.0f));
-    for (auto* k : knobs_)
-    {
-        const auto b = k->getBounds();
-        const auto index = set.indexOf (k->paramId());
-        if (index == ParameterSet::npos) continue;
-        g.setColour (colour (Token::TextDim));
-        g.drawText (juce::String::fromUTF8 (set.spec (index).name.c_str()), b.getCentreX() - kKnobCell / 2, b.getY() - 20, kKnobCell, 18,
-                    juce::Justification::centred, true);
-        g.setColour (colour (Token::Text));
-        g.drawText (juce::String::fromUTF8 (set.toText (k->paramId()).c_str()), b.getCentreX() - kKnobCell / 2, b.getBottom() + 1, kKnobCell, 18,
-                    juce::Justification::centred, true);
-    }
-}
-
-bool AnalogSynthEditor::keyPressed (const juce::KeyPress& k)
-{
-    const auto m = k.getModifiers();
-    if (! m.isCommandDown()) return false;
-    const int code = k.getKeyCode();
-    if (code == 'Z' || code == 'z')
-    {
-        if (m.isShiftDown()) processor_.uiRedo(); else processor_.uiUndo();
-        return true;
-    }
-    if (code == 'Y' || code == 'y') { processor_.uiRedo(); return true; }
-    if (code == 'S' || code == 's') { presetBar_->quickSave(); return true; }
-    return false;
-}
-
-void AnalogSynthEditor::openModal (ParamId id, uistate::Terminal terminal)
-{
-    if (modal_ || manager_) return;
-    modal_ = std::make_unique<KnobModal> (processor_, id, terminal, palette_, tr_,
-                                          [safe = juce::Component::SafePointer<AnalogSynthEditor> (this)]
-                                          {
-                                              juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
-                                          });
-    root_.addAndMakeVisible (*modal_);
-    modal_->setBounds (root_.getLocalBounds());
-    modal_->toFront (true);
-}
-
-void AnalogSynthEditor::closeModal()
-{
-    if (! modal_) return;
-    processor_.setModalSize (modal_->terminal(), modal_->panelSize());
-    modal_.reset();
-    grabKeyboardFocus();
-}
-
-void AnalogSynthEditor::openManager (bool saveAs)
-{
-    if (manager_ || modal_) return;
-    manager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
-    manager_->onClose = [safe = juce::Component::SafePointer<AnalogSynthEditor> (this)]
-    {
-        juce::MessageManager::callAsync ([safe]
-        {
-            if (safe == nullptr) return;
-            safe->manager_.reset();
-            safe->refreshPresetBar();
-            safe->grabKeyboardFocus();
-        });
+        p.applySettings (s);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
     };
-    manager_->onChanged = [safe = juce::Component::SafePointer<AnalogSynthEditor> (this)]
-    {
-        if (safe != nullptr) { safe->refreshPresetBar(); safe->synthView_->setDescription (safe->processor_.synthDescription()); }
-    };
-    root_.addAndMakeVisible (*manager_);
-    manager_->setBounds (root_.getLocalBounds());
-    manager_->toFront (true);
-    if (saveAs) manager_->showSaveAs();
+    opt.presetMenu = [this] (juce::Component* anchor) { if (content_ != nullptr) content_->showPresetMenu (anchor); };
+    SynthLink link;
+    link.description = [&p] { return p.synthDescription(); };
+    link.edit = [&p] (SynthDescription d) { p.uiEditSynth (std::move (d), "Synth", "synth"); };
+    link.beginGesture = [&p] { p.uiBeginGesture(); };
+    link.endGesture = [&p] { p.uiEndGesture(); };
+    link.panic = [&p] { p.uiPanic(); };
+    link.noteOn = [&p] (int key, float v) { p.uiNoteOn (key, v); };
+    link.noteOff = [&p] (int key) { p.uiNoteOff (key); };
+    link.heldKeys = [&p] (int word) { return p.engine().heldKeyWord (word); };
+    link.track = 0;
+    link.outputs = { analog::volume, analog::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
+    content_.reset();
+    content_ = std::make_unique<NovaSynthEditor> (p, p, std::move (link), palette, def.knob, tr_, opt);
+    addAndMakeVisible (*content_);
+    content_->setBounds (getLocalBounds());
 }
 
-void AnalogSynthEditor::refreshPresetBar() { presetBar_->refresh(); }
-
-void AnalogSynthEditor::timerCallback()
-{
-    if (presetBar_->needsRefresh())
-    {
-        presetBar_->refresh();
-        synthView_->setDescription (processor_.synthDescription()); // un preset vient d'être chargé (ou la sélection a changé)
-    }
-    const auto rev = static_cast<std::uint32_t> (processor_.undoManager().revision());
-    if (rev != lastUndoRevision_)
-    {
-        lastUndoRevision_ = rev;
-        synthView_->setDescription (processor_.synthDescription()); // annuler / rétablir ont pu changer le patch
-    }
-    // automation des enveloppes, du glissando, de l'équilibre : l'éditeur graphique suit
-    {
-        std::uint32_t sum = 0;
-        for (int k = 0; k < neptune::core::mixer::kSynthEnvKinds; ++k)
-            sum += processor_.engine().params().version (neptune::core::mixer::synthEnvParam (0, static_cast<neptune::core::mixer::SynthEnvKind> (k)));
-        if (sum != lastEnvVersions_)
-        {
-            lastEnvVersions_ = sum;
-            synthView_->setDescription (processor_.synthDescription());
-        }
-    }
-    synthView_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1)); // notes MIDI reçues
-    undoButton_.setEnabled (processor_.undoManager().canUndo());
-    redoButton_.setEnabled (processor_.undoManager().canRedo());
-    const int voices = processor_.engine().voiceCount();
-    if (voices != lastVoices_)
-    {
-        lastVoices_ = voices;
-        infoLabel_.setText (text ("analog.voices") + " " + juce::String (voices), juce::dontSendNotification);
-    }
-    root_.repaint(); // valeurs des potards (automation de l'hôte)
-}
+void NovaSynthPluginEditor::resized() { content_->setBounds (getLocalBounds()); }
+void NovaSynthPluginEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::black); }
+bool NovaSynthPluginEditor::keyPressed (const juce::KeyPress& k) { return content_ != nullptr && content_->keyPressed (k); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new AnalogSynthProcessor(); }
