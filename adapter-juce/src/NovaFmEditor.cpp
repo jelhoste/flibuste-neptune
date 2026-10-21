@@ -455,7 +455,7 @@ void NovaFmEditor::buildOperatorPage()
     };
     addInfo (0, opEg_, "hlp.fm_eg", 1);
     scaleText_ = add<nova::Text> (0, skin(), Token::TextDim2, 11.0f, true);
-    scaleText_->setText (tx ("fm.key_scaling").toUpperCase());
+    scaleText_->setText (tx ("fm.scaling_short"));
     addInfo (0, scaleText_, "hlp.fm_scaling");
     const struct { const char* key; int field; } sc[] = { { "fm.break_point", fm::kBreakPoint }, { "fm.left_depth", fm::kLeftDepth }, { "fm.right_depth", fm::kRightDepth } };
     for (const auto& c : sc) scaleSliders_.push_back (opSlider (tx (c.key), c.field, 99, c.field == fm::kBreakPoint ? 39 : 0));

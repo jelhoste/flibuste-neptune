@@ -95,7 +95,7 @@ void EnvelopeEditor::resized()
 {
     auto r = getLocalBounds();
     auto top = r.removeFromTop (kToggleRowHeight);
-    presets_.setBounds (top.removeFromRight (300).reduced (2));
+    presets_.setBounds (top.removeFromRight (juce::jlimit (110, 300, r.getWidth() / 4)).reduced (2));   // étroit : les cinq boutons de segment gardent leur largeur
     const int w = juce::jmin (84, top.getWidth() / 5);
     for (int i = 0; i < 5; ++i) toggles_[i].setBounds (top.removeFromLeft (w).reduced (2));
 }

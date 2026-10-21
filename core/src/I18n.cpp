@@ -787,6 +787,7 @@ const Entry kEntries[] = {
     { "hlp.sy_matrix", { "One tile per preset of the bank, for playing live: click a tile to load it. The arrows change bank; COLUMNS and ROWS size the grid; MAIN FIELD chooses which text is shown big on each tile.", "Une tuile par preset de la banque, pour jouer en concert : clique une tuile pour la charger. Les flèches changent de banque ; COLONNES et LIGNES dimensionnent la grille ; CHAMP PRINCIPAL choisit le texte affiché en grand sur chaque tuile." } },
     { "hlp.sy_keyboard.t", { "KEYBOARD", "CLAVIER" } },
     { "hlp.sy_keyboard", { "Play the synth with the mouse or the touch screen. OCT - and OCT + shift the range, HOLD keeps notes sounding, ALL NOTES OFF silences everything. The button in the left column hides or shows this strip.", "Joue le synthé à la souris ou à l'écran tactile. OCT - et OCT + décalent la plage, MAINTIEN garde les notes, TOUT ARRÊTER coupe tout. Le bouton de la colonne de gauche masque ou affiche ce bandeau." } },
+    { "fm.scaling_short", { "KEY SCALING", "ÉCHELLE CLAVIER" } },
     { "fm.patch_name", { "Patch name", "Nom du patch" } },
     { "hlp.fm_out.t", { "OUTPUT", "SORTIE" } },
     { "hlp.fm_out", { "Volume and pan of the synth output, then the plugin gain and the tuning (semitones and cents). These knobs are automatable by the host.", "Volume et panoramique de la sortie du synthé, puis le gain du plugin et l'accordage (demi-tons et cents). Ces potards sont automatisables par l'hôte." } },

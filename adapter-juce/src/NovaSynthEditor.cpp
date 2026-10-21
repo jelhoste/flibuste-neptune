@@ -199,7 +199,6 @@ void NovaSynthEditor::buildOscPage()
         u.wave = add<WaveTile> (0, skin(), translator(), [this, idx] { return desc_.osc[idx].wave; },
                                 [this, idx] (int w) { commit ([&] (Desc& d) { d.osc[idx].wave = w; }); });
         onUpdate (0, [w = u.wave] { w->update(); });
-        addInfo (0, u.wave, "hlp.sy_wave", 1);
         u.octave = number (0, tx ("synth.octave").toUpperCase(), SynthDescription::minOctave, SynthDescription::maxOctave, [idx] (const Desc& d) { return d.osc[idx].octave; },
                            [idx] (Desc& d, int v) { d.osc[idx].octave = v; }, {});
         u.semitone = number (0, tx ("synth.semitone").toUpperCase(), -12, 12, [idx] (const Desc& d) { return d.osc[idx].semitone; },
@@ -219,7 +218,6 @@ void NovaSynthEditor::buildOscPage()
             osc_[o].knobs[3]->setInterceptsMouseClicks (uni, uni);
         });
         u.unison = number (0, tx ("synth.unison").toUpperCase(), 1, maxUnison, [idx] (const Desc& d) { return d.osc[idx].unison; }, [idx] (Desc& d, int v) { d.osc[idx].unison = v; }, {});
-        addInfo (0, u.unison, "hlp.sy_unison", 1);
         u.curve = choice (0, tx ("synth.curve").toUpperCase(), { tx ("synth.curve_linear"), tx ("synth.curve_supersaw") },
                           [idx] (const Desc& d) { return d.osc[idx].curve == DetuneCurve::Supersaw ? 1 : 0; },
                           [idx] (Desc& d, int v) { d.osc[idx].curve = v == 1 ? DetuneCurve::Supersaw : DetuneCurve::Linear; },
@@ -233,11 +231,9 @@ void NovaSynthEditor::buildOscPage()
         u.pan = slider (0, tx ("synth.mix_pan").toUpperCase(), -100.0, 100.0, 1.0, "", [o] (const Desc& d) { return d.mix[static_cast<std::size_t> (o)].pan * 100.0; },
                         [o] (Desc& d, double v) { d.mix[static_cast<std::size_t> (o)].pan = v / 100.0; }, 0.0);
         u.retrigger = toggle (0, tx ("synth.retrigger"), [idx] (const Desc& d) { return d.osc[idx].retrigger; }, [idx] (Desc& d, bool b) { d.osc[idx].retrigger = b; });
-        addInfo (0, u.retrigger, "hlp.sy_retrig", 1);
         if (o > 0)
         {
             u.sync = toggle (0, tx ("synth.sync"), [idx] (const Desc& d) { return d.osc[idx].sync; }, [idx] (Desc& d, bool b) { d.osc[idx].sync = b; });
-            addInfo (0, u.sync, "hlp.sy_sync", 1);
         }
         u.mute = toggle (0, tx ("synth.mute"), [o] (const Desc& d) { return d.mix[static_cast<std::size_t> (o)].mute; }, [o] (Desc& d, bool b) { d.mix[static_cast<std::size_t> (o)].mute = b; });
     }
