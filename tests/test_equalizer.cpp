@@ -91,6 +91,15 @@ TEST_CASE ("equalizer: a peak band reaches its gain at the centre and spares far
     CHECK (r.eq().totalResponseDb (r.runner.params(), 1500.0, false) == Approx (r.gain (1500.0)).margin (0.05));
 }
 
+TEST_CASE ("equalizer: the displayed current curve follows the gain setting of a static band without processing", "[equalizer]")
+{
+    EqRig r;
+    r.band (0, e::kPeak, 1000.0, 3.0, 1.0);
+    CHECK (r.eq().bandResponseDb (r.runner.params(), 0, 1000.0, true) == Approx (3.0).margin (0.01));
+    r.set (e::bandParam (0, e::kGain), -9.0);
+    CHECK (r.eq().bandResponseDb (r.runner.params(), 0, 1000.0, true) == Approx (-9.0).margin (0.01));
+}
+
 TEST_CASE ("equalizer: bandwidth follows Q for peak, notch and band pass", "[equalizer]")
 {
     EqRig r;

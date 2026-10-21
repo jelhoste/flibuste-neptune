@@ -484,7 +484,9 @@ double EqualizerModule::bandResponseDb (const ParameterSet& params, int band, do
     const auto si = idx_[static_cast<std::size_t> (equalizer::gainScale - 100)];
     const double sc = si == ParameterSet::npos ? 1.0 : params.getAt (si) * 0.01;
     double g = at (kGain) * sc;
-    if (current) g = static_cast<double> (meters_[static_cast<std::size_t> (kBandGain0 + band)].load (std::memory_order_relaxed));
+    // gain courant mesuré par le DSP : seulement pour une bande dynamique (son gain bouge avec le signal). Une bande statique suit toujours le réglage, même quand le module
+    // n'est pas traité (insert de Neptune sans signal) : sinon la courbe resterait figée sur la dernière mesure.
+    if (current && at (kDynOn) >= 0.5) g = static_cast<double> (meters_[static_cast<std::size_t> (kBandGain0 + band)].load (std::memory_order_relaxed));
     std::array<BiquadCoefs, kMaxSections> cf {};
     double scale = 1.0;
     const int count = designFilter (static_cast<Type> (std::clamp (static_cast<int> (std::lround (at (kType))), 0, kNumTypes - 1)),

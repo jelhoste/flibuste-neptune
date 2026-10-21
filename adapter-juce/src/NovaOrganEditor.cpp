@@ -128,15 +128,17 @@ private:
 class NovaOrganEditor::MidiBar : public juce::Component
 {
 public:
-    MidiBar (const nova::Skin& s, juce::String letter) : skin_ (s), letter_ (std::move (letter)) {}
+    // output : barre de niveau de sortie (montée immédiate, retombée rapide, sans numéro de canal) ; sinon barre MIDI (hauteur = vélocité, aucune animation)
+    MidiBar (const nova::Skin& s, juce::String letter, bool output = false) : skin_ (s), letter_ (std::move (letter)), output_ (output) {}
 
-    // level : vélocité de la note tenue (0..1), 0 si aucune ; channel : canal MIDI du clavier (0 = désactivé)
+    // level : 0..1 ; channel : canal MIDI du clavier (0 = désactivé), sans objet pour une barre de sortie
     void update (float level, int channel)
     {
-        const float next = level > shown_ ? level : shown_ * 0.86f;   // montée immédiate, retombée rapide
-        const float settled = next < 0.004f ? 0.0f : next;
-        if (settled == shown_ && channel == channel_) return;
-        shown_ = settled;
+        float next = level;
+        if (output_) next = std::max (level, shown_ * 0.9f);   // le maximum évite de vibrer quand le niveau est stable
+        if (next < 0.004f) next = 0.0f;
+        if (next == shown_ && channel == channel_) return;
+        shown_ = next;
         channel_ = channel;
         repaint();
     }
@@ -145,7 +147,7 @@ public:
         const auto b = getLocalBounds().toFloat();
         const auto track = b.withTrimmedTop (skin_.px (2.0f)).withTrimmedBottom (skin_.px (34.0f)).withSizeKeepingCentre (skin_.px (14.0f), b.getHeight() - skin_.px (36.0f));
         skin_.fill (g, Token::StageBg, track, skin_.px (4.0f));
-        if (channel_ > 0 && shown_ > 0.0f)
+        if ((output_ || channel_ > 0) && shown_ > 0.0f)
         {
             const float h = track.getHeight() * shown_;
             g.setGradientFill (juce::ColourGradient (skin_.colour (Token::KnobHot), 0.0f, track.getY(), skin_.colour (Token::Accent), 0.0f, track.getBottom(), false));
@@ -154,6 +156,7 @@ public:
         g.setColour (skin_.colour (Token::Text));
         g.setFont (skin_.font (12.0f, true));
         g.drawText (letter_, juce::Rectangle<float> (b.getX(), b.getBottom() - skin_.px (34.0f), b.getWidth(), skin_.px (16.0f)), juce::Justification::centred);
+        if (output_) return;
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (10.0f));
         g.drawText (channel_ > 0 ? juce::String (channel_) : "-", juce::Rectangle<float> (b.getX(), b.getBottom() - skin_.px (16.0f), b.getWidth(), skin_.px (14.0f)), juce::Justification::centred);
@@ -162,6 +165,7 @@ public:
 private:
     const nova::Skin& skin_;
     juce::String letter_;
+    bool output_;
     float shown_ = 0.0f;
     int channel_ = -1;
 };
@@ -627,8 +631,7 @@ void NovaOrganEditor::buildLeftColumn()
     lesliePanel_->setTitle (tx ("organ.leslie").toUpperCase());
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
-    outMeter_ = add<nova::VMeter> (-1, skin(), "OUT", nova::VMeter::Kind::Level, true);
-    outMeter_->setModeVisible (false);
+    for (const char* letter : { "L", "R" }) outBars_.push_back (add<MidiBar> (-1, skin(), juce::String (letter), true));
     for (const char* letter : { "U", "L", "P" }) midiBars_.push_back (add<MidiBar> (-1, skin(), juce::String (letter)));
     notesText_ = add<nova::Text> (-1, skin(), Token::TextDim2, 11.0f, true);
     leftLeslie_ = makeLeslie (-1);
@@ -928,7 +931,7 @@ void NovaOrganEditor::layout()
     // ---- colonne de gauche
     metersPanel_->setBounds (R (14, 72, 176, 222));
     for (std::size_t i = 0; i < midiBars_.size(); ++i) midiBars_[i]->setBounds (R (22.0f + static_cast<float> (i) * 28.0f, 72 + 32, 26, 156));
-    outMeter_->setBounds (R (14 + 108, 72 + 32, 62, 150));
+    for (std::size_t i = 0; i < outBars_.size(); ++i) outBars_[i]->setBounds (R (22.0f + 3.0f * 28.0f + 10.0f + static_cast<float> (i) * 28.0f, 72 + 32, 26, 156));
     notesText_->setBounds (R (14 + 8, 72 + 188, 160, 24));
     lesliePanel_->setBounds (R (14, 306, 176, 176));
     for (std::size_t i = 0; i < leftLeslie_->squares.size(); ++i) leftLeslie_->squares[i]->setBounds (R (24, 340.0f + 46.0f * static_cast<float> (i), 156, 40));
@@ -1033,7 +1036,7 @@ void NovaOrganEditor::tick()
         desc_ = proc_.organDescription();
     }
     presetPill()->setText (presetLabel());
-    outMeter_->update (dbOf (proc_.outPeak (0)), dbOf (proc_.outPeak (1)));
+    for (std::size_t c = 0; c < outBars_.size(); ++c) outBars_[c]->update (std::clamp ((dbOf (proc_.outPeak (static_cast<int> (c))) + 60.0f) / 60.0f, 0.0f, 1.0f), 0);   // -60 dBFS en bas, 0 dBFS en haut
     for (std::size_t m = 0; m < midiBars_.size(); ++m)
     {
         const int ch = desc_.channel[m];   // 0 : clavier désactivé, sinon canal 1..16

@@ -59,7 +59,7 @@ private:
 
     // colonne de gauche
     nova::Panel *metersPanel_ = nullptr, *navPanel_ = nullptr, *lesliePanel_ = nullptr;
-    nova::VMeter* outMeter_ = nullptr;
+    std::vector<MidiBar*> outBars_;    // niveau de sortie gauche et droite (même taille que les barres MIDI)
     std::vector<MidiBar*> midiBars_;   // vu-mètres de contrôle des canaux MIDI des trois claviers (vélocité d'entrée)
     nova::Text* notesText_ = nullptr;
     LeslieSet* leftLeslie_ = nullptr;
