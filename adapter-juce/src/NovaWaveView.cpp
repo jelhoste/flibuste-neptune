@@ -363,7 +363,14 @@ void WaveView::paint (juce::Graphics& g)
     if (hovering_ && p.contains (hoverPos_))
     {
         const double f = frameAt (hoverPos_.x);
-        const auto text = juce::String (static_cast<long long> (f)) + "  -  " + timeText (f / sampleRate_, 0.00001);
+        auto text = juce::String (static_cast<long long> (f)) + "  -  " + timeText (f / sampleRate_, 0.00001);
+        if (shown_.ok && shown_.bins > 0 && shown_.to > shown_.from && f >= static_cast<double> (shown_.from) && f < static_cast<double> (shown_.to))
+        {
+            const int bin = std::clamp (static_cast<int> ((f - static_cast<double> (shown_.from)) * shown_.bins / static_cast<double> (shown_.to - shown_.from)), 0, shown_.bins - 1);
+            float a = 0.0f;
+            for (int ch = 0; ch < shown_.channels; ++ch) a = std::max ({ a, std::fabs (shown_.low (ch, bin)), std::fabs (shown_.high (ch, bin)) });
+            text += a > 1.0e-6f ? "  -  " + juce::String (20.0 * std::log10 (static_cast<double> (a)), 1) + " dB" : juce::String ("  -  -inf dB");
+        }
         g.setColour (skin_.colour (Token::TextDim));
         g.setFont (skin_.font (10.0f));
         g.drawText (text, juce::Rectangle<float> (p.getX() + skin_.px (6.0f), p.getBottom() - skin_.px (18.0f), skin_.px (220.0f), skin_.px (16.0f)), juce::Justification::centredLeft);
@@ -468,5 +475,56 @@ void WaveView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
     const double delta = static_cast<double> (std::abs (w.deltaY) > std::abs (w.deltaX) ? w.deltaY : w.deltaX);
     if (delta == 0.0) return;
     zoomBy (std::pow (0.7, delta * 4.0), frameAt (e.position.x));
+}
+
+void LoopSeamView::setData (std::vector<float> beforeEnd, std::vector<float> afterStart, std::vector<float> beforeStart)
+{
+    beforeEnd_ = std::move (beforeEnd);
+    afterStart_ = std::move (afterStart);
+    beforeStart_ = std::move (beforeStart);
+    repaint();
+}
+
+void LoopSeamView::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat();
+    skin_.fill (g, Token::StageBg, b, skin_.px (6.0f));
+    if (beforeEnd_.empty() || afterStart_.empty() || beforeStart_.empty())
+    {
+        g.setColour (skin_.colour (Token::TextDim2));
+        g.setFont (skin_.font (10.0f));
+        g.drawText ("LOOP", b, juce::Justification::centred);
+        return;
+    }
+    const float gap = skin_.px (6.0f);
+    const float w = (b.getWidth() - 3.0f * gap) / 2.0f;
+    const auto left = juce::Rectangle<float> (b.getX() + gap, b.getY() + gap, w, b.getHeight() - 2.0f * gap);
+    const auto right = juce::Rectangle<float> (left.getRight() + gap, left.getY(), w, left.getHeight());
+    auto trace = [&] (const std::vector<float>& v, juce::Rectangle<float> area, float x0, float x1, juce::Colour c)
+    {
+        if (v.size() < 2) return;
+        juce::Path p;
+        for (std::size_t i = 0; i < v.size(); ++i)
+        {
+            const float x = area.getX() + area.getWidth() * (x0 + (x1 - x0) * static_cast<float> (i) / static_cast<float> (v.size() - 1));
+            const float y = area.getCentreY() - std::clamp (v[i], -1.0f, 1.0f) * area.getHeight() * 0.5f;
+            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+        }
+        g.setColour (c);
+        g.strokePath (p, juce::PathStrokeType (skin_.px (1.4f)));
+    };
+    for (const auto& r : { left, right })
+    {
+        g.setColour (skin_.colour (Token::Grid));
+        g.drawHorizontalLine (juce::roundToInt (r.getCentreY()), r.getX(), r.getRight());
+    }
+    // gauche : fin de boucle puis début de boucle, raccordés au milieu
+    trace (beforeEnd_, left, 0.0f, 0.5f, skin_.colour (Token::Accent));
+    trace (afterStart_, left, 0.5f, 1.0f, skin_.colour (Token::Pink));
+    g.setColour (skin_.colour (Token::TextDim2, 0.8f));
+    g.drawVerticalLine (juce::roundToInt (left.getCentreX()), left.getY(), left.getBottom());
+    // droite : les deux avant-côtés superposés
+    trace (beforeEnd_, right, 0.0f, 1.0f, skin_.colour (Token::Accent));
+    trace (beforeStart_, right, 0.0f, 1.0f, skin_.colour (Token::Pink, 0.9f));
 }
 } // namespace nova

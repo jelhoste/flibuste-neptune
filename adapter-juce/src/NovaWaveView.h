@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 #include "NovaKit.h"
 #include "neptune/core/WaveformPeaks.h"
 
@@ -96,5 +97,20 @@ private:
     double panStartFrom_ = 0.0, panStartTo_ = 0.0;
     juce::Point<float> hoverPos_;
     bool hovering_ = false;
+};
+
+// Raccord de boucle (spec §13.5, vue superposée) : à gauche ce qu'on entend au passage de la boucle (la fin de boucle suivie du début), à droite la fin de boucle
+// et ce qui précède le début de boucle superposés. Des courbes qui se confondent = boucle sans coupure audible. Les données (mélange mono) viennent de l'éditeur.
+class LoopSeamView : public juce::Component
+{
+public:
+    explicit LoopSeamView (const Skin& s) : skin_ (s) { setInterceptsMouseClicks (false, false); }
+    // `beforeEnd` : les échantillons qui précèdent la fin de boucle ; `afterStart` : ceux qui suivent le début ; `beforeStart` : ceux qui le précèdent. Vides = rien à montrer.
+    void setData (std::vector<float> beforeEnd, std::vector<float> afterStart, std::vector<float> beforeStart);
+    void paint (juce::Graphics&) override;
+
+private:
+    const Skin& skin_;
+    std::vector<float> beforeEnd_, afterStart_, beforeStart_;
 };
 } // namespace nova

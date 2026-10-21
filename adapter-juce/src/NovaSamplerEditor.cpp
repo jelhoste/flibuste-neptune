@@ -269,6 +269,7 @@ void NovaSamplerEditor::buildSamplePage()
         if (shown == nullptr) return;
         const auto& info = fileInfo_.info (shown->samplePath);
         const std::int64_t total = info.ok ? info.frames : 0;
+        if (snapOn_ && m != nova::WaveView::Marker::Crossfade) frame = snapFrame (shown->samplePath, frame);
         editZone ([m, frame, total] (Zone& z)
         {
             const std::int64_t end = z.endFrame < 0 ? total : z.endFrame;
@@ -355,6 +356,336 @@ void NovaSamplerEditor::buildSamplePage()
                                           [this] (int v) { return juce::String (v) + "  " + noteName (v); });
     rootNumber2_->gestureBegin = [this] { proc_.uiBeginGesture(); };
     rootNumber2_->gestureEnd = [this] { proc_.uiEndGesture(); };
+
+    // ---- outils du sample
+    toolsPanel_ = add<nova::Panel> (1, skin());
+    toolsPanel_->setTitle (tx ("sm.tools").toUpperCase());
+    addInfo (1, toolsPanel_, "hlp.sm_tools", 1);
+    auto tool = [this] (juce::String text, const char* help, std::function<void()> click)
+    {
+        auto* pl = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+        pl->setText (text);
+        pl->onClick = std::move (click);
+        if (help != nullptr) addInfo (1, pl, help, 1);
+        return pl;
+    };
+    auto toolChoice = [this] (juce::String label, std::vector<juce::String> items, int* index)
+    {
+        auto c = std::make_unique<nova::ChoicePill>();
+        c->pill = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+        c->label = [label] { return label; };
+        c->items = std::move (items);
+        c->get = [index] { return *index; };
+        c->set = [index] (int i) { *index = i; };
+        c->attach (*this);
+        auto* raw = c.get();
+        choices_.push_back (std::move (c));
+        return raw;
+    };
+    trimPill_ = tool (tx ("sm.tool_trim"), "hlp.sm_trim", [this] { toolTrim(); });
+    normPill_ = tool (tx ("sm.tool_norm"), "hlp.sm_norm", [this] { toolNormalize(); });
+    normChoice_ = toolChoice (tx ("sm.norm_target"), { "PEAK 0 dB", "PEAK -1 dB", "PEAK -3 dB", "RMS -18 dB", "RMS -12 dB", "RMS -9 dB" }, &normIndex_);
+    dcPill_ = tool (tx ("sm.tool_dc"), "hlp.sm_dc", [this] { toolRemoveDc(); });
+    saveAsPill_ = tool (tx ("sm.tool_saveas"), "hlp.sm_saveas", [this] { toolSaveAs(); });
+    silencePill_ = tool (tx ("sm.tool_silence"), "hlp.sm_silence", [this] { toolSilence(); });
+    silenceChoice_ = toolChoice (tx ("sm.silence_thr"), { "-30 dB", "-40 dB", "-50 dB", "-60 dB", "-72 dB" }, &silenceIndex_);
+    cutsPill_ = tool (tx ("sm.tool_cuts"), "hlp.sm_cuts", [this] { toolSplitHits(); });
+    cutsChoice_ = toolChoice (tx ("sm.cuts_sens"), { tx ("sm.sens_low"), tx ("sm.sens_mid"), tx ("sm.sens_high") }, &cutsIndex_);
+    loopFindPill_ = tool (tx ("sm.tool_loop"), "hlp.sm_loop", [this] { toolAutoLoop(); });
+    snapPill_ = tool (tx ("sm.tool_snap"), "hlp.sm_snap", [this] { snapOn_ = ! snapOn_; snapPill_->setOn (snapOn_); });
+    toolStatus_ = add<nova::Text> (1, skin(), Token::TextDim, 11.0f);
+    seam_ = add<nova::LoopSeamView> (1, skin());
+}
+
+// ------------------------------------------------------------------------------------------------ outils du sample
+namespace
+{
+namespace se = neptune::core::sampleedit;
+
+std::filesystem::path editedDirectory()
+{
+    auto base = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
+   #if JUCE_MAC
+    base = base.getChildFile ("Application Support");
+   #endif
+    return std::filesystem::u8path (base.getChildFile ("Neptune").getChildFile ("Edited").getFullPathName().toStdString());
+}
+
+std::filesystem::path utf8Path (const std::string& s) { return std::filesystem::u8path (s); }
+
+juce::String numberText (double v, int decimals = 1) { return juce::String (v, decimals); }
+}
+
+int NovaSamplerEditor::shownIndex() const
+{
+    const auto* z = shownZone();
+    return z == nullptr ? -1 : static_cast<int> (z - cached_.zones.data());
+}
+
+// Modifie la seule zone affichée (les outils agissent sur la zone qu'on regarde, pas sur toute la sélection).
+void NovaSamplerEditor::editShownZone (const std::function<void (Zone&)>& change)
+{
+    const int i = shownIndex();
+    if (i < 0) return;
+    auto d = proc_.instrumentDescription();
+    if (i >= static_cast<int> (d.zones.size())) return;
+    change (d.zones[static_cast<std::size_t> (i)]);
+    d.zones[static_cast<std::size_t> (i)] = sanitised (d.zones[static_cast<std::size_t> (i)]);
+    proc_.uiEditInstrument (std::move (d), "Edit sample", "sample-edit");
+    lastRevision_ = 0xFFFFFFFFu;
+    refreshFromInstrument();
+}
+
+bool NovaSamplerEditor::writeDerived (const Zone& z, const char* tag, const se::Buffer& b, std::string& newPath)
+{
+    std::string err;
+    const auto path = se::derivedPath (editedDirectory(), z.samplePath, tag, b);
+    if (! std::filesystem::exists (path) && ! se::writeWav (path, b, &err))
+    {
+        setToolStatus (U (translator().format ("sm.st_error", { err })));
+        return false;
+    }
+    newPath = path.u8string();
+    return true;
+}
+
+void NovaSamplerEditor::setToolStatus (const juce::String& t) { toolStatus_->setText (t); }
+
+// Passage par zéro le plus proche (dans ±2048 échantillons), lu sur le disque autour du point.
+std::int64_t NovaSamplerEditor::snapFrame (const std::string& path, std::int64_t frame) const
+{
+    constexpr std::int64_t kRadius = 2048;
+    AudioStreamReader reader;
+    if (! reader.open (utf8Path (path))) return frame;
+    const std::int64_t from = std::max<std::int64_t> (0, frame - kRadius), to = std::min (reader.totalFrames(), frame + kRadius);
+    if (to - from < 2 || ! reader.seek (from)) return frame;
+    se::Buffer b;
+    b.channels = reader.channels();
+    b.data.resize (static_cast<std::size_t> ((to - from) * b.channels));
+    const auto got = reader.read (b.data.data(), to - from);
+    b.data.resize (static_cast<std::size_t> (got * b.channels));
+    return from + se::snapToZero (b, frame - from, kRadius);
+}
+
+void NovaSamplerEditor::toolTrim()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const Zone zone = *z;
+    se::Buffer b;
+    std::string err;
+    if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+    const std::int64_t total = b.frames(), from = zone.startFrame, to = zone.endFrame < 0 ? total : std::min (zone.endFrame, total);
+    if (to - from < 1 || (from == 0 && to == total)) { setToolStatus (tx ("sm.st_nothing_trim")); return; }
+    const auto t = se::trimmed (b, from, to);
+    std::string newPath;
+    if (! writeDerived (zone, "trim", t, newPath)) return;
+    const std::int64_t n = t.frames();
+    editShownZone ([&] (Zone& d)
+    {
+        d.samplePath = newPath;
+        d.startFrame = 0;
+        d.endFrame = -1;
+        d.loopStart = std::max<std::int64_t> (0, d.loopStart - from);
+        if (d.loopEnd >= 0) d.loopEnd = std::clamp<std::int64_t> (d.loopEnd - from, 1, n);
+    });
+    setToolStatus (U (translator().format ("sm.st_trimmed", { std::to_string (n) })));
+}
+
+void NovaSamplerEditor::toolNormalize()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const Zone zone = *z;
+    se::Buffer b;
+    std::string err;
+    if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+    static constexpr double targets[6] = { 0.0, -1.0, -3.0, -18.0, -12.0, -9.0 };
+    const auto kind = normIndex_ < 3 ? se::NormalizeTarget::Peak : se::NormalizeTarget::Rms;
+    const double target = targets[std::clamp (normIndex_, 0, 5)];
+    const std::int64_t total = b.frames(), from = zone.startFrame, to = zone.endFrame < 0 ? total : std::min (zone.endFrame, total);
+    bool limited = false;
+    const double g = se::normalizeGainDb (b, from, to, kind, target, &limited);
+    const double peakDb = se::toDb (se::peakAmplitude (b, from, to)), rmsDb = se::toDb (se::rmsAmplitude (b, from, to));
+    if (std::fabs (g) < 0.05) { setToolStatus (tx ("sm.st_gain_none")); return; }
+    se::applyGainDb (b, g);
+    std::string newPath;
+    if (! writeDerived (zone, "norm", b, newPath)) return;
+    editShownZone ([&] (Zone& d) { d.samplePath = newPath; });
+    setToolStatus (limited ? U (translator().format ("sm.st_gain_limited", { numberText (g).toStdString() }))
+                           : U (translator().format ("sm.st_gain", { numberText (g).toStdString(), numberText (peakDb).toStdString(), numberText (rmsDb).toStdString() })));
+}
+
+void NovaSamplerEditor::toolRemoveDc()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const Zone zone = *z;
+    se::Buffer b;
+    std::string err;
+    if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+    const double dc = se::dcOffset (b);
+    const auto text = numberText (dc * 100.0, 2).toStdString() + " %";
+    if (std::fabs (dc) < 1.0e-4) { setToolStatus (U (translator().format ("sm.st_dc_none", { text }))); return; }
+    se::removeDc (b);
+    std::string newPath;
+    if (! writeDerived (zone, "dc", b, newPath)) return;
+    editShownZone ([&] (Zone& d) { d.samplePath = newPath; });
+    setToolStatus (U (translator().format ("sm.st_dc", { text })));
+}
+
+void NovaSamplerEditor::toolSilence()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const std::string path = z->samplePath;
+    se::Buffer b;
+    std::string err;
+    if (! se::readFile (utf8Path (path), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+    static constexpr double thresholds[5] = { -30.0, -40.0, -50.0, -60.0, -72.0 };
+    const auto r = se::detectSilence (b, thresholds[std::clamp (silenceIndex_, 0, 4)]);
+    if (! r.found) { setToolStatus (tx ("sm.st_silence_none")); return; }
+    std::int64_t start = r.start, end = r.end;
+    if (snapOn_) { start = se::snapToZero (b, start, 2048); end = se::snapToZero (b, end, 2048); }
+    const std::int64_t total = b.frames();
+    editShownZone ([&] (Zone& d)
+    {
+        d.startFrame = std::clamp<std::int64_t> (start, 0, total - 1);
+        d.endFrame = end >= total ? -1 : std::max (end, d.startFrame + 1);
+        d.loopStart = std::max (d.loopStart, d.startFrame);
+    });
+    setToolStatus (tx ("sm.st_silence"));
+}
+
+// Un coup = une zone, sur des notes consécutives à partir de la note racine de la zone coupée.
+void NovaSamplerEditor::toolSplitHits()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const Zone zone = *z;
+    const int index = shownIndex();
+    se::Buffer b;
+    std::string err;
+    if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+    static constexpr double sensitivities[3] = { 0.3, 0.6, 0.9 };
+    const std::int64_t total = b.frames(), regionStart = zone.startFrame, regionEnd = zone.endFrame < 0 ? total : std::min (zone.endFrame, total);
+    std::vector<std::int64_t> hits;
+    for (auto h : se::detectTransients (b, sensitivities[std::clamp (cutsIndex_, 0, 2)], 60.0))
+    {
+        if (snapOn_) h = se::snapToZero (b, h, 512);
+        if (h >= regionStart && h < regionEnd) hits.push_back (h);
+    }
+    if (hits.empty()) { setToolStatus (tx ("sm.st_cuts_none")); return; }
+    const int firstNote = std::clamp (zone.rootNote, 0, 127);
+    const bool truncated = static_cast<int> (hits.size()) > 128 - firstNote;
+    if (truncated) hits.resize (static_cast<std::size_t> (128 - firstNote));
+    std::vector<Zone> made;
+    for (std::size_t i = 0; i < hits.size(); ++i)
+    {
+        Zone n = zone;
+        n.keyLow = n.keyHigh = n.rootNote = firstNote + static_cast<int> (i);
+        n.startFrame = hits[i];
+        n.endFrame = i + 1 < hits.size() ? hits[i + 1] : (regionEnd >= total ? -1 : regionEnd);
+        n.mode = PlayMode::OneShot;
+        n.loopStart = n.startFrame;
+        n.loopEnd = -1;
+        n.loopCrossfade = 0;
+        made.push_back (sanitised (n));
+    }
+    auto d = proc_.instrumentDescription();
+    if (index < 0 || index >= static_cast<int> (d.zones.size())) return;
+    d.zones.erase (d.zones.begin() + index);
+    d.zones.insert (d.zones.begin() + index, made.begin(), made.end());
+    proc_.uiEditInstrument (std::move (d), "Split hits");
+    lastRevision_ = 0xFFFFFFFFu;
+    const auto n = std::to_string (made.size());
+    setToolStatus (U (translator().format ("sm.st_cuts", { n })) + (truncated ? " " + U (translator().format ("sm.st_cuts_truncated", { n })) : juce::String()));
+}
+
+// Premier clic : cherche les candidats et applique le meilleur ; clics suivants : candidat suivant.
+void NovaSamplerEditor::toolAutoLoop()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const Zone zone = *z;
+    const std::string key = zone.samplePath + "|" + std::to_string (zone.startFrame) + "|" + std::to_string (zone.endFrame);
+    if (key != loopCandidatesKey_ || loopCandidates_.empty())
+    {
+        se::Buffer b;
+        std::string err;
+        if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+        const std::int64_t total = b.frames();
+        loopCandidates_ = se::findLoopCandidates (b, zone.startFrame, zone.endFrame < 0 ? total : std::min (zone.endFrame, total), 6, 100.0);
+        loopCandidatesKey_ = key;
+        loopCandidateIndex_ = 0;
+        if (loopCandidates_.empty()) { setToolStatus (tx ("sm.st_loop_none")); return; }
+    }
+    else loopCandidateIndex_ = (loopCandidateIndex_ + 1) % static_cast<int> (loopCandidates_.size());
+    const auto c = loopCandidates_[static_cast<std::size_t> (loopCandidateIndex_)];
+    editShownZone ([&] (Zone& d)
+    {
+        d.mode = PlayMode::Loop;
+        d.loopStart = c.start;
+        d.loopEnd = c.end;
+        d.loopCrossfade = 0;
+    });
+    setToolStatus (U (translator().format ("sm.st_loop", { std::to_string (loopCandidateIndex_ + 1), std::to_string (loopCandidates_.size()),
+                                                            std::to_string (static_cast<int> (std::lround (c.score * 100.0))) })));
+}
+
+void NovaSamplerEditor::toolSaveAs()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const std::string source = z->samplePath;
+    const auto start = juce::File (juce::String::fromUTF8 (source.c_str())).withFileExtension ("wav");
+    saveChooser_ = std::make_unique<juce::FileChooser> (tx ("sm.tool_saveas"), start, "*.wav");
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    saveChooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                               [safe, source] (const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+        if (safe == nullptr || file == juce::File()) return;
+        std::error_code ec;
+        const auto target = utf8Path (file.withFileExtension ("wav").getFullPathName().toStdString());
+        std::filesystem::copy_file (utf8Path (source), target, std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) { safe->setToolStatus (U (safe->translator().format ("sm.st_error", { ec.message() }))); return; }
+        const std::string path = target.u8string();
+        safe->editShownZone ([&] (Zone& d) { d.samplePath = path; });
+        safe->setToolStatus (safe->tx ("sm.st_saved"));
+    });
+}
+
+// Raccord de boucle : quelques millisecondes autour des points de boucle, lues sur le disque (seulement quand la boucle change).
+void NovaSamplerEditor::updateSeam()
+{
+    const auto* z = shownZone();
+    std::string key;
+    neptune::core::AudioFileInfo info;
+    if (z != nullptr && ! z->samplePath.empty()) info = fileInfo_.info (z->samplePath);
+    if (z != nullptr && z->mode == PlayMode::Loop && info.ok)
+        key = z->samplePath + "|" + std::to_string (std::max (z->loopStart, z->startFrame)) + "|" + std::to_string (z->loopEnd < 0 ? info.frames : z->loopEnd);
+    if (key == seamKey_) return;
+    seamKey_ = key;
+    if (key.empty()) { seam_->setData ({}, {}, {}); return; }
+    const std::int64_t S = std::max (z->loopStart, z->startFrame), E = z->loopEnd < 0 ? info.frames : std::min (z->loopEnd, info.frames);
+    const std::int64_t w = std::min<std::int64_t> ({ std::clamp<std::int64_t> (static_cast<std::int64_t> (info.sampleRate * 0.01), 64, 2048), S, E - S, info.frames - S });
+    AudioStreamReader reader;
+    if (w < 8 || ! reader.open (utf8Path (z->samplePath))) { seam_->setData ({}, {}, {}); return; }
+    auto grab = [&] (std::int64_t from)
+    {
+        std::vector<float> out;
+        std::vector<float> buf (static_cast<std::size_t> (w * reader.channels()));
+        if (! reader.seek (from) || reader.read (buf.data(), w) < w) return out;
+        for (std::int64_t i = 0; i < w; ++i)
+        {
+            float m = 0.0f;
+            for (int c = 0; c < reader.channels(); ++c) m += buf[static_cast<std::size_t> (i * reader.channels() + c)];
+            out.push_back (m / static_cast<float> (reader.channels()));
+        }
+        return out;
+    };
+    seam_->setData (grab (E - w), grab (S), grab (S - w));
 }
 
 void NovaSamplerEditor::buildSoundPage()
@@ -1079,22 +1410,36 @@ void NovaSamplerEditor::layout()
     voicesView_->setBounds (R (X0, 196, 942, 514));
 
     // ---- page SAMPLE
-    wavePanel_->setBounds (R (X0, 72, 942, 350));
-    wave_->setBounds (R (X0 + 10, 104, 922, 306));
-    infoText_->setBounds (R (X0 + 4, 428, 934, 16));
-    markerText_->setBounds (R (X0 + 4, 446, 934, 16));
-    playPanel_->setBounds (R (X0, 468, 942, 242));
-    loopPill_->setBounds (R (X0 + 12, 504, 170, 30));
-    reversePill_->setBounds (R (X0 + 188, 504, 150, 30));
-    showAllPill_->setBounds (R (X0 + 344, 504, 130, 30));
+    wavePanel_->setBounds (R (X0, 72, 942, 270));
+    wave_->setBounds (R (X0 + 10, 104, 922, 228));
+    infoText_->setBounds (R (X0 + 4, 344, 934, 16));
+    markerText_->setBounds (R (X0 + 4, 360, 934, 16));
+    toolsPanel_->setBounds (R (X0, 380, 942, 136));
+    trimPill_->setBounds (R (X0 + 12, 412, 110, 28));
+    normPill_->setBounds (R (X0 + 128, 412, 116, 28));
+    normChoice_->pill->setBounds (R (X0 + 250, 412, 170, 28));
+    dcPill_->setBounds (R (X0 + 426, 412, 124, 28));
+    saveAsPill_->setBounds (R (X0 + 556, 412, 150, 28));
+    silencePill_->setBounds (R (X0 + 12, 446, 170, 28));
+    silenceChoice_->pill->setBounds (R (X0 + 188, 446, 160, 28));
+    cutsPill_->setBounds (R (X0 + 354, 446, 160, 28));
+    cutsChoice_->pill->setBounds (R (X0 + 520, 446, 186, 28));
+    loopFindPill_->setBounds (R (X0 + 12, 480, 150, 28));
+    snapPill_->setBounds (R (X0 + 168, 480, 150, 28));
+    toolStatus_->setBounds (R (X0 + 326, 480, 380, 28));
+    seam_->setBounds (R (X0 + 718, 408, 216, 100));
+    playPanel_->setBounds (R (X0, 524, 942, 186));
+    loopPill_->setBounds (R (X0 + 12, 558, 170, 28));
+    reversePill_->setBounds (R (X0 + 188, 558, 150, 28));
+    showAllPill_->setBounds (R (X0 + 344, 558, 130, 28));
     playPill_->setBounds (R (1006, 736, 140, 32));
-    rootNumber2_->setBounds (R (X0 + 480, 504, 154, 30));
-    fadeIn_->setBounds (R (X0 + 12, 552, 214, 46));
-    fadeOut_->setBounds (R (X0 + 240, 552, 214, 46));
-    delay_->setBounds (R (X0 + 468, 552, 214, 46));
-    crossfade_->setBounds (R (X0 + 696, 552, 230, 46));
-    tune_->setBounds (R (X0 + 12, 612, 214, 46));
-    gain_->setBounds (R (X0 + 240, 612, 214, 46));
+    rootNumber2_->setBounds (R (X0 + 480, 558, 154, 28));
+    fadeIn_->setBounds (R (X0 + 12, 596, 214, 46));
+    fadeOut_->setBounds (R (X0 + 240, 596, 214, 46));
+    delay_->setBounds (R (X0 + 468, 596, 214, 46));
+    crossfade_->setBounds (R (X0 + 696, 596, 230, 46));
+    tune_->setBounds (R (X0 + 12, 650, 214, 46));
+    gain_->setBounds (R (X0 + 240, 650, 214, 46));
 
     // ---- page SON
     envPanel_->setBounds (R (X0, 72, 942, 340));
@@ -1181,6 +1526,15 @@ void NovaSamplerEditor::tick()
     if (page == 1)
     {
         updateSampleInfo();
+        updateSeam();
+        for (auto* c : { normChoice_, silenceChoice_, cutsChoice_ }) c->refresh (has);
+        for (auto* pl : { trimPill_, normPill_, dcPill_, saveAsPill_, silencePill_, cutsPill_, loopFindPill_ }) pl->setAlpha (has ? 1.0f : 0.4f);
+        if (has && z != nullptr)
+        {
+            const std::string key = z->samplePath + "|" + std::to_string (z->startFrame) + "|" + std::to_string (z->endFrame);
+            loopFindPill_->setText (tx ("sm.tool_loop") + (key == loopCandidatesKey_ && ! loopCandidates_.empty()
+                                                          ? "  " + juce::String (loopCandidateIndex_ + 1) + "/" + juce::String (static_cast<int> (loopCandidates_.size())) : juce::String()));
+        }
         const bool loop = has && z->mode == PlayMode::Loop;
         loopPill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : "sampler.mode_one_shot")) })));
         loopPill_->setOn (loop);

@@ -19,6 +19,7 @@
 #include "VoicesView.h"
 #include "ZoneTable.h"
 #include "neptune/core/MemoryBudget.h"
+#include "neptune/core/SampleEdit.h"
 
 class NovaSamplerEditor : public nova::EditorBase
 {
@@ -63,6 +64,21 @@ private:
     void updatePlayButton();
     void rebuildLoadPanel();
     void updateSampleInfo();
+
+    // ---- outils du sample (lot 2) : opérations sur une copie de travail, analyses
+    int shownIndex() const;
+    void editShownZone (const std::function<void (Zone&)>&);
+    bool writeDerived (const Zone&, const char* tag, const neptune::core::sampleedit::Buffer&, std::string& newPath);
+    std::int64_t snapFrame (const std::string& path, std::int64_t frame) const;
+    void setToolStatus (const juce::String&);
+    void toolTrim();
+    void toolNormalize();
+    void toolRemoveDc();
+    void toolSilence();
+    void toolSplitHits();
+    void toolAutoLoop();
+    void toolSaveAs();
+    void updateSeam();
     juce::String statusText() const;
     juce::String baseStatusText() const;
     juce::String noteName (int note) const;
@@ -86,6 +102,12 @@ private:
     int lastVoiceCount_ = -1;
     std::string shownSamplePath_;
     struct GroupMenuListener;
+    bool snapOn_ = false;
+    int normIndex_ = 1, silenceIndex_ = 1, cutsIndex_ = 1;
+    std::vector<neptune::core::sampleedit::LoopCandidate> loopCandidates_;
+    int loopCandidateIndex_ = 0;
+    std::string loopCandidatesKey_, seamKey_;
+    std::unique_ptr<juce::FileChooser> saveChooser_;
     bool previewing_ = false;
     juce::uint32 previewStartMs_ = 0;
     std::unique_ptr<juce::MouseListener> groupMenuListener_;
@@ -114,6 +136,11 @@ private:
     nova::Pill *loopPill_ = nullptr, *reversePill_ = nullptr, *showAllPill_ = nullptr, *playPill_ = nullptr;
     nova::ValueSlider *fadeIn_ = nullptr, *fadeOut_ = nullptr, *delay_ = nullptr, *crossfade_ = nullptr, *tune_ = nullptr, *gain_ = nullptr;
     nova::NumberPill* rootNumber2_ = nullptr;
+    nova::Panel* toolsPanel_ = nullptr;
+    nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
+    nova::ChoicePill *normChoice_ = nullptr, *silenceChoice_ = nullptr, *cutsChoice_ = nullptr;
+    nova::Text* toolStatus_ = nullptr;
+    nova::LoopSeamView* seam_ = nullptr;
 
     // page SON
     nova::Panel *envPanel_ = nullptr, *filterPanel_ = nullptr, *slotsAreaPanel_ = nullptr;
