@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 
 #include "neptune/core/AudioRecorder.h"
@@ -73,5 +74,9 @@ TEST_CASE ("pushes when not recording are ignored, stop without start is harmles
     rec.push (x, x, 16);
     REQUIRE (rec.framesWritten() == 0);
     REQUIRE (rec.stop() == 0);
-    REQUIRE_FALSE (rec.start ("/nonexistent-root-dir/xx/take.wav", 48000.0));
+    // le « dossier » parent est un fichier ordinaire : impossible d'y créer la prise (sur tous les systèmes)
+    const auto blocker = std::filesystem::temp_directory_path() / "neptune-rec-blocker";
+    { std::ofstream (blocker) << "x"; }
+    REQUIRE_FALSE (rec.start (blocker / "take.wav", 48000.0));
+    std::filesystem::remove (blocker);
 }
