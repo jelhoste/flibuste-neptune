@@ -98,6 +98,8 @@ public:
     neptune::core::organ::OrganSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
     void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
+    // Niveau d'entrée MIDI d'un canal (0..15) : vélocité de la dernière note enfoncée, 0 quand aucune n'est tenue (pour les vu-mètres de contrôle des claviers)
+    float midiLevel (int channel) const noexcept { return midiLevel_[channel & 15].load (std::memory_order_relaxed); }
     float outPeak (int channel) const noexcept { return outPeak_[channel & 1].load (std::memory_order_relaxed); }   // crête du dernier bloc, pour le vu-mètre
 
 private:
@@ -116,6 +118,8 @@ private:
     std::uint32_t presetRevision_ = 1;
     std::atomic<int> midiBank_ { 0 };
     std::atomic<float> outPeak_[2] { 0.0f, 0.0f };
+    std::atomic<float> midiLevel_[16] {};
+    int heldPerChannel_[16] {};   // fil audio seulement
     std::atomic<bool> ccEnabled_ { false }; // contrôleurs MIDI (hors banque et notes) : désactivés par défaut
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 

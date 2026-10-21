@@ -272,7 +272,8 @@ void NovaMicrodecaleEditor::buildVoicesPage()
 void NovaMicrodecaleEditor::layout()
 {
     // ---- page MICRO
-    metersPanel_->setBounds (R (14, 72, 176, 410));
+    // deuxième ligne (menu et potards) : 168 px, le menu a 14 px de marge en haut et en bas comme à gauche et à droite ; première ligne agrandie d'autant (14 px entre les deux)
+    metersPanel_->setBounds (R (14, 72, 176, 456));
     {
         const auto in = metersPanel_->getBounds().reduced (skin().ipx (8.0f), skin().ipx (12.0f));
         const int w = in.getWidth() / 2, trimH = skin().ipx (40.0f);
@@ -281,18 +282,18 @@ void NovaMicrodecaleEditor::layout()
         outMeter_->setBounds (meters.withX (meters.getX() + w).withWidth (w));
         inTrimPill_->setBounds (in.getX() + skin().ipx (1.0f), in.getBottom() - skin().ipx (30.0f), w - skin().ipx (2.0f), skin().ipx (24.0f));
     }
-    navPanel_->setBounds (R (14, 496, 176, 214));
-    layoutNav (496, 214);
-    viewPanel_->setBounds (R (204, 72, 942, 410));
-    view_->setBounds (R (220, 104, 910, 300));
-    modePill_->setBounds (R (220, 424, 170, 32));
-    note_->setBounds (R (430, 420, 700, 40));
+    navPanel_->setBounds (R (14, 542, 176, 168));
+    layoutNav (542, 168);
+    viewPanel_->setBounds (R (204, 72, 942, 456));
+    view_->setBounds (R (220, 104, 910, 362));
+    modePill_->setBounds (R (220, 480, 170, 32));
+    note_->setBounds (R (430, 476, 700, 40));
     const float colW = (942.0f - 12.0f * 7.0f) / 8.0f;
     for (std::size_t i = 0; i < columns_.size(); ++i)
     {
         const float x = 204.0f + static_cast<float> (i) * (colW + 12.0f);
-        columns_[i].card->setBounds (R (x, 496, colW, 214));
-        columns_[i].knob->setBounds (R (x, 496, colW, 132));
+        columns_[i].card->setBounds (R (x, 542, colW, 168));
+        columns_[i].knob->setBounds (R (x, 542 + 18, colW, 132));
     }
 
     // ---- page VOICES

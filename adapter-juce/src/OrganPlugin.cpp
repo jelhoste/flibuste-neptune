@@ -81,10 +81,24 @@ void OrganProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             pos = at;
         }
         const auto m = meta.getMessage();
-        if (m.isNoteOn()) engine_.noteOn (m.getChannel() - 1, m.getNoteNumber());
-        else if (m.isNoteOff()) engine_.noteOff (m.getChannel() - 1, m.getNoteNumber());
-        else if (m.isAllNotesOff()) engine_.allNotesOff();
-        else if (m.isAllSoundOff()) engine_.panic();
+        if (m.isNoteOn())
+        {
+            const int ch = (m.getChannel() - 1) & 15;
+            ++heldPerChannel_[ch];
+            midiLevel_[ch].store (m.getFloatVelocity(), std::memory_order_relaxed);
+            engine_.noteOn (m.getChannel() - 1, m.getNoteNumber());
+        }
+        else if (m.isNoteOff())
+        {
+            const int ch = (m.getChannel() - 1) & 15;
+            if (heldPerChannel_[ch] > 0 && --heldPerChannel_[ch] == 0) midiLevel_[ch].store (0.0f, std::memory_order_relaxed);
+            engine_.noteOff (m.getChannel() - 1, m.getNoteNumber());
+        }
+        else if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            for (int c = 0; c < 16; ++c) { heldPerChannel_[c] = 0; midiLevel_[c].store (0.0f, std::memory_order_relaxed); }
+            if (m.isAllNotesOff()) engine_.allNotesOff(); else engine_.panic();
+        }
         else if (m.isController() && m.getControllerNumber() == 0) midiBank_.store (juce::jlimit (0, 127, m.getControllerValue()));
         else if (m.isController() && ccEnabled_.load (std::memory_order_relaxed)) engine_.controlChange (m.getChannel() - 1, m.getControllerNumber(), m.getControllerValue());
         else if (m.isProgramChange())
