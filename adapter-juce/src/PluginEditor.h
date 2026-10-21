@@ -19,7 +19,7 @@
 #include "PresetManager.h"
 #include "ScaledRoot.h"
 #include "InsertOverlay.h"
-#include "InstrumentOverlay.h"
+#include "InstrumentPanel.h"
 #include "KnobModal.h"
 #include "NeptuneKnob.h"
 #include "ZoneTable.h"
@@ -122,11 +122,8 @@ private:
     std::unique_ptr<MixerView> mixerView_;
     // Vue Synthé : remplace la vue Mapping quand la piste sélectionnée est un synthé.
     std::unique_ptr<InsertOverlay> insertOverlay_;
-    std::unique_ptr<InstrumentOverlay> instrumentOverlay_;   // éditeur NOVA du synthé ou du FM de la piste sélectionnée
-    juce::TextButton novaButton_;
-    juce::Label instrumentLabel_;
-    void openInstrumentEditor();
-    void closeInstrumentEditor();
+    std::unique_ptr<InstrumentPanel> instrumentPanel_;   // éditeur NOVA du synthé ou du FM de la piste sélectionnée (page Edit)
+    void updateInstrumentPanel();
     void openInsert (NeptuneProcessor::StripKind, int index, int slot);
     void closeInsert();
     bool synthShown_ = false, fmShown_ = false, organShown_ = false, audioInShown_ = false;

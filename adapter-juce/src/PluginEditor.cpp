@@ -333,13 +333,6 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
     presetBar_->onOpenManager = [this] (bool saveAs) { openPresetManager (saveAs); };
     addChildComponent (*presetBar_);
-    novaButton_.setButtonText (text ("nv.open_editor"));
-    novaButton_.onClick = [this] { openInstrumentEditor(); };
-    addChildComponent (novaButton_);
-    instrumentLabel_.setJustificationType (juce::Justification::centredBottom);
-    instrumentLabel_.setFont (juce::FontOptions (18.0f, juce::Font::bold));
-    instrumentLabel_.setColour (juce::Label::textColourId, colour (Token::Text));
-    addChildComponent (instrumentLabel_);
 
     for (int t = 0; t < neptune::core::mixer::numTracks; ++t) trackBox_.addItem (juce::String (t + 1), t + 1);
     trackBox_.onChange = [this]
@@ -415,7 +408,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
 void NeptuneEditor::openPresetManager (bool saveAs)
 {
-    if (presetManager_ || modal_ || insertOverlay_ || instrumentOverlay_ || wizard_ || filterEditor_) return;
+    if (presetManager_ || modal_ || insertOverlay_ || wizard_ || filterEditor_) return;
     presetManager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
     presetManager_->onClose = [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
     {
@@ -438,7 +431,7 @@ void NeptuneEditor::openPresetManager (bool saveAs)
 
 void NeptuneEditor::openMidiFilter()
 {
-    if (midiFilterEditor_ || presetManager_ || modal_ || insertOverlay_ || instrumentOverlay_ || wizard_ || filterEditor_) return;
+    if (midiFilterEditor_ || presetManager_ || modal_ || insertOverlay_ || wizard_ || filterEditor_) return;
     const int track = processor_.selectedTrack();
     midiFilterEditor_ = std::make_unique<MidiFilterEditor> (
         palette_, tr_, track,
@@ -480,7 +473,7 @@ void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate
 // Éditeur d'un insert, superposé à toute la fenêtre.
 void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int slot)
 {
-    if (insertOverlay_ || instrumentOverlay_ || modal_ || wizard_ || filterEditor_) return;
+    if (insertOverlay_ || modal_ || wizard_ || filterEditor_) return;
     using namespace neptune::core;
     const auto& def = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
     auto overlay = std::make_unique<InsertOverlay> (processor_, kind, index, slot, palette_, tr_, def.knob,
@@ -496,28 +489,22 @@ void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int
     insertOverlay_->grabKeyboardFocus();
 }
 
-void NeptuneEditor::openInstrumentEditor()
+// L'éditeur NOVA de la piste Synthé ou FM sélectionnée occupe la page Edit ; il est reconstruit quand la piste ou son type change.
+void NeptuneEditor::updateInstrumentPanel()
 {
-    if (insertOverlay_ || instrumentOverlay_ || modal_ || wizard_ || filterEditor_ || presetManager_) return;
-    using namespace neptune::core;
-    const auto& def = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
-    auto overlay = std::make_unique<InstrumentOverlay> (processor_, palette_, tr_, def.knob,
-                                                        [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
-                                                        {
-                                                            juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeInstrumentEditor(); });
-                                                        });
-    if (! overlay->valid()) return;
-    instrumentOverlay_ = std::move (overlay);
-    root_.addAndMakeVisible (*instrumentOverlay_);
-    instrumentOverlay_->setBounds (rootBounds());
-    instrumentOverlay_->toFront (true);
-    instrumentOverlay_->grabKeyboardFocus();
-}
-
-void NeptuneEditor::closeInstrumentEditor()
-{
-    instrumentOverlay_.reset();
-    grabKeyboardFocus();
+    const bool wanted = ! showProbe_ && ! showMixer_ && (selectedIsSynth() || selectedIsFm());
+    if (! wanted) { instrumentPanel_.reset(); return; }
+    const int track = processor_.selectedTrack();
+    const auto type = processor_.trackType (track);
+    if (instrumentPanel_ != nullptr && instrumentPanel_->matches (track, type)) return;
+    instrumentPanel_.reset();
+    const auto& def = neptune::core::theme::definition (neptune::core::theme::themeFromString (processor_.settings().theme).value_or (neptune::core::theme::ThemeId::Dark));
+    auto panel = std::make_unique<InstrumentPanel> (processor_, palette_, tr_, def.knob);
+    if (! panel->valid()) return;
+    instrumentPanel_ = std::move (panel);
+    addAndMakeVisible (*instrumentPanel_);
+    instrumentPanel_->toBack();
+    resized();
 }
 
 void NeptuneEditor::closeInsert()
@@ -1180,9 +1167,7 @@ void NeptuneEditor::updateViewVisibility()
     organShown_ = organMode;
     mixerView_->setVisible (showMixer_);
     organView_->setVisible (organMode);
-    presetBar_->setVisible (synth || fmMode || organMode);
-    novaButton_.setVisible (synth || fmMode);
-    instrumentLabel_.setVisible (synth || fmMode);
+    presetBar_->setVisible (organMode);
     trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (sampler);
     modeButton_.setVisible (sampler);
@@ -1213,13 +1198,9 @@ void NeptuneEditor::updateViewVisibility()
     preloadBox_.setVisible (sampler);
     groupsViewport_.setVisible (sampler);
     // gain et accordage valent pour les deux types ; les filtres du synthé se règlent dans sa page « Filtres »
-    int k = 0;
     for (auto* knob : knobs_)
-    {
-        const bool filterKnob = k >= static_cast<int> (neptune::core::mixer::kFilter1Cutoff);
-        knob->setVisible (mapping && ! organMode && ! ((synth || fmMode) && filterKnob)); // le gain de l'orgue est dans sa console
-        ++k;
-    }
+        knob->setVisible (mapping && ! organMode && ! synth && ! fmMode); // le gain, l'accordage et les filtres du synthé, du FM et de l'orgue sont dans leur éditeur
+    updateInstrumentPanel();
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
     mappingButton_.setToggleState (mapping, juce::dontSendNotification);
     viewButton_.setToggleState (showProbe_, juce::dontSendNotification);
@@ -1402,6 +1383,7 @@ void NeptuneEditor::timerCallback()
         if (t == processor_.selectedTrack()) matrix_->notePlayed (k, v); // curseur de la matrice (piste sélectionnée)
     updateTrackBox();
     rebindKnobs();
+    updateInstrumentPanel();   // piste ou type changé : l'éditeur NOVA est reconstruit
     if (synthShown_ != (! showProbe_ && ! showMixer_ && selectedIsSynth())
         || fmShown_ != (! showProbe_ && ! showMixer_ && selectedIsFm())
         || organShown_ != (! showProbe_ && ! showMixer_ && selectedIsOrgan())
@@ -1413,14 +1395,6 @@ void NeptuneEditor::timerCallback()
         organView_->refreshFromParameters();
     }
     if (presetBar_->isVisible() && presetBar_->needsRefresh()) presetBar_->refresh();
-    if (instrumentLabel_.isVisible())
-    {
-        const auto* preset = processor_.currentPreset();
-        const juce::String name = preset != nullptr ? juce::String::fromUTF8 (preset->name.c_str()) : text ("preset.none");
-        const auto label = text (selectedIsFm() ? "mix.type_short_fm" : "mix.type_short_synth") + "  -  " + juce::String (processor_.selectedTrack() + 1) + "\n" + name
-                           + (processor_.isModified() ? " *" : "");
-        if (label != instrumentLabel_.getText()) instrumentLabel_.setText (label, juce::dontSendNotification);
-    }
     {
         const int tr = processor_.selectedTrack();
         organView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1));
@@ -1487,12 +1461,8 @@ void NeptuneEditor::resized()
     oscButton_.setBounds (626, 32, 44, 36);
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
-    {
-        // pistes Synthé et FM : l'éditeur NOVA s'ouvre en calque ; la zone ne montre qu'un résumé et le bouton pour l'ouvrir
-        const juce::Rectangle<int> zone (32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 270 - 12 - 80 - 38));
-        instrumentLabel_.setBounds (zone.withHeight (zone.getHeight() / 2).withTrimmedBottom (4));
-        novaButton_.setBounds (juce::Rectangle<int> (340, 64).withCentre ({ zone.getCentreX(), zone.getCentreY() + 40 }));
-    }
+    if (instrumentPanel_ != nullptr)
+        instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 158 - 80)));   // jusqu'à la bande de profil ; les potards du bas sont dans l'éditeur
     organView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 80 - 38 - 160) });
     audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 160) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
@@ -1547,7 +1517,6 @@ void NeptuneEditor::resized()
     if (wizard_) wizard_->setBounds (rootBounds());
     if (filterEditor_) filterEditor_->setBounds (rootBounds());
     if (insertOverlay_) insertOverlay_->setBounds (rootBounds());
-    if (instrumentOverlay_) instrumentOverlay_->setBounds (rootBounds());
 
     // Rangée de potards au-dessus de la bande de profil : nom (18) + potard (zone >= 44 px) + valeur (18).
     {

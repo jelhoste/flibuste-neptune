@@ -53,7 +53,7 @@ target_sources(Neptune PRIVATE
   src/FmSysexIO.cpp
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
-  src/InstrumentOverlay.cpp
+  src/InstrumentPanel.cpp
   src/NovaSynthEditor.cpp
   src/NovaFmEditor.cpp
   src/NovaInstrumentBase.cpp
