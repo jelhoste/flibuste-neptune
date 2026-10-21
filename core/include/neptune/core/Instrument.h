@@ -48,6 +48,15 @@ const char* toString (TriggerCondition) noexcept;
 // Un seul numéro N sur les deux champs = groupe symétrique (les zones du groupe se coupent entre elles).
 constexpr int maxChokeGroup = 32;
 
+// Boucle supplémentaire d'une zone (spec §13.5 : jusqu'à 4 boucles par zone, jouées à la suite). La première boucle reste loopStart / loopEnd / loopCrossfade.
+struct LoopRegion
+{
+    std::int64_t start = 0, end = -1;   // end < 0 : jusqu'à la fin du fichier
+    std::int64_t crossfade = 0;         // fondu enchaîné de cette boucle, en échantillons
+    int repeats = 0;                    // retours en arrière avant de passer à la boucle suivante ; 0 = jusqu'au relâchement (toujours le cas de la dernière)
+    bool operator== (const LoopRegion& o) const noexcept { return start == o.start && end == o.end && crossfade == o.crossfade && repeats == o.repeats; }
+};
+
 struct ZoneDescription
 {
     std::string samplePath;        // chemin absolu (la résolution relative/recherche par nom viendra avec les presets, spec §20)
@@ -76,6 +85,12 @@ struct ZoneDescription
     // Fondus d'entrée et de sortie (ms) : rampes de gain appliquées en direct (rien n'est figé dans le sample) ; petites par défaut, contre les clics.
     // Le fondu de sortie ne vaut que pour une lecture jusqu'au bout (one-shot) ; une boucle se termine par le relâchement de l'enveloppe.
     double fadeInMs = defaultFadeInMs, fadeOutMs = defaultFadeOutMs;
+    // Boucles 2 à 4 (au plus 3), dans l'ordre du fichier : la lecture parcourt la boucle 1 `loopRepeats` fois (0 = sans fin), puis continue vers la boucle 2, etc.
+    // La dernière boucle tourne jusqu'au relâchement. Sans effet en lecture inversée (seule la boucle 1 compte).
+    static constexpr std::size_t maxExtraLoops = 3;
+    std::vector<LoopRegion> extraLoops;
+    int loopRepeats = 0;
+    double pan = 0.0;              // -1 (gauche) .. +1 (droite) ; loi de balance en cosinus, neutre au centre
     bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
     static constexpr double defaultFadeInMs = 1.0, defaultFadeOutMs = 2.0, maxFadeMs = 5000.0, maxDelayMs = 10000.0;
@@ -88,7 +103,8 @@ struct ZoneDescription
             && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
             && filterOverride == o.filterOverride && filters == o.filters
             && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
-            && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs;
+            && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs
+            && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan;
     }
 };
 
@@ -200,6 +216,9 @@ struct FilterRuntimeBlock
     bool anyOn = false;
 };
 
+// Boucle supplémentaire résolue (bornée au fichier) : voir ZoneDescription::extraLoops.
+struct LoopRt { std::int64_t start = 0, end = 0, crossfade = 0; int repeats = 0; };
+
 struct Zone
 {
     std::shared_ptr<const SampleData> sample;
@@ -215,6 +234,10 @@ struct Zone
     double fadeInMs = 0.0, fadeOutMs = 0.0;
     bool reverse = false;
     double delayMs = 0.0;
+    std::array<LoopRt, 3> moreLoops {};   // boucles 2 à 4, strictement croissantes (fin après la fin de la précédente)
+    int moreLoopCount = 0;
+    int loopRepeats = 0;                  // répétitions de la boucle 1 quand il y en a d'autres (0 = sans fin)
+    float panL = 1.0f, panR = 1.0f;       // gains de balance
     int roundRobin = 0;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;

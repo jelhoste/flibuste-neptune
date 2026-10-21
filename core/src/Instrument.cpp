@@ -87,6 +87,16 @@ ZoneDescription sanitised (ZoneDescription z)
     z.fadeInMs = std::isfinite (z.fadeInMs) ? std::clamp (z.fadeInMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeInMs;
     z.fadeOutMs = std::isfinite (z.fadeOutMs) ? std::clamp (z.fadeOutMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeOutMs;
     z.delayMs = std::isfinite (z.delayMs) ? std::clamp (z.delayMs, 0.0, ZoneDescription::maxDelayMs) : 0.0;
+    z.pan = std::isfinite (z.pan) ? std::clamp (z.pan, -1.0, 1.0) : 0.0;
+    z.loopRepeats = std::clamp (z.loopRepeats, 0, 1000);
+    if (z.extraLoops.size() > ZoneDescription::maxExtraLoops) z.extraLoops.resize (ZoneDescription::maxExtraLoops);
+    for (auto& l : z.extraLoops)
+    {
+        if (l.start < 0) l.start = 0;
+        if (l.end >= 0 && l.end <= l.start) l.end = -1;
+        l.crossfade = std::clamp<std::int64_t> (l.crossfade, 0, 100000000);
+        l.repeats = std::clamp (l.repeats, 0, 1000);
+    }
     return z;
 }
 
@@ -206,6 +216,22 @@ std::string toJson (const InstrumentDescription& d)
         if (z.fadeOutMs != ZoneDescription::defaultFadeOutMs) o["fade_out_ms"] = z.fadeOutMs;
         if (z.reverse) o["reverse"] = true;
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
+        if (z.pan != 0.0) o["pan"] = z.pan;
+        if (z.loopRepeats != 0) o["loop_repeats"] = z.loopRepeats;
+        if (! z.extraLoops.empty())
+        {
+            nlohmann::json loops = nlohmann::json::array();
+            for (const auto& l : z.extraLoops)
+            {
+                nlohmann::json lo;
+                lo["start"] = l.start;
+                lo["end"] = l.end;
+                if (l.crossfade != 0) lo["crossfade"] = l.crossfade;
+                if (l.repeats != 0) lo["repeats"] = l.repeats;
+                loops.push_back (lo);
+            }
+            o["extra_loops"] = loops;
+        }
         if (z.roundRobin != 0) o["round_robin"] = z.roundRobin;
         if (! z.group.empty()) o["group"] = z.group;
         if (z.onRelease) o["on_release"] = true;
@@ -330,6 +356,19 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.fadeOutMs = readNum (o, "fade_out_ms", z.fadeOutMs);
     if (const auto it = o.find ("reverse"); it != o.end() && it->is_boolean()) z.reverse = it->get<bool>();
     z.delayMs = readNum (o, "delay_ms", z.delayMs);
+    z.pan = readNum (o, "pan", z.pan);
+    z.loopRepeats = readInt (o, "loop_repeats", z.loopRepeats);
+    if (const auto it = o.find ("extra_loops"); it != o.end() && it->is_array())
+        for (const auto& lo : *it)
+        {
+            if (! lo.is_object() || z.extraLoops.size() >= ZoneDescription::maxExtraLoops) continue;
+            LoopRegion l;
+            l.start = readI64 (lo, "start", 0);
+            l.end = readI64 (lo, "end", -1);
+            l.crossfade = readI64 (lo, "crossfade", 0);
+            l.repeats = readInt (lo, "repeats", 0);
+            z.extraLoops.push_back (l);
+        }
     z.roundRobin = readInt (o, "round_robin", 0);
     if (const auto it = o.find ("group"); it != o.end() && it->is_string()) z.group = it->get<std::string>();
     if (const auto it = o.find ("on_release"); it != o.end() && it->is_boolean()) z.onRelease = it->get<bool>();
@@ -636,6 +675,8 @@ std::int64_t residentFramesNeeded (const InstrumentDescription& d, const ZoneDes
         std::int64_t loopEnd = zone.loopEnd < 0 ? totalFrames : std::min<std::int64_t> (zone.loopEnd, totalFrames);
         const std::int64_t loopStart = std::min<std::int64_t> (zone.loopStart, totalFrames - 1);
         if (loopEnd <= loopStart) loopEnd = totalFrames;
+        for (const auto& l : zone.extraLoops)   // la lecture traverse tout ce qui précède la dernière boucle
+            loopEnd = std::max (loopEnd, l.end < 0 ? totalFrames : std::min<std::int64_t> (l.end, totalFrames));
         return std::min<std::int64_t> (totalFrames, loopEnd + 4);
     }
     const std::int64_t bytes = static_cast<std::int64_t> (std::clamp (d.preloadKB, InstrumentDescription::minPreloadKB,
@@ -769,6 +810,28 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.fadeOutMs = zd.fadeOutMs;
         z.reverse = zd.reverse;
         z.delayMs = zd.delayMs;
+        {
+            // Boucles 2 à 4 : chacune se termine après la précédente (sinon elle est ignorée, avec les suivantes) ; début borné après le début de la précédente.
+            std::int64_t prevEnd = z.loopEnd, prevStart = z.loopStart;
+            for (const auto& l : zd.extraLoops)
+            {
+                if (z.moreLoopCount >= static_cast<int> (z.moreLoops.size())) break;
+                LoopRt r;
+                r.end = l.end < 0 ? frames : std::min<std::int64_t> (l.end, frames);
+                r.start = std::clamp<std::int64_t> (l.start, prevStart, std::max<std::int64_t> (prevStart, r.end - 1));
+                if (r.end <= prevEnd || r.end <= r.start) break;
+                r.crossfade = std::min<std::int64_t> ({ l.crossfade, r.start, (r.end - r.start) / 2 });
+                r.repeats = l.repeats;
+                z.moreLoops[static_cast<std::size_t> (z.moreLoopCount++)] = r;
+                prevEnd = r.end; prevStart = r.start;
+            }
+            z.loopRepeats = z.moreLoopCount > 0 ? zd.loopRepeats : 0;
+            // seule la dernière boucle tourne jusqu'au relâchement
+            if (z.moreLoopCount > 0) z.moreLoops[static_cast<std::size_t> (z.moreLoopCount - 1)].repeats = 0;
+            const double pan = std::clamp (zd.pan, -1.0, 1.0);
+            z.panL = pan > 0.0 ? static_cast<float> (std::cos (pan * 1.5707963267948966)) : 1.0f;
+            z.panR = pan < 0.0 ? static_cast<float> (std::cos (-pan * 1.5707963267948966)) : 1.0f;
+        }
         inst->zones.push_back (std::move (z));
     }
     for (std::size_t i = 0; i < description.slots.size(); ++i)

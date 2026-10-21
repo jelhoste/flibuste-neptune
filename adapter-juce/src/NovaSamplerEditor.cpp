@@ -16,6 +16,21 @@ namespace
 {
 juce::String U (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
+// Boucle n d'une zone (0 = la première, les autres sont dans extraLoops) : lecture et écriture uniformes.
+int loopCountOf (const ZoneDescription& z) { return 1 + static_cast<int> (z.extraLoops.size()); }
+LoopRegion loopView (const ZoneDescription& z, int idx)
+{
+    idx = std::clamp (idx, 0, loopCountOf (z) - 1);
+    if (idx == 0) return { z.loopStart, z.loopEnd, z.loopCrossfade, z.loopRepeats };
+    return z.extraLoops[static_cast<std::size_t> (idx - 1)];
+}
+void setLoopView (ZoneDescription& z, int idx, const LoopRegion& l)
+{
+    idx = std::clamp (idx, 0, loopCountOf (z) - 1);
+    if (idx == 0) { z.loopStart = l.start; z.loopEnd = l.end; z.loopCrossfade = l.crossfade; z.loopRepeats = l.repeats; }
+    else z.extraLoops[static_cast<std::size_t> (idx - 1)] = l;
+}
+
 juce::Path iconPath (int kind)
 {
     juce::Path p;
@@ -276,17 +291,40 @@ void NovaSamplerEditor::buildSamplePage()
         const auto& info = fileInfo_.info (shown->samplePath);
         const std::int64_t total = info.ok ? info.frames : 0;
         if (snapOn_ && m != nova::WaveView::Marker::Crossfade) frame = snapFrame (shown->samplePath, frame);
-        editZone ([m, frame, total] (Zone& z)
+        const int idx = editLoop_;
+        editZone ([m, frame, total, idx] (Zone& z)
         {
             const std::int64_t end = z.endFrame < 0 ? total : z.endFrame;
-            const std::int64_t loopEnd = z.loopEnd < 0 ? total : z.loopEnd;
             switch (m)
             {
                 case nova::WaveView::Marker::Start: z.startFrame = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, end - 1)); z.loopStart = std::max (z.loopStart, z.startFrame); break;
                 case nova::WaveView::Marker::End: z.endFrame = frame >= total ? -1 : std::max (frame, z.startFrame + 1); break;
-                case nova::WaveView::Marker::LoopStart: z.loopStart = std::clamp<std::int64_t> (frame, z.startFrame, std::max<std::int64_t> (z.startFrame, loopEnd - 1)); break;
-                case nova::WaveView::Marker::LoopEnd: z.loopEnd = frame >= total ? -1 : std::max (frame, z.loopStart + 1); break;
-                case nova::WaveView::Marker::Crossfade: z.loopCrossfade = std::clamp<std::int64_t> (frame, 0, std::min (z.loopStart, (loopEnd - z.loopStart) / 2)); break;
+                case nova::WaveView::Marker::LoopStart:
+                {
+                    auto l = loopView (z, idx);
+                    const std::int64_t lend = l.end < 0 ? total : l.end;
+                    const std::int64_t lo = std::max (idx > 0 ? loopView (z, idx - 1).start : z.startFrame, z.startFrame);
+                    l.start = std::clamp<std::int64_t> (frame, lo, std::max (lo, lend - 1));
+                    setLoopView (z, idx, l);
+                    break;
+                }
+                case nova::WaveView::Marker::LoopEnd:
+                {
+                    auto l = loopView (z, idx);
+                    std::int64_t lo = l.start + 1;
+                    if (idx > 0) { const auto prev = loopView (z, idx - 1); lo = std::max (lo, (prev.end < 0 ? total : prev.end) + 1); }
+                    l.end = frame >= total ? -1 : std::max (frame, lo);
+                    setLoopView (z, idx, l);
+                    break;
+                }
+                case nova::WaveView::Marker::Crossfade:
+                {
+                    auto l = loopView (z, idx);
+                    const std::int64_t lend = l.end < 0 ? total : l.end;
+                    l.crossfade = std::clamp<std::int64_t> (frame, 0, std::min (l.start, (lend - l.start) / 2));
+                    setLoopView (z, idx, l);
+                    break;
+                }
             }
         });
     };
@@ -348,19 +386,42 @@ void NovaSamplerEditor::buildSamplePage()
                      [] (Zone& z, double v) { z.delayMs = v; }, 0.0);
     addInfo (1, delay_, "hlp.sm_delay", 1);
     crossfade_ = slider (tx ("sm.crossfade").toUpperCase(), 0.0, 1000.0, 1.0, " ms",
-                         [this] { const auto* z = shownZone(); return z != nullptr ? static_cast<double> (z->loopCrossfade) * 1000.0 / sampleRate() : 0.0; },
+                         [this] { const auto* z = shownZone(); return z != nullptr ? static_cast<double> (loopView (*z, editLoop_).crossfade) * 1000.0 / sampleRate() : 0.0; },
                          [this] (Zone& z, double v)
                          {
                              const auto& info = fileInfo_.info (z.samplePath);
                              const std::int64_t total = info.ok ? info.frames : 0;
-                             const std::int64_t loopEnd = z.loopEnd < 0 ? total : z.loopEnd;
-                             z.loopCrossfade = std::clamp<std::int64_t> (static_cast<std::int64_t> (std::llround (v * sampleRate() / 1000.0)), 0, std::min (z.loopStart, std::max<std::int64_t> (0, (loopEnd - z.loopStart) / 2)));
+                             auto l = loopView (z, editLoop_);
+                             const std::int64_t loopEnd = l.end < 0 ? total : l.end;
+                             l.crossfade = std::clamp<std::int64_t> (static_cast<std::int64_t> (std::llround (v * sampleRate() / 1000.0)), 0, std::min (l.start, std::max<std::int64_t> (0, (loopEnd - l.start) / 2)));
+                             setLoopView (z, editLoop_, l);
                          }, 0.0);
     addInfo (1, crossfade_, "hlp.sm_crossfade", 1);
     tune_ = slider (tx ("sm.tune").toUpperCase(), -100.0, 100.0, 0.5, " ct", [this] { const auto* z = shownZone(); return z != nullptr ? z->tuneCents : 0.0; },
                     [] (Zone& z, double v) { z.tuneCents = v; }, 0.0);
     gain_ = slider (tx ("sm.gain").toUpperCase(), -24.0, 24.0, 0.1, " dB", [this] { const auto* z = shownZone(); return z != nullptr ? z->gainDb : 0.0; },
                     [] (Zone& z, double v) { z.gainDb = v; }, 0.0);
+    pan_ = slider (tx ("sm.pan").toUpperCase(), -100.0, 100.0, 1.0, " %", [this] { const auto* z = shownZone(); return z != nullptr ? z->pan * 100.0 : 0.0; },
+                   [] (Zone& z, double v) { z.pan = v / 100.0; }, 0.0);
+    addInfo (1, pan_, "hlp.sm_pan", 1);
+    // boucles multiples : choix de la boucle éditée, ajout / retrait, répétitions
+    loopEditChoice_ = std::make_unique<nova::ChoicePill>();
+    loopEditChoice_->pill = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    loopEditChoice_->label = [this] { return tx ("sm.loop_n").toUpperCase(); };
+    loopEditChoice_->get = [this] { return editLoop_; };
+    loopEditChoice_->set = [this] (int i) { editLoop_ = i; navPoint_ = -1; lastRevision_ = 0xFFFFFFFFu; };
+    loopEditChoice_->attach (*this);
+    loopAddPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    loopAddPill_->setText ("+");
+    loopAddPill_->onClick = [this] { addLoop(); };
+    addInfo (1, loopAddPill_, "hlp.sm_multiloop", 1);
+    loopRemovePill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    loopRemovePill_->setText ("-");
+    loopRemovePill_->onClick = [this] { removeLoop(); };
+    loopRepeatsNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.loop_repeats").toUpperCase(), 0, 99,
+                                                [this] { const auto* z = shownZone(); return z != nullptr ? loopView (*z, editLoop_).repeats : 0; },
+                                                [this] (int v) { editZone ([this, v] (Zone& z) { auto l = loopView (z, editLoop_); l.repeats = v; setLoopView (z, editLoop_, l); }); },
+                                                [] (int v) { return v == 0 ? juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x9e")) : juce::String (v); });
     rootNumber2_ = add<nova::NumberPill> (1, skin(), tx ("sampler.root").toUpperCase(), 0, 127,
                                           [this] { const auto* z = shownZone(); return z != nullptr ? z->rootNote : 60; },
                                           [this] (int v) { editZone ([v] (Zone& z) { z.rootNote = v; }); },
@@ -659,9 +720,11 @@ void NovaSamplerEditor::toolAutoLoop()
     editShownZone ([&] (Zone& d)
     {
         d.mode = PlayMode::Loop;
-        d.loopStart = c.start;
-        d.loopEnd = c.end;
-        d.loopCrossfade = 0;
+        auto l = loopView (d, editLoop_);
+        l.start = c.start;
+        l.end = c.end;
+        l.crossfade = 0;
+        setLoopView (d, editLoop_, l);
     });
     setToolStatus (U (translator().format ("sm.st_loop", { std::to_string (loopCandidateIndex_ + 1), std::to_string (loopCandidates_.size()),
                                                             std::to_string (static_cast<int> (std::lround (c.score * 100.0))) })));
@@ -725,6 +788,48 @@ void NovaSamplerEditor::toolStretch()
             safe->setToolStatus (U (safe->translator().format ("sm.st_stretch", { std::to_string (newFrames) })));
         });
     });
+}
+
+// Ajoute une boucle (4 au plus) à la suite de la dernière, jusqu'à la fin de la région jouée.
+void NovaSamplerEditor::addLoop()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    if (loopCountOf (*z) > static_cast<int> (ZoneDescription::maxExtraLoops)) { setToolStatus (tx ("sm.st_loops_max")); return; }
+    const auto& info = fileInfo_.info (z->samplePath);
+    const std::int64_t total = info.ok ? info.frames : 0;
+    const auto last = loopView (*z, loopCountOf (*z) - 1);
+    const std::int64_t lastEnd = last.end < 0 ? total : last.end, regionEnd = z->endFrame < 0 ? total : z->endFrame;
+    if (regionEnd - lastEnd < 200) { setToolStatus (tx ("sm.st_loops_room")); return; }
+    const std::int64_t start = lastEnd, end = regionEnd >= total ? -1 : regionEnd;
+    const int newIndex = loopCountOf (*z);
+    editShownZone ([&] (Zone& d)
+    {
+        d.mode = PlayMode::Loop;
+        LoopRegion l;
+        l.start = start; l.end = end;
+        d.extraLoops.push_back (l);
+    });
+    editLoop_ = newIndex;
+    setToolStatus (tx ("sm.st_loops_added"));
+}
+
+void NovaSamplerEditor::removeLoop()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || loopCountOf (*z) < 2) return;
+    const int idx = std::clamp (editLoop_, 0, loopCountOf (*z) - 1);
+    editShownZone ([idx] (Zone& d)
+    {
+        if (idx == 0)
+        {
+            const auto next = d.extraLoops.front();
+            d.loopStart = next.start; d.loopEnd = next.end; d.loopCrossfade = next.crossfade; d.loopRepeats = next.repeats;
+            d.extraLoops.erase (d.extraLoops.begin());
+        }
+        else d.extraLoops.erase (d.extraLoops.begin() + (idx - 1));
+    });
+    editLoop_ = std::max (0, idx - 1);
 }
 
 void NovaSamplerEditor::toolSaveAs()
@@ -837,12 +942,13 @@ void NovaSamplerEditor::updateSeam()
     std::string key;
     neptune::core::AudioFileInfo info;
     if (z != nullptr && ! z->samplePath.empty()) info = fileInfo_.info (z->samplePath);
+    const auto el = z != nullptr ? loopView (*z, editLoop_) : LoopRegion {};
     if (z != nullptr && z->mode == PlayMode::Loop && info.ok)
-        key = z->samplePath + "|" + std::to_string (std::max (z->loopStart, z->startFrame)) + "|" + std::to_string (z->loopEnd < 0 ? info.frames : z->loopEnd);
+        key = z->samplePath + "|" + std::to_string (std::max (el.start, z->startFrame)) + "|" + std::to_string (el.end < 0 ? info.frames : el.end);
     if (key == seamKey_) return;
     seamKey_ = key;
     if (key.empty()) { seam_->setData ({}, {}, {}); return; }
-    const std::int64_t S = std::max (z->loopStart, z->startFrame), E = z->loopEnd < 0 ? info.frames : std::min (z->loopEnd, info.frames);
+    const std::int64_t S = std::max (el.start, z->startFrame), E = el.end < 0 ? info.frames : std::min (el.end, info.frames);
     const std::int64_t w = std::min<std::int64_t> ({ std::clamp<std::int64_t> (static_cast<std::int64_t> (info.sampleRate * 0.01), 64, 2048), S, E - S, info.frames - S });
     AudioStreamReader reader;
     if (w < 8 || ! reader.open (utf8Path (z->samplePath))) { seam_->setData ({}, {}, {}); return; }
@@ -1498,9 +1604,14 @@ void NovaSamplerEditor::updateSampleInfo()
     wave_->setSample (z->samplePath, info.frames, info.sampleRate);
     nova::WaveView::Markers m;
     m.start = z->startFrame; m.end = z->endFrame;
-    m.loopStart = z->loopStart; m.loopEnd = z->loopEnd;
-    m.crossfade = z->loopCrossfade;
-    m.loopStart = std::max (z->loopStart, z->startFrame);   // la boucle ne revient jamais avant START (même règle que le moteur)
+    const int idx = std::clamp (editLoop_, 0, loopCountOf (*z) - 1);
+    const auto edited = loopView (*z, idx);
+    m.loopStart = edited.start; m.loopEnd = edited.end;
+    m.crossfade = edited.crossfade;
+    m.loopStart = std::max (edited.start, z->startFrame);   // la boucle ne revient jamais avant START (même règle que le moteur)
+    m.loopNumber = idx + 1;
+    for (int i = 0; i < loopCountOf (*z); ++i)
+        if (i != idx) { const auto l = loopView (*z, i); m.otherLoops.push_back ({ std::max (l.start, z->startFrame), l.end < 0 ? info.frames : l.end, i + 1 }); }
     const double rate = info.sampleRate;
     m.fadeInMs = z->fadeInMs; m.fadeOutMs = z->fadeOutMs; m.delayMs = z->delayMs;
     m.fadeInFrames = static_cast<std::int64_t> (std::llround (z->fadeInMs * rate / 1000.0));
@@ -1519,9 +1630,9 @@ void NovaSamplerEditor::updateSampleInfo()
                             + juce::String (static_cast<long long> (info.frames)) + " " + tx ("sm.frames") + ")");
     }
     auto t = [&] (std::int64_t f) { return juce::String (static_cast<long long> (f)) + " (" + juce::String (static_cast<double> (f) * 1000.0 / info.sampleRate, 1) + " ms)"; };
-    const std::int64_t end = z->endFrame < 0 ? info.frames : z->endFrame, loopEnd = z->loopEnd < 0 ? info.frames : z->loopEnd;
+    const std::int64_t end = z->endFrame < 0 ? info.frames : z->endFrame, loopEnd = edited.end < 0 ? info.frames : edited.end;
     auto text = juce::String ("START ") + t (z->startFrame) + "    END " + t (end);
-    if (z->mode == PlayMode::Loop) text += "    LOOP " + t (std::max (z->loopStart, z->startFrame)) + " > " + t (loopEnd);
+    if (z->mode == PlayMode::Loop) text += "    LOOP" + (loopCountOf (*z) > 1 ? " " + juce::String (idx + 1) : juce::String()) + " " + t (std::max (edited.start, z->startFrame)) + " > " + t (loopEnd);
     markerText_->setText (text);
 }
 
@@ -1621,6 +1732,11 @@ void NovaSamplerEditor::layout()
     playPill_->setBounds (R (1006, 736, 140, 32));
     recPill_->setBounds (R (846, 736, 140, 32));
     rootNumber2_->setBounds (R (X0 + 480, 558, 154, 28));
+    loopEditChoice_->pill->setBounds (R (X0 + 640, 558, 100, 28));
+    loopAddPill_->setBounds (R (X0 + 744, 558, 30, 28));
+    loopRemovePill_->setBounds (R (X0 + 778, 558, 30, 28));
+    loopRepeatsNumber_->setBounds (R (X0 + 814, 556, 118, 32));
+    pan_->setBounds (R (X0 + 468, 650, 214, 46));
     fadeIn_->setBounds (R (X0 + 12, 596, 214, 46));
     fadeOut_->setBounds (R (X0 + 240, 596, 214, 46));
     delay_->setBounds (R (X0 + 468, 596, 214, 46));
@@ -1787,6 +1903,21 @@ void NovaSamplerEditor::tick()
         updateFootprint();
         for (auto* c : { normChoice_, silenceChoice_, cutsChoice_ }) c->refresh (has);
         for (auto* pl : { trimPill_, normPill_, dcPill_, saveAsPill_, silencePill_, cutsPill_, loopFindPill_ }) pl->setAlpha (has ? 1.0f : 0.4f);
+        {
+            // boucles multiples : la liste du menu suit le nombre de boucles ; la dernière tourne sans fin (pas de répétitions)
+            const int n = z != nullptr ? loopCountOf (*z) : 1;
+            if (z != nullptr) editLoop_ = std::clamp (editLoop_, 0, n - 1);
+            if (static_cast<int> (loopEditChoice_->items.size()) != n)
+            {
+                loopEditChoice_->items.clear();
+                for (int i = 0; i < n; ++i) loopEditChoice_->items.push_back (juce::String (i + 1) + (n > 1 ? " / " + juce::String (n) : juce::String()));
+            }
+            loopEditChoice_->refresh (has);
+            loopRepeatsNumber_->update();
+            loopRepeatsNumber_->setActive (has && n > 1 && editLoop_ < n - 1);
+            loopAddPill_->setAlpha (has && n <= static_cast<int> (ZoneDescription::maxExtraLoops) ? 1.0f : 0.4f);
+            loopRemovePill_->setAlpha (has && n > 1 ? 1.0f : 0.4f);
+        }
         durationNumber_->update(); pitchNumber_->update();
         durationNumber_->setActive (has); pitchNumber_->setActive (has);
         stretchPill_->setAlpha (has && ! stretchBusy_ ? 1.0f : 0.4f);
@@ -1800,7 +1931,7 @@ void NovaSamplerEditor::tick()
         loopPill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : "sampler.mode_one_shot")) })));
         loopPill_->setOn (loop);
         reversePill_->setOn (has && z->reverse);
-        for (auto* s : { fadeIn_, fadeOut_, delay_, tune_, gain_ }) { s->update(); s->setActive (has); }
+        for (auto* s : { fadeIn_, fadeOut_, delay_, tune_, gain_, pan_ }) { s->update(); s->setActive (has); }
         crossfade_->update();
         crossfade_->setActive (loop && has && ! z->reverse);
         fadeOut_->setActive (has && ! loop);

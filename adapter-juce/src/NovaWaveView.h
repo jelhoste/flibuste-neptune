@@ -26,6 +26,9 @@ public:
         std::int64_t start = 0, end = -1;          // région jouée (end < 0 : fin du fichier)
         std::int64_t loopStart = 0, loopEnd = -1;  // boucle (loopEnd < 0 : fin du fichier)
         std::int64_t crossfade = 0;                // longueur du fondu enchaîné avant la fin de boucle
+        int loopNumber = 1;                        // numéro de la boucle éditée (1 à 4)
+        struct Other { std::int64_t start, end; int number; };
+        std::vector<Other> otherLoops;             // les autres boucles de la zone, affichées en retrait
         bool loop = false, reverse = false;
         // visualisation des réglages de lecture (en échantillons du fichier, à la hauteur d'origine du sample)
         std::int64_t fadeInFrames = 0, fadeOutFrames = 0, delayFrames = 0;

@@ -173,3 +173,95 @@ TEST_CASE ("zone description round-trips the new playback settings")
     CHECK (clean.endFrame == -1);
     CHECK (clean.delayMs == ZoneDescription::maxDelayMs);
 }
+
+TEST_CASE ("several loops play in sequence")
+{
+    // boucle 1 : [1000, 2000) jouée trois fois (deux retours), puis la lecture continue jusqu'à la boucle 2 : [3000, 4000), sans fin
+    Rig rig (makeRamp (8000), PlayMode::Loop, [] (Zone& z)
+    {
+        z.loopStart = 1000; z.loopEnd = 2000;
+        z.moreLoops[0].start = 3000; z.moreLoops[0].end = 4000;
+        z.moreLoopCount = 1;
+        z.loopRepeats = 2;
+    });
+    const auto out = rig.play (8200);
+    auto at = [&] (std::size_t i) { return static_cast<double> (out[i]) * 8000.0; };
+    CHECK_THAT (at (1999), WithinAbs (1999.0, 1.0));
+    CHECK_THAT (at (2000), WithinAbs (1000.0, 1.0));   // premier retour
+    CHECK_THAT (at (3000), WithinAbs (1000.0, 1.0));   // second retour
+    CHECK_THAT (at (3999), WithinAbs (1999.0, 1.0));
+    CHECK_THAT (at (4000), WithinAbs (2000.0, 1.0));   // plus de retour : la lecture continue
+    CHECK_THAT (at (5999), WithinAbs (3999.0, 1.0));
+    CHECK_THAT (at (6000), WithinAbs (3000.0, 1.0));   // la dernière boucle revient sans fin
+    CHECK_THAT (at (7999), WithinAbs (3999.0, 1.0));
+    CHECK_THAT (at (8000), WithinAbs (3000.0, 1.0));
+}
+
+TEST_CASE ("a zone with a single loop still wraps forever")
+{
+    Rig rig (makeRamp (8000), PlayMode::Loop, [] (Zone& z) { z.loopStart = 1000; z.loopEnd = 2000; });
+    const auto out = rig.play (6000);
+    CHECK_THAT (static_cast<double> (out[5500]) * 8000.0, WithinAbs (1000.0 + std::fmod (5500.0 - 1000.0, 1000.0), 1.0));
+}
+
+TEST_CASE ("zone pan is a balance with unity at the centre")
+{
+    auto render = [] (float panL, float panR)
+    {
+        auto sample = makeConstant (4000, 0.5f);
+        auto inst = std::make_shared<Instrument>();
+        auto z = makeFullKeyboardZone (sample, 60, PlayMode::Loop);
+        z.panL = panL; z.panR = panR;
+        inst->zones.push_back (std::move (z));
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        v.noteOn (0, 60, 1.0f);
+        std::vector<float> l (512, 0.0f), r (512, 0.0f);
+        v.render (l.data(), r.data(), 512, 1.0f, 1.0f, 0.0);
+        return std::make_pair (l[300], r[300]);
+    };
+    const auto centre = render (1.0f, 1.0f);
+    CHECK_THAT (centre.first, WithinAbs (0.5, 1e-3));
+    CHECK_THAT (centre.second, WithinAbs (0.5, 1e-3));
+    const auto right = render (0.0f, 1.0f);
+    CHECK_THAT (right.first, WithinAbs (0.0, 1e-4));
+    CHECK_THAT (right.second, WithinAbs (0.5, 1e-3));
+}
+
+TEST_CASE ("extra loops and pan survive JSON and are built into the instrument")
+{
+    const auto path = std::filesystem::temp_directory_path() / "neptune-multiloop.wav";
+    {
+        SF_INFO info {};
+        info.samplerate = 48000; info.channels = 1; info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+        SNDFILE* f = sf_open (path.string().c_str(), SFM_WRITE, &info);
+        REQUIRE (f != nullptr);
+        std::vector<float> data (10000, 0.3f);
+        sf_writef_float (f, data.data(), static_cast<sf_count_t> (data.size()));
+        sf_close (f);
+    }
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = path.string();
+    z.mode = PlayMode::Loop;
+    z.loopStart = 1000; z.loopEnd = 2000; z.loopRepeats = 3;
+    z.extraLoops = { { 3000, 4000, 100, 2 }, { 5000, 6000, 0, 0 }, { 5500, 5800, 0, 0 } };   // la troisième finit avant la deuxième : ignorée
+    z.pan = 0.5;
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    REQUIRE (back.zones.size() == 1);
+    CHECK (back.zones[0] == sanitised (z));
+    CHECK (back.zones[0].extraLoops.size() == 3);
+    const auto inst = buildInstrument (back);
+    REQUIRE (inst != nullptr);
+    const auto& rt = inst->zones[0];
+    CHECK (rt.moreLoopCount == 2);
+    CHECK (rt.loopRepeats == 3);
+    CHECK (rt.moreLoops[0].start == 3000);
+    CHECK (rt.moreLoops[0].repeats == 2);
+    CHECK (rt.moreLoops[1].repeats == 0);
+    CHECK_THAT (rt.panL, WithinAbs (std::cos (0.25 * 3.14159265358979), 1e-4));
+    CHECK (rt.panR == 1.0f);
+    std::filesystem::remove (path);
+}

@@ -266,6 +266,17 @@ void WaveView::paint (juce::Graphics& g)
     if (xs > p.getX()) g.fillRect (juce::Rectangle<float> (p.getX(), p.getY(), std::min (xs, p.getRight()) - p.getX(), p.getHeight()));
     if (xe < p.getRight()) g.fillRect (juce::Rectangle<float> (std::max (xe, p.getX()), p.getY(), p.getRight() - std::max (xe, p.getX()), p.getHeight()));
     if (markers_.loop)
+        for (const auto& o : markers_.otherLoops)
+        {
+            const float a = std::max (xOf (static_cast<double> (o.start)), p.getX()), b = std::min (xOf (static_cast<double> (std::min (o.end, frames_))), p.getRight());
+            if (b <= a) continue;
+            g.setColour (skin_.colour (Token::Pink, 0.06f));
+            g.fillRect (juce::Rectangle<float> (a, p.getY(), b - a, p.getHeight()));
+            g.setColour (skin_.colour (Token::TextDim2));
+            g.setFont (skin_.font (9.0f, true));
+            g.drawText ("LOOP " + juce::String (o.number), juce::Rectangle<float> (a + skin_.px (3.0f), p.getBottom() - skin_.px (28.0f), skin_.px (60.0f), skin_.px (12.0f)), juce::Justification::centredLeft);
+        }
+    if (markers_.loop)
     {
         const float ls = xOf (static_cast<double> (markers_.loopStart)), le = xOf (static_cast<double> (effectiveLoopEnd()));
         g.setColour (skin_.colour (Token::Pink, 0.12f));

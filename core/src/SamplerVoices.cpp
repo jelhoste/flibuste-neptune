@@ -15,16 +15,6 @@ inline float hermite (float y0, float y1, float y2, float y3, float t) noexcept
     return ((c3 * t + c2) * t + c1) * t + y1;
 }
 
-// Indice réellement lu : en boucle, ce qui dépasse la fin de boucle revient dans la boucle.
-inline std::int64_t wrapIndex (const Zone& z, std::int64_t k) noexcept
-{
-    if (z.mode == PlayMode::Loop && k >= z.loopEnd)
-    {
-        const std::int64_t len = z.loopEnd - z.loopStart;
-        k = z.loopStart + (k - z.loopStart) % len;
-    }
-    return k;
-}
 } // namespace
 
 void SamplerVoices::discard (Voice& v) noexcept
@@ -404,6 +394,8 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
         v->fadeInPlayed = 0.0;
     }
     bindZone (*v, zone);
+    v->loopIdx = 0;
+    v->repsLeft = (zone.moreLoopCount > 0 && zone.loopRepeats > 0) ? zone.loopRepeats : -1;
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     v->layerGain = layerGain;
     v->level = v->velocity * zone.gain * v->mods.gain * layerGain;
@@ -532,8 +524,17 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     const double endLimit = loop ? frames : static_cast<double> (endF);
     const double fadeInOut = z.fadeInMs > 0.0 ? z.fadeInMs * 0.001 * sampleRate_ : 0.0;
     const double fadeOutOut = (! loop && z.fadeOutMs > 0.0) ? z.fadeOutMs * 0.001 * sampleRate_ : 0.0;
-    const bool crossfade = loop && ! reverse && z.loopCrossfade > 0;
-    const double xfade = static_cast<double> (z.loopCrossfade), loopEndD = static_cast<double> (z.loopEnd), loopLen = static_cast<double> (z.loopEnd - z.loopStart);
+    // boucle en cours de la voix (la première, ou l'une des suivantes quand la zone en a plusieurs)
+    std::int64_t ls = z.loopStart, le = z.loopEnd, cxl = z.loopCrossfade;
+    auto useLoop = [&] (int idx) noexcept
+    {
+        if (idx <= 0 || idx > z.moreLoopCount) { ls = z.loopStart; le = z.loopEnd; cxl = z.loopCrossfade; return; }
+        const auto& m = z.moreLoops[static_cast<std::size_t> (idx - 1)];
+        ls = m.start; le = m.end; cxl = m.crossfade;
+    };
+    useLoop (v.loopIdx);
+    // la boucle revient en arrière tant qu'il reste des retours, ou si c'est la dernière
+    auto wrapping = [&] () noexcept { return loop && (v.repsLeft != 0 || v.loopIdx >= z.moreLoopCount); };
     const float gStep = numFrames > 0 ? (g1 - g0) / static_cast<float> (numFrames) : 0.0f;
     float mg = g0;
 
@@ -588,13 +589,20 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
         const std::int64_t i0 = static_cast<std::int64_t> (std::floor (v.pos));
         const float t = static_cast<float> (v.pos - static_cast<double> (i0));
-        const std::int64_t a = wrapIndex (z, i0 - 1), b = wrapIndex (z, i0), c = wrapIndex (z, i0 + 1), d = wrapIndex (z, i0 + 2);
+        const bool wrapNow = wrapping();
+        auto wrapK = [&] (std::int64_t k) noexcept
+        {
+            if (wrapNow && k >= le) k = ls + (k - ls) % (le - ls);
+            return k;
+        };
+        const std::int64_t a = wrapK (i0 - 1), b = wrapK (i0), c = wrapK (i0 + 1), d = wrapK (i0 + 2);
         float l = hermite (tap (0, a), tap (0, b), tap (0, c), tap (0, d), t);
         float r = stereo ? hermite (tap (1, a), tap (1, b), tap (1, c), tap (1, d), t) : l;
-        if (crossfade && v.pos >= loopEndD - xfade && v.pos < loopEndD)
+        if (wrapNow && ! reverse && cxl > 0 && v.pos >= static_cast<double> (le - cxl) && v.pos < static_cast<double> (le))
         {
             // fondu enchaîné de boucle : le son qui précède le début de boucle (une longueur de boucle plus tôt) est mélangé en puissance constante
-            const double w = (v.pos - (loopEndD - xfade)) / xfade;
+            const double xfade = static_cast<double> (cxl), loopLen = static_cast<double> (le - ls);
+            const double w = (v.pos - (static_cast<double> (le) - xfade)) / xfade;
             const float g1 = static_cast<float> (std::cos (w * 1.5707963267948966)), g2 = static_cast<float> (std::sin (w * 1.5707963267948966));
             const std::int64_t j0 = i0 - static_cast<std::int64_t> (loopLen);
             const float l2 = hermite (tap (0, j0 - 1), tap (0, j0), tap (0, j0 + 1), tap (0, j0 + 2), t);
@@ -659,8 +667,8 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         }
         if (right != nullptr)
         {
-            left[i] += l * e;
-            right[i] += r * e;
+            left[i] += l * e * z.panL;
+            right[i] += r * e * z.panR;
         }
         else
             left[i] += 0.5f * (l + r) * e;
@@ -674,10 +682,22 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
             inc = dir * ratio * pitchFactor;
         }
         lastEnv = envValue;
-        if (loop && ! reverse && v.pos >= static_cast<double> (z.loopEnd))
+        if (loop && ! reverse && v.pos >= static_cast<double> (le))
         {
-            const double len = static_cast<double> (z.loopEnd - z.loopStart);
-            v.pos = static_cast<double> (z.loopStart) + std::fmod (v.pos - static_cast<double> (z.loopStart), len);
+            if (v.repsLeft == 0 && v.loopIdx < z.moreLoopCount)
+            {
+                // les retours de cette boucle sont épuisés : la lecture continue vers la boucle suivante
+                ++v.loopIdx;
+                useLoop (v.loopIdx);
+                const int reps = v.loopIdx < z.moreLoopCount ? z.moreLoops[static_cast<std::size_t> (v.loopIdx - 1)].repeats : 0;
+                v.repsLeft = reps > 0 ? reps : -1;
+            }
+            else
+            {
+                const double len = static_cast<double> (le - ls);
+                v.pos = static_cast<double> (ls) + std::fmod (v.pos - static_cast<double> (ls), len);
+                if (v.repsLeft > 0) --v.repsLeft;
+            }
         }
         else if (loop && reverse && v.pos < static_cast<double> (z.loopStart))
         {

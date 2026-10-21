@@ -87,6 +87,8 @@ private:
     void toolSplitHits();
     void toolAutoLoop();
     void toolSaveAs();
+    void addLoop();
+    void removeLoop();
     void toolStretch();
     void updateSeam();
     void updateFootprint();
@@ -123,6 +125,7 @@ private:
     std::shared_ptr<const neptune::core::VolumeFootprint> footprint_;
     std::future<std::shared_ptr<const neptune::core::VolumeFootprint>> footprintJob_;
     std::atomic<bool> footprintCancel_ { false };
+    int editLoop_ = 0;   // boucle éditée (0 = la première)
     bool snapOn_ = false;
     int stretchPercent_ = 100, pitchTenths_ = 0;      // durée (%) et hauteur (dixièmes de demi-ton) de l'outil d'étirement
     std::thread stretchThread_;
@@ -160,12 +163,15 @@ private:
     nova::WaveView* wave_ = nullptr;
     nova::Text *infoText_ = nullptr, *markerText_ = nullptr;
     nova::Pill *loopPill_ = nullptr, *reversePill_ = nullptr, *showAllPill_ = nullptr, *playPill_ = nullptr, *recPill_ = nullptr;
-    nova::ValueSlider *fadeIn_ = nullptr, *fadeOut_ = nullptr, *delay_ = nullptr, *crossfade_ = nullptr, *tune_ = nullptr, *gain_ = nullptr;
+    nova::ValueSlider *fadeIn_ = nullptr, *fadeOut_ = nullptr, *delay_ = nullptr, *crossfade_ = nullptr, *tune_ = nullptr, *gain_ = nullptr, *pan_ = nullptr;
     nova::NumberPill* rootNumber2_ = nullptr;
     nova::Panel* toolsPanel_ = nullptr;
     nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
     nova::ChoicePill *normChoice_ = nullptr, *silenceChoice_ = nullptr, *cutsChoice_ = nullptr;
     nova::Text* toolStatus_ = nullptr;
+    std::unique_ptr<nova::ChoicePill> loopEditChoice_;
+    nova::Pill *loopAddPill_ = nullptr, *loopRemovePill_ = nullptr;
+    nova::NumberPill* loopRepeatsNumber_ = nullptr;
     nova::Pill *peakCurvePill_ = nullptr, *rmsCurvePill_ = nullptr, *lufsCurvePill_ = nullptr, *loudestPill_ = nullptr, *prevPeakPill_ = nullptr, *nextPeakPill_ = nullptr, *rangePill_ = nullptr;
     nova::NumberPill *rangeLoNumber_ = nullptr, *rangeHiNumber_ = nullptr;
     nova::NumberPill *durationNumber_ = nullptr, *pitchNumber_ = nullptr;
