@@ -81,6 +81,12 @@ ZoneDescription sanitised (ZoneDescription z)
     if (z.onRelease) z.trigger = TriggerCondition::Always; // la condition ne concerne que les zones d'attaque
     if (z.loopStart < 0) z.loopStart = 0;
     if (z.loopEnd >= 0 && z.loopEnd <= z.loopStart) z.loopEnd = -1; // incohérent : tout le fichier
+    if (z.startFrame < 0) z.startFrame = 0;
+    if (z.endFrame >= 0 && z.endFrame <= z.startFrame) z.endFrame = -1;
+    z.loopCrossfade = std::clamp<std::int64_t> (z.loopCrossfade, 0, 100000000);
+    z.fadeInMs = std::isfinite (z.fadeInMs) ? std::clamp (z.fadeInMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeInMs;
+    z.fadeOutMs = std::isfinite (z.fadeOutMs) ? std::clamp (z.fadeOutMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeOutMs;
+    z.delayMs = std::isfinite (z.delayMs) ? std::clamp (z.delayMs, 0.0, ZoneDescription::maxDelayMs) : 0.0;
     return z;
 }
 
@@ -193,6 +199,13 @@ std::string toJson (const InstrumentDescription& d)
         o["gain_db"] = z.gainDb;
         o["loop_start"] = z.loopStart;
         o["loop_end"] = z.loopEnd;
+        if (z.startFrame != 0) o["start_frame"] = z.startFrame;
+        if (z.endFrame >= 0) o["end_frame"] = z.endFrame;
+        if (z.loopCrossfade != 0) o["loop_crossfade"] = z.loopCrossfade;
+        if (z.fadeInMs != ZoneDescription::defaultFadeInMs) o["fade_in_ms"] = z.fadeInMs;
+        if (z.fadeOutMs != ZoneDescription::defaultFadeOutMs) o["fade_out_ms"] = z.fadeOutMs;
+        if (z.reverse) o["reverse"] = true;
+        if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.roundRobin != 0) o["round_robin"] = z.roundRobin;
         if (! z.group.empty()) o["group"] = z.group;
         if (z.onRelease) o["on_release"] = true;
@@ -310,6 +323,13 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.gainDb = readNum (o, "gain_db", z.gainDb);
     z.loopStart = readI64 (o, "loop_start", z.loopStart);
     z.loopEnd = readI64 (o, "loop_end", z.loopEnd);
+    z.startFrame = readI64 (o, "start_frame", z.startFrame);
+    z.endFrame = readI64 (o, "end_frame", z.endFrame);
+    z.loopCrossfade = readI64 (o, "loop_crossfade", z.loopCrossfade);
+    z.fadeInMs = readNum (o, "fade_in_ms", z.fadeInMs);
+    z.fadeOutMs = readNum (o, "fade_out_ms", z.fadeOutMs);
+    if (const auto it = o.find ("reverse"); it != o.end() && it->is_boolean()) z.reverse = it->get<bool>();
+    z.delayMs = readNum (o, "delay_ms", z.delayMs);
     z.roundRobin = readInt (o, "round_robin", 0);
     if (const auto it = o.find ("group"); it != o.end() && it->is_string()) z.group = it->get<std::string>();
     if (const auto it = o.find ("on_release"); it != o.end() && it->is_boolean()) z.onRelease = it->get<bool>();
@@ -609,6 +629,7 @@ std::int64_t residentFramesNeeded (const InstrumentDescription& d, const ZoneDes
                                    std::int64_t totalFrames)
 {
     if (! d.streamFromDisk || totalFrames <= 0) return totalFrames;
+    if (zone.reverse) return totalFrames;   // lue à l'envers : tout doit être en mémoire
     if (zone.mode == PlayMode::Loop)
     {
         // Même règle de bornage que buildInstrument : la boucle lit jusqu'à loopEnd (+ 4 pour l'interpolation).
@@ -620,7 +641,9 @@ std::int64_t residentFramesNeeded (const InstrumentDescription& d, const ZoneDes
     const std::int64_t bytes = static_cast<std::int64_t> (std::clamp (d.preloadKB, InstrumentDescription::minPreloadKB,
                                                                       InstrumentDescription::maxPreloadKB)) * 1024;
     const std::int64_t perFrame = static_cast<std::int64_t> (std::max (1, channels)) * (keptAsInt16 ? 2 : 4);
-    return std::min<std::int64_t> (totalFrames, std::max<std::int64_t> (1, bytes / perFrame));
+    // la lecture commence à startFrame : le préchargement couvre le début de la région jouée
+    const std::int64_t start = std::clamp<std::int64_t> (zone.startFrame, 0, totalFrames - 1);
+    return std::min<std::int64_t> (totalFrames, start + std::max<std::int64_t> (1, bytes / perFrame));
 }
 
 std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& description, std::vector<std::string>* warnings,
@@ -737,6 +760,14 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.loopStart = std::min<std::int64_t> (zd.loopStart, frames - 1);
         z.loopEnd = zd.loopEnd < 0 ? frames : std::min<std::int64_t> (zd.loopEnd, frames);
         if (z.loopEnd <= z.loopStart) { z.loopStart = 0; z.loopEnd = frames; }
+        z.startFrame = std::clamp<std::int64_t> (zd.startFrame, 0, frames - 1);
+        z.endFrame = zd.endFrame < 0 ? frames : std::min<std::int64_t> (zd.endFrame, frames);
+        if (z.endFrame <= z.startFrame) { z.startFrame = 0; z.endFrame = frames; }
+        z.loopCrossfade = std::min<std::int64_t> ({ zd.loopCrossfade, z.loopStart, (z.loopEnd - z.loopStart) / 2 });
+        z.fadeInMs = zd.fadeInMs;
+        z.fadeOutMs = zd.fadeOutMs;
+        z.reverse = zd.reverse;
+        z.delayMs = zd.delayMs;
         inst->zones.push_back (std::move (z));
     }
     for (std::size_t i = 0; i < description.slots.size(); ++i)
@@ -773,6 +804,8 @@ Zone makeFullKeyboardZone (std::shared_ptr<const SampleData> sample, int rootNot
     z.mode = mode;
     z.loopStart = 0;
     z.loopEnd = sample ? sample->frames : 0;
+    z.startFrame = 0;
+    z.endFrame = sample ? sample->frames : 0;
     z.sample = std::move (sample);
     return z;
 }

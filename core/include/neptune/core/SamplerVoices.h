@@ -115,6 +115,8 @@ private:
         std::array<float, 2> fenvValue { 0.0f, 0.0f };
         SlotMods mods;                      // effet des emplacements assignables, fixé au Note On
         int fcount = 0;
+        int delayLeft = 0;                  // délai de lecture : échantillons de silence restant avant le début du son
+        double fadeInPlayed = 0.0;          // échantillons de sortie déjà joués (fondu d'entrée)
         bool streaming = false;             // un emplacement de DiskStreamer est réservé à cette voix
         int streamSlot = -1;
         std::uint32_t streamGen = 0;

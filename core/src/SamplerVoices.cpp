@@ -396,7 +396,13 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->key = key;
     v->zoneIndex = static_cast<int> (&zone - instrument_->zones.data());
     v->order = ++counter_;
-    v->pos = 0.0;
+    {
+        const std::int64_t endF = zone.endFrame > zone.startFrame ? zone.endFrame : zone.sample->frames;
+        if (! zone.reverse) v->pos = static_cast<double> (zone.startFrame);
+        else v->pos = static_cast<double> (zone.mode == PlayMode::Loop ? zone.loopEnd : endF) - 1.0;   // lecture à l'envers : on part de la fin
+        v->delayLeft = zone.delayMs > 0.0 ? static_cast<int> (std::lround (zone.delayMs * 0.001 * sampleRate_)) : 0;
+        v->fadeInPlayed = 0.0;
+    }
     bindZone (*v, zone);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     v->layerGain = layerGain;
@@ -518,8 +524,16 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     }
     double ratio = v.baseRatio;
     float lastEnv = 0.0f;
-    double inc = ratio * pitchFactor;
+    const bool reverse = z.reverse;
+    const double dir = reverse ? -1.0 : 1.0;
+    double inc = dir * ratio * pitchFactor;
     const double frames = static_cast<double> (s.frames);
+    const std::int64_t startF = z.startFrame, endF = z.endFrame > z.startFrame ? z.endFrame : s.frames;
+    const double endLimit = loop ? frames : static_cast<double> (endF);
+    const double fadeInOut = z.fadeInMs > 0.0 ? z.fadeInMs * 0.001 * sampleRate_ : 0.0;
+    const double fadeOutOut = (! loop && z.fadeOutMs > 0.0) ? z.fadeOutMs * 0.001 * sampleRate_ : 0.0;
+    const bool crossfade = loop && ! reverse && z.loopCrossfade > 0;
+    const double xfade = static_cast<double> (z.loopCrossfade), loopEndD = static_cast<double> (z.loopEnd), loopLen = static_cast<double> (z.loopEnd - z.loopStart);
     const float gStep = numFrames > 0 ? (g1 - g0) / static_cast<float> (numFrames) : 0.0f;
     float mg = g0;
 
@@ -569,13 +583,25 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
     for (int i = 0; i < numFrames; ++i)
     {
-        if (v.pos >= frames) { v.active = false; return; } // fin du sample (one-shot)
+        if (v.delayLeft > 0) { --v.delayLeft; continue; } // délai de lecture : rien ne se passe encore (l'enveloppe attend aussi)
+        if (reverse ? v.pos < static_cast<double> (startF) && ! loop : v.pos >= endLimit) { v.active = false; return; } // fin de la région jouée (one-shot)
 
-        const std::int64_t i0 = static_cast<std::int64_t> (v.pos);
+        const std::int64_t i0 = static_cast<std::int64_t> (std::floor (v.pos));
         const float t = static_cast<float> (v.pos - static_cast<double> (i0));
         const std::int64_t a = wrapIndex (z, i0 - 1), b = wrapIndex (z, i0), c = wrapIndex (z, i0 + 1), d = wrapIndex (z, i0 + 2);
         float l = hermite (tap (0, a), tap (0, b), tap (0, c), tap (0, d), t);
         float r = stereo ? hermite (tap (1, a), tap (1, b), tap (1, c), tap (1, d), t) : l;
+        if (crossfade && v.pos >= loopEndD - xfade && v.pos < loopEndD)
+        {
+            // fondu enchaîné de boucle : le son qui précède le début de boucle (une longueur de boucle plus tôt) est mélangé en puissance constante
+            const double w = (v.pos - (loopEndD - xfade)) / xfade;
+            const float g1 = static_cast<float> (std::cos (w * 1.5707963267948966)), g2 = static_cast<float> (std::sin (w * 1.5707963267948966));
+            const std::int64_t j0 = i0 - static_cast<std::int64_t> (loopLen);
+            const float l2 = hermite (tap (0, j0 - 1), tap (0, j0), tap (0, j0 + 1), tap (0, j0 + 2), t);
+            const float r2 = stereo ? hermite (tap (1, j0 - 1), tap (1, j0), tap (1, j0 + 1), tap (1, j0 + 2), t) : l2;
+            l = l * g1 + l2 * g2;
+            r = stereo ? r * g1 + r2 * g2 : l;
+        }
 
         if constexpr (Filtered) // filtres par voie : coefficients mis à jour tous les 16 échantillons, enveloppes au rythme de l'échantillon
         {
@@ -615,6 +641,16 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
         float e = v.velocity * z.gain * v.mods.gain * v.layerGain * mg * envValue;
+        if (fadeInOut > 0.0 && v.fadeInPlayed < fadeInOut)
+        {
+            e *= static_cast<float> (v.fadeInPlayed / fadeInOut);
+            v.fadeInPlayed += 1.0;
+        }
+        if (fadeOutOut > 0.0)   // fondu de sortie : sur la fin de la région jouée (durée mesurée en échantillons de sortie)
+        {
+            const double remaining = (reverse ? v.pos - static_cast<double> (startF) : static_cast<double> (endF) - v.pos) / std::max (std::abs (inc), 1e-9);
+            if (remaining < fadeOutOut) e *= static_cast<float> (std::max (0.0, remaining / fadeOutOut));
+        }
         if (v.stolen)
         {
             v.fade -= v.fadeStep;
@@ -635,13 +671,18 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         {
             ratio += v.glideDelta;
             if (--v.glideLeft == 0) ratio = v.targetRatio;
-            inc = ratio * pitchFactor;
+            inc = dir * ratio * pitchFactor;
         }
         lastEnv = envValue;
-        if (loop && v.pos >= static_cast<double> (z.loopEnd))
+        if (loop && ! reverse && v.pos >= static_cast<double> (z.loopEnd))
         {
             const double len = static_cast<double> (z.loopEnd - z.loopStart);
             v.pos = static_cast<double> (z.loopStart) + std::fmod (v.pos - static_cast<double> (z.loopStart), len);
+        }
+        else if (loop && reverse && v.pos < static_cast<double> (z.loopStart))
+        {
+            const double len = static_cast<double> (z.loopEnd - z.loopStart);
+            v.pos = static_cast<double> (z.loopEnd) - std::fmod (static_cast<double> (z.loopEnd) - v.pos, len);
         }
     }
     v.baseRatio = ratio; // le glissando du legato se poursuit au bloc suivant

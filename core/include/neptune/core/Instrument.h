@@ -69,6 +69,16 @@ struct ZoneDescription
     int chokeCutBy = 0;            // groupe de choke par lequel cette zone peut être coupée (0 = aucun)
     // Points de boucle en échantillons ; loopEnd < 0 = jusqu'à la fin du fichier.
     std::int64_t loopStart = 0, loopEnd = -1;
+    // Région jouée (en échantillons) : la lecture commence à startFrame et, hors boucle, s'arrête à endFrame (exclusif) ; endFrame < 0 = fin du fichier.
+    std::int64_t startFrame = 0, endFrame = -1;
+    // Fondu enchaîné de boucle (en échantillons, avant la fin de boucle : le son qui précède le début de boucle y est mélangé en puissance constante) ; 0 = aucun.
+    std::int64_t loopCrossfade = 0;
+    // Fondus d'entrée et de sortie (ms) : rampes de gain appliquées en direct (rien n'est figé dans le sample) ; petites par défaut, contre les clics.
+    // Le fondu de sortie ne vaut que pour une lecture jusqu'au bout (one-shot) ; une boucle se termine par le relâchement de l'enveloppe.
+    double fadeInMs = defaultFadeInMs, fadeOutMs = defaultFadeOutMs;
+    bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
+    double delayMs = 0.0;          // retard du déclenchement du son après le Note On
+    static constexpr double defaultFadeInMs = 1.0, defaultFadeOutMs = 2.0, maxFadeMs = 5000.0, maxDelayMs = 10000.0;
 
     bool operator== (const ZoneDescription& o) const noexcept
     {
@@ -76,7 +86,9 @@ struct ZoneDescription
             && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && tuneCents == o.tuneCents && gainDb == o.gainDb
             && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
             && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
-            && filterOverride == o.filterOverride && filters == o.filters;
+            && filterOverride == o.filterOverride && filters == o.filters
+            && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
+            && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs;
     }
 };
 
@@ -198,6 +210,11 @@ struct Zone
     double tuneCents = 0.0;
     float gain = 1.0f; // linéaire
     std::int64_t loopStart = 0, loopEnd = 0; // loopEnd exclusif, > loopStart, <= frames
+    std::int64_t startFrame = 0, endFrame = 0; // région jouée : [startFrame, endFrame) ; 0 / 0 = tout le fichier (construit par buildInstrument)
+    std::int64_t loopCrossfade = 0;            // en échantillons, <= loopStart et <= la moitié de la boucle
+    double fadeInMs = 0.0, fadeOutMs = 0.0;
+    bool reverse = false;
+    double delayMs = 0.0;
     int roundRobin = 0;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;
