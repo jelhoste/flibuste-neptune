@@ -3,7 +3,9 @@
 // marqueurs de lecture, boucle et fondu enchaîné, fondus, lecture inversée, délai, accordage, gain), SON (enveloppe de la zone, filtres, emplacements assignables), INSTRUMENT (réponse de vélocité,
 // polyphonie, mémoire et streaming, Groupes) et SETTINGS. Reprend toute la logique de l'ancienne vue Mapping de Neptune ; les composants existants (matrice, liste, enveloppe, panneaux)
 // sont posés dans des panneaux NOVA.
+#include <atomic>
 #include <map>
+#include <thread>
 #include "ChokePanel.h"
 #include "EnvelopeEditor.h"
 #include "FilterEditor.h"
@@ -20,6 +22,7 @@
 #include "ZoneTable.h"
 #include "neptune/core/MemoryBudget.h"
 #include "neptune/core/SampleEdit.h"
+#include "neptune/core/TimeStretch.h"
 
 class NovaSamplerEditor : public nova::EditorBase
 {
@@ -78,6 +81,7 @@ private:
     void toolSplitHits();
     void toolAutoLoop();
     void toolSaveAs();
+    void toolStretch();
     void updateSeam();
     juce::String statusText() const;
     juce::String baseStatusText() const;
@@ -103,6 +107,9 @@ private:
     std::string shownSamplePath_;
     struct GroupMenuListener;
     bool snapOn_ = false;
+    int stretchPercent_ = 100, pitchTenths_ = 0;      // durée (%) et hauteur (dixièmes de demi-ton) de l'outil d'étirement
+    std::thread stretchThread_;
+    std::atomic<bool> stretchCancel_ { false }, stretchBusy_ { false };
     int normIndex_ = 1, silenceIndex_ = 1, cutsIndex_ = 1;
     std::vector<neptune::core::sampleedit::LoopCandidate> loopCandidates_;
     int loopCandidateIndex_ = 0;
@@ -140,6 +147,8 @@ private:
     nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
     nova::ChoicePill *normChoice_ = nullptr, *silenceChoice_ = nullptr, *cutsChoice_ = nullptr;
     nova::Text* toolStatus_ = nullptr;
+    nova::NumberPill *durationNumber_ = nullptr, *pitchNumber_ = nullptr;
+    nova::Pill* stretchPill_ = nullptr;
     nova::LoopSeamView* seam_ = nullptr;
 
     // page SON

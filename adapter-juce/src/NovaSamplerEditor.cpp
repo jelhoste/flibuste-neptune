@@ -94,6 +94,8 @@ NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette&
 
 NovaSamplerEditor::~NovaSamplerEditor()
 {
+    stretchCancel_ = true;
+    if (stretchThread_.joinable()) stretchThread_.join();
     proc_.setVoiceMonitor (false);
 }
 
@@ -394,6 +396,13 @@ void NovaSamplerEditor::buildSamplePage()
     loopFindPill_ = tool (tx ("sm.tool_loop"), "hlp.sm_loop", [this] { toolAutoLoop(); });
     snapPill_ = tool (tx ("sm.tool_snap"), "hlp.sm_snap", [this] { snapOn_ = ! snapOn_; snapPill_->setOn (snapOn_); });
     toolStatus_ = add<nova::Text> (1, skin(), Token::TextDim, 11.0f);
+    durationNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.tool_duration").toUpperCase(), 25, 400, [this] { return stretchPercent_; }, [this] (int v) { stretchPercent_ = v; },
+                                             [] (int v) { return juce::String (v) + " %"; });
+    addInfo (1, durationNumber_, "hlp.sm_stretch", 1);
+    pitchNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.tool_pitch").toUpperCase(), -240, 240, [this] { return pitchTenths_; }, [this] (int v) { pitchTenths_ = v; },
+                                          [] (int v) { return (v > 0 ? "+" : "") + juce::String (static_cast<double> (v) / 10.0, 1) + " st"; });
+    addInfo (1, pitchNumber_, "hlp.sm_stretch", 1);
+    stretchPill_ = tool (tx ("sm.tool_stretch"), "hlp.sm_stretch", [this] { toolStretch(); });
     seam_ = add<nova::LoopSeamView> (1, skin());
 }
 
@@ -631,6 +640,66 @@ void NovaSamplerEditor::toolAutoLoop()
     });
     setToolStatus (U (translator().format ("sm.st_loop", { std::to_string (loopCandidateIndex_ + 1), std::to_string (loopCandidates_.size()),
                                                             std::to_string (static_cast<int> (std::lround (c.score * 100.0))) })));
+}
+
+// Étirement et décalage de hauteur : calcul en arrière-plan (plusieurs secondes sur un long fichier), puis nouvelle copie de travail.
+// Tous les repères de la zone suivent le changement de durée.
+void NovaSamplerEditor::toolStretch()
+{
+    if (stretchBusy_) return;
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const double ratio = static_cast<double> (stretchPercent_) / 100.0, semis = static_cast<double> (pitchTenths_) / 10.0;
+    if (std::fabs (ratio - 1.0) < 1.0e-6 && std::fabs (semis) < 1.0e-9) { setToolStatus (tx ("sm.st_stretch_none")); return; }
+    const Zone zone = *z;
+    const int index = shownIndex();
+    if (stretchThread_.joinable()) stretchThread_.join();
+    stretchCancel_ = false;
+    stretchBusy_ = true;
+    setToolStatus (tx ("sm.st_stretch_busy"));
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    stretchThread_ = std::thread ([this, safe, zone, index, ratio, semis]
+    {
+        se::Buffer in, out;
+        std::string err;
+        bool ok = se::readFile (utf8Path (zone.samplePath), in, &err);
+        if (ok)
+        {
+            out = se::stretchAndShift (in, ratio, semis, &stretchCancel_);
+            ok = out.frames() > 0;
+            if (! ok && err.empty()) err = "cancelled";
+        }
+        std::string newPath;
+        if (ok)
+        {
+            const auto path = se::derivedPath (editedDirectory(), zone.samplePath, "stretch", out);
+            if (! std::filesystem::exists (path)) ok = se::writeWav (path, out, &err);
+            newPath = path.u8string();
+        }
+        const std::int64_t oldFrames = in.frames(), newFrames = out.frames();
+        stretchBusy_ = false;
+        if (stretchCancel_) return;
+        juce::MessageManager::callAsync ([safe, ok, err, newPath, oldFrames, newFrames, zone, index]
+        {
+            if (safe == nullptr) return;
+            if (! ok) { safe->setToolStatus (U (safe->translator().format ("sm.st_error", { err }))); return; }
+            const double f = static_cast<double> (newFrames) / static_cast<double> (std::max<std::int64_t> (1, oldFrames));
+            auto scale = [f] (std::int64_t v) { return v < 0 ? v : static_cast<std::int64_t> (std::llround (static_cast<double> (v) * f)); };
+            auto d = safe->proc_.instrumentDescription();
+            if (index < 0 || index >= static_cast<int> (d.zones.size()) || d.zones[static_cast<std::size_t> (index)].samplePath != zone.samplePath) return;   // la zone a changé entre-temps
+            auto& n = d.zones[static_cast<std::size_t> (index)];
+            n.samplePath = newPath;
+            n.startFrame = scale (n.startFrame);
+            n.endFrame = scale (n.endFrame);
+            n.loopStart = scale (n.loopStart);
+            n.loopEnd = scale (n.loopEnd);
+            n.loopCrossfade = scale (n.loopCrossfade);
+            n = sanitised (n);
+            safe->proc_.uiEditInstrument (std::move (d), "Stretch sample", "sample-edit");
+            safe->lastRevision_ = 0xFFFFFFFFu;
+            safe->setToolStatus (U (safe->translator().format ("sm.st_stretch", { std::to_string (newFrames) })));
+        });
+    });
 }
 
 void NovaSamplerEditor::toolSaveAs()
@@ -1410,24 +1479,27 @@ void NovaSamplerEditor::layout()
     voicesView_->setBounds (R (X0, 196, 942, 514));
 
     // ---- page SAMPLE
-    wavePanel_->setBounds (R (X0, 72, 942, 270));
-    wave_->setBounds (R (X0 + 10, 104, 922, 228));
-    infoText_->setBounds (R (X0 + 4, 344, 934, 16));
-    markerText_->setBounds (R (X0 + 4, 360, 934, 16));
-    toolsPanel_->setBounds (R (X0, 380, 942, 136));
-    trimPill_->setBounds (R (X0 + 12, 412, 110, 28));
-    normPill_->setBounds (R (X0 + 128, 412, 116, 28));
-    normChoice_->pill->setBounds (R (X0 + 250, 412, 170, 28));
-    dcPill_->setBounds (R (X0 + 426, 412, 124, 28));
-    saveAsPill_->setBounds (R (X0 + 556, 412, 150, 28));
-    silencePill_->setBounds (R (X0 + 12, 446, 170, 28));
-    silenceChoice_->pill->setBounds (R (X0 + 188, 446, 160, 28));
-    cutsPill_->setBounds (R (X0 + 354, 446, 160, 28));
-    cutsChoice_->pill->setBounds (R (X0 + 520, 446, 186, 28));
-    loopFindPill_->setBounds (R (X0 + 12, 480, 150, 28));
-    snapPill_->setBounds (R (X0 + 168, 480, 150, 28));
-    toolStatus_->setBounds (R (X0 + 326, 480, 380, 28));
-    seam_->setBounds (R (X0 + 718, 408, 216, 100));
+    wavePanel_->setBounds (R (X0, 72, 942, 236));
+    wave_->setBounds (R (X0 + 10, 104, 922, 194));
+    infoText_->setBounds (R (X0 + 4, 310, 934, 16));
+    markerText_->setBounds (R (X0 + 4, 326, 934, 16));
+    toolsPanel_->setBounds (R (X0, 346, 942, 170));
+    trimPill_->setBounds (R (X0 + 12, 378, 110, 28));
+    normPill_->setBounds (R (X0 + 128, 378, 116, 28));
+    normChoice_->pill->setBounds (R (X0 + 250, 378, 170, 28));
+    dcPill_->setBounds (R (X0 + 426, 378, 124, 28));
+    saveAsPill_->setBounds (R (X0 + 556, 378, 150, 28));
+    silencePill_->setBounds (R (X0 + 12, 412, 170, 28));
+    silenceChoice_->pill->setBounds (R (X0 + 188, 412, 160, 28));
+    cutsPill_->setBounds (R (X0 + 354, 412, 160, 28));
+    cutsChoice_->pill->setBounds (R (X0 + 520, 412, 186, 28));
+    loopFindPill_->setBounds (R (X0 + 12, 446, 150, 28));
+    snapPill_->setBounds (R (X0 + 168, 446, 150, 28));
+    toolStatus_->setBounds (R (X0 + 326, 446, 380, 28));
+    durationNumber_->setBounds (R (X0 + 12, 480, 200, 28));
+    pitchNumber_->setBounds (R (X0 + 218, 480, 200, 28));
+    stretchPill_->setBounds (R (X0 + 424, 480, 140, 28));
+    seam_->setBounds (R (X0 + 718, 378, 216, 130));
     playPanel_->setBounds (R (X0, 524, 942, 186));
     loopPill_->setBounds (R (X0 + 12, 558, 170, 28));
     reversePill_->setBounds (R (X0 + 188, 558, 150, 28));
@@ -1529,6 +1601,9 @@ void NovaSamplerEditor::tick()
         updateSeam();
         for (auto* c : { normChoice_, silenceChoice_, cutsChoice_ }) c->refresh (has);
         for (auto* pl : { trimPill_, normPill_, dcPill_, saveAsPill_, silencePill_, cutsPill_, loopFindPill_ }) pl->setAlpha (has ? 1.0f : 0.4f);
+        durationNumber_->update(); pitchNumber_->update();
+        durationNumber_->setActive (has); pitchNumber_->setActive (has);
+        stretchPill_->setAlpha (has && ! stretchBusy_ ? 1.0f : 0.4f);
         if (has && z != nullptr)
         {
             const std::string key = z->samplePath + "|" + std::to_string (z->startFrame) + "|" + std::to_string (z->endFrame);
