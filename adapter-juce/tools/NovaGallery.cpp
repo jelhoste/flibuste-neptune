@@ -9,6 +9,7 @@
 #include "../src/NovaDelayEditor.h"
 #include "../src/NovaMicrodecaleEditor.h"
 #include "../src/NovaSynthEditor.h"
+#include "../src/NovaFmEditor.h"
 #include "../src/NovaSpectrum.h"
 #include "neptune/core/EqualizerModule.h"
 #include "neptune/core/CompressorModule.h"
@@ -18,6 +19,7 @@
 #include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/StockModule.h"
 #include "neptune/core/AnalogSynth.h"
+#include "neptune/core/FmSynth.h"
 #include "neptune/core/SamplerParams.h"
 #include <cmath>
 #include <memory>
@@ -505,6 +507,76 @@ int main (int argc, char** argv)
             link.heldKeys = [] (int) { return std::uint64_t (0); };
             link.outputs = { analogsynth::volume, analogsynth::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
             NovaSynthEditor ed (sh, presets, link, th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            ed.setKeyboardShownForTest (c.keyboard);
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel de FM6Op
+    {
+        fm::FmSynthEngine fmEngine;
+        fmEngine.prepare (48000.0, 512);
+        struct FHost : ParamHost
+        {
+            ParameterSet& set;
+            explicit FHost (ParameterSet& s) : set (s) {}
+            ParameterSet& parameters() override { return set; }
+            void uiBeginEdit (ParamId) override {}
+            void uiSetNormalised (ParamId id, double n) override { set.setNormalized (id, n); }
+            void uiEndEdit (ParamId) override {}
+            void uiResetToDefault (ParamId id) override { set.reset (id); }
+        } fh (fmEngine.params());
+        FakePresets fpresets (std::filesystem::path (out.getChildFile ("fm-presets").getFullPathName().toStdString()));
+        fm::FmDescription fdesc;
+        fdesc.patch.setGlobal (fm::kAlgorithmOffset, 4);
+        fdesc.patch.setGlobal (fm::kFeedbackOffset, 5);
+        fdesc.patch.setName ("E.PIANO 1");
+        for (int op = 0; op < fm::kOperators; ++op)
+        {
+            fdesc.patch.setOperatorOn (op, true);
+            fdesc.patch.setOp (op, fm::kOutputLevel, 60 + op * 6);
+            fdesc.patch.setOp (op, fm::kRate1, 90 - op * 5);
+            fdesc.patch.setOp (op, fm::kRate2, 70);
+            fdesc.patch.setOp (op, fm::kRate3, 40);
+            fdesc.patch.setOp (op, fm::kRate4, 60);
+            fdesc.patch.setOp (op, fm::kLevel1, 99);
+            fdesc.patch.setOp (op, fm::kLevel2, 80 - op * 4);
+            fdesc.patch.setOp (op, fm::kLevel3, 50);
+            fdesc.patch.setOp (op, fm::kLevel4, 0);
+            fdesc.patch.setOp (op, fm::kCoarse, 1 + op);
+            fdesc.patch.setOp (op, fm::kLeftDepth, 20);
+            fdesc.patch.setOp (op, fm::kRightDepth, 35);
+            fdesc.patch.setOp (op, fm::kLeftCurve, 0);
+            fdesc.patch.setOp (op, fm::kRightCurve, 2);
+        }
+        fmEngine.setDescription (fdesc);
+        struct FCase { const char* name; th::ThemeId id; float scale; int page; bool keyboard; };
+        const FCase fcs[] = { { "fm-dark-p0", th::ThemeId::Dark, 1.0f, 0, true }, { "fm-dark-p0-nokb", th::ThemeId::Dark, 1.0f, 0, false }, { "fm-dark-p1", th::ThemeId::Dark, 1.0f, 1, true },
+                              { "fm-dark-p2", th::ThemeId::Dark, 1.0f, 2, true }, { "fm-light-p0", th::ThemeId::Light, 1.0f, 0, true }, { "fm-hammond-p1", th::ThemeId::Hammond, 1.0f, 1, false },
+                              { "fm-dark-p0-070", th::ThemeId::Dark, 0.7f, 0, true } };
+        for (const auto& c : fcs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaFmEditor::Options opt;
+            opt.brand = true;
+            opt.noBypass = true;
+            opt.moduleName = "fm6op";
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            FmLink link;
+            link.description = [&fdesc] { return fdesc; };
+            link.edit = [] (fm::FmDescription, std::string, std::string) {};
+            link.heldKeys = [] (int) { return std::uint64_t (0); };
+            link.outputs = { fm::synthVolume, fm::synthPan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
+            NovaFmEditor ed (fh, fpresets, link, th::withContrast (def, 0), def.knob, tr, opt);
             ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.setKeyboardShownForTest (c.keyboard);

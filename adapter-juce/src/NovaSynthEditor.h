@@ -1,40 +1,24 @@
 #pragma once
-// Interface d'AnalogSynth (synthé soustractif) au style NOVA, sur le socle commun nova::EditorBase : pages OSCILLATEURS (3 oscillateurs, sous-oscillateur, bruit),
-// FILTRES (routage, deux filtres avec leur enveloppe), ENVELOPPES / VOIX (volume, pitch, polyphonie), MATRICE (grille de presets de la banque pour le concert),
-// SETTINGS ; clavier à l'écran en bandeau masquable. La bibliothèque de presets (banques, programmes MIDI, gestionnaire, corbeille) est conservée : la pastille
-// de preset de l'en-tête ouvre un menu NOVA et le gestionnaire existant se superpose à la fenêtre.
+// Interface d'AnalogSynth (synthé soustractif) au style NOVA, sur le socle commun des instruments (NovaInstrumentBase) : pages OSCILLATEURS (3 oscillateurs,
+// sous-oscillateur, bruit), FILTRES (routage, deux filtres avec leur enveloppe), ENVELOPPES / VOIX (volume, pitch, polyphonie), puis MATRICE (grille de presets de la
+// banque pour le concert) et SETTINGS ; clavier à l'écran en bandeau masquable. La bibliothèque de presets (banques, programmes MIDI, gestionnaire, corbeille) est
+// conservée : la pastille de preset de l'en-tête ouvre un menu NOVA et le gestionnaire existant se superpose à la fenêtre.
 // L'éditeur ne connaît le synthé que par `SynthLink` (description du patch, notes) : le même éditeur sert au plugin indépendant et à une piste de Neptune.
-#include <functional>
-#include <memory>
-#include <vector>
 #include "EnvelopeEditor.h"
-#include "NovaEditor.h"
-#include "NovaPresetUi.h"
-#include "NovaWidgets.h"
-#include "SynthKeyboard.h"
+#include "NovaInstrumentBase.h"
 #include "neptune/core/Synth.h"
 
-struct SynthLink
+struct SynthLink : InstrumentLink
 {
     std::function<neptune::core::SynthDescription()> description;
     std::function<void (neptune::core::SynthDescription)> edit;   // annulable (clé de fusion « synth »)
-    std::function<void()> beginGesture, endGesture, panic;
-    std::function<void (int key, float velocity)> noteOn;
-    std::function<void (int key)> noteOff;
-    std::function<std::uint64_t (int word)> heldKeys;             // touches tenues (bits 0..63 puis 64..127)
-    int track = 0;                                                // piste dont on règle les paramètres automatisables
-    std::vector<neptune::core::ParamId> outputs;                  // potards de la colonne de gauche (volume, pan, gain, accordage)
 };
 
-class NovaSynthEditor : public nova::EditorBase
+class NovaSynthEditor : public NovaInstrumentBase
 {
 public:
     NovaSynthEditor (ParamHost&, PresetHost&, SynthLink, const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle, const neptune::core::i18n::Translator&, Options);
     ~NovaSynthEditor() override;
-    bool keyPressed (const juce::KeyPress&) override;
-    void showPresetMenu (juce::Component* anchor);
-    void setPageForTest (int p) { setPage (p); }
-    void setKeyboardShownForTest (bool shown) { keyboardShown_ = shown; applyKeyboard(); resized(); }
 
 private:
     class WaveTile;
@@ -42,21 +26,15 @@ private:
 
     void layout() override;
     void tick() override;
-    void paintBackground (juce::Graphics&) override;
-    void pageChanged() override;
-    void applyKeyboard();
-    void buildLeftColumn();
+    void paintBackground (juce::Graphics& g) override { paintStatus (g); }
+    void reloadDescription() override { desc_ = describe_(); }
     void buildOscPage();
     void buildFilterPage();
     void buildEnvPage();
-    void buildMatrixPage();
-    void buildKeyboard();
 
-    // ---- fabriques : chaque commande enregistre sa mise à jour (page -1 : toujours)
+    // ---- fabriques typées sur la description du patch
     void edit (const std::function<void (Desc&)>&);
     void commit (const std::function<void (Desc&)>& change);   // changement discret : un geste complet
-    void gestureBegin();
-    void gestureEnd();
     nova::ValueSlider* slider (int page, juce::String title, double lo, double hi, double step, juce::String suffix, std::function<double (const Desc&)> get,
                                std::function<void (Desc&, double)> set, double def, std::function<bool (const Desc&)> enabled = {});
     nova::NumberPill* number (int page, juce::String label, int lo, int hi, std::function<int (const Desc&)> get, std::function<void (Desc&, int)> set,
@@ -64,27 +42,12 @@ private:
     nova::ChoicePill* choice (int page, juce::String label, std::vector<juce::String> items, std::function<int (const Desc&)> get, std::function<void (Desc&, int)> set,
                               std::function<bool (const Desc&)> enabled = {});
     nova::Pill* toggle (int page, juce::String text, std::function<bool (const Desc&)> get, std::function<void (Desc&, bool)> set, std::function<bool (const Desc&)> enabled = {});
-    nova::KnobCard* knob (int page, neptune::core::ParamId id, juce::String title, bool compact);
-    juce::String paramTitle (neptune::core::ParamId) const;
     EnvelopeEditor* envelope (int page, std::function<neptune::core::EnvelopeDescription (const Desc&)> get, std::function<void (Desc&, const neptune::core::EnvelopeDescription&)> set,
                               std::function<bool (const Desc&)> enabled = {});
-    void onUpdate (int page, std::function<void()> f);
 
-    ParamHost& hostRef_;
-    PresetHost& presets_;
-    SynthLink link_;
+    std::function<Desc()> describe_;
+    std::function<void (Desc)> apply_;
     Desc desc_;
-    bool dragging_ = false;
-    bool keyboardShown_ = true;
-    juce::String statusText_;
-    std::unique_ptr<nova::PresetUi> ui_;
-    std::vector<std::unique_ptr<nova::ChoicePill>> choices_;
-    std::vector<std::vector<std::function<void()>>> updaters_;   // par page (index page + 1 : -1 est l'index 0)
-
-    // colonne de gauche
-    nova::Panel *outPanel_ = nullptr, *navPanel_ = nullptr;
-    std::vector<nova::KnobCard*> outKnobs_;
-    nova::Pill* kbPill_ = nullptr;
 
     // page OSC
     struct OscUi
@@ -129,14 +92,4 @@ private:
     nova::KnobCard* pitchDepth_ = nullptr;
     nova::ChoicePill *polyMode_ = nullptr, *steal_ = nullptr;
     nova::ValueSlider *voices_ = nullptr, *glide_ = nullptr;
-
-    // page MATRICE
-    nova::Panel* matrixPanel_ = nullptr;
-    nova::PresetTiles* tiles_ = nullptr;
-    nova::Pill *colsPill_ = nullptr, *rowsPill_ = nullptr, *bankPrev_ = nullptr, *bankNext_ = nullptr, *bankPill_ = nullptr, *fieldPill_ = nullptr;
-
-    // clavier
-    nova::Panel* keyboardPanel_ = nullptr;
-    SynthKeyboard* keyboard_ = nullptr;
-    nova::Pill *octDown_ = nullptr, *octUp_ = nullptr, *holdPill_ = nullptr, *panicPill_ = nullptr;
 };

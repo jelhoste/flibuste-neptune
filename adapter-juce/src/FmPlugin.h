@@ -7,16 +7,11 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <memory>
 #include <string>
 #include <vector>
-#include "FmSysexIO.h"
-#include "FmView.h"
 #include "HostProbe.h"
-#include "KnobModal.h"
-#include "NeptuneKnob.h"
+#include "NovaFmEditor.h"
 #include "ParamHost.h"
-#include "PresetBar.h"
 #include "PresetHost.h"
 #include "PresetManager.h"
-#include "ScaledRoot.h"
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/FmSynth.h"
 #include "neptune/core/I18n.h"
@@ -24,8 +19,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Theme.h"
 #include "neptune/core/Undo.h"
 
-// « FM6Op » (nom provisoire) : le module FM de type DX7 de Neptune en plugin CLAP instrument indépendant. Même moteur (msfa), même
-// vue (FmView), mêmes presets (bibliothèque partagée avec Neptune et AnalogSynth), import / export sysex DX7.
+// « FM6Op » (nom provisoire) : le module FM de type DX7 de Neptune en plugin CLAP instrument indépendant. Même moteur (msfa),
+// interface NOVA (NovaFmEditor), mêmes presets (bibliothèque partagée avec Neptune et AnalogSynth), import / export sysex DX7.
 class FmSynthProcessor : public juce::AudioProcessor,
                          public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                          public ParamHost,
@@ -104,6 +99,7 @@ public:
 
     neptune::core::fm::FmSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
+    void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
 
 private:
     static BusesProperties makeBuses();
@@ -125,42 +121,19 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FmSynthProcessor)
 };
 
-class FmSynthEditor : public juce::AudioProcessorEditor, private juce::Timer
+// Fenêtre du plugin FM6Op : thème, contraste, langue ; reconstruit l'interface quand ils changent.
+class NovaFmPluginEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit FmSynthEditor (FmSynthProcessor&);
-    ~FmSynthEditor() override { stopTimer(); }
-
+    explicit NovaFmPluginEditor (FmSynthProcessor&);
     void resized() override;
     void paint (juce::Graphics&) override;
     bool keyPressed (const juce::KeyPress&) override;
 
 private:
-    void timerCallback() override;
-    void openModal (neptune::core::ParamId, neptune::core::uistate::Terminal);
-    void closeModal();
-    void openManager (bool saveAs);
-    void paintContent (juce::Graphics&);
-    juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
-    juce::Colour colour (neptune::core::theme::Token t) const;
-
-    ScaledRoot root_;
+    void buildContent();
     FmSynthProcessor& processor_;
     neptune::core::i18n::Translator tr_;
-    neptune::core::theme::Palette palette_;
-    neptune::core::theme::KnobStyle knobStyle_;
-
-    std::unique_ptr<FmView> view_;
-    std::unique_ptr<PresetBar> presetBar_;
-    std::unique_ptr<FmSysexIO> sysex_;
-    juce::OwnedArray<NeptuneKnob> knobs_;
-    juce::TextButton undoButton_, redoButton_, panicButton_;
-    juce::Label brandLabel_, infoLabel_;
-    std::unique_ptr<KnobModal> modal_;
-    std::unique_ptr<PresetManager> manager_;
-    std::uint32_t lastUndoRevision_ = 0;
-    std::uint32_t lastExtraVersions_ = 0;
-    int lastVoices_ = -1;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FmSynthEditor)
+    std::unique_ptr<NovaFmEditor> content_;
+    juce::ComponentBoundsConstrainer constrainer_;
 };

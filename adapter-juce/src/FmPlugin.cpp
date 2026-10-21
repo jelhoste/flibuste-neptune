@@ -1,4 +1,5 @@
 #include "FmPlugin.h"
+#include "NovaFmEditor.h"
 #include "NeptuneParameter.h"
 #include "neptune/core/SamplerParams.h"
 
@@ -16,14 +17,6 @@ std::filesystem::path configDirectory()
     return std::filesystem::u8path (base.getChildFile ("Neptune").getFullPathName().toStdString());
 }
 
-theme::Palette makePalette (const settings::GlobalSettings& st)
-{
-    const auto id = theme::themeFromString (st.theme).value_or (theme::ThemeId::Dark);
-    return theme::withContrast (theme::definition (id), st.contrast);
-}
-
-constexpr int kKnobCell = 118;
-constexpr int kBottomHeight = 120;
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------- processeur
@@ -293,232 +286,64 @@ bool FmSynthProcessor::saveConfig (const preset::LibraryConfig& c)
     return ok;
 }
 
-juce::AudioProcessorEditor* FmSynthProcessor::createEditor() { return new FmSynthEditor (*this); }
+juce::AudioProcessorEditor* FmSynthProcessor::createEditor() { return new NovaFmPluginEditor (*this); }
 
-// ---------------------------------------------------------------------------------------------------- éditeur
-
-juce::Colour FmSynthEditor::colour (Token t) const
+void FmSynthProcessor::applySettings (const settings::GlobalSettings& s)
 {
-    const auto& c = palette_.color (t);
-    return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
+    settings_ = s;
+    std::string error;
+    settings::saveFile (configDirectory() / "settings.json", s, &error);
 }
 
-FmSynthEditor::FmSynthEditor (FmSynthProcessor& p)
-    : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language), palette_ (makePalette (p.settings()))
+// ---------------------------------------------------------------------------------------------------- fenêtre du plugin
+NovaFmPluginEditor::NovaFmPluginEditor (FmSynthProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
 {
+    buildContent();
     setWantsKeyboardFocus (true);
-    const auto& def = theme::definition (theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark));
-    knobStyle_ = def.knob;
-
-    view_ = std::make_unique<FmView> (processor_, palette_, tr_, knobStyle_);
-    view_->onChange = [this] (const fm::FmDescription& d) { processor_.uiEditFm (d, "FM", "fm"); };
-    view_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
-    view_->onGestureEnd = [this] { processor_.uiEndGesture(); };
-    view_->onNoteOn = [this] (int key, float velocity) { processor_.uiNoteOn (key, velocity); };
-    view_->onNoteOff = [this] (int key) { processor_.uiNoteOff (key); };
-    view_->setTrack (0);
-    sysex_ = std::make_unique<FmSysexIO> (*this, processor_, tr_);
-    view_->onImportSysex = [this]
-    {
-        sysex_->importFile ([this] (const fm::Patch& patch)
-                            {
-                                auto d = processor_.fmDescription();
-                                d.patch = patch;
-                                processor_.uiEditFm (d, "Import DX7 voice");
-                            });
-    };
-    view_->onExportVoice = [this] { sysex_->exportVoice (processor_.fmDescription().patch); };
-    view_->onExportBank = [this] { sysex_->exportBank(); };
-    addAndMakeVisible (*view_);
-
-    for (const ParamId id : { fm::synthVolume, fm::synthPan, sampler::gain, sampler::tuneSemitones, sampler::tuneCents })
-        addAndMakeVisible (knobs_.add (new NeptuneKnob (processor_, id, palette_, knobStyle_,
-                                                        [this] (ParamId pid, uistate::Terminal t) { openModal (pid, t); })));
-
-    brandLabel_.setText ("FM6OP", juce::dontSendNotification);
-    brandLabel_.setColour (juce::Label::textColourId, colour (Token::Accent));
-    brandLabel_.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
-    addAndMakeVisible (brandLabel_);
-    infoLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
-    infoLabel_.setFont (juce::FontOptions (11.0f));
-    infoLabel_.setJustificationType (juce::Justification::centredRight);
-    addAndMakeVisible (infoLabel_);
-
-    presetBar_ = std::make_unique<PresetBar> (processor_, palette_, tr_);
-    presetBar_->onOpenManager = [this] (bool saveAs) { openManager (saveAs); };
-    presetBar_->onLoaded = [this] { view_->setDescription (processor_.fmDescription()); };
-    presetBar_->onStatus = [this] (const juce::String& m) { infoLabel_.setText (m, juce::dontSendNotification); };
-    addAndMakeVisible (*presetBar_);
-
-    undoButton_.setButtonText (text ("undo.undo"));
-    undoButton_.onClick = [this] { processor_.uiUndo(); };
-    redoButton_.setButtonText (text ("undo.redo"));
-    redoButton_.onClick = [this] { processor_.uiRedo(); };
-    panicButton_.setButtonText (text ("panic.button"));
-    panicButton_.onClick = [this] { processor_.uiPanic(); view_->releaseKeys(); };
-    for (auto* b : { &undoButton_, &redoButton_, &panicButton_ }) addAndMakeVisible (b);
-
-    view_->setDescription (processor_.fmDescription());
-    startTimerHz (15);
-
-    root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
-    root_.adopt (*this);
+    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    setConstrainer (&constrainer_);
     setResizable (true, true);
-    setResizeLimits (360, 240, 2400, 1400);
+    setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
+}
+
+void NovaFmPluginEditor::buildContent()
+{
+    auto& p = processor_;
+    tr_ = i18n::Translator (p.settings().language);
+    const auto id = theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark);
+    const auto palette = theme::withContrast (theme::definition (id), p.settings().contrast);
+    const auto& def = theme::definition (id);
+    NovaFmEditor::Options opt;
+    opt.brand = true;
+    opt.noBypass = true;
+    opt.moduleName = "fm6op";
+    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
+    opt.getSettings = [&p] { return p.settings(); };
+    opt.applySettings = [&p, safe = juce::Component::SafePointer<NovaFmPluginEditor> (this)] (const settings::GlobalSettings& s)
     {
-        int w = 1180, h = 760;
-        if (const auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        {
-            w = juce::jmin (w, d->userArea.getWidth() * 9 / 10);
-            h = juce::jmin (h, d->userArea.getHeight() * 85 / 100);
-        }
-        setSize (juce::jmax (360, w), juce::jmax (240, h));
-    }
-}
-
-void FmSynthEditor::resized()
-{
-    const auto logical = root_.fit (getWidth(), getHeight(), 860, 640);
-    auto r = logical.reduced (24, 12);
-    auto top = r.removeFromTop (40);
-    brandLabel_.setBounds (top.removeFromLeft (150));
-    presetBar_->setBounds (top.removeFromLeft (juce::jmin (620, top.getWidth() - 110 - 140)));
-    panicButton_.setBounds (top.removeFromRight (110).reduced (2));
-    infoLabel_.setBounds (top);
-    r.removeFromTop (8);
-    auto bottom = r.removeFromBottom (kBottomHeight);
-    view_->placeScaled (r);
-
-    const int knobSide = static_cast<int> (ui::effectiveHitSize (48.0, ui::KnobConfig {}));
-    int x = bottom.getX();
-    const int y = bottom.getY() + 22;
-    for (auto* k : knobs_)
-    {
-        k->setBounds (x + (kKnobCell - knobSide) / 2, y, knobSide, knobSide);
-        x += kKnobCell;
-    }
-    redoButton_.setBounds (bottom.getRight() - 64, y + (knobSide - 22) / 2, 64, 22);
-    undoButton_.setBounds (bottom.getRight() - 64 - 4 - 64, y + (knobSide - 22) / 2, 64, 22);
-
-    if (modal_) modal_->setBounds (logical);
-    if (manager_) manager_->setBounds (logical);
-}
-
-void FmSynthEditor::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgApp)); }
-
-void FmSynthEditor::paintContent (juce::Graphics& g)
-{
-    g.fillAll (colour (Token::BgApp));
-    const auto& set = processor_.parameters();
-    g.setFont (juce::FontOptions (11.0f));
-    for (auto* k : knobs_)
-    {
-        const auto b = k->getBounds();
-        const auto index = set.indexOf (k->paramId());
-        if (index == ParameterSet::npos) continue;
-        g.setColour (colour (Token::TextDim));
-        g.drawText (juce::String::fromUTF8 (set.spec (index).name.c_str()), b.getCentreX() - kKnobCell / 2, b.getY() - 20, kKnobCell, 18,
-                    juce::Justification::centred, true);
-        g.setColour (colour (Token::Text));
-        g.drawText (juce::String::fromUTF8 (set.toText (k->paramId()).c_str()), b.getCentreX() - kKnobCell / 2, b.getBottom() + 1, kKnobCell, 18,
-                    juce::Justification::centred, true);
-    }
-}
-
-bool FmSynthEditor::keyPressed (const juce::KeyPress& k)
-{
-    const auto m = k.getModifiers();
-    if (! m.isCommandDown()) return false;
-    const int code = k.getKeyCode();
-    if (code == 'Z' || code == 'z')
-    {
-        if (m.isShiftDown()) processor_.uiRedo(); else processor_.uiUndo();
-        return true;
-    }
-    if (code == 'Y' || code == 'y') { processor_.uiRedo(); return true; }
-    if (code == 'S' || code == 's') { presetBar_->quickSave(); return true; }
-    return false;
-}
-
-void FmSynthEditor::openModal (ParamId id, uistate::Terminal terminal)
-{
-    if (modal_ || manager_) return;
-    modal_ = std::make_unique<KnobModal> (processor_, id, terminal, palette_, tr_,
-                                          [safe = juce::Component::SafePointer<FmSynthEditor> (this)]
-                                          {
-                                              juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
-                                          });
-    root_.addAndMakeVisible (*modal_);
-    modal_->setBounds (root_.getLocalBounds());
-    modal_->toFront (true);
-}
-
-void FmSynthEditor::closeModal()
-{
-    if (! modal_) return;
-    processor_.setModalSize (modal_->terminal(), modal_->panelSize());
-    modal_.reset();
-    grabKeyboardFocus();
-}
-
-void FmSynthEditor::openManager (bool saveAs)
-{
-    if (manager_ || modal_) return;
-    manager_ = std::make_unique<PresetManager> (processor_, palette_, tr_);
-    manager_->onClose = [safe = juce::Component::SafePointer<FmSynthEditor> (this)]
-    {
-        juce::MessageManager::callAsync ([safe]
-        {
-            if (safe == nullptr) return;
-            safe->manager_.reset();
-            safe->presetBar_->refresh();
-            safe->grabKeyboardFocus();
-        });
+        p.applySettings (s);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
     };
-    manager_->onChanged = [safe = juce::Component::SafePointer<FmSynthEditor> (this)]
-    {
-        if (safe != nullptr) { safe->presetBar_->refresh(); safe->view_->setDescription (safe->processor_.fmDescription()); }
-    };
-    root_.addAndMakeVisible (*manager_);
-    manager_->setBounds (root_.getLocalBounds());
-    manager_->toFront (true);
-    if (saveAs) manager_->showSaveAs();
+    opt.presetMenu = [this] (juce::Component* anchor) { if (content_ != nullptr) content_->showPresetMenu (anchor); };
+    FmLink link;
+    link.description = [&p] { return p.fmDescription(); };
+    link.edit = [&p] (fm::FmDescription d, std::string name, std::string mergeKey) { p.uiEditFm (std::move (d), std::move (name), std::move (mergeKey)); };
+    link.beginGesture = [&p] { p.uiBeginGesture(); };
+    link.endGesture = [&p] { p.uiEndGesture(); };
+    link.panic = [&p] { p.uiPanic(); };
+    link.noteOn = [&p] (int key, float v) { p.uiNoteOn (key, v); };
+    link.noteOff = [&p] (int key) { p.uiNoteOff (key); };
+    link.heldKeys = [&p] (int word) { return p.engine().heldKeyWord (word); };
+    link.track = 0;
+    link.outputs = { fm::synthVolume, fm::synthPan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
+    content_.reset();
+    content_ = std::make_unique<NovaFmEditor> (p, p, std::move (link), palette, def.knob, tr_, opt);
+    addAndMakeVisible (*content_);
+    content_->setBounds (getLocalBounds());
 }
 
-void FmSynthEditor::timerCallback()
-{
-    if (presetBar_->needsRefresh())
-    {
-        presetBar_->refresh();
-        view_->setDescription (processor_.fmDescription());
-    }
-    const auto rev = static_cast<std::uint32_t> (processor_.undoManager().revision());
-    if (rev != lastUndoRevision_)
-    {
-        lastUndoRevision_ = rev;
-        view_->setDescription (processor_.fmDescription());
-    }
-    // automation du LFO, du bend, de la molette, du glissando : la vue suit
-    {
-        std::uint32_t sum = 0;
-        for (int k = 0; k < neptune::core::mixer::kFmExtraKinds; ++k)
-            sum += processor_.engine().params().version (neptune::core::mixer::fmExtraParam (0, static_cast<neptune::core::mixer::FmExtraKind> (k)));
-        if (sum != lastExtraVersions_)
-        {
-            lastExtraVersions_ = sum;
-            view_->setDescription (processor_.fmDescription());
-        }
-    }
-    view_->setHeldKeys (processor_.engine().heldKeyWord (0), processor_.engine().heldKeyWord (1));
-    undoButton_.setEnabled (processor_.undoManager().canUndo());
-    redoButton_.setEnabled (processor_.undoManager().canRedo());
-    const int voices = processor_.engine().voiceCount();
-    if (voices != lastVoices_)
-    {
-        lastVoices_ = voices;
-        infoLabel_.setText (text ("analog.voices") + " " + juce::String (voices), juce::dontSendNotification);
-    }
-    root_.repaint();
-}
+void NovaFmPluginEditor::resized() { content_->setBounds (getLocalBounds()); }
+void NovaFmPluginEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::black); }
+bool NovaFmPluginEditor::keyPressed (const juce::KeyPress& k) { return content_ != nullptr && content_->keyPressed (k); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new FmSynthProcessor(); }

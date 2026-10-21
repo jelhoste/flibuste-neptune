@@ -107,22 +107,14 @@ private:
     bool haveData_ = false, hover_ = false;
 };
 
-// ------------------------------------------------------------------------------------------------ fabriques
-void NovaSynthEditor::onUpdate (int page, std::function<void()> f)
-{
-    updaters_[static_cast<std::size_t> (page + 1)].push_back (std::move (f));
-}
-
-void NovaSynthEditor::gestureBegin() { dragging_ = true; if (link_.beginGesture) link_.beginGesture(); }
-void NovaSynthEditor::gestureEnd() { if (link_.endGesture) link_.endGesture(); dragging_ = false; }
-
+// ------------------------------------------------------------------------------------------------ fabriques typées sur la description
 void NovaSynthEditor::edit (const std::function<void (Desc&)>& change)
 {
     auto d = desc_;
     change (d);
     if (d == desc_) return;
     desc_ = d;
-    link_.edit (d);
+    apply_ (d);
 }
 
 void NovaSynthEditor::commit (const std::function<void (Desc&)>& change)
@@ -135,63 +127,28 @@ void NovaSynthEditor::commit (const std::function<void (Desc&)>& change)
 nova::ValueSlider* NovaSynthEditor::slider (int page, juce::String title, double lo, double hi, double step, juce::String suffix, std::function<double (const Desc&)> get,
                                             std::function<void (Desc&, double)> set, double def, std::function<bool (const Desc&)> enabled)
 {
-    auto* s = add<nova::ValueSlider> (page, skin(), std::move (title), lo, hi, step, std::move (suffix), [this, get] { return get (desc_); },
-                                      [this, set] (double v) { edit ([&] (Desc& d) { set (d, v); }); }, def);
-    s->gestureBegin = [this] { gestureBegin(); };
-    s->gestureEnd = [this] { gestureEnd(); };
-    onUpdate (page, [this, s, enabled] { s->update(); if (enabled) s->setActive (enabled (desc_)); });
-    return s;
+    return sliderFn (page, std::move (title), lo, hi, step, std::move (suffix), [this, get] { return get (desc_); },
+                     [this, set] (double v) { edit ([&] (Desc& d) { set (d, v); }); }, def, enabled ? std::function<bool()> ([this, enabled] { return enabled (desc_); }) : std::function<bool()> {});
 }
 
 nova::NumberPill* NovaSynthEditor::number (int page, juce::String label, int lo, int hi, std::function<int (const Desc&)> get, std::function<void (Desc&, int)> set,
                                            std::function<bool (const Desc&)> enabled)
 {
-    auto* n = add<nova::NumberPill> (page, skin(), std::move (label), lo, hi, [this, get] { return get (desc_); },
-                                     [this, set] (int v) { edit ([&] (Desc& d) { set (d, v); }); });
-    n->gestureBegin = [this] { gestureBegin(); };
-    n->gestureEnd = [this] { gestureEnd(); };
-    onUpdate (page, [this, n, enabled] { n->update(); if (enabled) n->setActive (enabled (desc_)); });
-    return n;
+    return numberFn (page, std::move (label), lo, hi, [this, get] { return get (desc_); }, [this, set] (int v) { edit ([&] (Desc& d) { set (d, v); }); },
+                     enabled ? std::function<bool()> ([this, enabled] { return enabled (desc_); }) : std::function<bool()> {});
 }
 
 nova::ChoicePill* NovaSynthEditor::choice (int page, juce::String label, std::vector<juce::String> items, std::function<int (const Desc&)> get, std::function<void (Desc&, int)> set,
                                            std::function<bool (const Desc&)> enabled)
 {
-    auto c = std::make_unique<nova::ChoicePill>();
-    c->pill = add<nova::Pill> (page, skin(), nova::Pill::Look::Small);
-    c->label = [label] { return label; };
-    c->items = std::move (items);
-    c->get = [this, get] { return get (desc_); };
-    c->set = [this, set] (int v) { commit ([&] (Desc& d) { set (d, v); }); };
-    c->attach (*this);
-    auto* raw = c.get();
-    choices_.push_back (std::move (c));
-    onUpdate (page, [this, raw, enabled] { raw->refresh (! enabled || enabled (desc_)); });
-    return raw;
+    return choiceFn (page, std::move (label), std::move (items), [this, get] { return get (desc_); }, [this, set] (int v) { edit ([&] (Desc& d) { set (d, v); }); },
+                     enabled ? std::function<bool()> ([this, enabled] { return enabled (desc_); }) : std::function<bool()> {});
 }
 
 nova::Pill* NovaSynthEditor::toggle (int page, juce::String text, std::function<bool (const Desc&)> get, std::function<void (Desc&, bool)> set, std::function<bool (const Desc&)> enabled)
 {
-    auto* p = add<nova::Pill> (page, skin(), nova::Pill::Look::Small);
-    p->setText (text);
-    p->onClick = [this, get, set] { const bool now = ! get (desc_); commit ([&] (Desc& d) { set (d, now); }); };
-    onUpdate (page, [this, p, get, enabled] { p->setOn (get (desc_)); const bool en = ! enabled || enabled (desc_); p->setAlpha (en ? 1.0f : 0.4f); p->setInterceptsMouseClicks (en, en); });
-    return p;
-}
-
-juce::String NovaSynthEditor::paramTitle (ParamId id) const
-{
-    const auto& set = hostRef_.parameters();
-    const auto index = set.indexOf (id);
-    return index == ParameterSet::npos ? juce::String() : juce::String::fromUTF8 (set.spec (index).name.c_str()).toUpperCase();
-}
-
-nova::KnobCard* NovaSynthEditor::knob (int page, ParamId id, juce::String title, bool compact)
-{
-    auto* k = add<nova::KnobCard> (page, skin(), host(), id, title.isEmpty() ? paramTitle (id) : title, modalOpener());
-    k->setPlain (true);
-    k->setCompact (compact);
-    return k;
+    return toggleFn (page, std::move (text), [this, get] { return get (desc_); }, [this, set] (bool b) { edit ([&] (Desc& d) { set (d, b); }); },
+                     enabled ? std::function<bool()> ([this, enabled] { return enabled (desc_); }) : std::function<bool()> {});
 }
 
 EnvelopeEditor* NovaSynthEditor::envelope (int page, std::function<EnvelopeDescription (const Desc&)> get, std::function<void (Desc&, const EnvelopeDescription&)> set,
@@ -204,7 +161,7 @@ EnvelopeEditor* NovaSynthEditor::envelope (int page, std::function<EnvelopeDescr
     auto shown = std::make_shared<std::pair<bool, EnvelopeDescription>> (false, EnvelopeDescription {});
     onUpdate (page, [this, e, get, enabled, shown]
     {
-        if (dragging_) return;
+        if (dragging()) return;
         const auto env = get (desc_);
         if (! shown->first || ! (env == shown->second)) { shown->first = true; shown->second = env; e->setEnvelope (env); }
         if (enabled) e->setEnabled (enabled (desc_));
@@ -214,40 +171,21 @@ EnvelopeEditor* NovaSynthEditor::envelope (int page, std::function<EnvelopeDescr
 
 // ------------------------------------------------------------------------------------------------ construction
 NovaSynthEditor::NovaSynthEditor (ParamHost& host, PresetHost& presets, SynthLink link, const theme::Palette& palette, theme::KnobStyle knobStyle, const i18n::Translator& tr, Options options)
-    : EditorBase (host, palette, knobStyle, tr, std::move (options), juce::String::fromUTF8 ("ANALOGSYNTH")), hostRef_ (host), presets_ (presets), link_ (std::move (link))
+    : NovaInstrumentBase (host, presets, link, palette, knobStyle, tr, std::move (options), juce::String::fromUTF8 ("ANALOGSYNTH")), describe_ (link.description), apply_ (link.edit)
 {
-    updaters_.resize (7);
-    desc_ = link_.description();
-    ui_ = std::make_unique<nova::PresetUi> (*this, presets_, palette, tr, [this] { desc_ = link_.description(); });
+    desc_ = describe_();
     addPage (tx ("synth.page_osc"), iconPath (0));
     addPage (tx ("synth.page_filter"), iconPath (1));
     addPage (tx ("synth.page_env"), iconPath (2));
-    addPage (tx ("og.page_matrix"), iconPath (3));
-    addPage (tx ("nv.page_settings"), iconPath (4));
-    buildLeftColumn();
+    buildCommon ("hlp.sy_out");   // MATRICE, SETTINGS, colonne de gauche, clavier
     buildOscPage();
     buildFilterPage();
     buildEnvPage();
-    buildMatrixPage();
-    buildKeyboard();
-    buildSettingsPage (4);
     setPage (0);
     setSize (designWidth, designHeight);
 }
 
 NovaSynthEditor::~NovaSynthEditor() = default;
-
-void NovaSynthEditor::buildLeftColumn()
-{
-    outPanel_ = add<nova::Panel> (-1, skin());
-    outPanel_->setTitle (tx ("sy.output").toUpperCase());
-    navPanel_ = add<nova::Panel> (-1, skin());
-    navPanel_->toBack();   // sous les entrées du menu, créées avant lui
-    for (const auto id : link_.outputs) outKnobs_.push_back (knob (-1, id, {}, true));
-    kbPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
-    kbPill_->onClick = [this] { keyboardShown_ = ! keyboardShown_; if (! keyboardShown_) keyboard_->releaseAll(); applyKeyboard(); resized(); };
-    addInfo (-1, outPanel_, "hlp.sy_out", 1);
-}
 
 void NovaSynthEditor::buildOscPage()
 {
@@ -402,88 +340,12 @@ void NovaSynthEditor::buildEnvPage()
     addInfo (2, glide_, "hlp.sy_glide", 1);
 }
 
-void NovaSynthEditor::buildMatrixPage()
-{
-    matrixPanel_ = add<nova::Panel> (3, skin());
-    matrixPanel_->setTitle (tx ("og.matrix_title").toUpperCase());
-    tiles_ = add<nova::PresetTiles> (3, skin(), presets_);
-    tiles_->onLoaded = [this] { desc_ = link_.description(); };
-    addInfo (3, matrixPanel_, "hlp.sy_matrix", true);
-    bankPrev_ = add<nova::Pill> (3, skin(), nova::Pill::Look::Small);
-    bankPrev_->setText ("<");
-    bankPrev_->onClick = [this] { tiles_->bank = (tiles_->bank + preset::numBanks - 1) % preset::numBanks; };
-    bankNext_ = add<nova::Pill> (3, skin(), nova::Pill::Look::Small);
-    bankNext_->setText (">");
-    bankNext_->onClick = [this] { tiles_->bank = (tiles_->bank + 1) % preset::numBanks; };
-    bankPill_ = add<nova::Pill> (3, skin());
-    bankPill_->setStatic (true);
-    colsPill_ = add<nova::Pill> (3, skin());
-    colsPill_->onClick = [this] { tiles_->cols = tiles_->cols % 8 + 1; };
-    rowsPill_ = add<nova::Pill> (3, skin());
-    rowsPill_->onClick = [this] { tiles_->rows = tiles_->rows % 8 + 1; };
-    fieldPill_ = add<nova::Pill> (3, skin());
-    fieldPill_->onClick = [this] { tiles_->field = (tiles_->field + 1) % 5; };
-    addInfo (3, fieldPill_, "hlp.og_field");
-}
-
-void NovaSynthEditor::buildKeyboard()
-{
-    keyboardPanel_ = add<nova::Panel> (-2, skin());
-    keyboardPanel_->setTitle (tx ("synth.keyboard").toUpperCase());
-    addInfo (-2, keyboardPanel_, "hlp.sy_keyboard", 1);
-    keyboard_ = add<SynthKeyboard> (-2, skin().palette());
-    keyboard_->onNoteOn = [this] (int key, float v) { if (link_.noteOn) link_.noteOn (key, v); };
-    keyboard_->onNoteOff = [this] (int key) { if (link_.noteOff) link_.noteOff (key); };
-    octDown_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
-    octDown_->setText (tx ("synth.oct_down"));
-    octDown_->onClick = [this] { keyboard_->shiftOctave (-1); };
-    octUp_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
-    octUp_->setText (tx ("synth.oct_up"));
-    octUp_->onClick = [this] { keyboard_->shiftOctave (1); };
-    holdPill_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
-    holdPill_->setText (tx ("synth.hold"));
-    holdPill_->onClick = [this] { holdPill_->setOn (! holdPill_->isOn()); keyboard_->setHold (holdPill_->isOn()); };
-    panicPill_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
-    panicPill_->setText (tx ("panic.button"));
-    panicPill_->onClick = [this] { if (link_.panic) link_.panic(); keyboard_->releaseAll(); };
-}
-
-// ------------------------------------------------------------------------------------------------ presets
-void NovaSynthEditor::showPresetMenu (juce::Component* anchor) { ui_->showMenu (anchor, tiles_ != nullptr ? tiles_->bank : 0); }
-
-bool NovaSynthEditor::keyPressed (const juce::KeyPress& k)
-{
-    const auto m = k.getModifiers();
-    if (m.isCommandDown() && (k.getKeyCode() == 'S' || k.getKeyCode() == 's')) { ui_->quickSave(); return true; }
-    return EditorBase::keyPressed (k);
-}
-
-// ------------------------------------------------------------------------------------------------ clavier masquable
-void NovaSynthEditor::applyKeyboard()
-{
-    const bool shown = keyboardShown_ && currentPage() != numPages() - 1;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { keyboardPanel_, keyboard_, octDown_, octUp_, holdPill_, panicPill_ }) c->setVisible (shown);
-    setInfoVisible (keyboardPanel_, shown);
-}
-
-void NovaSynthEditor::pageChanged() { if (keyboardPanel_ != nullptr) applyKeyboard(); }
-
 // ------------------------------------------------------------------------------------------------ mise en page
 void NovaSynthEditor::layout()
 {
-    // hauteur utile de la zone de pages (design) : 512 avec le clavier, 638 sans ; les rangées se répartissent en proportion
-    const float H = keyboardShown_ ? 512.0f : 638.0f, K = H / 512.0f;
-    auto Y = [K] (float rel) { return 72.0f + rel * K; };
-    constexpr float X0 = 204.0f;
-
-    // ---- colonne de gauche
-    outPanel_->setBounds (R (14, 72, 176, 316));
-    for (std::size_t i = 0; i < outKnobs_.size(); ++i)
-        outKnobs_[i]->setBounds (R (22.0f + static_cast<float> (i % 2) * 84.0f, 106.0f + static_cast<float> (i / 2) * 92.0f, 80, 88));
-    navPanel_->setBounds (R (14, 400, 176, 310));
-    layoutNav (400, 250);
-    kbPill_->setText (tx (keyboardShown_ ? "synth.kb_shown" : "synth.kb_hidden"));
-    kbPill_->setBounds (R (24, 664, 156, 30));
+    // hauteur utile de la zone de pages (maquette) : 512 avec le clavier, 638 sans ; les rangées se répartissent en proportion (Y, stretch)
+    const float H = contentH(), K = stretch();
+    layoutCommon();
 
     // ---- page OSCILLATEURS
     for (int o = 0; o < numOscillators; ++o)
@@ -553,58 +415,14 @@ void NovaSynthEditor::layout()
         voices_->setBounds (R (X0 + 560, vy + 28, 170, 46));
         glide_->setBounds (R (X0 + 750, vy + 28, 170, 46));
     }
-
-    // ---- page MATRICE
-    matrixPanel_->setBounds (R (X0, 72, 942, H));
-    bankPrev_->setBounds (R (X0 + 16, 72 + 36, 36, 30));
-    bankPill_->setBounds (R (X0 + 56, 72 + 36, 150, 30));
-    bankNext_->setBounds (R (X0 + 210, 72 + 36, 36, 30));
-    colsPill_->setBounds (R (X0 + 266, 72 + 36, 150, 30));
-    rowsPill_->setBounds (R (X0 + 426, 72 + 36, 150, 30));
-    fieldPill_->setBounds (R (X0 + 586, 72 + 36, 310, 30));
-    tiles_->setBounds (R (X0 + 16, 72 + 80, 910, H - 92));
-
-    // ---- clavier
-    keyboardPanel_->setBounds (R (X0, 596, 942, 114));
-    keyboard_->setBounds (R (X0 + 12, 626, 700, 78));
-    octDown_->setBounds (R (X0 + 732, 628, 60, 26));
-    octUp_->setBounds (R (X0 + 798, 628, 60, 26));
-    holdPill_->setBounds (R (X0 + 864, 628, 66, 26));
-    panicPill_->setBounds (R (X0 + 732, 664, 198, 30));
-    applyKeyboard();
-
-    // ---- barre du bas, en-tête, gestionnaire
-    abPill()->setBounds (R (14, 724 + 12, 40, 32));
-    presetPill()->setBounds (R (440, 11, 280, 36));
-    ui_->resized();
 }
 
 void NovaSynthEditor::tick()
 {
-    if (! dragging_)
+    if (! dragging())
     {
-        const auto d = link_.description();
+        const auto d = describe_();
         if (! (d == desc_)) desc_ = d;
     }
-    presetPill()->setText (ui_->label());
-    for (auto& f : updaters_[0]) f();
-    const int page = currentPage();
-    if (page >= 0 && page < 5) for (auto& f : updaters_[static_cast<std::size_t> (page + 1)]) f();
-    if (keyboardShown_ && page != numPages() - 1 && link_.heldKeys) keyboard_->setHeldKeys (link_.heldKeys (0), link_.heldKeys (1));
-    if (page == 3)
-    {
-        tiles_->update();
-        bankPill_->setText (tx ("og.bank") + " " + juce::String::fromUTF8 (preset::defaultBankName (tiles_->bank).c_str()) + " (" + juce::String (tiles_->bank) + ")");
-        colsPill_->setText (tx ("og.columns") + "  " + juce::String (tiles_->cols));
-        rowsPill_->setText (tx ("og.rows") + "  " + juce::String (tiles_->rows));
-        static const char* const fields[5] = { "og.f_preset", "og.f_song", "og.f_workshop", "og.f_student", "og.f_event" };
-        fieldPill_->setText (tx ("og.main_field") + ": " + tx (fields[tiles_->field]));
-    }
-}
-
-void NovaSynthEditor::paintBackground (juce::Graphics& g)
-{
-    g.setColour (skin().colour (Token::TextDim2));
-    g.setFont (skin().font (11.0f, true));
-    if (ui_->statusText.isNotEmpty()) g.drawText (ui_->statusText, R (730, 724 + 12, 416, 32).toFloat(), juce::Justification::centredRight);
+    tickCommon();
 }
