@@ -46,12 +46,10 @@ target_sources(Neptune PRIVATE
   src/VoicesView.cpp
   src/FilterEditor.cpp
   src/MixerView.cpp
-  src/SynthView.cpp
   src/SynthKeyboard.cpp
   src/PresetBar.cpp
   src/PresetManager.cpp
   src/MidiFilterEditor.cpp
-  src/FmView.cpp
   src/FmSysexIO.cpp
   src/UtilityEditor.cpp
   src/InsertOverlay.cpp
@@ -437,7 +435,7 @@ target_link_libraries(AnalogSynth
     juce::juce_recommended_warning_flags)
 
 # ---- FM6Op (nom provisoire) : le module FM de type DX7 de Neptune, plugin CLAP instrument indépendant ---------------------------
-# Même moteur (neptune_core : msfa via FmEngine / FmVoices / FmSynth) et même vue (FmView) que le type de piste FM ; presets
+# Même moteur (neptune_core : msfa via FmEngine / FmVoices / FmSynth) que le type de piste FM, interface NOVA (NovaFmEditor) ; presets
 # partagés avec Neptune et AnalogSynth ; import / export sysex DX7.
 set(FM6OP_CLAP_ID "com.tournedosrossini.fm6op" CACHE STRING "Identifiant CLAP du synthé FM indépendant")
 

@@ -14,12 +14,10 @@
 #include "MixerView.h"
 #include "MidiFilterEditor.h"
 #include "FmSysexIO.h"
-#include "FmView.h"
 #include "OrganView.h"
 #include "PresetBar.h"
 #include "PresetManager.h"
 #include "ScaledRoot.h"
-#include "SynthView.h"
 #include "InsertOverlay.h"
 #include "InstrumentOverlay.h"
 #include "KnobModal.h"
@@ -123,10 +121,10 @@ private:
     juce::TextButton mixerButton_, mappingButton_;
     std::unique_ptr<MixerView> mixerView_;
     // Vue Synthé : remplace la vue Mapping quand la piste sélectionnée est un synthé.
-    std::unique_ptr<SynthView> synthView_;
     std::unique_ptr<InsertOverlay> insertOverlay_;
     std::unique_ptr<InstrumentOverlay> instrumentOverlay_;   // éditeur NOVA du synthé ou du FM de la piste sélectionnée
     juce::TextButton novaButton_;
+    juce::Label instrumentLabel_;
     void openInstrumentEditor();
     void closeInstrumentEditor();
     void openInsert (NeptuneProcessor::StripKind, int index, int slot);
@@ -138,12 +136,9 @@ private:
     bool selectedIsAudioIn() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::AudioIn; }
     bool selectedIsOrgan() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Organ; }
     // Vue FM : remplace la vue Mapping quand la piste sélectionnée est de type FM.
-    std::unique_ptr<FmView> fmView_;
-    std::unique_ptr<FmSysexIO> sysexIO_;
     bool selectedIsFm() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Fm; }
     std::array<int, 128> synthKeyTrack_ {}; // piste sur laquelle chaque touche du clavier à l'écran a démarré
     bool selectedIsSynth() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Synth; }
-    void updateSynthView();
     juce::ComboBox trackBox_;   // piste sélectionnée
     int knobTrack_ = -1;        // piste sur laquelle les potards d'instrument sont branchés
     std::uint32_t trackBoxRevision_ = 0xFFFFFFFFu;
