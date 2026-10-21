@@ -560,3 +560,15 @@ Décisions de l'utilisateur : bibliothèque de presets conservée (menu NOVA dan
 
 - Orgamon : les deux barres de sortie L/R sont maintenant des `MidiBar` de mêmes dimensions que les barres MIDI ; les barres MIDI affichent directement la vélocité du dernier note-on, sans animation, jusqu'au note-off.
 - Égaliseur en insert Neptune : `bandResponseDb(..., current=true)` n'utilisait le gain mesuré par le DSP que pour une bande dynamique ; avant, la courbe restait figée quand le module n'était pas traité. Test de non-régression dans `tests/test_equalizer.cpp`.
+
+## AnalogSynth et FM6Op au style NOVA (2026-10-21)
+
+Décisions (réponses de l'utilisateur) : AnalogSynth d'abord, puis FM6Op ; pages OSC / FILTRES / ENV & VOIX + MATRICE + SETTINGS ; éditeurs graphiques d'enveloppe réécrits au style NOVA (FM : fait ; AnalogSynth : `EnvelopeEditor` réutilisé, habillé par le LookAndFeel NOVA, à refaire si l'aspect gêne) ; clavier en bandeau masquable ; bibliothèque de presets conservée (menu NOVA + gestionnaire existant + matrice de tuiles). Migration des pistes Synthé/FM de Neptune : demandée, **non faite** (la zone des pistes de Neptune fait ~1100 x 430, l'interface NOVA est conçue en 1160 x 780 : question posée à l'utilisateur).
+
+Architecture :
+- `NovaInstrumentBase` (`.h/.cpp`) : colonne de gauche (potards de sortie, menu de pages, bouton du clavier), page MATRICE, page SETTINGS, clavier masquable, `PresetUi`, fabriques de commandes (`sliderFn`, `numberFn`, `choiceFn`, `toggleFn`, `knob`, `onUpdate`). L'instrument ne passe que par `InstrumentLink` (gestes, notes, touches tenues, piste, potards de sortie). Hauteur utile des pages : 512 (avec clavier) ou 638 ; `Y(rel)` étire les rangées.
+- `NovaWidgets.h` : `ValueSlider` (valeur de la description, geste d'annulation), `NumberPill`, `ChoicePill`, `PresetTiles` (grille de la matrice). `NovaPresetUi.*` : libellé, menu, gestionnaire.
+- `NovaSynthEditor` (`SynthLink` : description + édition annulable) ; `NovaFmEditor` (`FmLink`) avec `AlgoView`, `EnvView` (enveloppe 4 vitesses / 4 niveaux), `ScaleView`.
+- `WaveExplorer.h` : l'explorateur de formes d'onde, sorti de `SynthView.cpp`.
+- Les anciens `AnalogSynthEditor` et `FmSynthEditor` sont supprimés ; `SynthView` et `FmView` restent pour Neptune.
+- Textes d'aide : `hlp.sy_*` et `hlp.fm_*` (I18n). Galerie : cas `synth-*` et `fm-*` dans `NovaGallery`.
