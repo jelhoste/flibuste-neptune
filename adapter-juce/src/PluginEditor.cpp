@@ -502,7 +502,7 @@ void NeptuneEditor::updateInstrumentPanel()
     auto panel = std::make_unique<InstrumentPanel> (processor_, palette_, tr_, def.knob);
     if (! panel->valid()) return;
     instrumentPanel_ = std::move (panel);
-    addAndMakeVisible (*instrumentPanel_);
+    root_.addAndMakeVisible (*instrumentPanel_);   // dans la racine mise à l'échelle (comme les calques), pas dans la fenêtre : sinon elle passe sous la racine
     instrumentPanel_->toBack();
     resized();
 }
