@@ -54,6 +54,7 @@ target_sources(Neptune PRIVATE
   src/InstrumentPanel.cpp
   src/NovaSamplerEditor.cpp
   src/NovaWaveView.cpp
+  src/NovaOrganEditor.cpp
   src/NovaSynthEditor.cpp
   src/NovaFmEditor.cpp
   src/NovaInstrumentBase.cpp
