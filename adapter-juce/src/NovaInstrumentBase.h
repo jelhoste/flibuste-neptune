@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include "NovaEditor.h"
+#include "NovaPresetFields.h"
 #include "NovaPresetUi.h"
 #include "NovaWidgets.h"
 #include "SynthKeyboard.h"
@@ -78,6 +79,8 @@ private:
     nova::Pill* kbPill_ = nullptr;
     nova::Panel* matrixPanel_ = nullptr;
     nova::PresetTiles* tiles_ = nullptr;
+    nova::PresetFields* fields_ = nullptr;
+    nova::Text* fieldsTitle_ = nullptr;
     nova::Pill *colsPill_ = nullptr, *rowsPill_ = nullptr, *bankPrev_ = nullptr, *bankNext_ = nullptr, *bankPill_ = nullptr, *fieldPill_ = nullptr, *fillPill_ = nullptr;
     nova::Panel* keyboardPanel_ = nullptr;
     SynthKeyboard* keyboard_ = nullptr;

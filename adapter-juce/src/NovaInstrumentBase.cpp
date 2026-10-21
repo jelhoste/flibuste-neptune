@@ -141,6 +141,10 @@ void NovaInstrumentBase::buildCommon (const char* outputHelpKey)
     fieldPill_ = add<nova::Pill> (mp, skin());
     fieldPill_->onClick = [this] { tiles_->field = (tiles_->field + 1) % 5; };
     addInfo (mp, fieldPill_, "hlp.og_field");
+    fieldsTitle_ = add<nova::Text> (mp, skin(), Token::TextDim2, 11.0f, true);
+    fieldsTitle_->setText (tx ("sy.fields_title").toUpperCase());
+    fields_ = add<nova::PresetFields> (mp, skin(), presets_, translator());
+    addInfo (mp, fieldsTitle_, "hlp.sy_fields");
     fillPill_ = add<nova::Pill> (mp, skin());
     fillPill_->setText (tx ("sy.fill_factory"));
     fillPill_->onClick = [this] { fillBankWithFactoryPresets(); };
@@ -235,7 +239,9 @@ void NovaInstrumentBase::layoutCommon()
     rowsPill_->setBounds (R (X0 + 426, 72 + 36, 150, 30));
     fieldPill_->setBounds (R (X0 + 586, 72 + 36, 190, 30));
     fillPill_->setBounds (R (X0 + 784, 72 + 36, 124, 30));
-    tiles_->setBounds (R (X0 + 16, 72 + 80, 910, H - 92));
+    tiles_->setBounds (R (X0 + 16, 72 + 80, 640, H - 92));
+    fieldsTitle_->setBounds (R (X0 + 676, 72 + 80, 240, 16));
+    fields_->setBounds (R (X0 + 676, 72 + 100, 250, H - 112));
 
     // ---- clavier
     keyboardPanel_->setBounds (R (X0, 596, 942, 114));
@@ -262,6 +268,7 @@ void NovaInstrumentBase::tickCommon()
     if (page == matrixPage())
     {
         tiles_->update();
+        fields_->update();
         bankPill_->setText (tx ("og.bank") + " " + juce::String::fromUTF8 (preset::defaultBankName (tiles_->bank).c_str()) + " (" + juce::String (tiles_->bank) + ")");
         colsPill_->setText (tx ("og.columns") + "  " + juce::String (tiles_->cols));
         rowsPill_->setText (tx ("og.rows") + "  " + juce::String (tiles_->rows));
