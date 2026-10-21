@@ -1701,7 +1701,19 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     {
         const auto msg = metadata.getMessage();
         if (msg.isNoteOn())
+        {
             ++hostProbe_.midiNoteOns;
+            const int ch = (msg.getChannel() - 1) & 15;
+            ++heldPerChannel_[ch];
+            midiLevel_[ch].store (msg.getFloatVelocity(), std::memory_order_relaxed);
+        }
+        else if (msg.isNoteOff())
+        {
+            const int ch = (msg.getChannel() - 1) & 15;
+            if (heldPerChannel_[ch] > 0 && --heldPerChannel_[ch] == 0) midiLevel_[ch].store (0.0f, std::memory_order_relaxed);
+        }
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
+            for (int ch = 0; ch < 16; ++ch) { heldPerChannel_[ch] = 0; midiLevel_[ch].store (0.0f, std::memory_order_relaxed); }
         if (msg.isAllSoundOff())
             engine_.panic();
         else if (msg.isAllNotesOff())

@@ -14,7 +14,6 @@
 #include "MixerView.h"
 #include "MidiFilterEditor.h"
 #include "FmSysexIO.h"
-#include "OrganView.h"
 #include "PresetBar.h"
 #include "PresetManager.h"
 #include "ScaledRoot.h"
@@ -128,7 +127,6 @@ private:
     void closeInsert();
     bool synthShown_ = false, fmShown_ = false, organShown_ = false, audioInShown_ = false;
     // Vue Orgue : remplace la vue Mapping quand la piste sélectionnée est de type Orgue.
-    std::unique_ptr<OrganView> organView_;
     std::unique_ptr<AudioInView> audioInView_;
     bool selectedIsAudioIn() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::AudioIn; }
     bool selectedIsOrgan() const { return processor_.trackType (processor_.selectedTrack()) == neptune::core::TrackType::Organ; }

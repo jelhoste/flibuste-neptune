@@ -55,17 +55,47 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
         fm_ = std::make_unique<NovaFmEditor> (proc, proc, std::move (link), palette_, knobStyle, tr_, opt);
         addAndMakeVisible (*fm_);
     }
+    else if (type_ == TrackType::Organ)
+    {
+        OrganLink link;
+        link.description = [&proc, track] { return proc.organDescription (track); };
+        link.edit = [&proc] (organ::OrganDescription d) { proc.uiEditOrgan (std::move (d), "Organ keyboards", "organ"); };
+        link.undoRevision = [&proc] { return static_cast<std::uint32_t> (proc.undoManager().revision()); };
+        link.panic = [&proc] { proc.uiPanic(); };
+        link.noteOn = [&proc, track] (int channel, int key) { proc.uiNoteOnTrack (track, key, 0.8f, channel); };
+        link.noteOff = [&proc, track] (int channel, int key) { proc.uiNoteOffTrack (track, key, channel); };
+        link.heldWord = [&proc, track] (int word) { return proc.heldKeyWord (track, word); };
+        link.heldCount = [&proc, track]
+        {
+            int n = 0;
+            for (int w = 0; w < 2; ++w) for (auto bits = proc.heldKeyWord (track, w); bits != 0; bits &= bits - 1) ++n;
+            return n;
+        };
+        link.outPeak = [&proc, track] (int c) { const auto m = proc.trackMeter (track); return c == 0 ? m.peakL : m.peakR; };
+        link.midiLevel = [&proc] (int ch) { return proc.midiLevel (ch); };
+        link.ccEnabled = [&proc] { return proc.ccEnabled(); };
+        link.setCc = [&proc] (bool on) { proc.uiSetCcEnabled (on); };
+        link.track = track;
+        link.volumeId = probe::trackParam (track, probe::kVolume);
+        link.gainId = mx::samplerParam (track, mx::kGain);
+        auto opt = options ("organ");
+        opt.presetMenu = [this] (juce::Component* anchor) { if (organ_ != nullptr) organ_->showPresetMenu (anchor); };
+        organ_ = std::make_unique<NovaOrganEditor> (proc, proc, std::move (link), palette_, knobStyle, tr_, opt);
+        addAndMakeVisible (*organ_);
+    }
 }
 
 void InstrumentPanel::resized()
 {
     if (synth_ != nullptr) synth_->setBounds (getLocalBounds());
     if (fm_ != nullptr) fm_->setBounds (getLocalBounds());
+    if (organ_ != nullptr) organ_->setBounds (getLocalBounds());
 }
 
 bool InstrumentPanel::keyPressed (const juce::KeyPress& k)
 {
     if (synth_ != nullptr) return synth_->keyPressed (k);
     if (fm_ != nullptr) return fm_->keyPressed (k);
+    if (organ_ != nullptr) return organ_->keyPressed (k);
     return false;
 }

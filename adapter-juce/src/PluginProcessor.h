@@ -223,6 +223,8 @@ public:
     void uiEditBus (int bus, neptune::core::mixer::StripSettings, std::string name, std::string mergeKey = {});
     void uiEditMaster (neptune::core::mixer::MasterSettings, std::string name, std::string mergeKey = {});
     neptune::core::Engine::Meter trackMeter (int track) const { return engine_.trackMeter (track); }
+    // Vélocité du dernier note-on reçu sur un canal MIDI (0..15), 0 quand plus aucune note n'y est tenue (vu-mètres de contrôle des claviers de l'orgue)
+    float midiLevel (int channel) const noexcept { return midiLevel_[channel & 15].load (std::memory_order_relaxed); }
     neptune::core::Engine::Meter busMeter (int bus) const { return engine_.busMeter (bus); }
     neptune::core::Engine::Meter parallelMeter (int p) const { return engine_.parallelMeter (p); }
     neptune::core::Engine::Meter masterMeter() const { return engine_.masterMeter(); }
@@ -281,6 +283,8 @@ private:
 
     void seedHostParameters (const std::vector<std::pair<neptune::core::ParamId, double>>&);
     bool notifyHostOnSeed_ = true;       // faux pendant le chargement d'un état (publishSynthPatch)
+    std::atomic<float> midiLevel_[16] {};
+    int heldPerChannel_[16] {};   // fil audio seulement
     neptune::core::ParameterSet params_; // déclaré avant le moteur : les paramètres survivent à tout ce qui les lit
     neptune::core::Engine engine_;
     neptune::core::InstanceProfile profile_;

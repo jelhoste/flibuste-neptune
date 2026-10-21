@@ -402,105 +402,6 @@ private:
     int start_ = 0;
 };
 
-// ------------------------------------------------------------------------------------------------ grille de presets de la banque courante (page MATRICE)
-class NovaOrganEditor::TileGrid : public juce::Component
-{
-public:
-    TileGrid (const nova::Skin& s, OrganProcessor& p) : skin_ (s), proc_ (p) {}
-
-    int cols = 4, rows = 3, bank = 0, field = 0;   // field : 0 nom du preset, 1 morceau, 2 atelier, 3 élève, 4 événement
-    std::function<void()> onLoaded;
-
-    void update()
-    {
-        const auto rev = proc_.presetRevision();
-        const auto id = proc_.currentPresetId();
-        const auto key = static_cast<std::uint32_t> (cols * 1000 + rows * 100 + bank * 7 + field);
-        if (rev == rev_ && id == id_ && key == key_) return;
-        rev_ = rev;
-        id_ = id;
-        key_ = key;
-        repaint();
-    }
-    void paint (juce::Graphics& g) override
-    {
-        const auto& lib = proc_.library();
-        const auto current = proc_.currentPresetId();
-        for (int i = 0; i < cols * rows; ++i)
-        {
-            const auto r = tile (i).reduced (skin_.px (4.0f));
-            const auto presetId = preset::Navigator::presetAt (lib.banks(), { bank, i });
-            const auto* p = presetId.empty() ? nullptr : lib.find (presetId);
-            const bool active = p != nullptr && presetId == current;
-            skin_.fill (g, active ? Token::Accent : Token::StageBg, r, skin_.px (8.0f));
-            g.setColour (skin_.colour (active ? Token::Accent : Token::Grid, active ? 1.0f : 0.9f));
-            g.drawRoundedRectangle (r, skin_.px (8.0f), skin_.px (active ? 2.0f : 1.0f));
-            g.setColour (skin_.colour (active ? Token::BgApp : Token::TextDim2));
-            g.setFont (skin_.font (11.0f, true));
-            g.drawText (juce::String (i + 1), r.withTrimmedLeft (skin_.px (8.0f)).withHeight (skin_.px (18.0f)), juce::Justification::centredLeft);
-            if (p == nullptr)
-            {
-                g.drawText (juce::String::fromUTF8 ("\xe2\x80\x94"), r, juce::Justification::centred);
-                continue;
-            }
-            // champ principal en grand, puis les champs renseignés en plus petit
-            const auto main = textOf (*p, field);
-            g.setColour (skin_.colour (active ? Token::BgApp : Token::Text));
-            g.setFont (skin_.font (cols <= 4 ? 17.0f : 13.0f, true));
-            g.drawText (main.isEmpty() ? juce::String::fromUTF8 (p->name.c_str()) : main, r.reduced (skin_.px (10.0f), skin_.px (18.0f)).withHeight (r.getHeight() * 0.5f), juce::Justification::centredLeft, true);
-            g.setFont (skin_.font (cols <= 4 ? 12.0f : 10.0f));
-            g.setColour (skin_.colour (active ? Token::BgApp : Token::TextDim));
-            float y = r.getCentreY();
-            for (int f = 0; f < 5; ++f)
-            {
-                if (f == field) continue;
-                const auto t = f == 0 ? juce::String::fromUTF8 (p->name.c_str()) : textOf (*p, f);
-                if (t.isEmpty() || y + skin_.px (14.0f) > r.getBottom()) continue;
-                g.drawText (t, juce::Rectangle<float> (r.getX() + skin_.px (10.0f), y, r.getWidth() - skin_.px (20.0f), skin_.px (14.0f)), juce::Justification::centredLeft, true);
-                y += skin_.px (14.0f);
-            }
-        }
-    }
-    void mouseUp (const juce::MouseEvent& e) override
-    {
-        if (e.mods.isPopupMenu() || e.getDistanceFromDragStart() > 6) return;
-        for (int i = 0; i < cols * rows; ++i)
-            if (tile (i).contains (e.position))
-            {
-                const auto id = preset::Navigator::presetAt (proc_.library().banks(), { bank, i });
-                if (! id.empty() && proc_.loadPreset (id) && onLoaded) onLoaded();
-                repaint();
-                return;
-            }
-    }
-
-private:
-    juce::Rectangle<float> tile (int i) const
-    {
-        const float w = static_cast<float> (getWidth()) / static_cast<float> (cols), h = static_cast<float> (getHeight()) / static_cast<float> (rows);
-        return { static_cast<float> (i % cols) * w, static_cast<float> (i / cols) * h, w, h };
-    }
-    // champ personnalisé du preset dont la clé (sans casse) est l'une des variantes françaises ou anglaises
-    static juce::String textOf (const preset::Preset& p, int f)
-    {
-        if (f == 0) return juce::String::fromUTF8 (p.name.c_str());
-        static const std::vector<std::string> keys[5] = { {}, { "song", "morceau", "piece", "pi\xc3\xa8" "ce" }, { "workshop", "atelier" }, { "student", "\xc3\xa9" "l\xc3\xa8" "ve", "eleve" },
-                                                          { "event", "\xc3\xa9v\xc3\xa9nement", "evenement", "concert" } };
-        for (const auto& cf : p.customFields)
-        {
-            std::string k = cf.key;
-            std::transform (k.begin(), k.end(), k.begin(), [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-            for (const auto& wanted : keys[f]) if (k == wanted) return juce::String::fromUTF8 (cf.value.c_str());
-        }
-        return {};
-    }
-
-    const nova::Skin& skin_;
-    OrganProcessor& proc_;
-    std::uint32_t rev_ = 0xFFFFFFFFu, key_ = 0xFFFFFFFFu;
-    std::string id_;
-};
-
 // ------------------------------------------------------------------------------------------------ ensembles de commandes (une page chacun)
 struct NovaOrganEditor::DrawbarSet
 {
@@ -521,7 +422,7 @@ NovaOrganEditor::DrawbarSet* NovaOrganEditor::makeDrawbars (int page)
 {
     auto* set = new DrawbarSet;
     owned_sets_.emplace_back (set);
-    auto make = [&] (int offset, int kind, const char* footage) { set->bars.push_back (add<Drawbar> (page, skin(), host(), mx::organParam (0, offset), kind, juce::String (footage))); };
+    auto make = [&] (int offset, int kind, const char* footage) { set->bars.push_back (add<Drawbar> (page, skin(), host(), mx::organParam (track_, offset), kind, juce::String (footage))); };
     for (int i = 0; i < 9; ++i) make (mx::kOrgUpper0 + i, kDrawbarKind[i], kFootage[i]);
     for (int i = 0; i < 9; ++i) make (mx::kOrgLower0 + i, kDrawbarKind[i], kFootage[i]);
     make (mx::kOrgPedal16, 0, "16'");
@@ -545,11 +446,11 @@ NovaOrganEditor::ToggleSet* NovaOrganEditor::makeToggles (int page, bool large)
                        T { mx::kOrgVibUpper, "organ.vib_upper" }, T { mx::kOrgVibLower, "organ.vib_lower" } })
     {
         auto* p = add<nova::Pill> (page, skin(), look);
-        p->bindToggle (host(), mx::organParam (0, t.kind), tx (t.key));
+        p->bindToggle (host(), mx::organParam (track_, t.kind), tx (t.key));
         set->pills.push_back (p);
     }
     set->vibMode = add<nova::Pill> (page, skin(), look);
-    const auto id = mx::organParam (0, mx::kOrgVibMode);
+    const auto id = mx::organParam (track_, mx::kOrgVibMode);
     std::vector<juce::String> choices;
     if (const auto* spec = host().parameters().find (id)) for (const auto& c : spec->choices) choices.push_back (juce::String::fromUTF8 (c.c_str()));
     set->vibMode->bindChoice (host(), id, tx ("organ.vibrato"), choices);
@@ -565,7 +466,7 @@ NovaOrganEditor::LeslieSet* NovaOrganEditor::makeLeslie (int page)
     {
         auto* p = add<nova::Pill> (page, skin());
         p->setText (tx (keys[v]));
-        p->onClick = [this, v] { nova::setParamNormalised (host(), mx::organParam (0, mx::kOrgLeslieSpeed), static_cast<double> (v) / 2.0); };
+        p->onClick = [this, v] { nova::setParamNormalised (host(), mx::organParam (track_, mx::kOrgLeslieSpeed), static_cast<double> (v) / 2.0); };
         set->squares.push_back (p);
     }
     return set;
@@ -596,14 +497,15 @@ void NovaOrganEditor::editDesc (const std::function<void (organ::OrganDescriptio
     change (d);
     if (d == desc_) return;
     desc_ = d;
-    proc_.uiEditOrgan (d, "Organ keyboards", "organ");
+    link_.edit (d);
 }
 
 // ------------------------------------------------------------------------------------------------ éditeur
-NovaOrganEditor::NovaOrganEditor (OrganProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
-    : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("ORGAMON")), proc_ (p)
+NovaOrganEditor::NovaOrganEditor (ParamHost& host, PresetHost& presets, OrganLink link, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
+    : EditorBase (host, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("ORGAMON")), link_ (std::move (link)), presets_ (presets), track_ (link_.track)
 {
-    desc_ = proc_.organDescription();
+    desc_ = link_.description();
+    ui_ = std::make_unique<nova::PresetUi> (*this, presets_, palette, tr, [this] { desc_ = link_.description(); });
     addPage (tx ("organ.page_drawbars"), iconPath (0));
     addPage (tx ("organ.page_leslie"), iconPath (1));
     addPage (tx ("organ.page_live"), iconPath (2));
@@ -683,8 +585,8 @@ void NovaOrganEditor::buildDrawbarsPage()
     keyboardPanel_ = add<nova::Panel> (0, skin());
     keyboard_ = add<SynthKeyboard> (0, skin().palette());
     auto channelOfUpper = [this] { return std::max (0, desc_.channel[0] - 1); };
-    keyboard_->onNoteOn = [this, channelOfUpper] (int key, float) { proc_.uiNoteOn (channelOfUpper(), key); };
-    keyboard_->onNoteOff = [this, channelOfUpper] (int key) { proc_.uiNoteOff (channelOfUpper(), key); };
+    keyboard_->onNoteOn = [this, channelOfUpper] (int key, float) { link_.noteOn (channelOfUpper(), key); };
+    keyboard_->onNoteOff = [this, channelOfUpper] (int key) { link_.noteOff (channelOfUpper(), key); };
     octDown_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     octDown_->setText (tx ("synth.oct_down"));
     octDown_->onClick = [this] { keyboard_->shiftOctave (-1); };
@@ -704,10 +606,10 @@ void NovaOrganEditor::buildDrawbarsPage()
 
     // potards : vibrato (profondeur), overdrive (3), Leslie (mélange), réverbération, puis volume et gain du plugin
     struct Spec { ParamId id; const char* title; bool pink; const char* help; };
-    const Spec specs[8] = { { mx::organParam (0, mx::kOrgVibDepth), "og.vib_depth", false, "hlp.og_vibdepth" }, { mx::organParam (0, mx::kOrgDriveInput), "og.drive_in", false, "hlp.og_drive" },
-                            { mx::organParam (0, mx::kOrgDriveCharacter), "og.drive_char", false, "hlp.og_drivechar" }, { mx::organParam (0, mx::kOrgDriveOutput), "og.drive_out", false, "hlp.og_driveout" },
-                            { mx::organParam (0, mx::kOrgLeslieMix), "og.leslie_mix", false, "hlp.og_lesliemix" }, { mx::organParam (0, mx::kOrgReverb), "og.reverb", false, "hlp.og_reverb" },
-                            { organ::synthVolume, "og.volume", true, "hlp.og_volume" }, { static_cast<ParamId> (sampler::gain), "og.gain", true, "hlp.og_gain" } };
+    const Spec specs[8] = { { mx::organParam (track_, mx::kOrgVibDepth), "og.vib_depth", false, "hlp.og_vibdepth" }, { mx::organParam (track_, mx::kOrgDriveInput), "og.drive_in", false, "hlp.og_drive" },
+                            { mx::organParam (track_, mx::kOrgDriveCharacter), "og.drive_char", false, "hlp.og_drivechar" }, { mx::organParam (track_, mx::kOrgDriveOutput), "og.drive_out", false, "hlp.og_driveout" },
+                            { mx::organParam (track_, mx::kOrgLeslieMix), "og.leslie_mix", false, "hlp.og_lesliemix" }, { mx::organParam (track_, mx::kOrgReverb), "og.reverb", false, "hlp.og_reverb" },
+                            { link_.volumeId, "og.volume", true, "hlp.og_volume" }, { link_.gainId, "og.gain", true, "hlp.og_gain" } };
     for (const auto& s : specs)
     {
         Column c {};
@@ -718,7 +620,7 @@ void NovaOrganEditor::buildDrawbarsPage()
         columns_.push_back (c);
     }
     drivePill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
-    drivePill_->bindToggle (host(), mx::organParam (0, mx::kOrgDriveOn), "ON");
+    drivePill_->bindToggle (host(), mx::organParam (track_, mx::kOrgDriveOn), "ON");
 }
 
 // ------------------------------------------------------------------------------------------------ pages LESLIE et LIVE
@@ -728,7 +630,7 @@ void NovaOrganEditor::buildLeslieAndLivePages()
     lesliePagePanel_ = add<nova::Panel> (1, skin());
     lesliePagePanel_->setTitle (tx ("organ.leslie").toUpperCase());
     leslieSet_ = makeLeslie (1);
-    leslieMixCard_ = add<nova::KnobCard> (1, skin(), host(), mx::organParam (0, mx::kOrgLeslieMix), tx ("og.leslie_mix"), modalOpener(), false);
+    leslieMixCard_ = add<nova::KnobCard> (1, skin(), host(), mx::organParam (track_, mx::kOrgLeslieMix), tx ("og.leslie_mix"), modalOpener(), false);
     struct S { const char* group; const char* key; double organ::OrganDescription::* field; double lo, hi, step; const char* suffix; double def; };
     const S defs[] = {
         { "organ.horn", "organ.horn_slow", &organ::OrganDescription::hornSlowRpm, 5.0, 200.0, 0.5, " rpm", 48.0 },
@@ -765,8 +667,8 @@ void NovaOrganEditor::buildMatrixPage()
 {
     matrixPanel_ = add<nova::Panel> (3, skin());
     matrixPanel_->setTitle (tx ("og.matrix_title").toUpperCase());
-    tiles_ = add<TileGrid> (3, skin(), proc_);
-    tiles_->onLoaded = [this] { desc_ = proc_.organDescription(); };
+    tiles_ = add<nova::PresetTiles> (3, skin(), presets_);
+    tiles_->onLoaded = [this] { desc_ = link_.description(); };
     addInfo (3, matrixPanel_, "hlp.og_matrix", true);
     bankPrev_ = add<nova::Pill> (3, skin(), nova::Pill::Look::Small);
     bankPrev_->setText ("<");
@@ -783,6 +685,13 @@ void NovaOrganEditor::buildMatrixPage()
     fieldPill_ = add<nova::Pill> (3, skin());
     fieldPill_->onClick = [this] { tiles_->field = (tiles_->field + 1) % 5; };
     addInfo (3, fieldPill_, "hlp.og_field");
+    tiles_->textLoad = tx ("sy.tile_load");
+    tiles_->textAssign = tx ("sy.tile_assign");
+    tiles_->textClear = tx ("sy.tile_clear");
+    fieldsTitle_ = add<nova::Text> (3, skin(), Token::TextDim2, 11.0f, true);
+    fieldsTitle_->setText (tx ("sy.fields_title").toUpperCase());
+    fields_ = add<nova::PresetFields> (3, skin(), presets_, translator());
+    addInfo (3, fieldsTitle_, "hlp.sy_fields");
 }
 
 // ------------------------------------------------------------------------------------------------ page ORGUE (accord, clic des touches, câblage, MIDI)
@@ -824,104 +733,20 @@ void NovaOrganEditor::buildSettingsExtras()
                                  [this] { return desc_.extended; },
                                  std::vector<juce::String> { "C0-B1", "C2-B2", "C3-B3", "C4-B4", "C5+" });
     ccPill_ = add<nova::Pill> (page, skin());
-    ccPill_->onClick = [this] { proc_.uiSetCcEnabled (! proc_.ccEnabled()); };
+    ccPill_->onClick = [this] { link_.setCc (! link_.ccEnabled()); };
     addInfo (page, ccPill_, "hlp.og_cc");
     panicPill_ = add<nova::Pill> (page, skin());
     panicPill_->setText (tx ("panic.button"));
-    panicPill_->onClick = [this] { proc_.uiPanic(); keyboard_->releaseAll(); };
+    panicPill_->onClick = [this] { link_.panic(); keyboard_->releaseAll(); };
 }
 
 // ------------------------------------------------------------------------------------------------ presets : menu, enregistrement, gestionnaire
-juce::String NovaOrganEditor::presetLabel() const
-{
-    const auto* p = proc_.currentPreset();
-    juce::String name = p != nullptr ? juce::String::fromUTF8 (p->name.c_str()) : tx ("preset.none");
-    if (proc_.isModified()) name += " *";
-    if (p != nullptr && p->locked) name = tx ("preset.tag_locked") + "  " + name;
-    return name;
-}
-
-void NovaOrganEditor::quickSave()
-{
-    if (proc_.canSaveCurrent())
-    {
-        std::string error;
-        if (proc_.saveCurrent (&error)) { statusText_ = tx ("preset.saved"); return; }
-    }
-    openManager (true);   // preset d'usine, verrouillé ou aucun : « Enregistrer sous »
-}
-
-void NovaOrganEditor::openManager (bool saveAs)
-{
-    if (manager_ != nullptr) return;
-    manager_ = std::make_unique<PresetManager> (proc_, skin().palette(), translator());
-    juce::Component::SafePointer<NovaOrganEditor> safe (this);
-    manager_->onClose = [safe] { juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->manager_.reset(); safe->grabKeyboardFocus(); } }); };
-    manager_->onChanged = [safe] { if (safe != nullptr) safe->desc_ = safe->proc_.organDescription(); };
-    addAndMakeVisible (*manager_);
-    manager_->setBounds (getLocalBounds());
-    manager_->toFront (true);
-    if (saveAs) manager_->showSaveAs();
-}
-
-void NovaOrganEditor::showPresetMenu (juce::Component* anchor)
-{
-    juce::PopupMenu menu;
-    menu.addItem (1, tx ("preset.manager"));
-    menu.addItem (2, tx ("preset.save"), proc_.canSaveCurrent() || true);
-    menu.addItem (3, tx ("og.save_as"));
-    menu.addSeparator();
-    menu.addItem (4, tx ("preset.prev"));
-    menu.addItem (5, tx ("preset.next"));
-    // presets de la banque du preset courant (sinon de la banque affichée dans la matrice)
-    const auto& lib = proc_.library();
-    int bank = tiles_ != nullptr ? tiles_->bank : 0;
-    if (const auto slot = preset::Navigator::locate (lib.banks(), proc_.currentPresetId())) bank = slot->bank;
-    std::vector<std::string> ids;
-    juce::PopupMenu bankMenu;
-    for (int prog = 0; prog < preset::programsPerBank; ++prog)
-    {
-        const auto id = preset::Navigator::presetAt (lib.banks(), { bank, prog });
-        const auto* p = id.empty() ? nullptr : lib.find (id);
-        if (p == nullptr || ! proc_.acceptsPreset (*p)) continue;
-        ids.push_back (id);
-        bankMenu.addItem (1000 + static_cast<int> (ids.size()) - 1, juce::String (prog + 1) + "  " + juce::String::fromUTF8 (p->name.c_str()), true, id == proc_.currentPresetId());
-    }
-    if (! ids.empty())
-    {
-        menu.addSeparator();
-        menu.addSectionHeader (tx ("og.bank_header") + " " + juce::String::fromUTF8 (preset::displayName (lib.banks().find (bank) != nullptr ? *lib.banks().find (bank) : preset::Bank()).c_str()));
-        menu.addSubMenu (tx ("og.bank_presets"), bankMenu);
-    }
-    std::vector<std::string> all;
-    juce::PopupMenu allMenu;
-    for (const auto& p : lib.allPresets())
-    {
-        if (! proc_.acceptsPreset (p)) continue;
-        all.push_back (p.id);
-        allMenu.addItem (5000 + static_cast<int> (all.size()) - 1, juce::String::fromUTF8 (p.name.c_str()), true, p.id == proc_.currentPresetId());
-    }
-    menu.addSubMenu (tx ("og.all_presets"), allMenu);
-    juce::Component::SafePointer<NovaOrganEditor> safe (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor), [safe, ids, all] (int r)
-    {
-        if (safe == nullptr || r == 0) return;
-        auto& e = *safe;
-        if (r == 1) e.openManager (false);
-        else if (r == 2) e.quickSave();
-        else if (r == 3) e.openManager (true);
-        else if (r == 4) e.proc_.stepPreset (-1);
-        else if (r == 5) e.proc_.stepPreset (+1);
-        else if (r >= 5000 && static_cast<std::size_t> (r - 5000) < all.size()) e.proc_.loadPreset (all[static_cast<std::size_t> (r - 5000)]);
-        else if (r >= 1000 && static_cast<std::size_t> (r - 1000) < ids.size()) e.proc_.loadPreset (ids[static_cast<std::size_t> (r - 1000)]);
-        e.desc_ = e.proc_.organDescription();
-    });
-}
+void NovaOrganEditor::showPresetMenu (juce::Component* anchor) { ui_->showMenu (anchor, tiles_ != nullptr ? tiles_->bank : 0); }
 
 bool NovaOrganEditor::keyPressed (const juce::KeyPress& k)
 {
     const auto m = k.getModifiers();
-    if (m.isCommandDown() && (k.getKeyCode() == 'S' || k.getKeyCode() == 's')) { quickSave(); return true; }
+    if (m.isCommandDown() && (k.getKeyCode() == 'S' || k.getKeyCode() == 's')) { ui_->quickSave(); return true; }
     return EditorBase::keyPressed (k);
 }
 
@@ -1003,8 +828,10 @@ void NovaOrganEditor::layout()
     bankNext_->setBounds (R (414, 108, 36, 30));
     colsPill_->setBounds (R (470, 108, 150, 30));
     rowsPill_->setBounds (R (630, 108, 150, 30));
-    fieldPill_->setBounds (R (790, 108, 310, 30));
-    tiles_->setBounds (R (220, 152, 910, 540));
+    fieldPill_->setBounds (R (790, 108, 340, 30));
+    tiles_->setBounds (R (220, 152, 640, 540));
+    fieldsTitle_->setBounds (R (880, 152, 240, 16));
+    fields_->setBounds (R (880, 172, 250, 520));
 
     // ---- page ORGUE
     organ_settings_panel_->setBounds (R (204, 72, 942, 638));
@@ -1023,27 +850,27 @@ void NovaOrganEditor::layout()
     // ---- barre du bas, en-tête, gestionnaire
     abPill()->setBounds (R (14, 724 + 12, 40, 32));
     presetPill()->setBounds (R (440, 11, 280, 36));
-    if (manager_ != nullptr) manager_->setBounds (getLocalBounds());
+    ui_->resized();
 }
 
 void NovaOrganEditor::tick()
 {
-    proc_.engine().collect();   // libère l'orgue remplacé après un changement d'accord ou de câblage
-    const auto rev = static_cast<std::uint32_t> (proc_.undoManager().revision());
+    if (link_.collect) link_.collect();   // libère l'orgue remplacé après un changement d'accord ou de câblage
+    const auto rev = link_.undoRevision();
     if (rev != lastUndoRevision_)
     {
         lastUndoRevision_ = rev;
-        desc_ = proc_.organDescription();
+        desc_ = link_.description();
     }
-    presetPill()->setText (presetLabel());
-    for (std::size_t c = 0; c < outBars_.size(); ++c) outBars_[c]->update (std::clamp ((dbOf (proc_.outPeak (static_cast<int> (c))) + 60.0f) / 60.0f, 0.0f, 1.0f), 0);   // -60 dBFS en bas, 0 dBFS en haut
+    presetPill()->setText (ui_->label());
+    for (std::size_t c = 0; c < outBars_.size(); ++c) outBars_[c]->update (std::clamp ((dbOf (link_.outPeak (static_cast<int> (c))) + 60.0f) / 60.0f, 0.0f, 1.0f), 0);   // -60 dBFS en bas, 0 dBFS en haut
     for (std::size_t m = 0; m < midiBars_.size(); ++m)
     {
         const int ch = desc_.channel[m];   // 0 : clavier désactivé, sinon canal 1..16
-        midiBars_[m]->update (ch > 0 ? proc_.midiLevel (ch - 1) : 0.0f, ch);
+        midiBars_[m]->update (ch > 0 ? link_.midiLevel (ch - 1) : 0.0f, ch);
     }
-    notesText_->setText (juce::String (proc_.engine().heldKeys()) + " " + tx ("og.notes"));
-    const int speed = choiceValue (mx::organParam (0, mx::kOrgLeslieSpeed));
+    notesText_->setText (juce::String (link_.heldCount()) + " " + tx ("og.notes"));
+    const int speed = choiceValue (mx::organParam (track_, mx::kOrgLeslieSpeed));
     for (auto* set : { leftLeslie_, leslieSet_, liveLeslie_ })
         for (std::size_t i = 0; i < set->squares.size(); ++i) set->squares[i]->setOn (static_cast<int> (i) == speed);
     const int page = currentPage();
@@ -1052,7 +879,7 @@ void NovaOrganEditor::tick()
         for (auto* b : drawbars_->bars) b->update();
         for (auto* m : manualMenus_) { const auto t = m->label() + "  " + m->items[static_cast<std::size_t> (std::clamp (m->get(), 0, static_cast<int> (m->items.size()) - 1))]; if (t != m->shown) { m->shown = t; m->pill->setText (t); } }
         for (auto* n : numPills_) n->update();
-        keyboard_->setHeldKeys (proc_.engine().heldKeyWord (0), proc_.engine().heldKeyWord (1));
+        keyboard_->setHeldKeys (link_.heldWord (0), link_.heldWord (1));
         holdPill_->setOn (holdPill_->isOn());
     }
     if (page == 1) for (auto* s : leslieSliders_) s->update();
@@ -1060,6 +887,7 @@ void NovaOrganEditor::tick()
     if (page == 3)
     {
         tiles_->update();
+        fields_->update();
         bankPill_->setText (tx ("og.bank") + " " + juce::String::fromUTF8 (preset::defaultBankName (tiles_->bank).c_str()) + " (" + juce::String (tiles_->bank) + ")");
         colsPill_->setText (tx ("og.columns") + "  " + juce::String (tiles_->cols));
         rowsPill_->setText (tx ("og.rows") + "  " + juce::String (tiles_->rows));
@@ -1076,8 +904,8 @@ void NovaOrganEditor::tick()
         foldbackPill_->setOn (desc_.foldback);
         foldbackPill_->setEnabled (desc_.extended);
         foldbackPill_->setAlpha (desc_.extended ? 1.0f : 0.4f);
-        ccPill_->setText (tx ("control.button") + "  " + (proc_.ccEnabled() ? "ON" : "OFF"));
-        ccPill_->setOn (proc_.ccEnabled());
+        ccPill_->setText (tx ("control.button") + "  " + (link_.ccEnabled() ? "ON" : "OFF"));
+        ccPill_->setOn (link_.ccEnabled());
     }
 }
 
@@ -1085,45 +913,5 @@ void NovaOrganEditor::paintBackground (juce::Graphics& g)
 {
     g.setColour (skin().colour (Token::TextDim2));
     g.setFont (skin().font (11.0f, true));
-    g.drawText (statusText_, R (730, 724 + 12, 416, 32).toFloat(), juce::Justification::centredRight);
+    g.drawText (ui_->statusText, R (730, 724 + 12, 416, 32).toFloat(), juce::Justification::centredRight);
 }
-
-// ------------------------------------------------------------------------------------------------ fenêtre du plugin
-NovaOrganPluginEditor::NovaOrganPluginEditor (OrganProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
-{
-    buildContent();
-    setWantsKeyboardFocus (true);
-    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
-    setConstrainer (&constrainer_);
-    setResizable (true, true);
-    setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
-}
-
-void NovaOrganPluginEditor::buildContent()
-{
-    auto& p = processor_;
-    tr_ = i18n::Translator (p.settings().language);
-    const auto id = theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark);
-    const auto palette = theme::withContrast (theme::definition (id), p.settings().contrast);
-    const auto& def = theme::definition (id);
-    NovaOrganEditor::Options opt;
-    opt.brand = true;
-    opt.noBypass = true;
-    opt.moduleName = "organ";
-    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
-    opt.getSettings = [&p] { return p.settings(); };
-    opt.applySettings = [&p, safe = juce::Component::SafePointer<NovaOrganPluginEditor> (this)] (const settings::GlobalSettings& s)
-    {
-        p.applySettings (s);
-        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
-    };
-    opt.presetMenu = [this] (juce::Component* anchor) { if (content_ != nullptr) content_->showPresetMenu (anchor); };
-    content_.reset();
-    content_ = std::make_unique<NovaOrganEditor> (p, palette, def.knob, tr_, opt);
-    addAndMakeVisible (*content_);
-    content_->setBounds (getLocalBounds());
-}
-
-void NovaOrganPluginEditor::resized() { content_->setBounds (getLocalBounds()); }
-void NovaOrganPluginEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::black); }
-bool NovaOrganPluginEditor::keyPressed (const juce::KeyPress& k) { return content_ != nullptr && content_->keyPressed (k); }

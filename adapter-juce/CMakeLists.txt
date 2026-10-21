@@ -35,7 +35,6 @@ target_sources(Neptune PRIVATE
   src/OscServer.cpp
   src/ControlPanel.cpp
   src/AudioInView.cpp
-  src/OrganView.cpp
   src/EnvelopeEditor.cpp
   src/ImportWizard.cpp
   src/ZoneTable.cpp
@@ -505,6 +504,8 @@ target_sources(Orgamon PRIVATE
   src/NovaOrganEditor.cpp
   src/NovaEditor.cpp
   src/NovaKit.cpp
+  src/NovaPresetUi.cpp
+  src/NovaPresetFields.cpp
   src/PresetManager.cpp
   src/SynthKeyboard.cpp
   src/NeptuneKnob.cpp

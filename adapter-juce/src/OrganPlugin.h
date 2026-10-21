@@ -12,6 +12,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "NeptuneKnob.h"
 #include "ParamHost.h"
 #include "PresetHost.h"
+#include "NovaOrganEditor.h"
 #include "PresetManager.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/OrganPreset.h"
@@ -124,4 +125,21 @@ private:
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrganProcessor)
+};
+
+// Éditeur du plugin Orgamon (fenêtre CLAP) : thème, contraste, langue ; reconstruit l'interface quand ils changent.
+class NovaOrganPluginEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit NovaOrganPluginEditor (OrganProcessor&);
+    void resized() override;
+    void paint (juce::Graphics&) override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+private:
+    void buildContent();
+    OrganProcessor& processor_;
+    neptune::core::i18n::Translator tr_;
+    std::unique_ptr<NovaOrganEditor> content_;
+    juce::ComponentBoundsConstrainer constrainer_;
 };

@@ -322,4 +322,61 @@ void OrganProcessor::applySettings (const settings::GlobalSettings& s)
     settings::saveFile (configDirectory() / "settings.json", s, &error);
 }
 
+// ------------------------------------------------------------------------------------------------ fenêtre du plugin
+NovaOrganPluginEditor::NovaOrganPluginEditor (OrganProcessor& p) : juce::AudioProcessorEditor (p), processor_ (p), tr_ (p.settings().language)
+{
+    buildContent();
+    setWantsKeyboardFocus (true);
+    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    setConstrainer (&constrainer_);
+    setResizable (true, true);
+    setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
+}
+
+void NovaOrganPluginEditor::buildContent()
+{
+    auto& p = processor_;
+    tr_ = i18n::Translator (p.settings().language);
+    const auto id = theme::themeFromString (p.settings().theme).value_or (theme::ThemeId::Dark);
+    const auto palette = theme::withContrast (theme::definition (id), p.settings().contrast);
+    const auto& def = theme::definition (id);
+    NovaOrganEditor::Options opt;
+    opt.brand = true;
+    opt.noBypass = true;
+    opt.moduleName = "organ";
+    opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
+    opt.getSettings = [&p] { return p.settings(); };
+    opt.applySettings = [&p, safe = juce::Component::SafePointer<NovaOrganPluginEditor> (this)] (const settings::GlobalSettings& s)
+    {
+        p.applySettings (s);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->buildContent(); safe->resized(); } });
+    };
+    opt.presetMenu = [this] (juce::Component* anchor) { if (content_ != nullptr) content_->showPresetMenu (anchor); };
+    content_.reset();
+    OrganLink link;
+    link.description = [&p] { return p.organDescription(); };
+    link.edit = [&p] (organ::OrganDescription d) { p.uiEditOrgan (std::move (d), "Organ keyboards", "organ"); };
+    link.undoRevision = [&p] { return static_cast<std::uint32_t> (p.undoManager().revision()); };
+    link.panic = [&p] { p.uiPanic(); };
+    link.noteOn = [&p] (int ch, int key) { p.uiNoteOn (ch, key); };
+    link.noteOff = [&p] (int ch, int key) { p.uiNoteOff (ch, key); };
+    link.heldWord = [&p] (int word) { return p.engine().heldKeyWord (word); };
+    link.heldCount = [&p] { return p.engine().heldKeys(); };
+    link.outPeak = [&p] (int c) { return p.outPeak (c); };
+    link.midiLevel = [&p] (int ch) { return p.midiLevel (ch); };
+    link.ccEnabled = [&p] { return p.ccEnabled(); };
+    link.setCc = [&p] (bool on) { p.uiSetCcEnabled (on); };
+    link.collect = [&p] { p.engine().collect(); };
+    link.track = 0;
+    link.volumeId = organ::synthVolume;
+    link.gainId = static_cast<ParamId> (sampler::gain);
+    content_ = std::make_unique<NovaOrganEditor> (p, p, std::move (link), palette, def.knob, tr_, opt);
+    addAndMakeVisible (*content_);
+    content_->setBounds (getLocalBounds());
+}
+
+void NovaOrganPluginEditor::resized() { content_->setBounds (getLocalBounds()); }
+void NovaOrganPluginEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::black); }
+bool NovaOrganPluginEditor::keyPressed (const juce::KeyPress& k) { return content_ != nullptr && content_->keyPressed (k); }
+
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new OrganProcessor(); }

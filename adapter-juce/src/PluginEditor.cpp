@@ -246,7 +246,6 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     {
         processor_.uiPanic();
         matrix_->clearHeldKeys();
-        organView_->releaseKeys();
     };
     addAndMakeVisible (panicButton_);
     addChildComponent (voicesButton_);
@@ -308,24 +307,6 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
 
     {
-        using namespace neptune::core;
-        const auto& themeDef = theme::definition (theme::themeFromString (processor_.settings().theme).value_or (theme::ThemeId::Dark));
-        OrganView::KnobIds extra;
-        extra.push_back ([] (int t) { return mixer::samplerParam (t, mixer::kGain); }); // le volume est celui de la bande
-        organView_ = std::make_unique<OrganView> (processor_, palette_, tr_, themeDef.knob, std::move (extra),
-                                                  [this] (neptune::core::ParamId id, neptune::core::uistate::Terminal t) { openModal (id, t); });
-        organView_->onChange = [this] (const organ::OrganDescription& d) { processor_.uiEditOrgan (d, "Organ keyboards", "organ"); };
-        organView_->onNoteOn = [this] (int key, int channel)
-        {
-            const int track = processor_.selectedTrack();
-            synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))] = track;
-            processor_.uiNoteOnTrack (track, key, 0.8f, channel);
-        };
-        organView_->onNoteOff = [this] (int key, int channel)
-        {
-            processor_.uiNoteOffTrack (synthKeyTrack_[static_cast<std::size_t> (juce::jlimit (0, 127, key))], key, channel);
-        };
-        addChildComponent (*organView_);
         audioInView_ = std::make_unique<AudioInView> (processor_, palette_, tr_);
         addChildComponent (*audioInView_);
     }
@@ -492,7 +473,7 @@ void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int
 // L'éditeur NOVA de la piste Synthé ou FM sélectionnée occupe la page Edit ; il est reconstruit quand la piste ou son type change.
 void NeptuneEditor::updateInstrumentPanel()
 {
-    const bool wanted = ! showProbe_ && ! showMixer_ && (selectedIsSynth() || selectedIsFm());
+    const bool wanted = ! showProbe_ && ! showMixer_ && (selectedIsSynth() || selectedIsFm() || selectedIsOrgan());
     if (! wanted) { instrumentPanel_.reset(); return; }
     const int track = processor_.selectedTrack();
     const auto type = processor_.trackType (track);
@@ -1166,8 +1147,7 @@ void NeptuneEditor::updateViewVisibility()
     fmShown_ = fmMode;
     organShown_ = organMode;
     mixerView_->setVisible (showMixer_);
-    organView_->setVisible (organMode);
-    presetBar_->setVisible (organMode);
+    presetBar_->setVisible (false);   // les presets se choisissent dans l'éditeur NOVA de la piste
     trackBox_.setVisible (! showProbe_);
     loadButton_.setVisible (sampler);
     modeButton_.setVisible (sampler);
@@ -1242,9 +1222,7 @@ void NeptuneEditor::rebindKnobs()
     const int track = processor_.selectedTrack();
     if (track == knobTrack_) return;
     knobTrack_ = track;
-    organView_->setTrack (track);
     audioInView_->setTrack (track);
-    organView_->releaseKeys();
     zoneTable_->setSelectedRows ({}, false); // la sélection de zones appartenait à l'instrument de l'ancienne piste
     int k = 0;
     for (auto* knob : knobs_)
@@ -1389,16 +1367,7 @@ void NeptuneEditor::timerCallback()
         || organShown_ != (! showProbe_ && ! showMixer_ && selectedIsOrgan())
         || audioInShown_ != (! showProbe_ && ! showMixer_ && selectedIsAudioIn())) { updateViewVisibility(); resized(); } // type de la piste changé
     if (audioInView_->isVisible()) audioInView_->refresh();
-    if (organView_->isVisible())
-    {
-        organView_->setDescription (processor_.organDescription());
-        organView_->refreshFromParameters();
-    }
     if (presetBar_->isVisible() && presetBar_->needsRefresh()) presetBar_->refresh();
-    {
-        const int tr = processor_.selectedTrack();
-        organView_->setHeldKeys (processor_.heldKeyWord (tr, 0), processor_.heldKeyWord (tr, 1));
-    }
     updateRecoveryBanner();
     updateProfileControls();
     updateUndoButtons();
@@ -1463,7 +1432,6 @@ void NeptuneEditor::resized()
     presetBar_->setBounds (32, 80, juce::jmin (640, lw_ - 64), 34);
     if (instrumentPanel_ != nullptr)
         instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 158 - 80)));   // jusqu'à la bande de profil ; les potards du bas sont dans l'éditeur
-    organView_->placeScaled ({ 32, 80 + 38, lw_ - 64, juce::jmax (200, lh_ - 80 - 38 - 160) });
     audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 160) });
     if (presetManager_) presetManager_->setBounds (rootBounds());
     {
