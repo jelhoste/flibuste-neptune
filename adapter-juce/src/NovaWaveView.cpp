@@ -70,6 +70,44 @@ void WaveView::setSample (const std::string& path, std::int64_t frames, double s
     showAll();
 }
 
+void WaveView::setFootprint (std::shared_ptr<const neptune::core::VolumeFootprint> fp, int mask)
+{
+    if (fp == footprint_ && mask == curveMask_) return;
+    if (fp != footprint_ && fp != nullptr && fp->ok)
+        for (int k = 0; k < 3; ++k)
+        {
+            const auto& cv = fp->curve (k);
+            if (cv.empty()) continue;
+            const auto mm = std::minmax_element (cv.begin(), cv.end());
+            curveMax_[k] = *mm.second;
+            curveMin_[k] = std::max (*mm.first, curveMax_[k] - 60.0f);   // le dégradé couvre au plus 60 dB sous le maximum
+            if (curveMax_[k] - curveMin_[k] < 6.0f) curveMin_[k] = curveMax_[k] - 6.0f;
+        }
+    footprint_ = std::move (fp);
+    curveMask_ = mask;
+    repaint();
+}
+
+void WaveView::setRange (bool on, double lo, double hi, int kind)
+{
+    if (on == rangeOn_ && lo == rangeLo_ && hi == rangeHi_ && kind == rangeKind_) return;
+    rangeOn_ = on; rangeLo_ = lo; rangeHi_ = hi; rangeKind_ = kind;
+    repaint();
+}
+
+void WaveView::setCursor (std::int64_t frame, bool reveal)
+{
+    cursorFrame_ = frame;
+    if (reveal && frame >= 0 && frames_ > 0 && (static_cast<double> (frame) < viewFrom_ || static_cast<double> (frame) > viewTo_))
+    {
+        const double span = viewTo_ - viewFrom_;
+        viewFrom_ = static_cast<double> (frame) - span / 2.0;
+        viewTo_ = viewFrom_ + span;
+        clampView();
+    }
+    repaint();
+}
+
 void WaveView::setMarkers (const Markers& m)
 {
     if (dragging_) return;
@@ -269,6 +307,82 @@ void WaveView::paint (juce::Graphics& g)
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (11.0f));
         g.drawText ("...", p, juce::Justification::centred);
+    }
+
+
+    // ---- empreintes de volume : courbes de niveau en dB (plancher -60 dB en bas), colorées du bleu-vert au violet selon le niveau
+    if (footprint_ != nullptr && footprint_->ok && footprint_->hopFrames > 0)
+    {
+        const auto& fp = *footprint_;
+        const float floorDb = -60.0f;
+        auto levelColour = [] (float t)
+        {
+            static const juce::Colour stops[5] = { juce::Colour (0xff1fb5a8), juce::Colour (0xff6ccf5a), juce::Colour (0xfff2d14b), juce::Colour (0xfff0603c), juce::Colour (0xffb04cff) };
+            t = std::clamp (t, 0.0f, 1.0f) * 4.0f;
+            const int i = std::min (3, static_cast<int> (t));
+            return stops[i].interpolatedWith (stops[i + 1], t - static_cast<float> (i));
+        };
+        auto levelAt = [&] (const std::vector<float>& cv, float x, bool& have)
+        {
+            const double f0 = frameAt (x), f1 = frameAt (x + 1.0f);
+            have = f1 >= 0.0 && f0 <= static_cast<double> (fp.totalFrames) && ! cv.empty();
+            if (! have) return floorDb;
+            const auto last = static_cast<std::int64_t> (cv.size()) - 1;
+            const std::int64_t i0 = std::clamp<std::int64_t> (static_cast<std::int64_t> (f0) / fp.hopFrames, 0, last);
+            const std::int64_t i1 = std::clamp<std::int64_t> (static_cast<std::int64_t> (f1) / fp.hopFrames, i0, last);
+            float v = -200.0f;
+            for (std::int64_t i = i0; i <= i1; ++i) v = std::max (v, cv[static_cast<std::size_t> (i)]);
+            return v;
+        };
+        if (rangeOn_ && rangeKind_ >= 0 && rangeKind_ < 3 && ! fp.curve (rangeKind_).empty())
+        {
+            g.setColour (levelColour (1.0f).withAlpha (0.20f));
+            for (float x = p.getX(); x < p.getRight(); x += 1.0f)
+            {
+                bool have = false;
+                const float v = levelAt (fp.curve (rangeKind_), x, have);
+                if (have && v >= static_cast<float> (rangeLo_) && v <= static_cast<float> (rangeHi_)) g.fillRect (x, p.getY(), 1.0f, p.getHeight());
+            }
+        }
+        for (int kind = 0; kind < 3; ++kind)
+        {
+            if ((curveMask_ & (1 << kind)) == 0 || fp.curve (kind).empty()) continue;
+            const auto& cv = fp.curve (kind);
+            float px = 0.0f, py = 0.0f;
+            bool prev = false;
+            for (float x = p.getX(); x < p.getRight(); x += 1.0f)
+            {
+                bool have = false;
+                const float v = levelAt (cv, x, have);
+                if (! have) { prev = false; continue; }
+                const float y = p.getBottom() - (std::clamp (v, floorDb, 0.0f) - floorDb) / (-floorDb) * p.getHeight();
+                if (prev)
+                {
+                    g.setColour (levelColour ((v - curveMin_[kind]) / (curveMax_[kind] - curveMin_[kind])));
+                    g.drawLine (px, py, x, y, skin_.px (kind == 0 ? 1.2f : 1.8f));
+                }
+                px = x; py = y; prev = true;
+            }
+        }
+        if (curveMask_ != 0)
+        {
+            g.setColour (skin_.colour (Token::TextDim2));
+            g.setFont (skin_.font (9.0f));
+            g.drawText ("0 dB", juce::Rectangle<float> (p.getRight() - skin_.px (46.0f), p.getY() + skin_.px (1.0f), skin_.px (44.0f), skin_.px (12.0f)), juce::Justification::centredRight);
+            g.drawText ("-60 dB", juce::Rectangle<float> (p.getRight() - skin_.px (46.0f), p.getBottom() - skin_.px (13.0f), skin_.px (44.0f), skin_.px (12.0f)), juce::Justification::centredRight);
+        }
+    }
+    if (cursorFrame_ >= 0)
+    {
+        const float cx = xOf (static_cast<double> (cursorFrame_));
+        if (cx >= p.getX() && cx <= p.getRight())
+        {
+            g.setColour (skin_.colour (Token::Text, 0.9f));
+            g.drawVerticalLine (juce::roundToInt (cx), p.getY(), p.getBottom());
+            juce::Path tri;
+            tri.addTriangle (cx - skin_.px (5.0f), p.getY(), cx + skin_.px (5.0f), p.getY(), cx, p.getY() + skin_.px (7.0f));
+            g.fillPath (tri);
+        }
     }
 
     // ---- fondus, délai, gain et accordage de la zone

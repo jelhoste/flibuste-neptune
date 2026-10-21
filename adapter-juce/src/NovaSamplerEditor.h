@@ -4,6 +4,8 @@
 // polyphonie, mémoire et streaming, Groupes) et SETTINGS. Reprend toute la logique de l'ancienne vue Mapping de Neptune ; les composants existants (matrice, liste, enveloppe, panneaux)
 // sont posés dans des panneaux NOVA.
 #include <atomic>
+#include <future>
+#include <memory>
 #include <map>
 #include <thread>
 #include "ChokePanel.h"
@@ -23,6 +25,7 @@
 #include "neptune/core/MemoryBudget.h"
 #include "neptune/core/SampleEdit.h"
 #include "neptune/core/TimeStretch.h"
+#include "neptune/core/VolumeFootprint.h"
 
 class NovaSamplerEditor : public nova::EditorBase
 {
@@ -83,6 +86,10 @@ private:
     void toolSaveAs();
     void toolStretch();
     void updateSeam();
+    void updateFootprint();
+    int primaryCurve() const;
+    void footprintLoudest();
+    void footprintPeak (int direction);
     juce::String statusText() const;
     juce::String baseStatusText() const;
     juce::String noteName (int note) const;
@@ -106,6 +113,13 @@ private:
     int lastVoiceCount_ = -1;
     std::string shownSamplePath_;
     struct GroupMenuListener;
+    // empreintes de volume
+    int curveMask_ = 0, rangeLo_ = -30, rangeHi_ = 0, navPoint_ = -1;
+    bool rangeOn_ = false;
+    std::string footprintPath_;
+    std::shared_ptr<const neptune::core::VolumeFootprint> footprint_;
+    std::future<std::shared_ptr<const neptune::core::VolumeFootprint>> footprintJob_;
+    std::atomic<bool> footprintCancel_ { false };
     bool snapOn_ = false;
     int stretchPercent_ = 100, pitchTenths_ = 0;      // durée (%) et hauteur (dixièmes de demi-ton) de l'outil d'étirement
     std::thread stretchThread_;
@@ -147,6 +161,8 @@ private:
     nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
     nova::ChoicePill *normChoice_ = nullptr, *silenceChoice_ = nullptr, *cutsChoice_ = nullptr;
     nova::Text* toolStatus_ = nullptr;
+    nova::Pill *peakCurvePill_ = nullptr, *rmsCurvePill_ = nullptr, *lufsCurvePill_ = nullptr, *loudestPill_ = nullptr, *prevPeakPill_ = nullptr, *nextPeakPill_ = nullptr, *rangePill_ = nullptr;
+    nova::NumberPill *rangeLoNumber_ = nullptr, *rangeHiNumber_ = nullptr;
     nova::NumberPill *durationNumber_ = nullptr, *pitchNumber_ = nullptr;
     nova::Pill* stretchPill_ = nullptr;
     nova::LoopSeamView* seam_ = nullptr;

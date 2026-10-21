@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 #include "NovaKit.h"
+#include "neptune/core/VolumeFootprint.h"
 #include "neptune/core/WaveformPeaks.h"
 
 namespace nova
@@ -39,6 +40,13 @@ public:
     void setSample (const std::string& path, std::int64_t frames, double sampleRate);
     void setMarkers (const Markers&);           // sans notification ; ignoré pendant un glissé
     void showAll();
+
+    // Empreintes de volume superposées (spec §13.5 / §23) : `mask` = bits 0 Pic, 1 RMS, 2 LUFS. Dégradé de couleur selon le niveau, jusqu'au violet au maximum de la courbe.
+    void setFootprint (std::shared_ptr<const neptune::core::VolumeFootprint>, int mask);
+    // Filtre de plage de puissance : illumine les zones dont le niveau de la courbe `kind` est entre lo et hi (dB).
+    void setRange (bool on, double lo, double hi, int kind);
+    // Repère de navigation (frame < 0 : aucun) ; `reveal` recentre la vue si le repère en sort.
+    void setCursor (std::int64_t frame, bool reveal);
     void setAutoLabel (juce::String noSample) { noSample_ = std::move (noSample); repaint(); }
 
     std::function<void (Marker, std::int64_t frame)> onMarker;   // pendant un glissé (valeur brute : l'éditeur borne)
@@ -95,6 +103,13 @@ private:
     Hit active_;
     float panStartX_ = 0.0f;
     double panStartFrom_ = 0.0, panStartTo_ = 0.0;
+    std::shared_ptr<const neptune::core::VolumeFootprint> footprint_;
+    int curveMask_ = 0;
+    float curveMin_[3] = { -60.0f, -60.0f, -60.0f }, curveMax_[3] = { 0.0f, 0.0f, 0.0f };
+    bool rangeOn_ = false;
+    double rangeLo_ = -30.0, rangeHi_ = 0.0;
+    int rangeKind_ = 0;
+    std::int64_t cursorFrame_ = -1;
     juce::Point<float> hoverPos_;
     bool hovering_ = false;
 };

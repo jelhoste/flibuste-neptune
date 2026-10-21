@@ -1,6 +1,7 @@
 #include "NovaSamplerEditor.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include "ChokePanel.h"
@@ -94,6 +95,8 @@ NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette&
 
 NovaSamplerEditor::~NovaSamplerEditor()
 {
+    footprintCancel_ = true;
+    if (footprintJob_.valid()) footprintJob_.wait();
     stretchCancel_ = true;
     if (stretchThread_.joinable()) stretchThread_.join();
     proc_.setVoiceMonitor (false);
@@ -404,6 +407,22 @@ void NovaSamplerEditor::buildSamplePage()
     addInfo (1, pitchNumber_, "hlp.sm_stretch", 1);
     stretchPill_ = tool (tx ("sm.tool_stretch"), "hlp.sm_stretch", [this] { toolStretch(); });
     seam_ = add<nova::LoopSeamView> (1, skin());
+
+    // ---- empreintes de volume (rangée d'en-tête du panneau de la forme d'onde)
+    auto curveToggle = [this, tool] (const char* key, int bit)
+    {
+        auto* pl = tool (tx (key), nullptr, [this, bit] { curveMask_ ^= (1 << bit); navPoint_ = -1; });
+        return pl;
+    };
+    peakCurvePill_ = curveToggle ("sm.fp_peak", 0);
+    rmsCurvePill_ = curveToggle ("sm.fp_rms", 1);
+    lufsCurvePill_ = curveToggle ("sm.fp_lufs", 2);
+    loudestPill_ = tool (tx ("sm.fp_loudest"), nullptr, [this] { footprintLoudest(); });
+    prevPeakPill_ = tool (tx ("sm.fp_prev"), nullptr, [this] { footprintPeak (-1); });
+    nextPeakPill_ = tool (tx ("sm.fp_next"), nullptr, [this] { footprintPeak (+1); });
+    rangePill_ = tool (tx ("sm.fp_range"), nullptr, [this] { rangeOn_ = ! rangeOn_; });
+    rangeLoNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.fp_lo").toUpperCase(), -60, 0, [this] { return rangeLo_; }, [this] (int v) { rangeLo_ = std::min (v, rangeHi_); }, [] (int v) { return juce::String (v) + " dB"; });
+    rangeHiNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.fp_hi").toUpperCase(), -60, 0, [this] { return rangeHi_; }, [this] (int v) { rangeHi_ = std::max (v, rangeLo_); }, [] (int v) { return juce::String (v) + " dB"; });
 }
 
 // ------------------------------------------------------------------------------------------------ outils du sample
@@ -723,6 +742,86 @@ void NovaSamplerEditor::toolSaveAs()
         safe->editShownZone ([&] (Zone& d) { d.samplePath = path; });
         safe->setToolStatus (safe->tx ("sm.st_saved"));
     });
+}
+
+// ---- empreintes de volume
+int NovaSamplerEditor::primaryCurve() const
+{
+    if ((curveMask_ & 4) != 0 && footprint_ != nullptr && footprint_->hasLufs()) return 2;
+    if ((curveMask_ & 2) != 0) return 1;
+    if ((curveMask_ & 1) != 0) return 0;
+    return (curveMask_ & 4) != 0 ? 1 : -1;
+}
+
+// Calcul en arrière-plan, une seule fois par fichier ; recalculé quand la zone affichée change de fichier.
+void NovaSamplerEditor::updateFootprint()
+{
+    const auto* z = shownZone();
+    const std::string path = (z != nullptr && curveMask_ != 0) ? z->samplePath : std::string();
+    if (footprintJob_.valid() && footprintJob_.wait_for (std::chrono::seconds (0)) == std::future_status::ready)
+    {
+        auto fp = footprintJob_.get();
+        if (path == footprintPath_ && fp != nullptr && fp->ok) footprint_ = std::move (fp);
+    }
+    if (path != footprintPath_)
+    {
+        if (footprintJob_.valid()) { footprintCancel_ = true; footprintJob_.wait(); }
+        footprintCancel_ = false;
+        footprintPath_ = path;
+        footprint_.reset();
+        navPoint_ = -1;
+        if (! path.empty())
+            footprintJob_ = std::async (std::launch::async, [this, path]
+            {
+                return std::shared_ptr<const VolumeFootprint> (std::make_shared<VolumeFootprint> (computeFootprint (std::filesystem::u8path (path), &footprintCancel_)));
+            });
+    }
+    wave_->setFootprint (footprint_, curveMask_);
+    const int kind = primaryCurve();
+    wave_->setRange (rangeOn_ && kind >= 0, rangeLo_, rangeHi_, kind);
+    peakCurvePill_->setOn ((curveMask_ & 1) != 0);
+    rmsCurvePill_->setOn ((curveMask_ & 2) != 0);
+    lufsCurvePill_->setOn ((curveMask_ & 4) != 0);
+    lufsCurvePill_->setAlpha (footprint_ != nullptr && ! footprint_->hasLufs() ? 0.4f : 1.0f);
+    rangePill_->setOn (rangeOn_);
+    rangeLoNumber_->update(); rangeHiNumber_->update();
+    rangeLoNumber_->setActive (rangeOn_); rangeHiNumber_->setActive (rangeOn_);
+    for (auto* pl : { loudestPill_, prevPeakPill_, nextPeakPill_ }) pl->setAlpha (footprint_ != nullptr ? 1.0f : 0.4f);
+}
+
+void NovaSamplerEditor::footprintLoudest()
+{
+    const auto* z = shownZone();
+    const int kind = primaryCurve();
+    if (z == nullptr) return;
+    if (kind < 0) { setToolStatus (tx ("sm.st_fp_nocurve")); return; }
+    if (footprint_ == nullptr) { setToolStatus (tx ("sm.st_fp_wait")); return; }
+    const auto& fp = *footprint_;
+    const auto& cv = fp.curve (kind);
+    const int from = static_cast<int> (fp.pointOfFrame (z->startFrame)), to = z->endFrame < 0 ? static_cast<int> (cv.size()) : static_cast<int> (fp.pointOfFrame (z->endFrame)) + 1;
+    const int i = loudestPoint (cv, from, to);
+    if (i < 0) return;
+    navPoint_ = i;
+    wave_->setCursor (fp.frameOfPoint (static_cast<std::size_t> (i)), true);
+    setToolStatus (U (translator().format ("sm.st_fp_loudest", { numberText (cv[static_cast<std::size_t> (i)]).toStdString(), numberText (static_cast<double> (fp.frameOfPoint (static_cast<std::size_t> (i))) / fp.sampleRate, 3).toStdString() })));
+}
+
+void NovaSamplerEditor::footprintPeak (int direction)
+{
+    const auto* z = shownZone();
+    const int kind = primaryCurve();
+    if (z == nullptr) return;
+    if (kind < 0) { setToolStatus (tx ("sm.st_fp_nocurve")); return; }
+    if (footprint_ == nullptr) { setToolStatus (tx ("sm.st_fp_wait")); return; }
+    const auto& fp = *footprint_;
+    const auto& cv = fp.curve (kind);
+    const auto peaks = localPeaks (cv, 3.0, static_cast<int> (std::lround (fp.sampleRate / static_cast<double> (fp.hopFrames))));
+    const int start = navPoint_ >= 0 ? navPoint_ : static_cast<int> (fp.pointOfFrame (z->startFrame)) - (direction > 0 ? 1 : -1);
+    const int i = neighbourPeak (peaks, start, direction);
+    if (i < 0) { setToolStatus (tx ("sm.st_fp_nopeak")); return; }
+    navPoint_ = i;
+    wave_->setCursor (fp.frameOfPoint (static_cast<std::size_t> (i)), true);
+    setToolStatus (U (translator().format ("sm.st_fp_peak", { numberText (cv[static_cast<std::size_t> (i)]).toStdString(), numberText (static_cast<double> (fp.frameOfPoint (static_cast<std::size_t> (i))) / fp.sampleRate, 3).toStdString() })));
 }
 
 // Raccord de boucle : quelques millisecondes autour des points de boucle, lues sur le disque (seulement quand la boucle change).
@@ -1481,6 +1580,15 @@ void NovaSamplerEditor::layout()
     // ---- page SAMPLE
     wavePanel_->setBounds (R (X0, 72, 942, 236));
     wave_->setBounds (R (X0 + 10, 104, 922, 194));
+    peakCurvePill_->setBounds (R (X0 + 150, 76, 54, 22));
+    rmsCurvePill_->setBounds (R (X0 + 208, 76, 54, 22));
+    lufsCurvePill_->setBounds (R (X0 + 266, 76, 58, 22));
+    loudestPill_->setBounds (R (X0 + 340, 76, 104, 22));
+    prevPeakPill_->setBounds (R (X0 + 448, 76, 80, 22));
+    nextPeakPill_->setBounds (R (X0 + 532, 76, 80, 22));
+    rangePill_->setBounds (R (X0 + 630, 76, 72, 22));
+    rangeLoNumber_->setBounds (R (X0 + 706, 74, 96, 26));
+    rangeHiNumber_->setBounds (R (X0 + 806, 74, 96, 26));
     infoText_->setBounds (R (X0 + 4, 310, 934, 16));
     markerText_->setBounds (R (X0 + 4, 326, 934, 16));
     toolsPanel_->setBounds (R (X0, 346, 942, 170));
@@ -1599,6 +1707,7 @@ void NovaSamplerEditor::tick()
     {
         updateSampleInfo();
         updateSeam();
+        updateFootprint();
         for (auto* c : { normChoice_, silenceChoice_, cutsChoice_ }) c->refresh (has);
         for (auto* pl : { trimPill_, normPill_, dcPill_, saveAsPill_, silencePill_, cutsPill_, loopFindPill_ }) pl->setAlpha (has ? 1.0f : 0.4f);
         durationNumber_->update(); pitchNumber_->update();
