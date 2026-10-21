@@ -25,6 +25,10 @@ public:
         std::int64_t loopStart = 0, loopEnd = -1;  // boucle (loopEnd < 0 : fin du fichier)
         std::int64_t crossfade = 0;                // longueur du fondu enchaîné avant la fin de boucle
         bool loop = false, reverse = false;
+        // visualisation des réglages de lecture (en échantillons du fichier, à la hauteur d'origine du sample)
+        std::int64_t fadeInFrames = 0, fadeOutFrames = 0, delayFrames = 0;
+        double gainDb = 0.0, tuneCents = 0.0;
+        double delayMs = 0.0, fadeInMs = 0.0, fadeOutMs = 0.0;
     };
 
     explicit WaveView (const Skin&);

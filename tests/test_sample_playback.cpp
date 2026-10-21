@@ -3,8 +3,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <memory>
 #include <vector>
+
+#include <sndfile.h>
 
 #include "neptune/core/Instrument.h"
 #include "neptune/core/SamplerVoices.h"
@@ -116,6 +119,41 @@ TEST_CASE ("loop crossfade removes the click at the loop point")
     const auto h = hard.play (12000), f = soft.play (12000);
     CHECK (maxStep (h, 4000) > 0.3f);    // saut de phase au raccord
     CHECK (maxStep (f, 4000) < 0.12f);   // le sinus lui-même fait des pas d'environ 0,065 : le raccord est continu
+}
+
+TEST_CASE ("a loop never wraps back before the start marker")
+{
+    // Instrument construit depuis une description : début de lecture à 1000, boucle laissée par défaut (début 0) : le retour se fait au point START.
+    const auto path = std::filesystem::temp_directory_path() / "neptune_loop_start.wav";
+    {
+        SF_INFO info {};
+        info.samplerate = 48000; info.channels = 1; info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+        SNDFILE* f = sf_open (path.string().c_str(), SFM_WRITE, &info);
+        REQUIRE (f != nullptr);
+        std::vector<float> x (3000);
+        for (std::size_t i = 0; i < x.size(); ++i) x[i] = i < 1000 ? -0.5f : 0.5f;   // avant START : -0,5 ; ensuite +0,5
+        sf_writef_float (f, x.data(), static_cast<sf_count_t> (x.size()));
+        sf_close (f);
+    }
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = path.string();
+    z.mode = PlayMode::Loop;
+    z.startFrame = 1000;
+    z.fadeInMs = 0.0;
+    d.zones.push_back (z);
+    std::vector<std::string> warnings;
+    const auto inst = buildInstrument (d, &warnings);
+    REQUIRE (inst != nullptr);
+    CHECK (inst->zones[0].loopStart == 1000);
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    v.noteOn (0, 60, 1.0f);
+    std::vector<float> l (20000, 0.0f), r (l);
+    for (int pos = 0; pos < 20000; pos += 256) v.render (l.data() + pos, r.data() + pos, std::min (256, 20000 - pos), 1.0f, 1.0f, 0.0);
+    for (std::size_t i = 0; i < l.size(); ++i) REQUIRE (l[i] > 0.4f);   // jamais de retour sur la partie négative d'avant START
+    std::filesystem::remove (path);
 }
 
 TEST_CASE ("zone description round-trips the new playback settings")

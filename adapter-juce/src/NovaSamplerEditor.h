@@ -85,6 +85,8 @@ private:
     int lastVoiceCount_ = -1;
     std::string shownSamplePath_;
     struct GroupMenuListener;
+    struct HoldListener;
+    std::unique_ptr<HoldListener> playListener_;
     std::unique_ptr<juce::MouseListener> groupMenuListener_;
 
     // colonne de gauche
@@ -108,7 +110,7 @@ private:
     nova::Panel *wavePanel_ = nullptr, *playPanel_ = nullptr;
     nova::WaveView* wave_ = nullptr;
     nova::Text *infoText_ = nullptr, *markerText_ = nullptr;
-    nova::Pill *loopPill_ = nullptr, *reversePill_ = nullptr, *showAllPill_ = nullptr;
+    nova::Pill *loopPill_ = nullptr, *reversePill_ = nullptr, *showAllPill_ = nullptr, *playPill_ = nullptr, *stopPill_ = nullptr;
     nova::ValueSlider *fadeIn_ = nullptr, *fadeOut_ = nullptr, *delay_ = nullptr, *crossfade_ = nullptr, *tune_ = nullptr, *gain_ = nullptr;
     nova::NumberPill* rootNumber2_ = nullptr;
 

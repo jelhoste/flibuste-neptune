@@ -249,7 +249,7 @@ void WaveView::paint (juce::Graphics& g)
         if (! shown_.ok || shownPath_ != path_ || shown_.bins < 1) continue;
         g.setColour (skin_.colour (Token::Accent));
         const double span = static_cast<double> (shown_.to - shown_.from);
-        const float amp = laneH * 0.46f;
+        const float amp = laneH * 0.46f * static_cast<float> (std::pow (10.0, markers_.gainDb / 20.0));   // le gain de la zone se voit sur la forme d'onde
         for (float x = p.getX(); x < p.getRight(); x += 1.0f)
         {
             const double f0 = frameAt (x), f1 = frameAt (x + 1.0f);
@@ -259,7 +259,8 @@ void WaveView::paint (juce::Graphics& g)
             float lo = 1.0f, hi = -1.0f;
             for (int k = b0; k <= b1; ++k) { lo = std::min (lo, shown_.low (c, k)); hi = std::max (hi, shown_.high (c, k)); }
             if (lo > hi) continue;
-            const float y0 = cy - hi * amp, y1 = cy - lo * amp;
+            const float lim = laneH * 0.5f;
+            const float y0 = std::max (cy - lim, cy - hi * amp), y1 = std::min (cy + lim, cy - lo * amp);   // écrêté à la voie : le dépassement saute aux yeux
             g.fillRect (x, y0, 1.0f, std::max (1.0f, y1 - y0));
         }
     }
@@ -268,6 +269,64 @@ void WaveView::paint (juce::Graphics& g)
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (11.0f));
         g.drawText ("...", p, juce::Justification::centred);
+    }
+
+    // ---- fondus, délai, gain et accordage de la zone
+    {
+        const bool rev = markers_.reverse;
+        const float top = p.getY(), bottom = p.getBottom();
+        auto ramp = [&] (float xA, float xB, bool up, const juce::String& label)
+        {
+            // rampe de gain : de 0 (bas) à 1 (haut) si `up`, l'inverse sinon ; la partie atténuée est teintée
+            juce::Path area;
+            if (up) { area.startNewSubPath (xA, top); area.lineTo (xB, top); area.lineTo (xA, bottom); }
+            else { area.startNewSubPath (xA, top); area.lineTo (xB, top); area.lineTo (xB, bottom); }
+            area.closeSubPath();
+            g.setColour (skin_.colour (Token::Accent2, 0.22f));
+            g.fillPath (area);
+            g.setColour (skin_.colour (Token::Accent2));
+            if (up) g.drawLine (xA, bottom, xB, top, skin_.px (2.0f)); else g.drawLine (xA, top, xB, bottom, skin_.px (2.0f));
+            g.setFont (skin_.font (9.0f, true));
+            g.drawText (label, juce::Rectangle<float> (std::min (xA, xB), top + skin_.px (16.0f), skin_.px (90.0f), skin_.px (13.0f)), juce::Justification::centredLeft);
+        };
+        const auto msText = [] (double ms) { return juce::String (ms, ms < 10.0 ? 1 : 0) + " ms"; };
+        if (markers_.fadeInFrames > 0)
+        {
+            const float len = std::max (skin_.px (3.0f), xOf (static_cast<double> (markers_.fadeInFrames)) - xOf (0.0));
+            if (! rev) ramp (xs, xs + len, true, "FADE IN " + msText (markers_.fadeInMs));
+            else ramp (xe, xe - len, true, "FADE IN " + msText (markers_.fadeInMs));
+        }
+        if (! markers_.loop && markers_.fadeOutFrames > 0)
+        {
+            const float len = std::max (skin_.px (3.0f), xOf (static_cast<double> (markers_.fadeOutFrames)) - xOf (0.0));
+            if (! rev) ramp (xe - len, xe, false, "FADE OUT " + msText (markers_.fadeOutMs));   // se termine sur le point END
+            else ramp (xs + len, xs, false, "FADE OUT " + msText (markers_.fadeOutMs));          // lecture inversée : se termine sur le point START
+        }
+        if (markers_.delayFrames > 0)
+        {
+            const float len = std::max (skin_.px (3.0f), xOf (static_cast<double> (markers_.delayFrames)) - xOf (0.0));
+            const float x0 = rev ? xe : xs - len;
+            g.setColour (skin_.colour (Token::Accent, 0.30f));
+            g.fillRect (juce::Rectangle<float> (x0, bottom - skin_.px (30.0f), len, skin_.px (14.0f)));
+            g.setColour (skin_.colour (Token::Accent));
+            g.setFont (skin_.font (9.0f, true));
+            g.drawText ("DELAY " + msText (markers_.delayMs), juce::Rectangle<float> (rev ? x0 + len + skin_.px (3.0f) : x0 - skin_.px (84.0f), bottom - skin_.px (30.0f), skin_.px (80.0f), skin_.px (14.0f)),
+                        rev ? juce::Justification::centredLeft : juce::Justification::centredRight);
+        }
+        float by = top + skin_.px (4.0f);
+        auto badge = [&] (const juce::String& text)
+        {
+            const float w = skin_.px (112.0f), h = skin_.px (16.0f);
+            const juce::Rectangle<float> r (p.getRight() - w - skin_.px (4.0f), by, w, h);
+            g.setColour (skin_.colour (Token::BgApp, 0.75f));
+            g.fillRoundedRectangle (r, skin_.px (4.0f));
+            g.setColour (skin_.colour (Token::Text));
+            g.setFont (skin_.font (10.0f, true));
+            g.drawText (text, r, juce::Justification::centred);
+            by += h + skin_.px (3.0f);
+        };
+        if (std::abs (markers_.gainDb) > 0.049) badge ("GAIN " + juce::String (markers_.gainDb, 1) + " dB");
+        if (std::abs (markers_.tuneCents) > 0.049) badge ("TUNE " + juce::String (markers_.tuneCents, 1) + " ct");
     }
 
     // ---- marqueurs

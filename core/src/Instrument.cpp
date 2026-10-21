@@ -757,12 +757,13 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.chokeCutBy = zd.chokeCutBy;
         if (! zd.group.empty())
             z.groupId = groupIds.emplace (zd.group, static_cast<int> (groupIds.size()) + 1).first->second;
-        z.loopStart = std::min<std::int64_t> (zd.loopStart, frames - 1);
-        z.loopEnd = zd.loopEnd < 0 ? frames : std::min<std::int64_t> (zd.loopEnd, frames);
-        if (z.loopEnd <= z.loopStart) { z.loopStart = 0; z.loopEnd = frames; }
         z.startFrame = std::clamp<std::int64_t> (zd.startFrame, 0, frames - 1);
         z.endFrame = zd.endFrame < 0 ? frames : std::min<std::int64_t> (zd.endFrame, frames);
         if (z.endFrame <= z.startFrame) { z.startFrame = 0; z.endFrame = frames; }
+        // La boucle ne revient jamais avant le point de départ : le début de boucle par défaut (0) suit le point START.
+        z.loopStart = std::max<std::int64_t> (std::min<std::int64_t> (zd.loopStart, frames - 1), z.startFrame);
+        z.loopEnd = zd.loopEnd < 0 ? frames : std::min<std::int64_t> (zd.loopEnd, frames);
+        if (z.loopEnd <= z.loopStart) { z.loopStart = z.startFrame; z.loopEnd = frames; }
         z.loopCrossfade = std::min<std::int64_t> ({ zd.loopCrossfade, z.loopStart, (z.loopEnd - z.loopStart) / 2 });
         z.fadeInMs = zd.fadeInMs;
         z.fadeOutMs = zd.fadeOutMs;

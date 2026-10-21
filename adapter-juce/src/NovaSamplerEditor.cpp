@@ -72,6 +72,14 @@ struct NovaSamplerEditor::GroupMenuListener : public juce::MouseListener
     NovaSamplerEditor& owner;
 };
 
+// Bouton « maintenu » : appuyé = la note démarre, relâché = Note Off (une boucle se relâche, un one-shot va au bout).
+struct NovaSamplerEditor::HoldListener : public juce::MouseListener
+{
+    std::function<void()> down, up;
+    void mouseDown (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu() && down) down(); }
+    void mouseUp (const juce::MouseEvent&) override { if (up) up(); }
+};
+
 // ------------------------------------------------------------------------------------------------ construction
 NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
     : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("SAMPLER")), proc_ (p)
@@ -275,9 +283,9 @@ void NovaSamplerEditor::buildSamplePage()
             const std::int64_t loopEnd = z.loopEnd < 0 ? total : z.loopEnd;
             switch (m)
             {
-                case nova::WaveView::Marker::Start: z.startFrame = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, end - 1)); break;
+                case nova::WaveView::Marker::Start: z.startFrame = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, end - 1)); z.loopStart = std::max (z.loopStart, z.startFrame); break;
                 case nova::WaveView::Marker::End: z.endFrame = frame >= total ? -1 : std::max (frame, z.startFrame + 1); break;
-                case nova::WaveView::Marker::LoopStart: z.loopStart = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, loopEnd - 1)); break;
+                case nova::WaveView::Marker::LoopStart: z.loopStart = std::clamp<std::int64_t> (frame, z.startFrame, std::max<std::int64_t> (z.startFrame, loopEnd - 1)); break;
                 case nova::WaveView::Marker::LoopEnd: z.loopEnd = frame >= total ? -1 : std::max (frame, z.loopStart + 1); break;
                 case nova::WaveView::Marker::Crossfade: z.loopCrossfade = std::clamp<std::int64_t> (frame, 0, std::min (z.loopStart, (loopEnd - z.loopStart) / 2)); break;
             }
@@ -295,6 +303,22 @@ void NovaSamplerEditor::buildSamplePage()
     reversePill_->setText (tx ("sm.reverse"));
     reversePill_->onClick = [this] { const auto* z = shownZone(); const bool now = z != nullptr && ! z->reverse; editZone ([now] (Zone& d) { d.reverse = now; }); };
     addInfo (1, reversePill_, "hlp.sm_reverse", 1);
+    playPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    playPill_->setText (tx ("sm.play_button"));
+    addInfo (1, playPill_, "hlp.sm_playbtn", 1);
+    playListener_ = std::make_unique<HoldListener>();
+    playListener_->down = [this]
+    {
+        if (cached_.zones.empty()) return;
+        const auto sel = zones_->selectedRows();
+        const int row = (! sel.empty() && sel.front() >= 0 && sel.front() < static_cast<int> (cached_.zones.size())) ? sel.front() : 0;
+        proc_.uiPreviewZone (row);
+    };
+    playListener_->up = [this] { proc_.uiPreviewRelease(); };
+    playPill_->addMouseListener (playListener_.get(), false);
+    stopPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    stopPill_->setText (tx ("sm.stop_button"));
+    stopPill_->onClick = [this] { proc_.uiPreviewStop(); };
     showAllPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     showAllPill_->setText (tx ("sm.show_all"));
     showAllPill_->onClick = [this] { wave_->showAll(); };
@@ -976,6 +1000,14 @@ void NovaSamplerEditor::updateSampleInfo()
     m.start = z->startFrame; m.end = z->endFrame;
     m.loopStart = z->loopStart; m.loopEnd = z->loopEnd;
     m.crossfade = z->loopCrossfade;
+    m.loopStart = std::max (z->loopStart, z->startFrame);   // la boucle ne revient jamais avant START (même règle que le moteur)
+    const double rate = info.sampleRate;
+    m.fadeInMs = z->fadeInMs; m.fadeOutMs = z->fadeOutMs; m.delayMs = z->delayMs;
+    m.fadeInFrames = static_cast<std::int64_t> (std::llround (z->fadeInMs * rate / 1000.0));
+    m.fadeOutFrames = static_cast<std::int64_t> (std::llround (z->fadeOutMs * rate / 1000.0));
+    m.delayFrames = static_cast<std::int64_t> (std::llround (z->delayMs * rate / 1000.0));
+    m.gainDb = z->gainDb;
+    m.tuneCents = z->tuneCents;
     m.loop = z->mode == PlayMode::Loop;
     m.reverse = z->reverse;
     wave_->setMarkers (m);
@@ -989,7 +1021,7 @@ void NovaSamplerEditor::updateSampleInfo()
     auto t = [&] (std::int64_t f) { return juce::String (static_cast<long long> (f)) + " (" + juce::String (static_cast<double> (f) * 1000.0 / info.sampleRate, 1) + " ms)"; };
     const std::int64_t end = z->endFrame < 0 ? info.frames : z->endFrame, loopEnd = z->loopEnd < 0 ? info.frames : z->loopEnd;
     auto text = juce::String ("START ") + t (z->startFrame) + "    END " + t (end);
-    if (z->mode == PlayMode::Loop) text += "    LOOP " + t (z->loopStart) + " > " + t (loopEnd);
+    if (z->mode == PlayMode::Loop) text += "    LOOP " + t (std::max (z->loopStart, z->startFrame)) + " > " + t (loopEnd);
     markerText_->setText (text);
 }
 
@@ -1060,7 +1092,9 @@ void NovaSamplerEditor::layout()
     loopPill_->setBounds (R (X0 + 12, 504, 170, 30));
     reversePill_->setBounds (R (X0 + 188, 504, 150, 30));
     showAllPill_->setBounds (R (X0 + 344, 504, 130, 30));
-    rootNumber2_->setBounds (R (X0 + 640, 504, 170, 30));
+    playPill_->setBounds (R (X0 + 640, 504, 140, 30));
+    stopPill_->setBounds (R (X0 + 786, 504, 100, 30));
+    rootNumber2_->setBounds (R (X0 + 480, 504, 154, 30));
     fadeIn_->setBounds (R (X0 + 12, 552, 214, 46));
     fadeOut_->setBounds (R (X0 + 240, 552, 214, 46));
     delay_->setBounds (R (X0 + 468, 552, 214, 46));

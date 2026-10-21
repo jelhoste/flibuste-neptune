@@ -130,12 +130,6 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
     latencyLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (latencyLabel_);
-    for (const int samples : { 0, 64, 512, 2048 })
-    {
-        auto* b = latencyButtons_.add (new juce::TextButton (juce::String::fromUTF8 (tr_.format ("latency.set", { std::to_string (samples) }).c_str())));
-        b->onClick = [this, samples] { processor_.setLatencySamples (samples); }; // thread message
-        addAndMakeVisible (b);
-    }
     startTimerHz (30);
 
     // La taille en dernier : resized() place les composants, qui doivent donc exister. (Fixée avant leur création,
@@ -467,8 +461,7 @@ void NeptuneEditor::resized()
         lw_ = logical.getWidth();
         lh_ = logical.getHeight();
     }
-    auto bottom = rootBounds().reduced (32).removeFromBottom (80);
-    auto banner = bottom.removeFromTop (36);
+    auto banner = juce::Rectangle<int> (32, lh_ - 74, lw_ - 64, 36);
     discardButton_.setBounds (banner.removeFromRight (90).reduced (2));
     restoreButton_.setBounds (banner.removeFromRight (90).reduced (2));
     recoveryLabel_.setBounds (banner);
@@ -479,33 +472,27 @@ void NeptuneEditor::resized()
     mixerButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
     panicButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
     trackBox_.setBounds (190, 32, 180, 36);
-    mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 150) });
+    mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
     voiceCountButton_.setBounds (376, 32, 150, 36);
     midiFilterButton_.setBounds (530, 32, 44, 36);
     controlButton_.setBounds (578, 32, 44, 36);
     oscButton_.setBounds (626, 32, 44, 36);
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (instrumentPanel_ != nullptr)
-        instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 158 - 80)));   // jusqu'à la bande de profil ; les potards du bas sont dans l'éditeur
-    audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 160) });
+        instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 40 - 80 - (recoveryShown_ ? 40 : 0))));   // jusqu'à la rangée du bas (et au-dessus du bandeau de récupération)
+    audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)) });
     if (insertOverlay_) insertOverlay_->setBounds (rootBounds());
 
     {
-        // annuler / rétablir : en bas de la fenêtre (jamais sur le mixeur ni sur le master), deux fois plus petits qu'avant
-        const int btnY = lh_ - 28;
-        redoButton_.setBounds (lw_ - 32 - 64, btnY, 64, 22);
-        undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, btnY, 64, 22);
-    }
-
-    auto profileStrip = rootBounds().reduced (32).removeFromBottom (120).removeFromTop (32);
-    profileSwitchButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
-    profileLockButton_.setBounds (profileStrip.removeFromLeft (200).reduced (2));
-    profileLabel_.setBounds (profileStrip);
-    auto strip = rootBounds().reduced (32).removeFromBottom (32);
-    latencyLabel_.setBounds (strip.removeFromLeft (260));
-    for (auto* b : latencyButtons_)
-    {
-        b->setBounds (strip.removeFromLeft (110).reduced (2));
+        // rangée du bas, sur toute la largeur : latence annoncée, profil de performance (bascule et verrou), puis annuler / rétablir ; même hauteur partout
+        const int rowY = lh_ - 30, rowH = 22;
+        redoButton_.setBounds (lw_ - 32 - 64, rowY, 64, rowH);
+        undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, rowY, 64, rowH);
+        auto row = juce::Rectangle<int> (32, rowY, lw_ - 64 - 64 - 4 - 64 - 12, rowH);
+        latencyLabel_.setBounds (row.removeFromLeft (230));
+        profileSwitchButton_.setBounds (row.removeFromLeft (190).reduced (2, 0));
+        profileLockButton_.setBounds (row.removeFromLeft (190).reduced (2, 0));
+        profileLabel_.setBounds (row);
     }
 }
 
