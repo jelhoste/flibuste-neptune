@@ -68,6 +68,9 @@ private:
     void updateFilterEditor();
     void updateVoices();
     void updatePlayButton();
+    void toggleRecording();
+    void finishRecording (const std::string& path, std::int64_t frames);
+    void updateRecordButton();
     void rebuildLoadPanel();
     void updateSampleInfo();
 
@@ -130,6 +133,8 @@ private:
     std::string loopCandidatesKey_, seamKey_;
     std::unique_ptr<juce::FileChooser> saveChooser_;
     bool previewing_ = false;
+    std::string recordingPath_;
+    juce::uint32 recordStartMs_ = 0;
     juce::uint32 previewStartMs_ = 0;
     std::unique_ptr<juce::MouseListener> groupMenuListener_;
 
@@ -154,7 +159,7 @@ private:
     nova::Panel *wavePanel_ = nullptr, *playPanel_ = nullptr;
     nova::WaveView* wave_ = nullptr;
     nova::Text *infoText_ = nullptr, *markerText_ = nullptr;
-    nova::Pill *loopPill_ = nullptr, *reversePill_ = nullptr, *showAllPill_ = nullptr, *playPill_ = nullptr;
+    nova::Pill *loopPill_ = nullptr, *reversePill_ = nullptr, *showAllPill_ = nullptr, *playPill_ = nullptr, *recPill_ = nullptr;
     nova::ValueSlider *fadeIn_ = nullptr, *fadeOut_ = nullptr, *delay_ = nullptr, *crossfade_ = nullptr, *tune_ = nullptr, *gain_ = nullptr;
     nova::NumberPill* rootNumber2_ = nullptr;
     nova::Panel* toolsPanel_ = nullptr;

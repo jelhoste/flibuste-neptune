@@ -16,6 +16,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "PresetHost.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmPreset.h"
+#include "neptune/core/AudioRecorder.h"
 #include "neptune/core/Autosave.h"
 #include "neptune/core/Control.h"
 #include "OscServer.h"
@@ -254,6 +255,13 @@ public:
     void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
     std::uint64_t heldKeyWord (int track, int word) const noexcept { return engine_.heldKeyWord (track, word); }
     int totalActiveVoices() const noexcept { return engine_.totalActiveVoices(); } // toutes pistes ; lisible depuis l'interface
+    // Enregistrement direct de l'entrée audio de l'hôte dans un fichier WAV (dossier de données de Neptune, Edited/Recordings) ; la zone est créée par l'éditeur.
+    bool uiStartRecording (std::string& path, std::string* error = nullptr);
+    std::int64_t uiStopRecording() { return recorder_.stop(); }
+    bool isRecording() const noexcept { return recorder_.recording(); }
+    std::int64_t recordedFrames() const noexcept { return recorder_.framesWritten(); }
+    double recordingSampleRate() const noexcept { return recorder_.sampleRate(); }
+    float recordingPeak() noexcept { return recorder_.peak(); }
     void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f, selectedTrack() }); }
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const { return instrumentStatus (selectedTrack()); }
@@ -279,6 +287,7 @@ public:
     void addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer& midi, int sampleOffset) override;
 
 private:
+    neptune::core::AudioRecorder recorder_;
     static BusesProperties makeBuses (int numOutputs);
 
     void seedHostParameters (const std::vector<std::pair<neptune::core::ParamId, double>>&);

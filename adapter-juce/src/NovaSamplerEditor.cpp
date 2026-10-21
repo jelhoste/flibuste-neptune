@@ -95,6 +95,7 @@ NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette&
 
 NovaSamplerEditor::~NovaSamplerEditor()
 {
+    // une prise en cours continue : elle est fermée avec le processeur ; le fichier reste dans Edited/Recordings
     footprintCancel_ = true;
     if (footprintJob_.valid()) footprintJob_.wait();
     stretchCancel_ = true;
@@ -301,6 +302,11 @@ void NovaSamplerEditor::buildSamplePage()
     reversePill_->setText (tx ("sm.reverse"));
     reversePill_->onClick = [this] { const auto* z = shownZone(); const bool now = z != nullptr && ! z->reverse; editZone ([now] (Zone& d) { d.reverse = now; }); };
     addInfo (1, reversePill_, "hlp.sm_reverse", 1);
+    // Bouton REC : enregistre l'entrée audio de l'hôte ; à l'arrêt, une zone est créée avec la prise
+    recPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
+    recPill_->setText (tx ("sm.rec"));
+    addInfo (-1, recPill_, "hlp.sm_rec", 1);
+    recPill_->onClick = [this] { toggleRecording(); };
     // Bouton PLAY / STOP : dans la barre du bas, visible sur toutes les pages (page -1)
     playPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
     playPill_->setText (tx ("sm.play_button"));
@@ -1613,6 +1619,7 @@ void NovaSamplerEditor::layout()
     reversePill_->setBounds (R (X0 + 188, 558, 150, 28));
     showAllPill_->setBounds (R (X0 + 344, 558, 130, 28));
     playPill_->setBounds (R (1006, 736, 140, 32));
+    recPill_->setBounds (R (846, 736, 140, 32));
     rootNumber2_->setBounds (R (X0 + 480, 558, 154, 28));
     fadeIn_->setBounds (R (X0 + 12, 596, 214, 46));
     fadeOut_->setBounds (R (X0 + 240, 596, 214, 46));
@@ -1666,6 +1673,75 @@ void NovaSamplerEditor::updatePlayButton()
     playPill_->setAlpha (cached_.zones.empty() && ! previewing_ ? 0.4f : 1.0f);
 }
 
+void NovaSamplerEditor::toggleRecording()
+{
+    if (proc_.isRecording())
+    {
+        const auto frames = proc_.uiStopRecording();
+        const auto path = recordingPath_;
+        recordingPath_.clear();
+        finishRecording (path, frames);
+        return;
+    }
+    std::string path, err;
+    if (! proc_.uiStartRecording (path, &err)) { recPill_->setText (tx ("sm.rec_error")); return; }
+    recordingPath_ = path;
+    recordStartMs_ = juce::Time::getMillisecondCounter();
+}
+
+// La prise devient une zone sur la prochaine note libre ; les silences de début et de fin sont écartés (marqueurs, rien n'est coupé).
+void NovaSamplerEditor::finishRecording (const std::string& path, std::int64_t frames)
+{
+    if (path.empty()) return;
+    if (frames <= 0) { std::error_code ec; std::filesystem::remove (utf8Path (path), ec); return; }
+    Zone zone;
+    zone.samplePath = path;
+    auto d = proc_.instrumentDescription();
+    int note = 60;
+    if (! d.zones.empty())
+    {
+        note = 0;
+        for (const auto& z : d.zones) note = std::max (note, z.keyHigh + 1);
+        note = std::min (note, 127);
+    }
+    zone.keyLow = zone.keyHigh = zone.rootNote = note;
+    se::Buffer b;
+    if (se::readFile (utf8Path (path), b))
+    {
+        const auto r = se::detectSilence (b, -60.0);
+        if (r.found)
+        {
+            const std::int64_t pad = static_cast<std::int64_t> (b.sampleRate * 0.005);
+            const std::int64_t start = std::max<std::int64_t> (0, r.start - pad), end = std::min (b.frames(), r.end + pad);
+            zone.startFrame = start;
+            zone.endFrame = end >= b.frames() ? -1 : end;
+        }
+    }
+    d.zones.push_back (sanitised (zone));
+    const int index = static_cast<int> (d.zones.size()) - 1;
+    proc_.uiEditInstrument (std::move (d), "Record sample");
+    lastRevision_ = 0xFFFFFFFFu;
+    refreshFromInstrument();
+    setSelection ({ index });
+    setPage (1);
+}
+
+void NovaSamplerEditor::updateRecordButton()
+{
+    if (! proc_.isRecording())
+    {
+        recPill_->setText (tx ("sm.rec"));
+        recPill_->setOn (false);
+        return;
+    }
+    const auto frames = proc_.recordedFrames();
+    const double seconds = static_cast<double> (frames) / std::max (1.0, proc_.recordingSampleRate());
+    const bool noInput = juce::Time::getMillisecondCounter() - recordStartMs_ > 1500 && frames == 0;
+    const int whole = static_cast<int> (seconds);
+    recPill_->setText (noInput ? tx ("sm.rec_noinput") : tx ("sm.rec_stop") + "  " + juce::String (whole / 60) + ":" + juce::String (whole % 60).paddedLeft ('0', 2));
+    recPill_->setOn (true);
+}
+
 void NovaSamplerEditor::tick()
 {
     for (int t = 0, k = 0, v = 0; proc_.popNoteTrace (t, k, v);)
@@ -1685,6 +1761,7 @@ void NovaSamplerEditor::tick()
     }
     updateVoices();
     updatePlayButton();
+    updateRecordButton();
     updateFilterEditor();
     if (chokePanel_ != nullptr && has) chokePanel_->setValues (z->chokeCuts, z->chokeCutBy);
 

@@ -1657,6 +1657,15 @@ void NeptuneProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     hostIn_[1].assign (capacity, 0.0f);
 }
 
+bool NeptuneProcessor::uiStartRecording (std::string& path, std::string* error)
+{
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S").toStdString();
+    const auto file = configDirectory() / "Edited" / "Recordings" / ("rec-" + stamp + ".wav");
+    if (! recorder_.start (file, getSampleRate() > 0.0 ? getSampleRate() : 48000.0, error)) return false;
+    path = file.u8string();
+    return true;
+}
+
 void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -1674,6 +1683,7 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             const float* right = buffer.getReadPointer (channels >= 2 ? 1 : 0);   // entrée mono : dupliquée
             std::copy (right, right + frames, hostIn_[1].begin());
             engine_.setHostInput (hostIn_[0].data(), hostIn_[1].data(), frames);
+            recorder_.push (hostIn_[0].data(), hostIn_[1].data(), frames);   // sans effet hors enregistrement
         }
     }
     ++hostProbe_.blocks;
