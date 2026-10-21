@@ -33,8 +33,8 @@ public:
     };
 
     static constexpr int designWidth = 1160, designHeight = 780;
-    // Plage d'échelle de la fenêtre. 1,0 au maximum pour l'instant (taille fixe d'abord) ; l'interface sait déjà s'agrandir sans transformation.
-    static constexpr float minScale = 0.6f, maxScale = 1.0f;
+    // Plage d'échelle de la fenêtre. 2,0 au maximum : l'interface profite d'une fenêtre agrandie.
+    static constexpr float minScale = 0.6f, maxScale = 2.0f;
 
     EditorBase (ParamHost&, const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle, const neptune::core::i18n::Translator&,
                 Options, juce::String word);

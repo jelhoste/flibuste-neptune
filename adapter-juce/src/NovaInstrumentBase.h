@@ -69,6 +69,7 @@ protected:
 
 private:
     void applyKeyboard();
+    void fillBankWithFactoryPresets();
     std::vector<std::unique_ptr<nova::ChoicePill>> choices_;
     std::vector<std::vector<std::function<void()>>> updaters_;   // index page + 1 (-1 : toujours)
 
@@ -77,7 +78,7 @@ private:
     nova::Pill* kbPill_ = nullptr;
     nova::Panel* matrixPanel_ = nullptr;
     nova::PresetTiles* tiles_ = nullptr;
-    nova::Pill *colsPill_ = nullptr, *rowsPill_ = nullptr, *bankPrev_ = nullptr, *bankNext_ = nullptr, *bankPill_ = nullptr, *fieldPill_ = nullptr;
+    nova::Pill *colsPill_ = nullptr, *rowsPill_ = nullptr, *bankPrev_ = nullptr, *bankNext_ = nullptr, *bankPill_ = nullptr, *fieldPill_ = nullptr, *fillPill_ = nullptr;
     nova::Panel* keyboardPanel_ = nullptr;
     SynthKeyboard* keyboard_ = nullptr;
     nova::Pill *octDown_ = nullptr, *octUp_ = nullptr, *holdPill_ = nullptr, *panicPill_ = nullptr;

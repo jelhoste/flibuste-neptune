@@ -122,6 +122,9 @@ void NovaInstrumentBase::buildCommon (const char* outputHelpKey)
     matrixPanel_->setTitle (tx ("og.matrix_title").toUpperCase());
     tiles_ = add<nova::PresetTiles> (mp, skin(), presets_);
     tiles_->onLoaded = [this] { reloadDescription(); };
+    tiles_->textLoad = tx ("sy.tile_load");
+    tiles_->textAssign = tx ("sy.tile_assign");
+    tiles_->textClear = tx ("sy.tile_clear");
     addInfo (mp, matrixPanel_, "hlp.sy_matrix", true);
     bankPrev_ = add<nova::Pill> (mp, skin(), nova::Pill::Look::Small);
     bankPrev_->setText ("<");
@@ -138,6 +141,10 @@ void NovaInstrumentBase::buildCommon (const char* outputHelpKey)
     fieldPill_ = add<nova::Pill> (mp, skin());
     fieldPill_->onClick = [this] { tiles_->field = (tiles_->field + 1) % 5; };
     addInfo (mp, fieldPill_, "hlp.og_field");
+    fillPill_ = add<nova::Pill> (mp, skin());
+    fillPill_->setText (tx ("sy.fill_factory"));
+    fillPill_->onClick = [this] { fillBankWithFactoryPresets(); };
+    addInfo (mp, fillPill_, "hlp.sy_fill");
 
     // clavier (toutes les pages sauf SETTINGS)
     keyboardPanel_ = add<nova::Panel> (-2, skin());
@@ -163,6 +170,29 @@ void NovaInstrumentBase::buildCommon (const char* outputHelpKey)
 }
 
 // ------------------------------------------------------------------------------------------------ presets
+// Place les presets d'usine acceptés par l'instrument dans les emplacements libres de la banque affichée (ceux déjà présents sont laissés).
+void NovaInstrumentBase::fillBankWithFactoryPresets()
+{
+    auto& lib = presets_.library();
+    const int bank = tiles_->bank;
+    std::vector<std::string> present;
+    for (int prog = 0; prog < preset::programsPerBank; ++prog)
+    {
+        const auto id = preset::Navigator::presetAt (lib.banks(), { bank, prog });
+        if (! id.empty()) present.push_back (id);
+    }
+    int prog = 0, placed = 0;
+    for (const auto& p : lib.factoryPresets())
+    {
+        if (! presets_.acceptsPreset (p) || std::find (present.begin(), present.end(), p.id) != present.end()) continue;
+        while (prog < preset::programsPerBank && ! preset::Navigator::presetAt (lib.banks(), { bank, prog }).empty()) ++prog;
+        if (prog >= preset::programsPerBank) break;
+        if (lib.assign (bank, prog, p.id)) ++placed;
+    }
+    presets_.touchPresets();
+    ui_->statusText = juce::String (placed) + " " + tx ("sy.fill_done");
+}
+
 void NovaInstrumentBase::showPresetMenu (juce::Component* anchor) { ui_->showMenu (anchor, tiles_ != nullptr ? tiles_->bank : 0); }
 
 bool NovaInstrumentBase::keyPressed (const juce::KeyPress& k)
@@ -203,7 +233,8 @@ void NovaInstrumentBase::layoutCommon()
     bankNext_->setBounds (R (X0 + 210, 72 + 36, 36, 30));
     colsPill_->setBounds (R (X0 + 266, 72 + 36, 150, 30));
     rowsPill_->setBounds (R (X0 + 426, 72 + 36, 150, 30));
-    fieldPill_->setBounds (R (X0 + 586, 72 + 36, 310, 30));
+    fieldPill_->setBounds (R (X0 + 586, 72 + 36, 190, 30));
+    fillPill_->setBounds (R (X0 + 784, 72 + 36, 124, 30));
     tiles_->setBounds (R (X0 + 16, 72 + 80, 910, H - 92));
 
     // ---- clavier

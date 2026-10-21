@@ -116,7 +116,7 @@ void InsertOverlay::timerCallback()
 
 void InsertOverlay::resized()
 {
-    const int w = juce::jmin (getWidth() - 40, 880), h = juce::jmin (getHeight() - 40, 640);
+    const int w = juce::jmin (getWidth() - 40, 2400), h = juce::jmin (getHeight() - 40, 1700);   // toute la place disponible : les éditeurs NOVA grossissent avec la fenêtre
     panel_ = juce::Rectangle<int> (0, 0, w, h).withCentre (getLocalBounds().getCentre());
     auto r = panel_.reduced (10);
     auto head = r.removeFromTop (36);

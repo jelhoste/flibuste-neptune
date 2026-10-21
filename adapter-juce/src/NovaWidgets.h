@@ -205,6 +205,7 @@ public:
 
     int cols = 4, rows = 3, bank = 0, field = 0;   // field : 0 nom du preset, 1 morceau, 2 atelier, 3 élève, 4 événement
     std::function<void()> onLoaded;
+    juce::String textLoad, textAssign, textClear;  // entrées du menu du clic droit (traduites par l'éditeur)
 
     void update()
     {
@@ -262,7 +263,13 @@ public:
     void mouseUp (const juce::MouseEvent& e) override
     {
         namespace preset = neptune::core::preset;
-        if (e.mods.isPopupMenu() || e.getDistanceFromDragStart() > 6) return;
+        if (e.getDistanceFromDragStart() > 6) return;
+        if (e.mods.isPopupMenu())
+        {
+            for (int i = 0; i < cols * rows; ++i)
+                if (tile (i).contains (e.position)) { showTileMenu (i); return; }
+            return;
+        }
         for (int i = 0; i < cols * rows; ++i)
             if (tile (i).contains (e.position))
             {
@@ -275,6 +282,27 @@ public:
     }
 
 private:
+    // clic droit : charger, assigner le preset courant à cette tuile, vider la tuile
+    void showTileMenu (int i)
+    {
+        namespace preset = neptune::core::preset;
+        const auto id = preset::Navigator::presetAt (host_.library().banks(), { bank, i });
+        const auto current = host_.currentPresetId();
+        juce::PopupMenu menu;
+        menu.addItem (1, textLoad, ! id.empty());
+        menu.addItem (2, textAssign, ! current.empty());
+        menu.addItem (3, textClear, ! id.empty());
+        juce::Component::SafePointer<PresetTiles> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options(), [safe, i, id, current] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            auto& host = safe->host_;
+            if (r == 1) { if (host.loadPreset (id) && safe->onLoaded) safe->onLoaded(); }
+            else if (r == 2) { host.library().assign (safe->bank, i, current); host.touchPresets(); }
+            else if (r == 3) { host.library().assign (safe->bank, i, {}); host.touchPresets(); }
+            safe->repaint();
+        });
+    }
     juce::Rectangle<float> tile (int i) const
     {
         const float w = static_cast<float> (getWidth()) / static_cast<float> (cols), h = static_cast<float> (getHeight()) / static_cast<float> (rows);

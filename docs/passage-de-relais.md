@@ -572,3 +572,8 @@ Architecture :
 - `WaveExplorer.h` : l'explorateur de formes d'onde, sorti de `SynthView.cpp`.
 - Les anciens `AnalogSynthEditor` et `FmSynthEditor` sont supprimés ; `SynthView` et `FmView` restent pour Neptune.
 - Textes d'aide : `hlp.sy_*` et `hlp.fm_*` (I18n). Galerie : cas `synth-*` et `fm-*` dans `NovaGallery`.
+
+### Suite (2026-10-21) : matrice, échelle, calque Neptune
+- Page MATRICE : clic droit sur une tuile (charger, placer le preset courant, vider) et bouton USINE (place les presets d'usine acceptés dans les emplacements libres de la banque affichée). Le placement passe par `Library::assign`, comme le gestionnaire.
+- `EditorBase::maxScale` passe de 1,0 à 2,0 : les éditeurs NOVA (plugins et calques) grossissent avec la fenêtre. `InsertOverlay` prend toute la place disponible (marge de 20 px).
+- Neptune : bouton « Éditeur NOVA » à droite de la barre de presets des pistes Synthé et FM ; `InstrumentOverlay` ouvre `NovaSynthEditor` / `NovaFmEditor` en calque (liens : `SynthLink` / `FmLink` vers `NeptuneProcessor`, piste figée à l'ouverture ; le calque se ferme si la piste ou son type change). Les anciennes vues `SynthView` / `FmView` restent dans la zone des pistes.
