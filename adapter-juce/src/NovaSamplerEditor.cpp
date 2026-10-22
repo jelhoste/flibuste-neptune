@@ -830,7 +830,7 @@ void NovaSamplerEditor::flushFileMeta()
     else setToolStatus (U (translator().format ("sm.st_marker_error", { err })));
 }
 
-bool NovaSamplerEditor::writeDerivedbool NovaSamplerEditor::writeDerived (const Zone& z, const char* tag, const se::Buffer& b, std::string& newPath)
+bool NovaSamplerEditor::writeDerived (const Zone& z, const char* tag, const se::Buffer& b, std::string& newPath)
 {
     std::string err;
     const auto path = se::derivedPath (editedDirectory(), z.samplePath, tag, b);
