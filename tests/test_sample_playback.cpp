@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include <sndfile.h>
@@ -656,4 +657,249 @@ TEST_CASE ("envelope and filters are inherited instrument -> group -> zone, bloc
     CHECK (legacy.zones[0].envelopeOverride);
     CHECK_FALSE (legacy.zones[1].envelopeOverride);
     std::filesystem::remove (path);
+}
+
+TEST_CASE ("round-robin: each velocity layer has its own counter, and a short layer can borrow from its neighbour")
+{
+    auto build = [] (bool borrow, int modeA)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto make = [] (int velLow, int velHigh, int rr, float level)
+        {
+            auto z = makeFullKeyboardZone (makeConstant (4800, level), 60, PlayMode::OneShot);
+            z.keyLow = z.keyHigh = 60; z.velLow = velLow; z.velHigh = velHigh; z.roundRobin = rr;
+            return z;
+        };
+        // couche douce (1-60) : 2 alternatives ; couche forte (61-127) : 4 alternatives
+        for (int i = 0; i < 2; ++i) inst->zones.push_back (make (1, 60, i + 1, 0.1f + 0.01f * static_cast<float> (i)));
+        for (int i = 0; i < 4; ++i) inst->zones.push_back (make (61, 127, i + 1, 0.5f + 0.01f * static_cast<float> (i)));
+        inst->zones[0].rrMode = modeA;
+        inst->rrBorrow = borrow;
+        inst->finalize();
+        return inst;
+    };
+    auto picks = [] (const std::shared_ptr<Instrument>& inst, float velocity, int count)
+    {
+        std::vector<const Zone*> out;
+        for (int i = 0; i < count; ++i)
+        {
+            Instrument::Pick p[Instrument::maxPicks];
+            const int n = inst->selectLayers (60, velocity, false, p, Instrument::maxPicks);
+            if (n > 0) out.push_back (p[0].zone);
+        }
+        return out;
+    };
+    auto distinct = [] (const std::vector<const Zone*>& v) { std::set<const Zone*> s (v.begin(), v.end()); return s.size(); };
+    // sans emprunt : 2 alternatives douces, 4 fortes, compteurs indépendants
+    {
+        auto inst = build (false, -1);
+        CHECK (distinct (picks (inst, 0.3f, 8)) == 2);
+        CHECK (distinct (picks (inst, 0.9f, 8)) == 4);
+        // jouer une couche n'avance pas le compteur de l'autre
+        const auto a1 = picks (inst, 0.3f, 1)[0];
+        picks (inst, 0.9f, 3);
+        const auto a2 = picks (inst, 0.3f, 1)[0];
+        CHECK (a1 != a2);   // la couche douce a continué sa propre alternance
+    }
+    // avec emprunt : la couche douce utilise aussi les alternatives de la voisine, corrigées en volume
+    {
+        auto inst = build (true, -1);
+        CHECK (distinct (picks (inst, 0.3f, 12)) == 4);
+        for (int i = 0; i < 12; ++i)
+        {
+            Instrument::Pick p[Instrument::maxPicks];
+            if (inst->selectLayers (60, 0.3f, false, p, Instrument::maxPicks) < 1) continue;
+            const bool borrowed = p[0].zone->velLow == 61;
+            const float g = p[0].gain;
+            if (borrowed) CHECK_THAT (static_cast<double> (g), WithinAbs (30.5 / 94.0, 0.05));   // vélocités moyennes : 30,5 contre 94
+        }
+        CHECK (distinct (picks (inst, 0.9f, 12)) == 4);   // la couche forte n'emprunte rien à la douce (moins d'alternatives)
+    }
+    // mode par jeu : aléatoire pour la couche douce (la première zone du jeu), séquentiel ailleurs
+    {
+        auto inst = build (false, 1);
+        const auto soft = picks (inst, 0.3f, 40);
+        int repeats = 0;
+        for (std::size_t i = 1; i < soft.size(); ++i) repeats += soft[i] == soft[i - 1] ? 1 : 0;
+        CHECK (repeats > 0);   // un tirage au sort répète parfois, l'alternance séquentielle jamais
+        const auto loud = picks (inst, 0.9f, 8);
+        for (std::size_t i = 1; i < loud.size(); ++i) CHECK (loud[i] != loud[i - 1]);
+    }
+}
+
+TEST_CASE ("round-robin settings survive JSON")
+{
+    InstrumentDescription d;
+    d.rrBorrow = true;
+    ZoneDescription z; z.samplePath = "a.wav"; z.rrMode = 2;
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back == d);
+    CHECK (back.zones[0].rrMode == 2);
+    CHECK_FALSE (instrumentFromJson (toJson (InstrumentDescription {})).rrBorrow);
+    ZoneDescription bad; bad.rrMode = 9;
+    CHECK (sanitised (bad).rrMode == 2);
+}
+
+TEST_CASE ("modulators gate groups, zones and the whole track, discrete or continuous, and keyswitches flip them")
+{
+    auto build = [] (std::uint16_t zoneMaskA, std::uint16_t zoneMaskB, bool continuousFirst)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto a = makeFullKeyboardZone (makeConstant (48000, 0.4f), 60, PlayMode::Loop);
+        auto b = makeFullKeyboardZone (makeConstant (48000, 0.2f), 60, PlayMode::Loop);
+        a.modMask = zoneMaskA; b.modMask = zoneMaskB;
+        a.panL = 1.0f; a.panR = 0.0f; b.panL = 0.0f; b.panR = 1.0f;   // A à gauche, B à droite : on les mesure séparément
+        inst->zones.push_back (std::move (a));
+        inst->zones.push_back (std::move (b));
+        inst->modulators[0].continuous = continuousFirst;
+        inst->modulators[1].used = true; inst->modulators[1].note = 24;
+        inst->finalize();
+        return inst;
+    };
+    auto play = [] (SamplerVoices& v, int note, int frames = 2048)
+    {
+        v.noteOn (0, note, 1.0f);
+        std::vector<float> l (static_cast<std::size_t> (frames), 0.0f), r (l);
+        v.render (l.data(), r.data(), frames, 1.0f, 1.0f, 0.0);
+        return std::make_pair (static_cast<double> (l[static_cast<std::size_t> (frames) - 10]), static_cast<double> (r[static_cast<std::size_t> (frames) - 10]));
+    };
+    {
+        // deux zones à la même place, A commandée par le modulateur 0, B par le modulateur 1 : un modulateur coupé les écarte du déclenchement
+        auto inst = build (1u << 0, 1u << 1, false);
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        float values[kModulators];
+        std::fill (values, values + kModulators, 1.0f);
+        v.setModulators (values);
+        auto both = play (v, 60);
+        CHECK_THAT (both.first, WithinAbs (0.4, 5e-3));   // A et B jouent ensemble (même famille, jeux distincts ? ici, même place : alternatives)
+        v.panic();
+        std::vector<float> t (4096, 0.0f), u (4096, 0.0f);
+        v.render (t.data(), u.data(), 4096, 1.0f, 1.0f, 0.0);
+        values[0] = 0.0f; v.setModulators (values);       // modulateur 0 coupé : A ne se déclenche plus
+        const auto onlyB = play (v, 60);
+        CHECK_THAT (onlyB.first, WithinAbs (0.0, 1e-4));
+        CHECK_THAT (onlyB.second, WithinAbs (0.2, 5e-3));
+        // un modulateur coupé en cours de note fait disparaître le son en fondu (le volume suit en direct) ; remis, la note tenue reprend
+        std::vector<float> l (2048), r (2048);
+        auto block = [&] { std::fill (l.begin(), l.end(), 0.0f); std::fill (r.begin(), r.end(), 0.0f); v.render (l.data(), r.data(), 2048, 1.0f, 1.0f, 0.0); };
+        values[1] = 0.0f; v.setModulators (values);
+        block();   // le bloc de la rampe de fondu
+        CHECK (r[2000] < r[10]);
+        block();
+        CHECK_THAT (static_cast<double> (r[2000]), WithinAbs (0.0, 1e-4));
+        values[1] = 1.0f; v.setModulators (values);
+        block();
+        block();
+        CHECK_THAT (static_cast<double> (r[2000]), WithinAbs (0.2, 5e-3));
+    }
+    {
+        // modulateur continu : le volume suit la valeur
+        auto inst = build (1u << 0, 0, true);
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        float values[kModulators];
+        std::fill (values, values + kModulators, 1.0f);
+        values[0] = 0.25f;
+        v.setModulators (values);
+        const auto quarter = play (v, 60);
+        CHECK_THAT (quarter.first, WithinAbs (0.4 * 0.25, 5e-3));
+    }
+    {
+        // la touche 24 est une touche de keyswitch ; pas la 25 ; le canal compte
+        auto inst = build (0, 0, false);
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        CHECK (v.isKeyswitch (0, 24));
+        CHECK_FALSE (v.isKeyswitch (0, 25));
+    }
+}
+
+TEST_CASE ("modulator settings and masks survive JSON and reach the zones")
+{
+    const auto path = std::filesystem::temp_directory_path() / "neptune-mods.wav";
+    {
+        SF_INFO info {};
+        info.samplerate = 48000; info.channels = 1; info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+        SNDFILE* f = sf_open (path.string().c_str(), SFM_WRITE, &info);
+        REQUIRE (f != nullptr);
+        std::vector<float> data (4800, 0.3f);
+        sf_writef_float (f, data.data(), static_cast<sf_count_t> (data.size()));
+        sf_close (f);
+    }
+    InstrumentDescription d;
+    d.modulators[2].name = "Flute 8";
+    d.modulators[2].momentary = true; d.modulators[2].continuous = true;
+    d.modulators[2].keyswitchNote = 30; d.modulators[2].keyswitchChannel = 3; d.modulators[2].radio = 2;
+    d.trackModulators = 1u << 5;
+    GroupSettings g; g.modulators = 1u << 1;
+    d.groups["stops"] = g;
+    ZoneDescription z; z.samplePath = path.string(); z.group = "stops"; z.modulators = 1u << 2;
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back == d);
+    CHECK (back.modulators[2].name == "Flute 8");
+    CHECK (back.groups.count ("stops") == 1);
+    const auto inst = buildInstrument (back);
+    REQUIRE (inst != nullptr);
+    CHECK (inst->zones[0].modMask == ((1u << 5) | (1u << 1) | (1u << 2)));   // piste + Groupe + zone
+    CHECK (inst->modulators[2].used);
+    CHECK (inst->modulators[2].note == 30);
+    CHECK (inst->modulators[2].continuous);
+    std::filesystem::remove (path);
+}
+
+#include "neptune/core/Engine.h"
+#include "neptune/core/Mixer.h"
+#include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
+
+TEST_CASE ("engine: a keyswitch note flips its modulator instead of playing, latch / momentary / exclusive group")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::pair<ParamId, double>> writes;
+    engine.setModulatorWriter ([&] (ParamId id, double v) { writes.emplace_back (id, v); params.setAt (params.indexOf (id), v); });
+
+    auto inst = std::make_shared<Instrument>();
+    auto z = makeFullKeyboardZone (makeConstant (48000, 0.5f), 60, PlayMode::Loop);
+    inst->zones.push_back (std::move (z));
+    auto& m0 = inst->modulators[0]; m0.used = true; m0.note = 20; m0.radio = 1;                        // bascule, exclusif
+    auto& m1 = inst->modulators[1]; m1.used = true; m1.note = 21; m1.radio = 1;
+    auto& m2 = inst->modulators[2]; m2.used = true; m2.note = 22; m2.momentary = true;                 // momentané
+    inst->finalize();
+    engine.publishInstrument (0, inst);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    engine.process (ptrs.data(), 4, 256);   // adopte l'instrument
+
+    const auto id = [] (int i) { return mixer::modulatorParam (0, i); };
+    CHECK (params.get (id (0)) == 100.0);   // actifs par défaut
+    engine.noteOn (0, 20, 1.0f);
+    engine.noteOff (0, 20);
+    CHECK (params.get (id (0)) == 0.0);     // bascule : éteint
+    CHECK (engine.activeVoices() == 0);     // et aucun son
+    engine.noteOn (0, 20, 1.0f);
+    CHECK (params.get (id (0)) == 100.0);   // rallumé
+    CHECK (params.get (id (1)) == 0.0);     // ... et, du même groupe d'exclusion, le 1 s'éteint
+    engine.noteOn (0, 21, 1.0f);
+    CHECK (params.get (id (1)) == 100.0);   // allumer le 1 éteint le 0
+    CHECK (params.get (id (0)) == 0.0);
+    engine.noteOn (0, 22, 1.0f);
+    CHECK (params.get (id (2)) == 100.0);   // momentané : actif tant que la touche est tenue
+    engine.noteOff (0, 22);
+    CHECK (params.get (id (2)) == 0.0);
+    CHECK (engine.activeVoices() == 0);
+    engine.noteOn (0, 60, 1.0f);            // une vraie note joue toujours
+    CHECK (engine.activeVoices() == 1);
 }

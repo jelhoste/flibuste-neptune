@@ -1182,6 +1182,8 @@ NeptuneProcessor::NeptuneProcessor()
     juce::ignoreUnused (ok, samplerOk, mixerOk, macrosOk);
     macroFirst_ = params_.indexOf (neptune::core::control::macroParamId (0));
     engine_.attachParameters (&params_);
+    // une touche de keyswitch bascule un modulateur : la valeur est écrite comme par la couche de contrôle (relayée vers l'hôte)
+    engine_.setModulatorWriter ([this] (neptune::core::ParamId id, double value) { control_.setParameter (id, value, true, params_); });
     mixer_ = neptune::core::MixerState::freshProject(); // projet neuf : une seule piste, un synthé
     pushMixerSettingsToEngine();
 

@@ -70,6 +70,31 @@ void SamplerVoices::allSoundOff() noexcept
     for (auto& v : voices_) discard (v);
 }
 
+bool SamplerVoices::modAllows (std::uint16_t mask) const noexcept
+{
+    if (mask == 0 || instrument_ == nullptr) return true;
+    for (int i = 0; i < kModulators; ++i)
+    {
+        if ((mask & (1u << i)) == 0) continue;
+        const float v = modValues_[static_cast<std::size_t> (i)];
+        if (instrument_->modulators[static_cast<std::size_t> (i)].continuous ? v <= 0.001f : v < 0.5f) return false;
+    }
+    return true;
+}
+
+float SamplerVoices::modFactor (std::uint16_t mask) const noexcept
+{
+    if (mask == 0 || instrument_ == nullptr) return 1.0f;
+    float f = 1.0f;
+    for (int i = 0; i < kModulators; ++i)
+    {
+        if ((mask & (1u << i)) == 0) continue;
+        const float v = modValues_[static_cast<std::size_t> (i)];
+        f *= instrument_->modulators[static_cast<std::size_t> (i)].continuous ? v : (v >= 0.5f ? 1.0f : 0.0f);
+    }
+    return f;
+}
+
 SamplerVoices::VoiceInfo SamplerVoices::describe (const Voice& v) const noexcept
 {
     VoiceInfo i;
@@ -229,9 +254,10 @@ Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key, int veloci
              // condition MIDI d'une zone : jugée au déclenchement, sur l'état des contrôleurs et sur la note qui se déclenche
              [] (const void* c, const Zone& z) noexcept
              {
+                 const auto* q = static_cast<const QueryContext*> (c);
+                 if (! q->self->modAllows (z.modMask)) return false;   // un modulateur qui la commande est coupé
                  if (z.midiCond == nullptr) return true;
                  static const midi::State empty;
-                 const auto* q = static_cast<const QueryContext*> (c);
                  midi::Message m;
                  m.kind = midi::MsgKind::NoteOn;
                  m.channel = q->channel & 15;
@@ -424,6 +450,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->delayLeft += humanDelay;
     v->loopIdx = 0;
     v->repsLeft = (zone.moreLoopCount > 0 && zone.loopRepeats > 0) ? zone.loopRepeats : -1;
+    v->modGain = modFactor (zone.modMask);
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
     {
         // suivi de la vélocité (1 : le volume suit la vélocité ; 0 : constant ; < 0 : plus fort en jouant doucement) et suivi du clavier (dB par octave autour de la note centrale)
@@ -612,6 +639,10 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     const bool trackLevels = instrument_ != nullptr && instrument_->trackLevels;
     const float gStep = numFrames > 0 ? (g1 - g0) / static_cast<float> (numFrames) : 0.0f;
     float mg = g0;
+    // modulateurs : le volume suit en direct leur état (rampe sur le bloc) ; une zone sans modulateur n'a rien à calculer
+    const float modTarget = z.modMask != 0 ? modFactor (z.modMask) : 1.0f;
+    float modCur = z.modMask != 0 ? v.modGain : 1.0f;
+    const float modStep = numFrames > 0 ? (modTarget - modCur) / static_cast<float> (numFrames) : 0.0f;
 
     // --- streaming : ce qui est disponible au-delà de la partie résidente ---
     const std::int64_t resident = s.resident();
@@ -723,7 +754,8 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
-        float e = v.ampVel * z.gain * v.mods.gain * v.layerGain * mg * envValue;
+        float e = v.ampVel * z.gain * v.mods.gain * v.layerGain * mg * modCur * envValue;
+        modCur += modStep;
         if (fadeInOut > 0.0 && v.fadeInPlayed < fadeInOut)
         {
             e *= static_cast<float> (v.fadeInPlayed / fadeInOut);
@@ -781,6 +813,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
             v.pos = static_cast<double> (z.loopEnd) - std::fmod (static_cast<double> (z.loopEnd) - v.pos, len);
         }
     }
+    if (z.modMask != 0) v.modGain = modTarget;
     v.baseRatio = ratio; // le glissando du legato se poursuit au bloc suivant
     v.level = v.ampVel * z.gain * v.mods.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
 }

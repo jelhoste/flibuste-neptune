@@ -213,6 +213,7 @@ Table buildTable()
         t.add (mixer::organParam (tr, mixer::kOrgReverb), p + "/organ/reverb");
 
         for (int s = 0; s < 16; ++s) t.add (mixer::zoneSlotParam (tr, s), p + "/slot/" + num (s + 1));
+        for (int s = 0; s < 16; ++s) t.add (mixer::modulatorParam (tr, s), p + "/mod/" + num (s + 1));
     }
     for (int m = 0; m < control::kMacros; ++m) t.add (control::macroParamId (m), "/macro/" + num (m + 1));
     for (int b = 0; b < mixer::numBuses; ++b) addStrip (t, mixer::busParam (b, 0), "/bus/" + num (b + 1), false);

@@ -17,6 +17,7 @@
 
 #include "neptune/core/Envelope.h"
 #include "neptune/core/MidiFilter.h"
+#include "neptune/core/Modulators.h"
 #include "neptune/core/Filter.h"
 #include "neptune/core/SampleData.h"
 #include "neptune/core/VelocityResponse.h"
@@ -68,9 +69,12 @@ struct ZoneDescription
     EnvelopeDescription envelope;  // enveloppe d'amplitude de la zone (voir Envelope.h)
     // Héritage de l'enveloppe, bloc par bloc (spec §3) : faux = la zone suit celle de son Groupe si le Groupe a la sienne, sinon celle de l'instrument ; vrai = la sienne (ci-dessus).
     bool envelopeOverride = false;
+    // Modulateurs qui commandent cette zone (masque de bits, 1 << indice) : elle ne se déclenche que si tous sont actifs. Voir Modulators.h.
+    std::uint16_t modulators = 0;
     double tuneCents = 0.0;        // accordage fin de la zone
     double gainDb = 0.0;
     int roundRobin = 0;            // indice dans le jeu round-robin (0 = non précisé)
+    int rrMode = -1;               // mode du jeu d'alternatives (celui de la première zone du jeu) : -1 = celui de l'instrument, 0 séquentiel, 1 aléatoire, 2 aléatoire sans répétition
     std::string group;             // nom de Groupe (micro, articulation...) ; vide = aucun
     bool onRelease = false;        // déclenchée au Note Off (bruits de mécanique, fins de note), pas au Note On
     TriggerCondition trigger = TriggerCondition::Always; // condition d'une zone d'attaque (ignorée si onRelease)
@@ -122,7 +126,7 @@ struct ZoneDescription
     bool operator== (const ZoneDescription& o) const noexcept
     {
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
-            && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && envelopeOverride == o.envelopeOverride && tuneCents == o.tuneCents && gainDb == o.gainDb
+            && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && envelopeOverride == o.envelopeOverride && modulators == o.modulators && rrMode == o.rrMode && tuneCents == o.tuneCents && gainDb == o.gainDb
             && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
             && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
             && filterOverride == o.filterOverride && filters == o.filters
@@ -143,8 +147,9 @@ struct GroupSettings
     EnvelopeDescription envelope;
     bool filterOverride = false;
     FilterBlock filters;
-    bool operator== (const GroupSettings& o) const noexcept { return envelopeOverride == o.envelopeOverride && envelope == o.envelope && filterOverride == o.filterOverride && filters == o.filters; }
-    bool isDefault() const noexcept { return ! envelopeOverride && ! filterOverride; }
+    std::uint16_t modulators = 0;     // modulateurs qui commandent toutes les zones du Groupe
+    bool operator== (const GroupSettings& o) const noexcept { return envelopeOverride == o.envelopeOverride && envelope == o.envelope && filterOverride == o.filterOverride && filters == o.filters && modulators == o.modulators; }
+    bool isDefault() const noexcept { return ! envelopeOverride && ! filterOverride && modulators == 0; }
 };
 
 // Polyphonie de l'instrument (palier 1, jalon 6).
@@ -162,6 +167,9 @@ struct InstrumentDescription
     // réserve garde en plus ceux qui ne sont (encore) dans aucune zone. Rien n'est chargé en mémoire pour un fichier de la réserve.
     std::vector<std::string> pool;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    // Emprunt aux couches de vélocité voisines (spec §3, round-robin) : une couche qui a moins d'alternatives que sa voisine immédiate peut emprunter les siennes
+    // (avec une correction de volume) pour éviter la répétition exacte.
+    bool rrBorrow = false;
 
     // Ce qui est chargé en mémoire (réglable en cours d'utilisation ; les zones restent toutes dans la description) :
     // Humanize : à chaque déclenchement, de petites variations aléatoires (tirées de -1 à +1, ou de 0 à 1 pour le départ), chacune multipliée par ces quantités.
@@ -199,6 +207,8 @@ struct InstrumentDescription
     // les PARAMÈTRES automatisables (SamplerParams : filterCutoff/filterResonance) : les valeurs stockées ici sont ignorées.
     FilterBlock defaultFilters;
     EnvelopeDescription defaultEnvelope;                  // enveloppe d'instrument, suivie par les Groupes et les zones qui ne personnalisent pas la leur
+    ModulatorList modulators;                              // les 16 modulateurs de la piste
+    std::uint16_t trackModulators = 0;                     // modulateurs qui commandent toute la piste
     std::map<std::string, GroupSettings> groups;          // réglages propres aux Groupes (seulement ceux qui personnalisent un bloc), par nom de Groupe
     bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
     static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
@@ -210,24 +220,24 @@ struct InstrumentDescription
     // Copie tout sauf les zones (réglages de chargement, de streaming, de réponse de vélocité, emplacements assignables, réserve de fichiers).
     void copySettingsFrom (const InstrumentDescription& o)
     {
-        roundRobinMode = o.roundRobinMode; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
+        roundRobinMode = o.roundRobinMode; rrBorrow = o.rrBorrow; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
         unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
-        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups;
+        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups; modulators = o.modulators; trackModulators = o.trackModulators;
         slots = o.slots; pool = o.pool; compensateOnReplace = o.compensateOnReplace;
         humanizePitchCents = o.humanizePitchCents; humanizeVolumeDb = o.humanizeVolumeDb; humanizeTimingMs = o.humanizeTimingMs;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept
     {
-        return zones == o.zones && pool == o.pool && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
+        return zones == o.zones && pool == o.pool && roundRobinMode == o.roundRobinMode && rrBorrow == o.rrBorrow && mainRoundRobinOnly == o.mainRoundRobinOnly
             && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
             && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
-            && defaultFilters == o.defaultFilters && defaultEnvelope == o.defaultEnvelope && groups == o.groups && slots == o.slots && compensateOnReplace == o.compensateOnReplace
+            && defaultFilters == o.defaultFilters && defaultEnvelope == o.defaultEnvelope && groups == o.groups && modulators == o.modulators && trackModulators == o.trackModulators && slots == o.slots && compensateOnReplace == o.compensateOnReplace
             && humanizePitchCents == o.humanizePitchCents && humanizeVolumeDb == o.humanizeVolumeDb && humanizeTimingMs == o.humanizeTimingMs;
     }
     bool empty() const noexcept { return zones.empty(); }
@@ -288,6 +298,7 @@ struct Zone
     std::array<LoopRt, 3> moreLoops {};   // boucles 2 à 4, strictement croissantes (fin après la fin de la précédente)
     int moreLoopCount = 0;
     int loopRepeats = 0;                  // répétitions de la boucle 1 quand il y en a d'autres (0 = sans fin)
+    std::uint16_t modMask = 0;            // modulateurs qui commandent la zone (les siens, ceux de son Groupe, ceux de la piste)
     float panL = 1.0f, panR = 1.0f;       // gains de balance
     bool releaseFollowsLevel = false;     // voir ZoneDescription
     int releaseMeter = 2;
@@ -300,6 +311,7 @@ struct Zone
     float releaseRefDb = -1000.0f;        // niveau de référence au marqueur de volume (mesuré au chargement) ; <= -900 : pas de marqueur
     float releaseOffsetDb = 0.0f;
     int roundRobin = 0;
+    int rrMode = -1;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;
     TriggerCondition trigger = TriggerCondition::Always;
@@ -312,7 +324,9 @@ struct Instrument
 {
     std::vector<Zone> zones;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    bool rrBorrow = false;      // emprunt aux couches voisines : à régler AVANT finalize()
     float humanizePitchCents = 0.0f, humanizeVolumeDb = 0.0f, humanizeTimingMs = 0.0f;   // recopiés de la description
+    ModulatorRuntimes modulators;       // keyswitchs et types des modulateurs (rempli par buildInstrument)
     bool trackLevels = false;   // une zone de relâchement suit le niveau des voix : les voix mesurent leur niveau entendu (rempli par finalize)
     SlotRuntimes slots;   // emplacements assignables résolus (voir ZoneSlots.h)
 
@@ -365,14 +379,15 @@ struct Instrument
     void finalize();
 
 private:
-    struct RrSet { std::vector<int> members; }; // indices de zones, dans l'ordre des indices round-robin
+    struct Borrowed { int zone; float gain; };
+    struct RrSet { std::vector<int> members; std::vector<Borrowed> borrowed; }; // indices de zones, dans l'ordre des indices round-robin
     std::vector<RrSet> rrSets_;
     std::vector<int> zoneSet_;
     std::vector<LayerFade> fades_;                  // par zone
     std::vector<std::vector<int>> familySets_;      // par famille : indices de jeux round-robin (une couche chacun)
     std::vector<int> zoneFamily_;                   // par zone
     std::array<std::vector<int>, 128> keyZones_;    // par note : zones qui la couvrent, dans l'ordre de déclaration
-    const Zone* pickFromSet (std::size_t set, const HeldQuery* filter = nullptr) const noexcept;
+    const Zone* pickFromSet (std::size_t set, const HeldQuery* filter = nullptr, float* correction = nullptr) const noexcept;
     mutable std::vector<std::uint32_t> rrCounter_, rrLast_;
     mutable std::uint32_t rng_ = 0x9E3779B9u;
 };

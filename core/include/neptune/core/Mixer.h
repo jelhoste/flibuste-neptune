@@ -145,6 +145,10 @@ bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, st
 constexpr ParamId zoneSlotBase = 12000;
 constexpr ParamId zoneSlotParam (int track, int slot) { return zoneSlotBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (slot); }
 bool addZoneSlotParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
+// Modulateurs d'une piste Sampler (voir Modulators.h) : 16 valeurs automatisables 0..100 %, identifiants `14000 + 16.t + i`, 100 % par défaut (actif).
+constexpr ParamId modulatorBase = 14000;
+constexpr ParamId modulatorParam (int track, int index) { return modulatorBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (index); }
+bool addModulatorParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 
 // Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.
 bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);

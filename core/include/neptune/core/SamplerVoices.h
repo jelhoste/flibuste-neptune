@@ -27,6 +27,17 @@ public:
     };
     void setFilterParams (const FilterParams& p) noexcept { filterParams_ = p; }
     // Valeurs des 16 emplacements assignables (-1..+1, voir ZoneSlots.h), lues une fois par bloc. Prises au début de chaque note.
+    // Valeurs des 16 modulateurs (0..1), une fois par bloc, avant render() et avant les notes du bloc.
+    const Instrument* instrumentPtr() const noexcept { return instrument_; }
+    void setModulators (const float* values) noexcept { for (int i = 0; i < kModulators; ++i) modValues_[static_cast<std::size_t> (i)] = values[i]; }
+    // La note est-elle une touche de keyswitch de cette piste (elle ne joue alors aucun son) ?
+    bool isKeyswitch (int channel, int key) const noexcept
+    {
+        if (instrument_ == nullptr) return false;
+        for (const auto& m : instrument_->modulators)
+            if (m.used && m.note == key && (m.channel == 0 || m.channel == (channel & 15) + 1)) return true;
+        return false;
+    }
     void setSlotAmounts (const float* amounts) noexcept { for (int i = 0; i < kZoneSlots; ++i) slotAmounts_[static_cast<std::size_t> (i)] = amounts[i]; }
 
     void prepare (double sampleRate) noexcept;
@@ -102,6 +113,10 @@ public:
 
 private:
     const midi::State* midiState_ = nullptr;
+    std::array<float, kModulators> modValues_ = [] { std::array<float, kModulators> a {}; a.fill (1.0f); return a; }();
+    // Une zone commandée par des modulateurs ne se déclenche que si tous sont actifs ; le volume suit en direct les modulateurs continus.
+    bool modAllows (std::uint16_t mask) const noexcept;
+    float modFactor (std::uint16_t mask) const noexcept;
     std::uint32_t humanRng_ = 0x2545F491u;   // générateur des variations de l'humanize
     LevelCoefs levelCoefs_;   // pondération K et lissages du suivi de niveau (voir LevelTracker.h) ; refaits à prepare()
     float heardGain (const Zone&, int channel, int key, float velocity) const noexcept;   // volume de relâchement lié au niveau (0 : rien ne sonnait)
@@ -118,6 +133,7 @@ private:
         double pos = 0.0;       // en échantillons du fichier
         double baseRatio = 1.0; // avance par échantillon de sortie, sans l'accordage global
         float velocity = 1.0f;  // le gain de la zone est relu à chaque bloc (édition en direct)
+        float modGain = 1.0f;    // facteur des modulateurs au bloc précédent (rampe sans clic)
         double humanCents = 0.0; // variation de hauteur aléatoire de ce déclenchement (humanize)
         float ampVel = 1.0f;    // facteur de volume dû à la vélocité (suivi de la zone) et à la touche (suivi du clavier), fixé au Note On
         float layerGain = 1.0f; // fondu entre couches de vélocité (fixé au Note On)

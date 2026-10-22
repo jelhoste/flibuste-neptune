@@ -90,6 +90,7 @@ ZoneDescription sanitised (ZoneDescription z)
     z.fadeOutMs = std::isfinite (z.fadeOutMs) ? std::clamp (z.fadeOutMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeOutMs;
     z.delayMs = std::isfinite (z.delayMs) ? std::clamp (z.delayMs, 0.0, ZoneDescription::maxDelayMs) : 0.0;
     z.pan = std::isfinite (z.pan) ? std::clamp (z.pan, -1.0, 1.0) : 0.0;
+    z.rrMode = std::clamp (z.rrMode, -1, 2);
     z.humanizePct = std::isfinite (z.humanizePct) ? std::clamp (z.humanizePct, 0.0, 100.0) : 100.0;
     z.velTrackPct = std::isfinite (z.velTrackPct) ? std::clamp (z.velTrackPct, -100.0, 100.0) : 100.0;
     z.keyTrackDbPerOct = std::isfinite (z.keyTrackDbPerOct) ? std::clamp (z.keyTrackDbPerOct, -24.0, 24.0) : 0.0;
@@ -231,6 +232,8 @@ std::string toJson (const InstrumentDescription& d)
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.pan != 0.0) o["pan"] = z.pan;
         if (z.humanizePct != 100.0) o["humanize_pct"] = z.humanizePct;
+        if (z.rrMode != -1) o["rr_mode"] = z.rrMode;
+        if (z.modulators != 0) o["modulators"] = z.modulators;
         if (z.velTrackPct != 100.0) o["vel_track_pct"] = z.velTrackPct;
         if (z.keyTrackDbPerOct != 0.0) o["key_track_db_per_oct"] = z.keyTrackDbPerOct;
         if (z.keyTrackCenter != 60) o["key_track_center"] = z.keyTrackCenter;
@@ -272,6 +275,7 @@ std::string toJson (const InstrumentDescription& d)
     doc["round_robin_mode"] = toString (d.roundRobinMode);
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.compensateOnReplace) doc["compensate_on_replace"] = false;
+    if (d.rrBorrow) doc["rr_borrow"] = true;
     if (d.humanizePitchCents != 0.0 || d.humanizeVolumeDb != 0.0 || d.humanizeTimingMs != 0.0)
         doc["humanize"] = { { "pitch_cents", d.humanizePitchCents }, { "volume_db", d.humanizeVolumeDb }, { "timing_ms", d.humanizeTimingMs } };
     if (! d.pool.empty()) doc["pool"] = d.pool;
@@ -297,6 +301,25 @@ std::string toJson (const InstrumentDescription& d)
     }
     if (! (d.defaultFilters == FilterBlock {})) doc["default_filters"] = filterBlockToJson (d.defaultFilters);
     if (! (d.defaultEnvelope == EnvelopeDescription {})) doc["default_envelope"] = envelopeToJson (d.defaultEnvelope);
+    if (d.trackModulators != 0) doc["track_modulators"] = d.trackModulators;
+    {
+        nlohmann::json mods = nlohmann::json::array();
+        for (int i = 0; i < kModulators; ++i)
+        {
+            const auto& m = d.modulators[static_cast<std::size_t> (i)];
+            if (m.isDefault()) continue;
+            nlohmann::json mo;
+            mo["index"] = i;
+            if (! m.name.empty()) mo["name"] = m.name;
+            if (m.momentary) mo["momentary"] = true;
+            if (m.continuous) mo["continuous"] = true;
+            if (m.keyswitchNote >= 0) mo["keyswitch_note"] = m.keyswitchNote;
+            if (m.keyswitchChannel != 0) mo["keyswitch_channel"] = m.keyswitchChannel;
+            if (m.radio != 0) mo["radio"] = m.radio;
+            mods.push_back (mo);
+        }
+        if (! mods.empty()) doc["modulators"] = mods;
+    }
     {
         nlohmann::json groups = nlohmann::json::array();
         for (const auto& [name, g] : d.groups)
@@ -306,6 +329,7 @@ std::string toJson (const InstrumentDescription& d)
             go["name"] = name;
             if (g.envelopeOverride) { go["envelope_override"] = true; go["envelope"] = envelopeToJson (g.envelope); }
             if (g.filterOverride) { go["filter_override"] = true; go["filters"] = filterBlockToJson (g.filters); }
+            if (g.modulators != 0) go["modulators"] = g.modulators;
             groups.push_back (go);
         }
         if (! groups.empty()) doc["groups"] = groups;
@@ -406,6 +430,8 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.delayMs = readNum (o, "delay_ms", z.delayMs);
     z.pan = readNum (o, "pan", z.pan);
     z.humanizePct = readNum (o, "humanize_pct", z.humanizePct);
+    z.rrMode = std::clamp (readInt (o, "rr_mode", z.rrMode), -1, 2);
+    z.modulators = static_cast<std::uint16_t> (std::clamp (readInt (o, "modulators", 0), 0, 65535));
     z.velTrackPct = readNum (o, "vel_track_pct", z.velTrackPct);
     z.keyTrackDbPerOct = readNum (o, "key_track_db_per_oct", z.keyTrackDbPerOct);
     z.keyTrackCenter = readInt (o, "key_track_center", z.keyTrackCenter);
@@ -461,6 +487,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("round_robin_mode"); m != doc.end() && m->is_string())
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
+    if (const auto m = doc.find ("rr_borrow"); m != doc.end() && m->is_boolean()) d.rrBorrow = m->get<bool>();
     if (const auto m = doc.find ("compensate_on_replace"); m != doc.end() && m->is_boolean()) d.compensateOnReplace = m->get<bool>();
     if (const auto m = doc.find ("humanize"); m != doc.end() && m->is_object())
     {
@@ -505,6 +532,21 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         wrap["envelope"] = *m;
         d.defaultEnvelope = sanitised (envelopeFromJson (wrap));
     }
+    d.trackModulators = static_cast<std::uint16_t> (std::clamp (readInt (doc, "track_modulators", 0), 0, 65535));
+    if (const auto m = doc.find ("modulators"); m != doc.end() && m->is_array())
+        for (const auto& mo : *m)
+        {
+            if (! mo.is_object()) continue;
+            const int index = readInt (mo, "index", -1);
+            if (index < 0 || index >= kModulators) continue;
+            auto& md = d.modulators[static_cast<std::size_t> (index)];
+            if (const auto v = mo.find ("name"); v != mo.end() && v->is_string()) { md.name = v->get<std::string>(); if (md.name.size() > 64) md.name.resize (64); }
+            if (const auto v = mo.find ("momentary"); v != mo.end() && v->is_boolean()) md.momentary = v->get<bool>();
+            if (const auto v = mo.find ("continuous"); v != mo.end() && v->is_boolean()) md.continuous = v->get<bool>();
+            md.keyswitchNote = std::clamp (readInt (mo, "keyswitch_note", -1), -1, 127);
+            md.keyswitchChannel = std::clamp (readInt (mo, "keyswitch_channel", 0), 0, 16);
+            md.radio = std::clamp (readInt (mo, "radio", 0), 0, 8);
+        }
     if (const auto m = doc.find ("groups"); m != doc.end() && m->is_array())
         for (const auto& go : *m)
         {
@@ -517,6 +559,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
             if (const auto v = go.find ("filter_override"); v != go.end() && v->is_boolean()) g.filterOverride = v->get<bool>();
             if (g.filterOverride)
                 if (const auto f = go.find ("filters"); f != go.end() && f->is_object()) g.filters = filterBlockFromJson (*f);
+            g.modulators = static_cast<std::uint16_t> (std::clamp (readInt (go, "modulators", 0), 0, 65535));
             if (! g.isDefault()) d.groups[name->get<std::string>()] = g;
         }
     if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
@@ -632,31 +675,60 @@ void Instrument::finalize()
     for (auto& set : rrSets_) // ordre des indices round-robin, puis ordre de déclaration
         std::stable_sort (set.members.begin(), set.members.end(),
                           [this] (int a, int b) { return zones[static_cast<std::size_t> (a)].roundRobin < zones[static_cast<std::size_t> (b)].roundRobin; });
+    // Emprunt aux couches voisines : dans chaque famille, les jeux sont rangés par vélocité basse ; un jeu qui a moins d'alternatives que son voisin immédiat
+    // (en dessous ou au-dessus) emprunte les alternatives en plus, avec une correction de volume (rapport des vélocités moyennes des deux couches).
+    for (auto& set : rrSets_) set.borrowed.clear();
+    if (rrBorrow)
+        for (auto sets : familySets_)
+        {
+            std::stable_sort (sets.begin(), sets.end(), [this] (int a, int b)
+            {
+                return zones[static_cast<std::size_t> (rrSets_[static_cast<std::size_t> (a)].members.front())].velLow < zones[static_cast<std::size_t> (rrSets_[static_cast<std::size_t> (b)].members.front())].velLow;
+            });
+            auto mid = [this] (int set) { const Zone& z = zones[static_cast<std::size_t> (rrSets_[static_cast<std::size_t> (set)].members.front())]; return 0.5f * static_cast<float> (z.velLow + z.velHigh); };
+            for (std::size_t i = 0; i < sets.size(); ++i)
+                for (const int step : { -1, 1 })
+                {
+                    const long j = static_cast<long> (i) + step;
+                    if (j < 0 || j >= static_cast<long> (sets.size())) continue;
+                    auto& mine = rrSets_[static_cast<std::size_t> (sets[i])];
+                    const auto& other = rrSets_[static_cast<std::size_t> (sets[static_cast<std::size_t> (j)])];
+                    const float gain = std::clamp (mid (sets[i]) / std::max (1.0f, mid (sets[static_cast<std::size_t> (j)])), 0.25f, 4.0f);
+                    for (std::size_t m = mine.members.size(); m < other.members.size(); ++m)
+                        if (mine.members.size() + mine.borrowed.size() < 64) mine.borrowed.push_back ({ other.members[m], gain });
+                }
+        }
     rrCounter_.assign (rrSets_.size(), 0);
     rrLast_.assign (rrSets_.size(), 0xFFFFFFFFu);
     fades_ = computeLayerFades (keys, fadeWidth);
 }
 
-const Zone* Instrument::pickFromSet (std::size_t set, const HeldQuery* filter) const noexcept
+const Zone* Instrument::pickFromSet (std::size_t set, const HeldQuery* filter, float* correction) const noexcept
 {
-    const auto& all = rrSets_[set].members;
-    // avec une condition MIDI : seules les alternatives dont la condition est satisfaite sont candidates (le round-robin tourne parmi elles)
-    int eligible[64];
-    std::size_t count = all.size();
-    const int* members = all.data();
-    if (filter != nullptr && filter->allowed != nullptr && all.size() <= 64)
+    const auto& rr = rrSets_[set];
+    if (correction != nullptr) *correction = 1.0f;
+    // Candidates : les alternatives du jeu, plus celles empruntées aux couches voisines ; avec une condition (MIDI, modulateurs), seules celles qui la satisfont.
+    const bool filtered = filter != nullptr && filter->allowed != nullptr;
+    if (rr.borrowed.empty() && ! filtered && rr.members.size() <= 1) return &zones[static_cast<std::size_t> (rr.members.front())];
+    int cand[64];
+    float gain[64];
+    std::size_t count = 0;
+    auto consider = [&] (int zi, float g)
     {
-        count = 0;
-        for (const int m : all)
-            if (filter->allowed (filter->context, zones[static_cast<std::size_t> (m)])) eligible[count++] = m;
-        if (count == 0) return nullptr;
-        members = eligible;
-    }
-    if (count <= 1) return &zones[static_cast<std::size_t> (members[0])];
+        if (count >= 64) return;
+        if (filtered && ! filter->allowed (filter->context, zones[static_cast<std::size_t> (zi)])) return;
+        cand[count] = zi; gain[count] = g; ++count;
+    };
+    for (const int m : rr.members) consider (m, 1.0f);
+    for (const auto& b : rr.borrowed) consider (b.zone, b.gain);
+    if (count == 0) return nullptr;
+    if (count == 1) { if (correction != nullptr) *correction = gain[0]; return &zones[static_cast<std::size_t> (cand[0])]; }
     const auto n = static_cast<std::uint32_t> (count);
     std::uint32_t pick = 0;
     auto next = [this] { rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5; return rng_; };
-    switch (roundRobinMode)
+    const int zoneMode = zones[static_cast<std::size_t> (rr.members.front())].rrMode;   // le mode du jeu : celui de sa première zone, sinon celui de l'instrument
+    const RoundRobinMode mode = zoneMode >= 0 ? static_cast<RoundRobinMode> (zoneMode) : roundRobinMode;
+    switch (mode)
     {
         case RoundRobinMode::Sequential: pick = rrCounter_[set]++ % n; break;
         case RoundRobinMode::Random: pick = next() % n; break;
@@ -666,7 +738,8 @@ const Zone* Instrument::pickFromSet (std::size_t set, const HeldQuery* filter) c
             break;
     }
     rrLast_[set] = pick;
-    return &zones[static_cast<std::size_t> (members[pick])];
+    if (correction != nullptr) *correction = gain[pick];
+    return &zones[static_cast<std::size_t> (cand[pick])];
 }
 
 const Zone* Instrument::select (int key, float velocity, bool release) const noexcept
@@ -727,9 +800,10 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
         const int rep = rrSets_[static_cast<std::size_t> (set)].members.front();
         const float g = layerGain (fades_[static_cast<std::size_t> (rep)], vCont, fadeLinear);
         if (g <= 1e-4f) continue;
-        const Zone* z = pickFromSet (static_cast<std::size_t> (set), held);
+        float corr = 1.0f;
+        const Zone* z = pickFromSet (static_cast<std::size_t> (set), held, &corr);
         if (z == nullptr || ! z->sample) continue;
-        out[n++] = { z, g };
+        out[n++] = { z, g * corr };
         if (n >= maxOut) break;
     }
     return n;
@@ -797,6 +871,15 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
 {
     auto inst = std::make_shared<Instrument>();
     inst->roundRobinMode = description.roundRobinMode;
+    inst->rrBorrow = description.rrBorrow;
+    for (int i = 0; i < kModulators; ++i)
+    {
+        const auto& m = description.modulators[static_cast<std::size_t> (i)];
+        auto& r = inst->modulators[static_cast<std::size_t> (i)];
+        r.used = m.keyswitchNote >= 0;
+        r.momentary = m.momentary; r.continuous = m.continuous;
+        r.note = std::clamp (m.keyswitchNote, -1, 127); r.channel = std::clamp (m.keyswitchChannel, 0, 16); r.radio = std::clamp (m.radio, 0, 8);
+    }
     inst->velocityLut = buildLut (description.velocityCurve);
     inst->velocityLinear = sanitised (description.velocityCurve).isLinear();
     inst->fadeWidth = std::clamp (description.velocityFadeWidth, 0, InstrumentDescription::maxVelocityFadeWidth);
@@ -949,6 +1032,11 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             // seule la dernière boucle tourne jusqu'au relâchement
             if (z.moreLoopCount > 0) z.moreLoops[static_cast<std::size_t> (z.moreLoopCount - 1)].repeats = 0;
             z.humanizeAmount = static_cast<float> (zd.humanizePct / 100.0);
+            z.rrMode = zd.rrMode;
+            {
+                const auto g = description.groups.find (zd.group);
+                z.modMask = static_cast<std::uint16_t> (description.trackModulators | zd.modulators | (g != description.groups.end() ? g->second.modulators : 0));
+            }
             z.velTrack = static_cast<float> (zd.velTrackPct / 100.0);
             z.keyTrackDbPerOct = static_cast<float> (zd.keyTrackDbPerOct);
             z.keyTrackCenter = zd.keyTrackCenter;

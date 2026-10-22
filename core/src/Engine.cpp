@@ -252,6 +252,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         for (int k = 0; k < mixer::kFmExtraKinds; ++k) p.fmExtra[k] = idx (mixer::fmExtraParam (t, static_cast<mixer::FmExtraKind> (k)));
         for (int k = 0; k < mixer::kOrganKinds; ++k) p.organ[k] = idx (mixer::organParam (t, k));
         for (int k = 0; k < 16; ++k) p.slot[k] = idx (mixer::zoneSlotParam (t, k));
+        for (int k = 0; k < 16; ++k) p.mod[k] = idx (mixer::modulatorParam (t, k));
     }
     for (int b = 0; b < kBuses; ++b)
     {
@@ -359,6 +360,31 @@ void Engine::enforceGlobalVoiceLimit() noexcept
     }
 }
 
+// Une touche de keyswitch : bascule (latch) ou actif pendant l'appui (momentané) ; allumer un modulateur d'un groupe d'exclusion éteint les autres du groupe.
+void Engine::keyswitch (int track, int channel, int key, bool down) noexcept
+{
+    if (! modulatorWriter_ || track < 0 || track >= kTracks) return;
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    const auto* inst = t.voices.instrumentPtr();
+    if (inst == nullptr) return;
+    for (int i = 0; i < kModulators; ++i)
+    {
+        const auto& m = inst->modulators[static_cast<std::size_t> (i)];
+        if (! m.used || m.note != key || (m.channel != 0 && m.channel != (channel & 15) + 1)) continue;
+        const double current = param (t.idx.mod[static_cast<std::size_t> (i)], 100.0);
+        double next = current;
+        if (m.momentary) next = down ? 100.0 : 0.0;
+        else if (down) next = current >= 50.0 ? 0.0 : 100.0;
+        else continue;
+        if (next == current) continue;
+        modulatorWriter_ (mixer::modulatorParam (track, i), next);
+        if (next >= 50.0 && m.radio != 0)
+            for (int j = 0; j < kModulators; ++j)
+                if (j != i && inst->modulators[static_cast<std::size_t> (j)].radio == m.radio && param (t.idx.mod[static_cast<std::size_t> (j)], 100.0) > 0.0)
+                    modulatorWriter_ (mixer::modulatorParam (track, j), 0.0);
+    }
+}
+
 void Engine::noteOffTrack (int track, int channel, int key) noexcept
 {
     if (track < 0 || track >= kTracks) return;
@@ -390,6 +416,7 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
         // un orgue écoute les canaux de ses propres claviers (description) : tous les canaux lui sont présentés
         const bool organ = tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
         if (! (organ || ch == 0 || ch == channel + 1)) continue;
+        if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Sampler) && tr.voices.isKeyswitch (channel, key)) { keyswitch (t, channel, key, true); continue; }   // une touche de keyswitch bascule un modulateur sans jouer
         if (tr.filter != nullptr && ! tr.filter->passes (m)) continue;
         tr.acceptedNotes[bit >> 6] |= std::uint64_t (1) << (bit & 63);
         noteOnTrack (t, channel, key, velocity);
@@ -405,6 +432,7 @@ void Engine::noteOff (int channel, int key) noexcept
         const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
         const bool organ = tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
         if (! (organ || ch == 0 || ch == channel + 1)) continue;
+        if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Sampler) && tr.voices.isKeyswitch (channel, key)) { keyswitch (t, channel, key, false); continue; }
         const std::uint64_t mask = std::uint64_t (1) << (bit & 63);
         const bool accepted = (tr.acceptedNotes[bit >> 6] & mask) != 0;
         if (tr.filter != nullptr && tr.filter->enabled() && ! accepted) continue; // le Note On n'est jamais passé
@@ -956,6 +984,9 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
                 float amounts[kZoneSlots];
                 for (int k = 0; k < kZoneSlots; ++k) amounts[k] = static_cast<float> (param (t.idx.slot[static_cast<std::size_t> (k)], 0.0) / 100.0);
                 t.voices.setSlotAmounts (amounts);
+                float mods[kModulators];
+                for (int k = 0; k < kModulators; ++k) mods[k] = static_cast<float> (param (t.idx.mod[static_cast<std::size_t> (k)], 100.0) / 100.0);
+                t.voices.setModulators (mods);
             }
             t.voices.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, cents);
         }

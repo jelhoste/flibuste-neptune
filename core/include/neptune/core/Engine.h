@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -85,6 +86,8 @@ public:
     void setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter>);
     // Un message de contrôleur (CC, pitch bend, pression, programme) : retenu pour les conditions MIDI des zones. Thread audio.
     void midiController (const midi::Message& m) noexcept { midiState_.update (m); }
+    // Écrit la valeur (0..100) d'un modulateur quand une touche de keyswitch le bascule ; appelé par le thread audio (fourni par le processeur, qui relaie vers l'hôte).
+    void setModulatorWriter (std::function<void (ParamId, double)> w) { modulatorWriter_ = std::move (w); }
     // Notes en cours d'une piste Synthé figées par un changement de preset (capture par voix).
     int frozenVoices (int track) const noexcept
     {
@@ -183,6 +186,7 @@ private:
         std::size_t fm[mixer::kFmKinds];
         std::size_t organ[mixer::kOrganKinds];
         std::size_t slot[16];
+        std::size_t mod[16];
         std::size_t fmExtra[mixer::kFmExtraKinds];
         ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; for (auto& v : fm) v = N; for (auto& v : organ) v = N; for (auto& v : slot) v = N; }
     };
@@ -314,6 +318,8 @@ private:
     int hostFrames_ = 0;
     const float *chunkHostL_ = nullptr, *chunkHostR_ = nullptr; // idem, décalée au bloc en cours
     int currentRoot_ = -1;                                      // piste en cours de traitement (ses pistes parallèles comprises)
+    std::function<void (ParamId, double)> modulatorWriter_;
+    void keyswitch (int track, int channel, int key, bool down) noexcept;
     midi::State midiState_;   // dernier état des contrôleurs de chaque canal (conditions MIDI des zones)
     bool currentRootAudioIn_ = false;
     std::array<Parallel, kParallels> parallels_;

@@ -68,6 +68,14 @@ bool addZoneSlotParams (ParameterSet& set, int track, const std::string& prefix,
     return true;
 }
 
+bool addModulatorParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
+{
+    for (int i = 0; i < 16; ++i)
+        if (! set.add (ParamSpec::continuous (modulatorParam (track, i), prefix + "Modulator " + std::to_string (i + 1), Unit::Percent, 0.0, 100.0, 100.0), error))
+            return false;
+    return true;
+}
+
 bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
 {
     static const char* const footage[9] = { "16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'" };
@@ -125,7 +133,7 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
     for (int t = 0; ok && t < tracks; ++t) ok = addSynthParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addFmParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addOrganParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
-    for (int t = 0; ok && t < tracks; ++t) ok = addZoneSlotParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
+    for (int t = 0; ok && t < tracks; ++t) ok = addZoneSlotParams (set, t, "Track " + std::to_string (t + 1) + " ", error) && addModulatorParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
 
     // Pistes parallèles
     for (int p = 0; ok && p < numParallels; ++p)
