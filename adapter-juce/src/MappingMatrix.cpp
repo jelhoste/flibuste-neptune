@@ -178,6 +178,8 @@ float MappingMatrix::keyX (double key) const
     return a.getX() + static_cast<float> ((key - keyStart_) / keySpan_) * a.getWidth();
 }
 
+neptune::core::mapping::View MappingMatrix::currentView() const { return view_; }
+
 int MappingMatrix::keyAtX (float x) const
 {
     const auto a = plotArea();
