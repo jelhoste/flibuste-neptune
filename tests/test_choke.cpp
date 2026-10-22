@@ -174,10 +174,11 @@ TEST_CASE ("places and layer fades keep different trigger conditions apart")
     d.zones = { a, b };
     // deux vues distinctes (Attaque / Legato) : jamais mélangées, donc jamais en « chevauchement » ni en round-robin
     const auto vs = mapping::views (d);
-    REQUIRE (vs.size() == 2);
-    CHECK (vs[1].category == mapping::View::Category::Legato);
+    REQUIRE (vs.size() == 4);   // les quatre tables sont toujours là : attaque, premier, legato, relâchement
+    CHECK (vs[2].category == mapping::View::Category::Legato);
     CHECK (mapping::places (d, vs[0]).size() == 1);
-    CHECK (mapping::places (d, vs[1]).size() == 1);
+    CHECK (mapping::places (d, vs[1]).empty());
+    CHECK (mapping::places (d, vs[2]).size() == 1);
     CHECK_FALSE (mapping::places (d, vs[0])[0].overlaps);
 
     const std::vector<LayerKey> keys = { { 0, 127, 1, 40, 0, false, 0 }, { 0, 127, 41, 127, 0, false, 1 } };
