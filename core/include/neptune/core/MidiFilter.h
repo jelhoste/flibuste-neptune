@@ -24,6 +24,16 @@ struct Message
     int data2 = 0;            // vélocité, valeur de CC, pression, pitch bend ramené à 0..127
 };
 
+// Dernier état connu des contrôleurs de chaque canal : de quoi juger une condition « au moment où une note se déclenche » (pédale de sustain enfoncée, pitch bend,
+// pression...). Mis à jour par le thread audio, lu par lui : pas de verrou.
+struct State
+{
+    std::array<std::array<std::uint8_t, 128>, 16> cc {}, poly {};
+    std::array<std::uint8_t, 16> bend {}, pressure {}, program {};
+    State() noexcept { bend.fill (64); }
+    void update (const Message&) noexcept;
+};
+
 struct Condition
 {
     MsgKind kind = MsgKind::Note;   // Note : note on ET note off
@@ -35,6 +45,9 @@ struct Condition
         return kind == o.kind && channel == o.channel && lo1 == o.lo1 && hi1 == o.hi1 && lo2 == o.lo2 && hi2 == o.hi2;
     }
     bool matches (const Message&) const noexcept;
+    // Comme matches(), mais pour un contrôleur on regarde sa DERNIÈRE valeur connue : une note qui se déclenche (`trigger`) est jugée sur l'état courant.
+    // Note / Note On : la note qui se déclenche elle-même. Note Off : jamais vrai au déclenchement.
+    bool matchesState (const State&, const Message& trigger) const noexcept;
 };
 
 enum class Op { Leaf = 0, And, Or, Xor, Nand, Nor, Not };
@@ -76,6 +89,8 @@ public:
     bool enabled() const noexcept { return enabled_ && count_ > 0; }
     // Vrai si le message est transmis à la piste. Filtre éteint : toujours vrai.
     bool passes (const Message&) const noexcept;
+    // Même arbre, jugé sur l'état des contrôleurs au moment où la note `trigger` se déclenche (condition MIDI d'une zone). Éteint : toujours vrai.
+    bool passesState (const State&, const Message& trigger) const noexcept;
 
 private:
     struct Node
@@ -86,6 +101,7 @@ private:
         std::array<int, maxChildren> child {};
     };
     bool eval (int index, const Message&, int depth) const noexcept;
+    bool evalState (int index, const State&, const Message& trigger, int depth) const noexcept;
 
     bool enabled_ = false;
     int count_ = 0;

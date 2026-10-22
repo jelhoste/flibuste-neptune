@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "ChokePanel.h"
+#include "MidiFilterEditor.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/SampleMeta.h"
 #include "neptune/core/SamplerParams.h"
@@ -115,6 +116,8 @@ class LevelsPanel : public juce::Component
 public:
     std::function<void (bool)> onCompensate;
     std::function<void (bool follow, int meter, double floorDb, double curve, double offsetDb)> onRelease;
+    std::function<void (double velPct, double dbPerOct, int center)> onTracking;
+    std::function<void()> onOpenMidi;
 
     LevelsPanel (const nova::Skin& skin, const i18n::Translator& tr, bool compensate, const ZoneDescription* zone)
         : skin_ (skin), look_ (skin_), tr_ (tr)
@@ -132,6 +135,26 @@ public:
         floorLabel_.setText (text ("sm.lv_floor"), juce::dontSendNotification);
         curveLabel_.setText (text ("sm.lv_curve"), juce::dontSendNotification);
         offsetLabel_.setText (text ("sm.lv_offset"), juce::dontSendNotification);
+        velLabel_.setText (text ("sm.lv_veltrack"), juce::dontSendNotification);
+        keyLabel_.setText (text ("sm.lv_keytrack"), juce::dontSendNotification);
+        centreLabel_.setText (text ("sm.lv_keycentre"), juce::dontSendNotification);
+        midiButton_.setButtonText (text (zone != nullptr && zone->midiCondition.enabled ? "sm.lv_midi_on" : "sm.lv_midi"));
+        vel_.setRange (-100.0, 100.0, 1.0);
+        vel_.setTextValueSuffix (" %");
+        vel_.setDoubleClickReturnValue (true, 100.0);
+        vel_.setValue (zone != nullptr ? zone->velTrackPct : 100.0, juce::dontSendNotification);
+        keyDb_.setRange (-24.0, 24.0, 0.1);
+        keyDb_.setTextValueSuffix (" dB/oct");
+        keyDb_.setDoubleClickReturnValue (true, 0.0);
+        keyDb_.setValue (zone != nullptr ? zone->keyTrackDbPerOct : 0.0, juce::dontSendNotification);
+        keyCentre_.setRange (0.0, 127.0, 1.0);
+        keyCentre_.setDoubleClickReturnValue (true, 60.0);
+        keyCentre_.setValue (zone != nullptr ? zone->keyTrackCenter : 60, juce::dontSendNotification);
+        auto tracking = [this] { if (onTracking) onTracking (vel_.getValue(), keyDb_.getValue(), static_cast<int> (keyCentre_.getValue())); };
+        vel_.onValueChange = tracking; keyDb_.onValueChange = tracking; keyCentre_.onValueChange = tracking;
+        midiButton_.onClick = [this] { if (onOpenMidi) onOpenMidi(); };
+        zoneSelected_ = zone != nullptr;
+        for (auto* c : std::initializer_list<juce::Component*> { &vel_, &keyDb_, &keyCentre_, &velLabel_, &keyLabel_, &centreLabel_, &midiButton_ }) { addAndMakeVisible (*c); c->setEnabled (zoneSelected_); }
         hint_.setText (text ("sm.lv_hint"), juce::dontSendNotification);
         hint_.setFont (juce::FontOptions (11.5f));
         hint_.setJustificationType (juce::Justification::topLeft);
@@ -154,7 +177,7 @@ public:
         curve_.onValueChange = changed;
         offset_.onValueChange = changed;
         for (auto* c : std::initializer_list<juce::Component*> { &compensate_, &follow_, &meter_, &floor_, &curve_, &offset_, &meterLabel_, &floorLabel_, &curveLabel_, &offsetLabel_, &hint_ }) addAndMakeVisible (*c);
-        setSize (440, 330);
+        setSize (440, 330 + 4 * 32 + 8);
     }
     ~LevelsPanel() override { setLookAndFeel (nullptr); }
     void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
@@ -169,6 +192,11 @@ public:
         row (floorLabel_, floor_);
         row (curveLabel_, curve_);
         row (offsetLabel_, offset_);
+        r.removeFromTop (10);
+        row (velLabel_, vel_);
+        row (keyLabel_, keyDb_);
+        row (centreLabel_, keyCentre_);
+        midiButton_.setBounds (r.removeFromTop (28));
         r.removeFromTop (6);
         hint_.setBounds (r);
     }
@@ -179,8 +207,12 @@ private:
     const i18n::Translator& tr_;
     juce::ToggleButton compensate_, follow_;
     juce::ComboBox meter_;
-    juce::Slider floor_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, curve_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, offset_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
-    juce::Label meterLabel_, floorLabel_, curveLabel_, offsetLabel_, hint_;
+    juce::Slider floor_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, curve_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, offset_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight },
+        vel_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, keyDb_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight },
+        keyCentre_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label meterLabel_, floorLabel_, curveLabel_, offsetLabel_, velLabel_, keyLabel_, centreLabel_, hint_;
+    juce::TextButton midiButton_;
+    bool zoneSelected_ = false;
 };
 
 // Options de la recherche automatique de boucle.
@@ -1897,7 +1929,36 @@ void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
         if (safe == nullptr) return;
         safe->editZone ([=] (Zone& zone) { zone.releaseFollowsLevel = follow; zone.releaseMeter = meter; zone.releaseFloorDb = floorDb; zone.releaseCurve = curve; zone.releaseOffsetDb = offsetDb; });
     };
+    panel->onTracking = [safe] (double velPct, double dbPerOct, int center)
+    {
+        if (safe == nullptr) return;
+        safe->editZone ([=] (Zone& zone) { zone.velTrackPct = velPct; zone.keyTrackDbPerOct = dbPerOct; zone.keyTrackCenter = center; });
+    };
+    panel->onOpenMidi = [safe]
+    {
+        if (safe == nullptr) return;
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->openMidiCondition(); });
+    };
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+}
+
+// Condition MIDI de la zone affichée : le même éditeur d'arbre que le filtre MIDI de piste, superposé à l'éditeur du sampler.
+void NovaSamplerEditor::openMidiCondition()
+{
+    if (midiEditor_ || wizard_ || filterEditor_ || shownZone() == nullptr) return;
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    midiEditor_ = std::make_unique<MidiFilterEditor> (
+        skin().palette(), translator(), proc_.selectedTrack(),
+        [safe] { const auto* z = safe != nullptr ? safe->shownZone() : nullptr; return z != nullptr ? z->midiCondition : neptune::core::midi::FilterDescription {}; },
+        [safe] (const neptune::core::midi::FilterDescription& f)
+        {
+            if (safe == nullptr) return;
+            safe->editZone ([&f] (Zone& zone) { zone.midiCondition = f; });   // les zones sélectionnées partagent la condition posée
+        },
+        [safe] { juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->midiEditor_.reset(); }); });
+    addAndMakeVisible (*midiEditor_);
+    midiEditor_->setBounds (getLocalBounds());
+    midiEditor_->toFront (true);
 }
 
 // Emplacements assignables : fenêtre flottante (les 16 lignes) ou menu contextuel d'une zone / d'un Groupe.
@@ -2304,7 +2365,7 @@ void NovaSamplerEditor::pageChanged()
     // moniteur de voix : remplace la liste et la matrice
     zones_->setVisible (zonesPage && listVisible_ && ! showVoices_ && ! showPool_);
     tablePanel_->setVisible (zonesPage && listVisible_ && ! showVoices_);
-    tablePanel_->setTitle ((showPool_ ? tx ("pool.title") : tx ("sm.table")).toUpperCase());
+    tablePanel_->setTitle ({});   // les deux onglets (ZONES / FICHIERS) tiennent lieu de titre
     zonesViewPill_->setVisible (zonesPage && listVisible_ && ! showVoices_);
     poolViewPill_->setVisible (zonesPage && listVisible_ && ! showVoices_);
     zonesViewPill_->setOn (! showPool_);
@@ -2350,8 +2411,8 @@ void NovaSamplerEditor::layout()
         tablePanel_->setBounds (R (X0, 196, 330, 514));
         zones_->setBounds (R (X0 + 10, 230, 310, 470));
         pool_->setBounds (R (X0 + 10, 230, 310, 470));
-        zonesViewPill_->setBounds (R (X0 + 130, 200, 84, 22));
-        poolViewPill_->setBounds (R (X0 + 218, 200, 96, 22));
+        zonesViewPill_->setBounds (R (X0 + 12, 200, 84, 22));
+        poolViewPill_->setBounds (R (X0 + 100, 200, 96, 22));
         matrixPanel_->setBounds (R (X0 + 342, 196, 600, 514));
         matrix_->setBounds (R (X0 + 350, 228, 584, 474));
     }
@@ -2444,6 +2505,7 @@ void NovaSamplerEditor::layout()
     presetPill()->setBounds (R (440, 11, 280, 36));
     if (wizard_) wizard_->setBounds (getLocalBounds());
     if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
+    if (midiEditor_) midiEditor_->setBounds (getLocalBounds());
 }
 
 // Écoute : une seule à la fois (le moteur remplace la précédente). `owner` : 1 = bouton du bas, 2 = bouton des outils du sample.

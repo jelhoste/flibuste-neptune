@@ -1734,6 +1734,20 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             engine_.noteOff (msg.getChannel() - 1, msg.getNoteNumber());
         else if (msg.isController())
             control_.controlChange (msg.getChannel() - 1, msg.getControllerNumber(), msg.getControllerValue(), params_); // désactivé par défaut
+
+        // dernier état des contrôleurs de chaque canal : jugé par les conditions MIDI des zones au moment où une note se déclenche
+        {
+            neptune::core::midi::Message mm;
+            mm.channel = (msg.getChannel() - 1) & 15;
+            bool known = true;
+            if (msg.isController()) { mm.kind = neptune::core::midi::MsgKind::ControlChange; mm.data1 = msg.getControllerNumber(); mm.data2 = msg.getControllerValue(); }
+            else if (msg.isPitchWheel()) { mm.kind = neptune::core::midi::MsgKind::PitchBend; mm.data2 = msg.getPitchWheelValue() >> 7; }
+            else if (msg.isChannelPressure()) { mm.kind = neptune::core::midi::MsgKind::ChannelPressure; mm.data2 = msg.getChannelPressureValue(); }
+            else if (msg.isAftertouch()) { mm.kind = neptune::core::midi::MsgKind::PolyPressure; mm.data1 = msg.getNoteNumber(); mm.data2 = msg.getAfterTouchValue(); }
+            else if (msg.isProgramChange()) { mm.kind = neptune::core::midi::MsgKind::ProgramChange; mm.data1 = msg.getProgramChangeNumber(); }
+            else known = false;
+            if (known) engine_.midiController (mm);
+        }
     }
 
     // Macros : une macro dont la valeur a changé (automation de l'hôte, interface, OSC) écrit les cibles qui lui sont assignées. Après le

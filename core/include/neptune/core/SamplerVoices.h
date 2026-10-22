@@ -30,6 +30,8 @@ public:
     void setSlotAmounts (const float* amounts) noexcept { for (int i = 0; i < kZoneSlots; ++i) slotAmounts_[static_cast<std::size_t> (i)] = amounts[i]; }
 
     void prepare (double sampleRate) noexcept;
+    // État des contrôleurs MIDI (tenu par le moteur) : sert aux conditions MIDI des zones. Nul : toute condition est jugée sur un état vide.
+    void setMidiState (const midi::State* state) noexcept { midiState_ = state; }
     // Streaming disque (facultatif) : les échantillons dont seul le début est en mémoire y sont lus. Nul = jamais de streaming.
     void setStreamer (DiskStreamer* streamer) noexcept { streamer_ = streamer; }
     // Remplace l'instrument. Les voix dont la zone existe encore (même indice, même sample) continuent avec les nouveaux
@@ -99,6 +101,7 @@ public:
     int heldVoices() const noexcept;      // voix comptées dans la limite (ni relâchées ni en fondu de vol)
 
 private:
+    const midi::State* midiState_ = nullptr;
     LevelCoefs levelCoefs_;   // pondération K et lissages du suivi de niveau (voir LevelTracker.h) ; refaits à prepare()
     float heardGain (const Zone&, int channel, int key, float velocity) const noexcept;   // volume de relâchement lié au niveau (0 : rien ne sonnait)
 
@@ -114,6 +117,7 @@ private:
         double pos = 0.0;       // en échantillons du fichier
         double baseRatio = 1.0; // avance par échantillon de sortie, sans l'accordage global
         float velocity = 1.0f;  // le gain de la zone est relu à chaque bloc (édition en direct)
+        float ampVel = 1.0f;    // facteur de volume dû à la vélocité (suivi de la zone) et à la touche (suivi du clavier), fixé au Note On
         float layerGain = 1.0f; // fondu entre couches de vélocité (fixé au Note On)
         EnvelopeRunner env;
         float fade = 1.0f, fadeStep = 0.0f; // fondu rapide d'une voix volée
@@ -153,7 +157,7 @@ private:
     void releaseZonesFor (int channel, int key) noexcept; // zones déclenchées au relâchement
     void chokeFor (const Zone& zone) noexcept;           // coupe les voix que cette zone choke (avant de démarrer les siennes)
     bool otherHeldInGroup (int groupId, int channel, int key) const noexcept; // conditions « Premier » / « Legato »
-    Instrument::HeldQuery heldQuery (int channel, int key) noexcept;
+    Instrument::HeldQuery heldQuery (int channel, int key, int velocity = 64) noexcept;
     void pushHeld (int channel, int key, float velocity) noexcept;
     void removeHeld (int channel, int key) noexcept;
     void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
@@ -182,7 +186,7 @@ private:
     static constexpr int kMaxDownKeys = 64;
     std::array<DownKey, kMaxDownKeys> down_ {};
     int numDown_ = 0;
-    struct QueryContext { const SamplerVoices* self; int channel, key; } queryContext_ {};
+    struct QueryContext { const SamplerVoices* self; int channel, key, velocity; } queryContext_ {};
     void markDown (int channel, int key) noexcept;
     void markUp (int channel, int key) noexcept;
     void recordGroups (int channel, int key, const Instrument::Pick* picks, int n) noexcept;

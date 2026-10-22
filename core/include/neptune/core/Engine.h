@@ -83,6 +83,8 @@ public:
     void publishOrgan (int track, std::shared_ptr<const organ::OrganDescription> description);
     // Filtre MIDI avancé d'une piste (normalement publié par setTrackSettings ; direct pour les tests).
     void setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter>);
+    // Un message de contrôleur (CC, pitch bend, pression, programme) : retenu pour les conditions MIDI des zones. Thread audio.
+    void midiController (const midi::Message& m) noexcept { midiState_.update (m); }
     // Notes en cours d'une piste Synthé figées par un changement de preset (capture par voix).
     int frozenVoices (int track) const noexcept
     {
@@ -312,6 +314,7 @@ private:
     int hostFrames_ = 0;
     const float *chunkHostL_ = nullptr, *chunkHostR_ = nullptr; // idem, décalée au bloc en cours
     int currentRoot_ = -1;                                      // piste en cours de traitement (ses pistes parallèles comprises)
+    midi::State midiState_;   // dernier état des contrôleurs de chaque canal (conditions MIDI des zones)
     bool currentRootAudioIn_ = false;
     std::array<Parallel, kParallels> parallels_;
     // contexte du bloc en cours

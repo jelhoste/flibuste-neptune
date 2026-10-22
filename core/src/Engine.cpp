@@ -29,6 +29,7 @@ Engine::Engine() noexcept
     {
         auto& tr = tracks_[static_cast<std::size_t> (t)];
         tr.voices.setStreamer (&streamer_);
+        tr.voices.setMidiState (&midiState_);
         tr.config.midiChannel.store (t == 0 ? 0 : t + 1, std::memory_order_relaxed); // piste 1 : tous les canaux ; les autres : leur canal
     }
 }

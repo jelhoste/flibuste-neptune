@@ -90,6 +90,10 @@ ZoneDescription sanitised (ZoneDescription z)
     z.fadeOutMs = std::isfinite (z.fadeOutMs) ? std::clamp (z.fadeOutMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeOutMs;
     z.delayMs = std::isfinite (z.delayMs) ? std::clamp (z.delayMs, 0.0, ZoneDescription::maxDelayMs) : 0.0;
     z.pan = std::isfinite (z.pan) ? std::clamp (z.pan, -1.0, 1.0) : 0.0;
+    z.velTrackPct = std::isfinite (z.velTrackPct) ? std::clamp (z.velTrackPct, -100.0, 100.0) : 100.0;
+    z.keyTrackDbPerOct = std::isfinite (z.keyTrackDbPerOct) ? std::clamp (z.keyTrackDbPerOct, -24.0, 24.0) : 0.0;
+    z.keyTrackCenter = std::clamp (z.keyTrackCenter, 0, 127);
+    z.midiCondition = midi::sanitised (std::move (z.midiCondition));
     z.releaseMeter = std::clamp (z.releaseMeter, 0, 2);
     z.releaseFloorDb = std::isfinite (z.releaseFloorDb) ? std::clamp (z.releaseFloorDb, -96.0, -6.0) : -48.0;
     z.releaseCurve = std::isfinite (z.releaseCurve) ? std::clamp (z.releaseCurve, 0.25, 4.0) : 1.0;
@@ -224,6 +228,10 @@ std::string toJson (const InstrumentDescription& d)
         if (z.reverse) o["reverse"] = true;
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.pan != 0.0) o["pan"] = z.pan;
+        if (z.velTrackPct != 100.0) o["vel_track_pct"] = z.velTrackPct;
+        if (z.keyTrackDbPerOct != 0.0) o["key_track_db_per_oct"] = z.keyTrackDbPerOct;
+        if (z.keyTrackCenter != 60) o["key_track_center"] = z.keyTrackCenter;
+        if (z.midiCondition.enabled) o["midi_condition"] = nlohmann::json::parse (midi::toJson (z.midiCondition), nullptr, false);
         if (z.releaseRefFrame >= 0) o["release_ref_frame"] = z.releaseRefFrame;   // propriété du sample : posée même sur une zone d'attaque (ignorée tant qu'elle n'est pas de relâchement)
         if (z.releaseFollowsLevel)
         {
@@ -375,6 +383,10 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     if (const auto it = o.find ("reverse"); it != o.end() && it->is_boolean()) z.reverse = it->get<bool>();
     z.delayMs = readNum (o, "delay_ms", z.delayMs);
     z.pan = readNum (o, "pan", z.pan);
+    z.velTrackPct = readNum (o, "vel_track_pct", z.velTrackPct);
+    z.keyTrackDbPerOct = readNum (o, "key_track_db_per_oct", z.keyTrackDbPerOct);
+    z.keyTrackCenter = readInt (o, "key_track_center", z.keyTrackCenter);
+    if (const auto it = o.find ("midi_condition"); it != o.end() && it->is_object()) z.midiCondition = midi::filterFromJson (it->dump());
     if (const auto it = o.find ("release_follows_level"); it != o.end() && it->is_boolean()) z.releaseFollowsLevel = it->get<bool>();
     z.releaseMeter = readInt (o, "release_meter", z.releaseMeter);
     z.releaseFloorDb = readNum (o, "release_floor_db", z.releaseFloorDb);
@@ -576,11 +588,23 @@ void Instrument::finalize()
     fades_ = computeLayerFades (keys, fadeWidth);
 }
 
-const Zone* Instrument::pickFromSet (std::size_t set) const noexcept
+const Zone* Instrument::pickFromSet (std::size_t set, const HeldQuery* filter) const noexcept
 {
-    const auto& members = rrSets_[set].members;
-    if (members.size() <= 1) return &zones[static_cast<std::size_t> (members.front())];
-    const auto n = static_cast<std::uint32_t> (members.size());
+    const auto& all = rrSets_[set].members;
+    // avec une condition MIDI : seules les alternatives dont la condition est satisfaite sont candidates (le round-robin tourne parmi elles)
+    int eligible[64];
+    std::size_t count = all.size();
+    const int* members = all.data();
+    if (filter != nullptr && filter->allowed != nullptr && all.size() <= 64)
+    {
+        count = 0;
+        for (const int m : all)
+            if (filter->allowed (filter->context, zones[static_cast<std::size_t> (m)])) eligible[count++] = m;
+        if (count == 0) return nullptr;
+        members = eligible;
+    }
+    if (count <= 1) return &zones[static_cast<std::size_t> (members[0])];
+    const auto n = static_cast<std::uint32_t> (count);
     std::uint32_t pick = 0;
     auto next = [this] { rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5; return rng_; };
     switch (roundRobinMode)
@@ -631,6 +655,7 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
         {
             const Zone& z = zones[static_cast<std::size_t> (zi)];
             if (! z.sample || z.onRelease != release || vInt < z.velLow || vInt > z.velHigh) continue;
+            if (held != nullptr && held->allowed != nullptr && ! held->allowed (held->context, z)) continue;   // condition MIDI de la zone
             const TriggerCondition t = release ? TriggerCondition::Always : z.trigger;
             if (pass == 0 && t != TriggerCondition::Legato) continue;
             if (pass == 1 && t != TriggerCondition::First) continue;
@@ -653,7 +678,7 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
         const int rep = rrSets_[static_cast<std::size_t> (set)].members.front();
         const float g = layerGain (fades_[static_cast<std::size_t> (rep)], vCont, fadeLinear);
         if (g <= 1e-4f) continue;
-        const Zone* z = pickFromSet (static_cast<std::size_t> (set));
+        const Zone* z = pickFromSet (static_cast<std::size_t> (set), held);
         if (z == nullptr || ! z->sample) continue;
         out[n++] = { z, g };
         if (n >= maxOut) break;
@@ -858,6 +883,10 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             z.loopRepeats = z.moreLoopCount > 0 ? zd.loopRepeats : 0;
             // seule la dernière boucle tourne jusqu'au relâchement
             if (z.moreLoopCount > 0) z.moreLoops[static_cast<std::size_t> (z.moreLoopCount - 1)].repeats = 0;
+            z.velTrack = static_cast<float> (zd.velTrackPct / 100.0);
+            z.keyTrackDbPerOct = static_cast<float> (zd.keyTrackDbPerOct);
+            z.keyTrackCenter = zd.keyTrackCenter;
+            if (zd.midiCondition.enabled) z.midiCond = std::make_shared<const midi::CompiledFilter> (zd.midiCondition);
             const double pan = std::clamp (zd.pan, -1.0, 1.0);
             z.panL = pan > 0.0 ? static_cast<float> (std::cos (pan * 1.5707963267948966)) : 1.0f;
             z.panR = pan < 0.0 ? static_cast<float> (std::cos (-pan * 1.5707963267948966)) : 1.0f;

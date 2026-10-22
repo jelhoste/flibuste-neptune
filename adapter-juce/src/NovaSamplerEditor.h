@@ -13,6 +13,7 @@
 #include "FilterEditor.h"
 #include "ImportWizard.h"
 #include "MappingMatrix.h"
+#include "MidiFilterEditor.h"
 #include "PoolTable.h"
 #include "NovaEditor.h"
 #include "NovaWaveView.h"
@@ -64,6 +65,7 @@ private:
     void removeSelectedZones();
     void openChokePanel (juce::Component& anchor);
     void openLevelsPanel (juce::Component& anchor);
+    void openMidiCondition();
     void rebuildPool();
     void addToPool (const std::vector<std::string>& paths);
     void placeFiles (const std::vector<int>& files, int firstKey, const neptune::core::mapping::View&);
@@ -128,6 +130,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser_, importChooser_;
     std::unique_ptr<ImportWizard> wizard_;
     std::unique_ptr<FilterEditor> filterEditor_;
+    std::unique_ptr<MidiFilterEditor> midiEditor_;   // condition MIDI de la zone (superposé)
     neptune::core::memory::FileInfoCache fileInfo_;
     juce::Component::SafePointer<ChokePanel> chokePanel_;
     juce::Component::SafePointer<SlotsPanel> slotsPanel_;

@@ -447,3 +447,99 @@ TEST_CASE ("the file pool is saved with the instrument")
     CHECK (back == d);
     CHECK (instrumentFromJson (toJson (InstrumentDescription {})).pool.empty());
 }
+
+TEST_CASE ("velocity tracking and key tracking shape the volume of a zone")
+{
+    auto level = [] (float velTrack, float dbPerOct, int key, float velocity)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto z = makeFullKeyboardZone (makeConstant (48000, 0.5f), 60, PlayMode::Loop);
+        z.velTrack = velTrack; z.keyTrackDbPerOct = dbPerOct; z.keyTrackCenter = 60;
+        inst->zones.push_back (std::move (z));
+        inst->finalize();
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        v.noteOn (0, key, velocity);
+        std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+        v.render (l.data(), r.data(), 1024, 1.0f, 1.0f, 0.0);
+        return static_cast<double> (l[800]);
+    };
+    // 100 % (défaut) : le volume suit la vélocité comme avant
+    CHECK_THAT (level (1.0f, 0.0f, 60, 1.0f), WithinAbs (0.5, 1e-3));
+    CHECK_THAT (level (1.0f, 0.0f, 60, 0.5f), WithinAbs (0.25, 2e-3));
+    // 0 % : volume constant
+    CHECK_THAT (level (0.0f, 0.0f, 60, 0.2f), WithinAbs (0.5, 1e-3));
+    CHECK_THAT (level (0.0f, 0.0f, 60, 1.0f), WithinAbs (0.5, 1e-3));
+    // -100 % : plus fort quand on joue doucement (2 - vélocité, borné par la vélocité de la couche)
+    CHECK (level (-1.0f, 0.0f, 60, 0.2f) > level (-1.0f, 0.0f, 60, 1.0f));
+    // 50 % : à mi-chemin
+    CHECK_THAT (level (0.5f, 0.0f, 60, 0.0f + 0.2f), WithinAbs (0.5 * (0.5 + 0.5 * 0.2), 2e-3));
+    // clavier : +6 dB par octave autour du do central -> une octave plus haut, le double ; une octave plus bas, la moitié
+    CHECK_THAT (level (0.0f, 6.0206f, 72, 1.0f), WithinAbs (1.0, 5e-3));
+    CHECK_THAT (level (0.0f, 6.0206f, 48, 1.0f), WithinAbs (0.25, 3e-3));
+    CHECK_THAT (level (0.0f, 6.0206f, 60, 1.0f), WithinAbs (0.5, 1e-3));
+}
+
+TEST_CASE ("a zone can require a controller value at the moment the note starts")
+{
+    auto inst = std::make_shared<Instrument>();
+    // même place, deux zones : l'une ne joue que pédale enfoncée (CC 64 >= 64), l'autre pédale levée
+    midi::FilterDescription down, up;
+    down.enabled = up.enabled = true;
+    midi::Rule leaf;
+    leaf.op = midi::Op::Leaf; leaf.condition.kind = midi::MsgKind::ControlChange; leaf.condition.lo1 = leaf.condition.hi1 = 64;
+    leaf.condition.lo2 = 64; leaf.condition.hi2 = 127;
+    down.root.children = { leaf };
+    leaf.condition.lo2 = 0; leaf.condition.hi2 = 63;
+    up.root.children = { leaf };
+    auto zA = makeFullKeyboardZone (makeConstant (48000, 0.8f), 60, PlayMode::Loop);
+    auto zB = makeFullKeyboardZone (makeConstant (48000, 0.2f), 60, PlayMode::Loop);
+    zA.midiCond = std::make_shared<const midi::CompiledFilter> (down);
+    zB.midiCond = std::make_shared<const midi::CompiledFilter> (up);
+    inst->zones.push_back (std::move (zA));
+    inst->zones.push_back (std::move (zB));
+    inst->finalize();
+    midi::State state;
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    v.setMidiState (&state);
+    auto play = [&] ()
+    {
+        v.noteOn (0, 60, 1.0f);
+        std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+        v.render (l.data(), r.data(), 1024, 1.0f, 1.0f, 0.0);
+        v.panic();
+        std::vector<float> t (4096, 0.0f), u (4096, 0.0f);
+        v.render (t.data(), u.data(), 4096, 1.0f, 1.0f, 0.0);   // laisse finir le fondu de coupure
+        return static_cast<double> (l[800]);
+    };
+    midi::Message cc; cc.kind = midi::MsgKind::ControlChange; cc.channel = 0; cc.data1 = 64;
+    cc.data2 = 0; state.update (cc);
+    for (int i = 0; i < 4; ++i) CHECK_THAT (play(), WithinAbs (0.2, 5e-3));   // pédale levée : toujours la zone B, malgré le round-robin
+    cc.data2 = 127; state.update (cc);
+    for (int i = 0; i < 4; ++i) CHECK_THAT (play(), WithinAbs (0.8, 5e-3));
+    // sans état fourni, une condition sur un contrôleur est jugée sur l'état vide (pédale levée)
+    v.setMidiState (nullptr);
+    CHECK_THAT (play(), WithinAbs (0.2, 5e-3));
+}
+
+TEST_CASE ("tracking and MIDI condition settings survive JSON")
+{
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = "a.wav";
+    z.velTrackPct = -40.0; z.keyTrackDbPerOct = 3.5; z.keyTrackCenter = 48;
+    z.midiCondition.enabled = true;
+    midi::Rule leaf;
+    leaf.op = midi::Op::Leaf; leaf.condition.kind = midi::MsgKind::ControlChange; leaf.condition.lo1 = leaf.condition.hi1 = 64; leaf.condition.lo2 = 64;
+    z.midiCondition.root.children = { leaf };
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back.zones[0] == sanitised (z));
+    CHECK (back.zones[0].midiCondition.enabled);
+    CHECK (back.zones[0].keyTrackCenter == 48);
+    const auto built = ZoneDescription {};
+    CHECK (built.velTrackPct == 100.0);
+}

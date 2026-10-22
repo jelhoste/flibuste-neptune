@@ -217,15 +217,28 @@ bool SamplerVoices::otherHeldInGroup (int groupId, int channel, int key) const n
     return false;
 }
 
-Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key) noexcept
+Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key, int velocity) noexcept
 {
-    queryContext_ = { this, channel, key };
+    queryContext_ = { this, channel, key, velocity };
     return { [] (const void* c, int group) noexcept
              {
                  const auto* q = static_cast<const QueryContext*> (c);
                  return q->self->otherHeldInGroup (group, q->channel, q->key);
              },
-             &queryContext_ };
+             &queryContext_,
+             // condition MIDI d'une zone : jugée au déclenchement, sur l'état des contrôleurs et sur la note qui se déclenche
+             [] (const void* c, const Zone& z) noexcept
+             {
+                 if (z.midiCond == nullptr) return true;
+                 static const midi::State empty;
+                 const auto* q = static_cast<const QueryContext*> (c);
+                 midi::Message m;
+                 m.kind = midi::MsgKind::NoteOn;
+                 m.channel = q->channel & 15;
+                 m.data1 = q->key;
+                 m.data2 = q->velocity;
+                 return z.midiCond->passesState (q->self->midiState_ != nullptr ? *q->self->midiState_ : empty, m);
+             } };
 }
 
 // Une zone qui se déclenche coupe les voix des zones dont `chokeCutBy` est son `chokeCuts`. Les voix de la même place
@@ -245,7 +258,7 @@ void SamplerVoices::chokeFor (const Zone& zone) noexcept
 void SamplerVoices::startNote (int channel, int key, float velocity) noexcept
 {
     Instrument::Pick picks[Instrument::maxPicks];
-    const auto held = heldQuery (channel, key);
+    const auto held = heldQuery (channel, key, std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 1, 127));
     const int n = instrument_->selectLayers (key, velocity, /*release*/ false, picks, Instrument::maxPicks, &held);
     recordGroups (channel, key, picks, n);
     for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone); // avant de démarrer : les nouvelles voix du même coup ne sont pas coupées
@@ -398,8 +411,16 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->loopIdx = 0;
     v->repsLeft = (zone.moreLoopCount > 0 && zone.loopRepeats > 0) ? zone.loopRepeats : -1;
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
+    {
+        // suivi de la vélocité (1 : le volume suit la vélocité ; 0 : constant ; < 0 : plus fort en jouant doucement) et suivi du clavier (dB par octave autour de la note centrale)
+        const float t = std::clamp (zone.velTrack, -1.0f, 1.0f);
+        float amp = std::max (0.0f, (1.0f - t) + t * v->velocity);
+        if (zone.keyTrackDbPerOct != 0.0f)
+            amp *= static_cast<float> (std::pow (10.0, static_cast<double> (zone.keyTrackDbPerOct) * static_cast<double> (key - zone.keyTrackCenter) / 12.0 / 20.0));
+        v->ampVel = amp;
+    }
     v->layerGain = layerGain;
-    v->level = v->velocity * zone.gain * v->mods.gain * layerGain;
+    v->level = v->ampVel * zone.gain * v->mods.gain * layerGain;
     v->targetRatio = v->baseRatio;
     if (v->mods.any)
     {
@@ -476,7 +497,8 @@ void SamplerVoices::releaseZonesFor (int channel, int key) noexcept
     const float vel = heldVelocity_[static_cast<std::size_t> (key)];
     const float v = vel > 0.0f ? vel : 0.5f;
     Instrument::Pick picks[Instrument::maxPicks];
-    const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks);
+    const auto held = heldQuery (channel, key, std::clamp (static_cast<int> (std::lround (v * 127.0f)), 1, 127));
+    const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks, &held);
     for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone);
     for (int i = 0; i < n; ++i)
     {
@@ -686,7 +708,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 
         const float envValue = v.env.next (z.env, sampleRate_);
         if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
-        float e = v.velocity * z.gain * v.mods.gain * v.layerGain * mg * envValue;
+        float e = v.ampVel * z.gain * v.mods.gain * v.layerGain * mg * envValue;
         if (fadeInOut > 0.0 && v.fadeInPlayed < fadeInOut)
         {
             e *= static_cast<float> (v.fadeInPlayed / fadeInOut);
@@ -745,7 +767,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         }
     }
     v.baseRatio = ratio; // le glissando du legato se poursuit au bloc suivant
-    v.level = v.velocity * z.gain * v.mods.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
+    v.level = v.ampVel * z.gain * v.mods.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
 }
 
 void SamplerVoices::render (float* left, float* right, int numFrames, float gainStart, float gainEnd, double masterTuneCents) noexcept

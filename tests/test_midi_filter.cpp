@@ -235,3 +235,50 @@ TEST_CASE ("midi filter is saved with the strip", "[midi][state]")
     CHECK (back.tracks[0].strip.midiFilter == m.tracks[0].strip.midiFilter);
     CHECK (back.tracks[1].strip.midiFilter == FilterDescription());
 }
+
+TEST_CASE ("state conditions judge the last known controller values")
+{
+    using namespace neptune::core::midi;
+    State st;
+    Message trigger; trigger.kind = MsgKind::NoteOn; trigger.channel = 2; trigger.data1 = 60; trigger.data2 = 100;
+    Condition cc;
+    cc.kind = MsgKind::ControlChange; cc.channel = 0; cc.lo1 = cc.hi1 = 64; cc.lo2 = 64; cc.hi2 = 127;
+    CHECK_FALSE (cc.matchesState (st, trigger));
+    Message m; m.kind = MsgKind::ControlChange; m.channel = 2; m.data1 = 64; m.data2 = 100;
+    st.update (m);
+    CHECK (cc.matchesState (st, trigger));                // « tous les canaux » : le canal de la note (indice 2)
+    cc.channel = 3;
+    CHECK (cc.matchesState (st, trigger));                // canal 3 = indice 2
+    cc.channel = 6;
+    CHECK_FALSE (cc.matchesState (st, trigger));          // un autre canal que celui de la pédale
+    cc.channel = 1;
+    CHECK_FALSE (cc.matchesState (st, trigger));          // un autre canal
+    Condition bend; bend.kind = MsgKind::PitchBend; bend.lo2 = 70; bend.hi2 = 127;
+    CHECK_FALSE (bend.matchesState (st, trigger));        // au centre (64)
+    Message pb; pb.kind = MsgKind::PitchBend; pb.channel = 2; pb.data2 = 100;
+    st.update (pb);
+    CHECK (bend.matchesState (st, trigger));
+    Condition note; note.kind = MsgKind::Note; note.lo1 = 50; note.hi1 = 70; note.lo2 = 90; note.hi2 = 127;
+    CHECK (note.matchesState (st, trigger));              // la note qui se déclenche : 60 à la vélocité 100
+    trigger.data2 = 20;
+    CHECK_FALSE (note.matchesState (st, trigger));
+    Condition off; off.kind = MsgKind::NoteOff;
+    CHECK_FALSE (off.matchesState (st, trigger));
+
+    // un arbre : (CC64 haut ET NON (pitch bend haut)) ; éteint -> toujours vrai
+    FilterDescription f;
+    f.enabled = true;
+    Rule a; a.op = Op::Leaf; a.condition = [] { Condition c; c.kind = MsgKind::ControlChange; c.lo1 = c.hi1 = 64; c.lo2 = 64; return c; }();
+    Rule b; b.op = Op::Leaf; b.condition = bend;
+    Rule n; n.op = Op::Not; n.children = { b };
+    f.root.children = { a, n };
+    const CompiledFilter cf (f);
+    State fresh;
+    CHECK_FALSE (cf.passesState (fresh, trigger));        // pédale levée
+    st.cc[2][64] = 100;
+    CHECK_FALSE (cf.passesState (st, trigger));           // pédale enfoncée, mais pitch bend haut
+    st.bend[2] = 64;
+    CHECK (cf.passesState (st, trigger));
+    FilterDescription off2;
+    CHECK (CompiledFilter (off2).passesState (fresh, trigger));
+}

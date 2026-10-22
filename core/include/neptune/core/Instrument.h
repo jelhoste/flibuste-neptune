@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "neptune/core/Envelope.h"
+#include "neptune/core/MidiFilter.h"
 #include "neptune/core/Filter.h"
 #include "neptune/core/SampleData.h"
 #include "neptune/core/VelocityResponse.h"
@@ -101,6 +102,14 @@ struct ZoneDescription
     // de relâchement, à ce marqueur, ait le niveau entendu de la voix d'attaque (plus `releaseOffsetDb`) ; le seuil de silence reste une porte, la courbe n'est plus utilisée.
     std::int64_t releaseRefFrame = -1;
     double releaseOffsetDb = 0.0;
+    // Volume : suivi de la vélocité (indépendant du choix de la couche : -100..+100 %, 100 = le volume suit la vélocité comme avant, 0 = volume constant, négatif =
+    // plus fort quand on joue doucement) et suivi du clavier (dB par octave autour de `keyTrackCenter`, 0 = aucun).
+    double velTrackPct = 100.0;
+    double keyTrackDbPerOct = 0.0;
+    int keyTrackCenter = 60;
+    // Condition MIDI supplémentaire (même arbre que le filtre MIDI de piste), jugée au déclenchement sur l'état des contrôleurs et sur la note : par exemple
+    // « ne joue que si la pédale de sustain (CC 64) est enfoncée ». Éteinte par défaut.
+    midi::FilterDescription midiCondition;
     double pan = 0.0;              // -1 (gauche) .. +1 (droite) ; loi de balance en cosinus, neutre au centre
     bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
@@ -117,7 +126,8 @@ struct ZoneDescription
             && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
             && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
-            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb;
+            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb
+            && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition;
     }
 };
 
@@ -258,6 +268,10 @@ struct Zone
     bool releaseFollowsLevel = false;     // voir ZoneDescription
     int releaseMeter = 2;
     float releaseFloorDb = -48.0f, releaseCurve = 1.0f;
+    float velTrack = 1.0f;                // suivi de la vélocité (1 = comme avant)
+    float keyTrackDbPerOct = 0.0f;
+    int keyTrackCenter = 60;
+    std::shared_ptr<const midi::CompiledFilter> midiCond;   // nul : aucune condition
     float releaseRefDb = -1000.0f;        // niveau de référence au marqueur de volume (mesuré au chargement) ; <= -900 : pas de marqueur
     float releaseOffsetDb = 0.0f;
     int roundRobin = 0;
@@ -311,7 +325,13 @@ struct Instrument
     // `held` (facultatif) répond aux conditions « Premier » / « Legato » : une autre note du Groupe est-elle tenue ? Sans lui,
     // « Premier » est toujours vrai et « Legato » toujours faux. Parmi les zones qui couvrent la note, la première dont la
     // condition est satisfaite fixe la famille.
-    struct HeldQuery { bool (*otherHeld) (const void* context, int groupId) noexcept = nullptr; const void* context = nullptr; };
+    // `allowed` (facultatif) : écarte les zones dont la condition MIDI n'est pas satisfaite, avant le choix de la famille et du round-robin.
+    struct HeldQuery
+    {
+        bool (*otherHeld) (const void* context, int groupId) noexcept = nullptr;
+        const void* context = nullptr;
+        bool (*allowed) (const void* context, const Zone&) noexcept = nullptr;
+    };
     int selectLayers (int key, float velocity, bool release, Pick* out, int maxOut, const HeldQuery* held = nullptr) const noexcept;
     int placeOf (int zoneIndex) const noexcept { return zoneIndex >= 0 && static_cast<std::size_t> (zoneIndex) < zoneSet_.size() ? zoneSet_[static_cast<std::size_t> (zoneIndex)] : -1; }
 
@@ -326,7 +346,7 @@ private:
     std::vector<std::vector<int>> familySets_;      // par famille : indices de jeux round-robin (une couche chacun)
     std::vector<int> zoneFamily_;                   // par zone
     std::array<std::vector<int>, 128> keyZones_;    // par note : zones qui la couvrent, dans l'ordre de déclaration
-    const Zone* pickFromSet (std::size_t set) const noexcept;
+    const Zone* pickFromSet (std::size_t set, const HeldQuery* filter = nullptr) const noexcept;
     mutable std::vector<std::uint32_t> rrCounter_, rrLast_;
     mutable std::uint32_t rng_ = 0x9E3779B9u;
 };

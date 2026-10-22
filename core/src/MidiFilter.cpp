@@ -76,6 +76,46 @@ bool Condition::matches (const Message& m) const noexcept
     return true;
 }
 
+void State::update (const Message& m) noexcept
+{
+    const auto ch = static_cast<std::size_t> (m.channel & 15);
+    const auto d1 = static_cast<std::size_t> (m.data1 & 127);
+    const auto d2 = static_cast<std::uint8_t> (std::clamp (m.data2, 0, 127));
+    switch (m.kind)
+    {
+        case MsgKind::ControlChange: cc[ch][d1] = d2; break;
+        case MsgKind::PitchBend: bend[ch] = d2; break;
+        case MsgKind::ChannelPressure: pressure[ch] = d2; break;
+        case MsgKind::PolyPressure: poly[ch][d1] = d2; break;
+        case MsgKind::ProgramChange: program[ch] = static_cast<std::uint8_t> (d1); break;
+        default: break;
+    }
+}
+
+bool Condition::matchesState (const State& st, const Message& trigger) const noexcept
+{
+    auto channelOk = [&] (auto&& test) noexcept
+    {
+        // « tous les canaux » : le canal de la note qui se déclenche (la pédale de ce canal), pas n'importe quel canal
+        return test (static_cast<std::size_t> (channel != 0 ? channel - 1 : trigger.channel & 15));
+    };
+    auto in2 = [&] (int v) noexcept { return v >= lo2 && v <= hi2; };
+    switch (kind)
+    {
+        case MsgKind::Note:
+        case MsgKind::NoteOn: return matches (trigger);
+        case MsgKind::NoteOff: return false;
+        case MsgKind::ControlChange:
+            return channelOk ([&] (std::size_t c) noexcept { for (int n = lo1; n <= hi1; ++n) if (in2 (st.cc[c][static_cast<std::size_t> (n)])) return true; return false; });
+        case MsgKind::PolyPressure:
+            return channelOk ([&] (std::size_t c) noexcept { for (int n = lo1; n <= hi1; ++n) if (in2 (st.poly[c][static_cast<std::size_t> (n)])) return true; return false; });
+        case MsgKind::PitchBend: return channelOk ([&] (std::size_t c) noexcept { return in2 (st.bend[c]); });
+        case MsgKind::ChannelPressure: return channelOk ([&] (std::size_t c) noexcept { return in2 (st.pressure[c]); });
+        case MsgKind::ProgramChange: return channelOk ([&] (std::size_t c) noexcept { return st.program[c] >= lo1 && st.program[c] <= hi1; });
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------------------------------- description
 
 int countNodes (const Rule& r) noexcept
@@ -304,6 +344,33 @@ bool CompiledFilter::eval (int index, const Message& m, int depth) const noexcep
         case Op::Leaf: break;
     }
     return false;
+}
+
+bool CompiledFilter::evalState (int index, const State& st, const Message& trigger, int depth) const noexcept
+{
+    const auto& n = nodes_[static_cast<std::size_t> (index)];
+    if (n.op == Op::Leaf) return n.cond.matchesState (st, trigger);
+    if (depth > maxDepth + 1) return false;
+    int trueCount = 0;
+    for (int i = 0; i < n.childCount; ++i)
+        if (evalState (n.child[static_cast<std::size_t> (i)], st, trigger, depth + 1)) ++trueCount;
+    switch (n.op)
+    {
+        case Op::And: return n.childCount > 0 && trueCount == n.childCount;
+        case Op::Or: return trueCount > 0;
+        case Op::Xor: return trueCount == 1;
+        case Op::Nand: return n.childCount > 0 && trueCount != n.childCount;
+        case Op::Nor: return trueCount == 0;
+        case Op::Not: return n.childCount > 0 && trueCount == 0;
+        case Op::Leaf: break;
+    }
+    return false;
+}
+
+bool CompiledFilter::passesState (const State& st, const Message& trigger) const noexcept
+{
+    if (! enabled()) return true;
+    return evalState (0, st, trigger, 0);
 }
 
 bool CompiledFilter::passes (const Message& m) const noexcept
