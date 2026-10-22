@@ -176,6 +176,7 @@ struct InstrumentDescription
     double humanizePitchCents = 0.0;   // 0..50 : ± cents
     double humanizeVolumeDb = 0.0;     // 0..6 : ± dB
     double humanizeTimingMs = 0.0;     // 0..30 : retard aléatoire du son
+    double analysisMs = 100.0;                 // 10..2000 : durée de la fenêtre où l'on mesure le niveau pour compenser un remplacement
     bool compensateOnReplace = true;           // remplacer le fichier d'une zone compense la différence de niveau (gain de la zone)
     bool mainRoundRobinOnly = false;           // ne charger que l'échantillon principal de chaque place
     bool loadReleaseSamples = true;            // zones déclenchées au relâchement
@@ -225,7 +226,7 @@ struct InstrumentDescription
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
         cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups; modulators = o.modulators; trackModulators = o.trackModulators;
-        slots = o.slots; pool = o.pool; compensateOnReplace = o.compensateOnReplace;
+        slots = o.slots; pool = o.pool; compensateOnReplace = o.compensateOnReplace; analysisMs = o.analysisMs;
         humanizePitchCents = o.humanizePitchCents; humanizeVolumeDb = o.humanizeVolumeDb; humanizeTimingMs = o.humanizeTimingMs;
     }
 
@@ -237,7 +238,7 @@ struct InstrumentDescription
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
             && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
-            && defaultFilters == o.defaultFilters && defaultEnvelope == o.defaultEnvelope && groups == o.groups && modulators == o.modulators && trackModulators == o.trackModulators && slots == o.slots && compensateOnReplace == o.compensateOnReplace
+            && defaultFilters == o.defaultFilters && defaultEnvelope == o.defaultEnvelope && groups == o.groups && modulators == o.modulators && trackModulators == o.trackModulators && slots == o.slots && compensateOnReplace == o.compensateOnReplace && analysisMs == o.analysisMs
             && humanizePitchCents == o.humanizePitchCents && humanizeVolumeDb == o.humanizeVolumeDb && humanizeTimingMs == o.humanizeTimingMs;
     }
     bool empty() const noexcept { return zones.empty(); }

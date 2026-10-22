@@ -276,6 +276,7 @@ std::string toJson (const InstrumentDescription& d)
     doc["round_robin_mode"] = toString (d.roundRobinMode);
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.compensateOnReplace) doc["compensate_on_replace"] = false;
+    if (d.analysisMs != 100.0) doc["analysis_ms"] = d.analysisMs;
     if (d.rrBorrow) doc["rr_borrow"] = true;
     if (d.humanizePitchCents != 0.0 || d.humanizeVolumeDb != 0.0 || d.humanizeTimingMs != 0.0)
         doc["humanize"] = { { "pitch_cents", d.humanizePitchCents }, { "volume_db", d.humanizeVolumeDb }, { "timing_ms", d.humanizeTimingMs } };
@@ -490,6 +491,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
     if (const auto m = doc.find ("rr_borrow"); m != doc.end() && m->is_boolean()) d.rrBorrow = m->get<bool>();
     if (const auto m = doc.find ("compensate_on_replace"); m != doc.end() && m->is_boolean()) d.compensateOnReplace = m->get<bool>();
+    if (const auto m = doc.find ("analysis_ms"); m != doc.end() && m->is_number()) d.analysisMs = std::clamp (m->get<double>(), 10.0, 2000.0);
     if (const auto m = doc.find ("humanize"); m != doc.end() && m->is_object())
     {
         d.humanizePitchCents = std::clamp (readNum (*m, "pitch_cents", 0.0), 0.0, 50.0);

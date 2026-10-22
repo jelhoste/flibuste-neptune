@@ -115,11 +115,12 @@ class LevelsPanel : public juce::Component
 {
 public:
     std::function<void (bool)> onCompensate;
+    std::function<void (double ms)> onAnalysis;
     std::function<void (bool follow, int meter, double floorDb, double curve, double offsetDb)> onRelease;
     std::function<void (double velPct, double dbPerOct, int center)> onTracking;
     std::function<void()> onOpenMidi;
 
-    LevelsPanel (const nova::Skin& skin, const i18n::Translator& tr, bool compensate, const ZoneDescription* zone)
+    LevelsPanel (const nova::Skin& skin, const i18n::Translator& tr, bool compensate, double analysisMs, const ZoneDescription* zone)
         : skin_ (skin), look_ (skin_), tr_ (tr)
     {
         setLookAndFeel (&look_);
@@ -127,6 +128,14 @@ public:
         compensate_.setButtonText (text ("sm.lv_compensate"));
         compensate_.setToggleState (compensate, juce::dontSendNotification);
         compensate_.onClick = [this] { if (onCompensate) onCompensate (compensate_.getToggleState()); };
+        analysisLabel_.setText (text ("sm.lv_analysis"), juce::dontSendNotification);
+        analysis_.setRange (10.0, 2000.0, 10.0);
+        analysis_.setSkewFactorFromMidPoint (200.0);
+        analysis_.setTextValueSuffix (" ms");
+        analysis_.setDoubleClickReturnValue (true, 100.0);
+        analysis_.setValue (analysisMs, juce::dontSendNotification);
+        analysis_.onValueChange = [this] { if (onAnalysis) onAnalysis (analysis_.getValue()); };
+        addAndMakeVisible (analysis_); addAndMakeVisible (analysisLabel_);
         follow_.setButtonText (text ("sm.lv_follow"));
         meter_.addItem (text ("sm.lv_peak"), 1);
         meter_.addItem ("RMS", 2);
@@ -177,7 +186,7 @@ public:
         curve_.onValueChange = changed;
         offset_.onValueChange = changed;
         for (auto* c : std::initializer_list<juce::Component*> { &compensate_, &follow_, &meter_, &floor_, &curve_, &offset_, &meterLabel_, &floorLabel_, &curveLabel_, &offsetLabel_, &hint_ }) addAndMakeVisible (*c);
-        setSize (440, 330 + 4 * 32 + 8);
+        setSize (440, 330 + 5 * 32 + 8);
     }
     ~LevelsPanel() override { setLookAndFeel (nullptr); }
     void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
@@ -185,6 +194,8 @@ public:
     {
         auto r = getLocalBounds().reduced (12);
         compensate_.setBounds (r.removeFromTop (26));
+        r.removeFromTop (4);
+        { auto line = r.removeFromTop (28); analysisLabel_.setBounds (line.removeFromLeft (130)); analysis_.setBounds (line); }
         r.removeFromTop (10);
         follow_.setBounds (r.removeFromTop (26));
         auto row = [&] (juce::Component& label, juce::Component& c) { auto line = r.removeFromTop (28); label.setBounds (line.removeFromLeft (130)); c.setBounds (line); r.removeFromTop (4); };
@@ -210,7 +221,8 @@ private:
     juce::Slider floor_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, curve_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, offset_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight },
         vel_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, keyDb_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight },
         keyCentre_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
-    juce::Label meterLabel_, floorLabel_, curveLabel_, offsetLabel_, velLabel_, keyLabel_, centreLabel_, hint_;
+    juce::Slider analysis_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label analysisLabel_, meterLabel_, floorLabel_, curveLabel_, offsetLabel_, velLabel_, keyLabel_, centreLabel_, hint_;
     juce::TextButton midiButton_;
     bool zoneSelected_ = false;
 };
@@ -1913,11 +1925,11 @@ void NovaSamplerEditor::chooseSample()
                                ZoneDescription z = d.zones.empty() ? ZoneDescription {} : d.zones.front();
                                z.samplePath = file.getFullPathName().toStdString();
                                z.keyLow = 0; z.keyHigh = 127; z.velLow = 1; z.velHigh = 127; z.roundRobin = 0; z.group.clear(); z.onRelease = false;
-                               // compensation : le niveau du nouveau fichier est comparé à celui de l'ancien sur les mêmes 100 premières ms de la région jouée
+                               // compensation : le niveau du nouveau fichier est comparé à celui de l'ancien sur les mêmes premières ms (fenêtre réglable) de la région jouée
                                double oldDb = 0.0, newDb = 0.0, delta = 0.0;
                                const bool compensate = d.compensateOnReplace && ! d.zones.empty() && ! d.zones.front().samplePath.empty()
-                                                       && windowLevelDb (d.zones.front().samplePath, d.zones.front().startFrame, 100.0, oldDb)
-                                                       && windowLevelDb (z.samplePath, 0, 100.0, newDb);
+                                                       && windowLevelDb (d.zones.front().samplePath, d.zones.front().startFrame, d.analysisMs, oldDb)
+                                                       && windowLevelDb (z.samplePath, 0, d.analysisMs, newDb);
                                if (compensate) delta = std::clamp (oldDb - newDb, -24.0, 24.0);
                                z.startFrame = 0; z.endFrame = -1; z.loopStart = 0; z.loopEnd = -1; z.loopCrossfade = 0;   // les repères de l'ancien fichier n'ont plus de sens
                                z.extraLoops.clear(); z.loopRepeats = 0;
@@ -2261,7 +2273,7 @@ void NovaSamplerEditor::openChokePanel (juce::Component& anchor)
 void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
 {
     const auto* z = shownZone();
-    auto panel = std::make_unique<LevelsPanel> (skin(), translator(), cached_.compensateOnReplace, z);
+    auto panel = std::make_unique<LevelsPanel> (skin(), translator(), cached_.compensateOnReplace, cached_.analysisMs, z);
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
     panel->onCompensate = [safe] (bool on)
     {
@@ -2269,6 +2281,14 @@ void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
         auto d = safe->proc_.instrumentDescription();
         d.compensateOnReplace = on;
         safe->proc_.uiEditInstrument (std::move (d), "Compensate on replace");
+        safe->lastRevision_ = 0xFFFFFFFFu;
+    };
+    panel->onAnalysis = [safe] (double ms)
+    {
+        if (safe == nullptr) return;
+        auto d = safe->proc_.instrumentDescription();
+        d.analysisMs = ms;
+        safe->proc_.uiEditInstrument (std::move (d), "Analysis window");
         safe->lastRevision_ = 0xFFFFFFFFu;
     };
     panel->onRelease = [safe] (bool follow, int meter, double floorDb, double curve, double offsetDb)

@@ -329,6 +329,12 @@ TEST_CASE ("release-level settings and the replace option survive JSON")
     const auto back = instrumentFromJson (toJson (d));
     CHECK (back.zones[0] == sanitised (z));
     CHECK_FALSE (back.compensateOnReplace);
+    CHECK (back.analysisMs == 100.0);
+    d.analysisMs = 350.0;
+    CHECK (instrumentFromJson (toJson (d)).analysisMs == 350.0);
+    auto wild = toJson (d);
+    wild = wild.substr (0, wild.rfind ('}')) + ",\"analysis_ms\":99999}";
+    CHECK (instrumentFromJson (wild).analysisMs == 2000.0);
     CHECK (instrumentFromJson (toJson (InstrumentDescription {})).compensateOnReplace);
 }
 
