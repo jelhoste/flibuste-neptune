@@ -9,6 +9,7 @@
 #include "neptune/core/Envelope.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/LevelTracker.h"
+#include "neptune/core/PreviewSample.h"
 
 namespace neptune::core
 {
@@ -66,6 +67,8 @@ public:
     };
     void previewZone (int sourceIndex, const PreviewSpec& spec) noexcept;
     void previewZone (int sourceIndex) noexcept { previewZone (sourceIndex, PreviewSpec {}); } // sourceIndex : indice de la zone dans la DESCRIPTION (Zone::sourceIndex)
+    // Écoute libre d'un sample hors zones (fichier de la réserve, raccord de boucle) : une voix d'écoute sur la zone temporaire de `p` (qui doit rester vivant pendant la lecture).
+    void previewObject (const PreviewSample& p) noexcept;
     void releasePreview() noexcept; // Note Off de l'écoute (les boucles se relâchent ; un one-shot va au bout)
     void stopPreview() noexcept;    // coupe l'écoute en fondu
     void allSoundOff() noexcept;

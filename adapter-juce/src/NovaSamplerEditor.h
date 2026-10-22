@@ -28,6 +28,8 @@
 #include "neptune/core/MemoryBudget.h"
 #include "neptune/core/SampleEdit.h"
 #include "neptune/core/PitchDetect.h"
+#include "neptune/core/PreviewSample.h"
+#include "neptune/core/SampleLoader.h"
 #include "neptune/core/SampleMeta.h"
 #include "neptune/core/TimeStretch.h"
 #include "neptune/core/VolumeFootprint.h"
@@ -93,6 +95,9 @@ private:
     void updatePlayButton();
     void startPreview (int source, std::int64_t frame, int loopIndex, int owner);
     void stopPreviewNow();
+    void previewFile (const std::string& path);
+    void pollPreviewLoad();
+    void previewSeam();
     void toggleRecording();
     void finishRecording (const std::string& path, std::int64_t frames);
     void updateRecordButton();
@@ -184,6 +189,9 @@ private:
     std::string loopCandidatesKey_, seamKey_;
     std::unique_ptr<juce::FileChooser> saveChooser_;
     bool previewing_ = false;
+    std::future<neptune::core::SampleLoadResult> previewLoad_;           // chargement d'un fichier de la réserve à écouter
+    std::string previewLoadPath_;
+    std::map<std::string, std::shared_ptr<const neptune::core::SampleData>> previewCache_;   // les derniers fichiers écoutés
     int previewOwner_ = 0;                       // 1 : bouton du bas, 2 : bouton des outils du sample
     int playSourceIndex_ = 3, loopPlayHeard_ = 1;   // outils du sample : quoi jouer (brut, région, curseur, boucle) ; boucle une fois (0) ou telle qu'entendue (1)
     std::string recordingPath_;

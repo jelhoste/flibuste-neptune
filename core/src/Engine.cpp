@@ -85,6 +85,12 @@ void Engine::publishInstrument (int track, std::shared_ptr<const Instrument> ins
     tracks_[static_cast<std::size_t> (track)].slot.publish (std::move (instrument));
 }
 
+void Engine::publishPreview (int track, std::shared_ptr<const PreviewSample> sample)
+{
+    if (track < 0 || track >= kTracks || sample == nullptr) return;
+    tracks_[static_cast<std::size_t> (track)].previewSlot.publish (std::move (sample));
+}
+
 void Engine::setTrackType (int track, TrackType type) noexcept
 {
     if (track < 0 || track >= kTracks) return;
@@ -159,6 +165,7 @@ void Engine::collectGarbage()
         t.organSlot.collect();
         t.organ.collect();
         t.filterSlot.collect();
+        t.previewSlot.collect();
         pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
     }
@@ -501,6 +508,14 @@ void Engine::drainUiEvents() noexcept
                     spec.frame = e.frame;
                     spec.loopIndex = e.loopIndex;
                     tracks_[static_cast<std::size_t> (tr)].voices.previewZone (e.key, spec);
+                }
+                break;
+            case UiEvent::Type::PreviewSample:
+                if (tracks_[static_cast<std::size_t> (tr)].type.load() == 0)
+                {
+                    auto& t = tracks_[static_cast<std::size_t> (tr)];
+                    t.previewSlot.adoptPending();
+                    if (const auto* p = t.previewSlot.current()) t.voices.previewObject (*p);
                 }
                 break;
             case UiEvent::Type::PreviewRelease: tracks_[static_cast<std::size_t> (tr)].voices.releasePreview(); break;

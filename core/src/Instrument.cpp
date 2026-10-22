@@ -1,4 +1,5 @@
 #include "neptune/core/Instrument.h"
+#include "neptune/core/PreviewSample.h"
 #include "neptune/core/LevelTracker.h"
 #include "neptune/core/SampleMeta.h"
 #include "neptune/core/DescriptionJson.h"
@@ -1103,5 +1104,24 @@ Zone makeFullKeyboardZone (std::shared_ptr<const SampleData> sample, int rootNot
     z.endFrame = sample ? sample->frames : 0;
     z.sample = std::move (sample);
     return z;
+}
+
+std::shared_ptr<const PreviewSample> makePreviewSample (std::shared_ptr<const SampleData> sample, int rootNote, bool loop, std::int64_t loopStart, std::int64_t loopEnd)
+{
+    if (sample == nullptr || sample->frames <= 0) return nullptr;
+    auto p = std::make_shared<PreviewSample>();
+    Zone& z = p->zone;
+    const auto frames = sample->frames;
+    z.rootNote = std::clamp (rootNote, 0, 127);
+    z.mode = loop ? PlayMode::Loop : PlayMode::OneShot;
+    z.startFrame = 0;
+    z.endFrame = frames;
+    z.loopStart = std::clamp<std::int64_t> (loopStart, 0, frames - 1);
+    z.loopEnd = loopEnd < 0 ? frames : std::min<std::int64_t> (loopEnd, frames);
+    if (z.loopEnd <= z.loopStart) { z.loopStart = 0; z.loopEnd = frames; }
+    z.fadeInMs = ZoneDescription::defaultFadeInMs;
+    z.fadeOutMs = ZoneDescription::defaultFadeOutMs;
+    z.sample = std::move (sample);
+    return p;
 }
 } // namespace neptune::core

@@ -424,7 +424,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->active = true;
     v->channel = channel;
     v->key = key;
-    v->zoneIndex = static_cast<int> (&zone - instrument_->zones.data());
+    v->zoneIndex = instrument_ != nullptr && channel != kPreviewChannel ? static_cast<int> (&zone - instrument_->zones.data()) : -1;
     v->order = ++counter_;
     {
         const std::int64_t endF = zone.endFrame > zone.startFrame ? zone.endFrame : zone.sample->frames;
@@ -965,6 +965,12 @@ void SamplerVoices::previewZone (int sourceIndex, const PreviewSpec& spec) noexc
         }
         return;
     }
+}
+
+void SamplerVoices::previewObject (const PreviewSample& p) noexcept
+{
+    stopPreview();
+    startVoice (kPreviewChannel, p.zone.rootNote, 0.8f, p.zone, 1.0f);
 }
 
 void SamplerVoices::releasePreview() noexcept

@@ -19,6 +19,7 @@
 #include "neptune/core/OrganEngine.h"
 #include "neptune/core/Loudness.h"
 #include "neptune/core/MidiFilter.h"
+#include "neptune/core/PreviewSample.h"
 #include "neptune/core/Synth.h"
 #include "neptune/core/SynthVoices.h"
 
@@ -65,6 +66,8 @@ public:
     // Instrument d'une piste : thread de message. L'audio l'adopte au début du bloc suivant ; les voix en cours s'arrêtent.
     // Démarre le thread disque (et ses tampons) la première fois qu'un instrument en streaming est publié.
     void publishInstrument (int track, std::shared_ptr<const Instrument> instrument);
+    // Écoute libre : l'objet est remis au thread audio ; l'appelant doit le garder vivant quelques écoutes de plus (les voix y pointent), puis poster UiEvent::PreviewSample.
+    void publishPreview (int track, std::shared_ptr<const PreviewSample> sample);
     void publishInstrument (std::shared_ptr<const Instrument> instrument) { publishInstrument (0, std::move (instrument)); }
     void collectGarbage(); // thread de message, régulièrement : détruit ce que le thread audio a rendu
 
@@ -110,7 +113,7 @@ public:
     // producteur) ; le thread audio les applique au début du bloc suivant. Rend false si la file est pleine.
     struct UiEvent
     {
-        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop, Panic, ReleaseAll } type = Type::NoteOn;
+        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop, Panic, ReleaseAll, PreviewSample } type = Type::NoteOn;
         int channel = 0, key = 0;      // NoteOn / NoteOff ; PreviewZone : `key` = indice de zone
         float velocity = 0.0f;
         int track = 0;                 // piste visée (NoteOn, NoteOff, Preview*) ; Panic / ReleaseAll : toutes
@@ -203,6 +206,7 @@ private:
         Inserts inserts;
         InstrumentSlot slot;
         SamplerVoices voices;
+        HandoffSlot<PreviewSample> previewSlot;         // écoute libre
         HandoffSlot<midi::CompiledFilter> filterSlot;   // filtre MIDI avancé de la piste
         const midi::CompiledFilter* filter = nullptr;   // thread audio
         midi::FilterDescription filterDescription;      // thread de message : ce qui est publié

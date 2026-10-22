@@ -39,6 +39,20 @@ std::uint64_t fnv (std::uint64_t h, const void* p, std::size_t n) noexcept
 }
 } // namespace
 
+std::shared_ptr<const SampleData> toSampleData (const Buffer& b, const std::string& name)
+{
+    if (b.channels < 1 || b.channels > 2 || b.frames() <= 0) return nullptr;
+    auto d = std::make_shared<SampleData>();
+    d->channels = b.channels;
+    d->frames = b.frames();
+    d->sampleRate = b.sampleRate;
+    d->name = name;
+    d->pcm32.resize (static_cast<std::size_t> (d->frames) * static_cast<std::size_t> (b.channels));
+    for (std::int64_t i = 0; i < d->frames; ++i)
+        for (int c = 0; c < b.channels; ++c) d->pcm32[static_cast<std::size_t> (c * d->frames + i)] = b.at (i, c);
+    return d;
+}
+
 bool readFile (const std::filesystem::path& path, Buffer& out, std::string* error)
 {
     AudioStreamReader reader;

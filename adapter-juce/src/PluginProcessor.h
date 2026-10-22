@@ -267,6 +267,15 @@ public:
     std::int64_t recordedFrames() const noexcept { return recorder_.framesWritten(); }
     double recordingSampleRate() const noexcept { return recorder_.sampleRate(); }
     float recordingPeak() noexcept { return recorder_.peak(); }
+    // Écoute libre d'un sample hors zones (voir PreviewSample.h) ; les derniers objets sont gardés vivants ici car les voix pointent dans leur zone temporaire.
+    void uiPreviewSample (std::shared_ptr<const neptune::core::PreviewSample> p)
+    {
+        if (p == nullptr) return;
+        recentPreviews_.push_back (p);
+        while (recentPreviews_.size() > 8) recentPreviews_.erase (recentPreviews_.begin());
+        engine_.publishPreview (selectedTrack(), std::move (p));
+        engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewSample, 0, 0, 0.0f, selectedTrack() });
+    }
     void uiPreviewStop() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::PreviewStop, 0, 0, 0.0f, selectedTrack() }); }
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const { return instrumentStatus (selectedTrack()); }
@@ -292,6 +301,7 @@ public:
     void addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer& midi, int sampleOffset) override;
 
 private:
+    std::vector<std::shared_ptr<const neptune::core::PreviewSample>> recentPreviews_;   // thread de message
     neptune::core::AudioRecorder recorder_;
     static BusesProperties makeBuses (int numOutputs);
 

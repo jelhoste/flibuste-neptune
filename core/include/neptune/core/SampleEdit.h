@@ -4,7 +4,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <memory>
 #include <vector>
+
+#include "neptune/core/SampleData.h"
 
 namespace neptune::core::sampleedit
 {
@@ -17,6 +20,9 @@ struct Buffer
     std::int64_t frames() const noexcept { return channels > 0 ? static_cast<std::int64_t> (data.size()) / channels : 0; }
     float at (std::int64_t frame, int channel) const noexcept { return data[static_cast<std::size_t> (frame * channels + channel)]; }
 };
+
+// Tampon en mémoire -> SampleData (float32 planaire) jouable par le moteur (écoutes libres).
+std::shared_ptr<const SampleData> toSampleData (const Buffer&, const std::string& name);
 
 // ---- fichiers
 bool readFile (const std::filesystem::path&, Buffer& out, std::string* error = nullptr);   // tout le fichier

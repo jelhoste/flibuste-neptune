@@ -60,6 +60,7 @@ public:
     int numRows() const { return static_cast<int> (rows_.size()); }
 
     std::function<void (int row)> onContextMenu;   // clic droit sur une ligne
+    std::function<void (int row)> onDoubleClick;   // double-clic sur une ligne : écouter le fichier
     std::function<void()> onSelectionChanged;
 
     void resized() override { table_.setBounds (getLocalBounds()); }
@@ -92,6 +93,7 @@ private:
         g.drawText (text, 4, 0, width - 6, height, juce::Justification::centredLeft, true);
     }
     void selectedRowsChanged (int) override { if (onSelectionChanged) onSelectionChanged(); }
+    void cellDoubleClicked (int row, int, const juce::MouseEvent&) override { if (onDoubleClick) onDoubleClick (row); }
     void cellClicked (int row, int, const juce::MouseEvent& e) override { if (e.mods.isPopupMenu() && onContextMenu) onContextMenu (row); }
     // Glisser des lignes vers la matrice : « neptune-files:<indices> ». Le conteneur de glisser-déposer est l'éditeur.
     juce::var getDragSourceDescription (const juce::SparseSet<int>& rows) override

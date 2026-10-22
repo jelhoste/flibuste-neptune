@@ -903,3 +903,39 @@ TEST_CASE ("engine: a keyswitch note flips its modulator instead of playing, lat
     engine.noteOn (0, 60, 1.0f);            // une vraie note joue toujours
     CHECK (engine.activeVoices() == 1);
 }
+
+#include "neptune/core/PreviewSample.h"
+
+TEST_CASE ("a free preview plays a sample that belongs to no zone, once or in a loop, with or without an instrument")
+{
+    auto sample = makeRamp (6000);
+    SamplerVoices v;
+    v.prepare (48000.0);
+    // sans instrument du tout : l'écoute libre joue quand même
+    {
+        const auto p = makePreviewSample (sample, 60, false);
+        REQUIRE (p != nullptr);
+        v.previewObject (*p);
+        std::vector<float> l (8000, 0.0f), r (l);
+        v.render (l.data(), r.data(), 8000, 1.0f, 1.0f, 0.0);
+        CHECK_THAT (static_cast<double> (l[3000]) * 6000.0 * 254.0 / 254.0 / 0.8, WithinAbs (3000.0, 8.0));   // rampe lue à la vélocité 0,8
+        CHECK (l[7000] == 0.0f);   // un coup : fini
+    }
+    // en boucle sur [1000, 2000)
+    {
+        v.panic();
+        std::vector<float> flush (4096, 0.0f), flush2 (4096, 0.0f);
+        v.render (flush.data(), flush2.data(), 4096, 1.0f, 1.0f, 0.0);
+        const auto p = makePreviewSample (sample, 60, true, 1000, 2000);
+        v.previewObject (*p);
+        std::vector<float> l (9000, 0.0f), r (l);
+        v.render (l.data(), r.data(), 9000, 1.0f, 1.0f, 0.0);
+        for (const int i : { 1200, 4200, 8800 })
+        {
+            const double pos = static_cast<double> (l[static_cast<std::size_t> (i)]) * 6000.0 / 0.8;
+            CHECK (pos >= 995.0);
+            CHECK (pos <= 2005.0);   // la lecture reste dans la boucle (après la première passe de 0 à 1000)
+        }
+    }
+    CHECK (makePreviewSample (nullptr) == nullptr);
+}

@@ -651,6 +651,7 @@ void NovaSamplerEditor::buildZonesPage()
 
     pool_ = add<PoolTable> (0, skin().palette(), translator());
     pool_->onContextMenu = [this] (int row) { showPoolMenu (row); };
+    pool_->onDoubleClick = [this] (int row) { if (row >= 0 && row < static_cast<int> (poolPaths_.size())) previewFile (poolPaths_[static_cast<std::size_t> (row)]); };
     zonesViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     zonesViewPill_->setText (tx ("pool.view_zones"));
     zonesViewPill_->onClick = [this] { showPool_ = false; pageChanged(); };
@@ -795,6 +796,13 @@ void NovaSamplerEditor::buildSamplePage()
     playPill_->onClick = [this]
     {
         if (previewing_ && previewOwner_ == 1) { stopPreviewNow(); return; }
+        if (showPool_ && pool_ != nullptr)
+        {
+            // la réserve de fichiers est affichée : JOUER écoute le fichier sélectionné (sans en faire une zone)
+            const auto sel = pool_->selectedRows();
+            if (! sel.empty() && sel.front() < static_cast<int> (poolPaths_.size())) previewFile (poolPaths_[static_cast<std::size_t> (sel.front())]);
+            return;
+        }
         const auto* zz = shownZone();
         if (zz == nullptr) return;
         // le sample joué en une fois : de START à END (ou du curseur à END), sans boucle
@@ -926,9 +934,10 @@ void NovaSamplerEditor::buildSamplePage()
             if (! ok) { setToolStatus (tx ("sm.st_loop_nocursor")); return; }
             startPreview (3, cursorFrame_, 0, 2);
         }
+        else if (mode == 4) previewSeam();
         else startPreview (loopPlayHeard_ ? 5 : 4, -1, std::clamp (editLoop_, 0, loopCountOf (*zz) - 1), 2);
     });
-    playSourceChoice_ = toolChoice (tx ("sm.tp_source"), { tx ("sm.tp_raw"), tx ("sm.tp_region"), tx ("sm.tp_cursor"), tx ("sm.tp_loop") }, &playSourceIndex_);
+    playSourceChoice_ = toolChoice (tx ("sm.tp_source"), { tx ("sm.tp_raw"), tx ("sm.tp_region"), tx ("sm.tp_cursor"), tx ("sm.tp_loop"), tx ("sm.tp_seam") }, &playSourceIndex_);
     toolLoopChoice_ = std::make_unique<nova::ChoicePill>();
     toolLoopChoice_->pill = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     toolLoopChoice_->label = [this] { return tx ("sm.loop_n").toUpperCase(); };
@@ -3059,6 +3068,75 @@ void NovaSamplerEditor::startPreview (int source, std::int64_t frame, int loopIn
     previewStartMs_ = juce::Time::getMillisecondCounter();
 }
 
+// Écoute libre d'un fichier de la réserve, sans en faire une zone : chargé en arrière-plan, puis joué par une zone temporaire du moteur.
+void NovaSamplerEditor::previewFile (const std::string& path)
+{
+    if (previewLoad_.valid()) return;   // un chargement est déjà en cours
+    const auto& info = fileInfo_.info (path);
+    if (! info.ok) { setToolStatus (U (translator().format ("sm.st_error", { info.error }))); return; }
+    if (info.ramBytes > 400ull * 1024 * 1024) { setToolStatus (tx ("sm.st_preview_big")); return; }
+    proc_.setVoiceMonitor (true);
+    previewing_ = true;
+    previewOwner_ = 1;
+    previewStartMs_ = juce::Time::getMillisecondCounter() + 600;   // laisse le temps du chargement avant de juger que « rien ne sonne »
+    if (const auto it = previewCache_.find (path); it != previewCache_.end())
+    {
+        proc_.uiPreviewSample (makePreviewSample (it->second, 60, false));
+        return;
+    }
+    previewLoadPath_ = path;
+    previewLoad_ = std::async (std::launch::async, [path] { return loadSampleFile (utf8Path (path), -1); });
+}
+
+void NovaSamplerEditor::pollPreviewLoad()
+{
+    if (! previewLoad_.valid() || previewLoad_.wait_for (std::chrono::seconds (0)) != std::future_status::ready) return;
+    auto r = previewLoad_.get();
+    if (! r.ok()) { previewing_ = false; previewOwner_ = 0; setToolStatus (U (translator().format ("sm.st_error", { r.error }))); return; }
+    if (previewCache_.size() >= 3) previewCache_.erase (previewCache_.begin());
+    previewCache_[previewLoadPath_] = r.sample;
+    if (previewing_) proc_.uiPreviewSample (makePreviewSample (r.sample, 60, false));   // sauf si l'utilisateur a arrêté entre-temps
+    previewStartMs_ = juce::Time::getMillisecondCounter();
+}
+
+// Écoute du raccord d'une boucle (spec §13.5) : la fin de la boucle suivie de son début, rien que l'endroit du saut, trois fois de suite.
+void NovaSamplerEditor::previewSeam()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const auto& info = fileInfo_.info (z->samplePath);
+    if (! info.ok) return;
+    const auto l = loopView (*z, editLoop_);
+    const std::int64_t le = l.end < 0 ? info.frames : std::min (l.end, info.frames), ls = std::max (l.start, z->startFrame);
+    if (le - ls < 64) { setToolStatus (tx ("sm.st_seam_none")); return; }
+    const std::int64_t w = std::min<std::int64_t> (static_cast<std::int64_t> (info.sampleRate * 0.12), (le - ls) / 2);
+    AudioStreamReader reader;
+    if (! reader.open (utf8Path (z->samplePath))) return;
+    const int ch = reader.channels();
+    auto grab = [&] (std::int64_t from)
+    {
+        std::vector<float> out (static_cast<std::size_t> (w * ch), 0.0f);
+        if (reader.seek (from)) reader.read (out.data(), w);
+        return out;
+    };
+    const auto a = grab (le - w), b = grab (ls);
+    const std::int64_t gap = static_cast<std::int64_t> (info.sampleRate * 0.25);
+    se::Buffer snippet;
+    snippet.channels = ch;
+    snippet.sampleRate = info.sampleRate;
+    for (int rep = 0; rep < 3; ++rep)
+    {
+        snippet.data.insert (snippet.data.end(), a.begin(), a.end());
+        snippet.data.insert (snippet.data.end(), b.begin(), b.end());
+        snippet.data.insert (snippet.data.end(), static_cast<std::size_t> (gap * ch), 0.0f);
+    }
+    proc_.setVoiceMonitor (true);
+    previewing_ = true;
+    previewOwner_ = 2;
+    previewStartMs_ = juce::Time::getMillisecondCounter();
+    proc_.uiPreviewSample (makePreviewSample (se::toSampleData (snippet, "seam"), 60, false));
+}
+
 void NovaSamplerEditor::stopPreviewNow()
 {
     proc_.uiPreviewStop();
@@ -3082,7 +3160,8 @@ void NovaSamplerEditor::updatePlayButton()
     const bool bottom = previewing_ && previewOwner_ == 1, tools = previewing_ && previewOwner_ == 2;
     playPill_->setText (tx (bottom ? "sm.stop_button" : "sm.play_button"));
     playPill_->setOn (bottom);
-    playPill_->setAlpha (cached_.zones.empty() && ! previewing_ ? 0.4f : 1.0f);
+    const bool poolHasSelection = showPool_ && pool_ != nullptr && ! pool_->selectedRows().empty();
+    playPill_->setAlpha ((cached_.zones.empty() && ! poolHasSelection) && ! previewing_ ? 0.4f : 1.0f);
     toolsPlayPill_->setText (tx (tools ? "sm.stop_button" : "sm.tp_play"));
     toolsPlayPill_->setOn (tools);
 }
@@ -3176,6 +3255,7 @@ void NovaSamplerEditor::tick()
     }
     updateVoices();
     syncFileMeta();
+    pollPreviewLoad();
     if (pitchDirty_.exchange (false)) { if (showPool_) rebuildPool (true); }   // une note vient d'être détectée : la colonne de la réserve se met à jour
     updatePlayButton();
     updateRecordButton();
@@ -3226,9 +3306,9 @@ void NovaSamplerEditor::tick()
         {
             const int n = z != nullptr ? loopCountOf (*z) : 1;
             if (static_cast<int> (toolLoopChoice_->items.size()) != n) toolLoopChoice_->items = loopEditChoice_->items;
-            const bool loopSource = playSourceIndex_ == 3 && has && z->mode == PlayMode::Loop;
+            const bool loopSource = (playSourceIndex_ == 3 || playSourceIndex_ == 4) && has && z->mode == PlayMode::Loop;
             toolLoopChoice_->refresh (loopSource);
-            loopPlayModeChoice_->refresh (loopSource);
+            loopPlayModeChoice_->refresh (loopSource && playSourceIndex_ == 3);
         }
         for (auto* pl : { trimPill_, normPill_, dcPill_, saveAsPill_, silencePill_, cutsPill_, loopFindPill_ }) pl->setAlpha (has ? 1.0f : 0.4f);
         {
