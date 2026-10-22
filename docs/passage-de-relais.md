@@ -663,3 +663,10 @@ Interface : `NovaSamplerEditor` (dépend de `NeptuneProcessor`) reprend toute la
 
 ### Fenêtre d'analyse réglable (2026-10-22)
 `InstrumentDescription::analysisMs` (10–2000 ms, 100 par défaut, JSON `analysis_ms`, borné à la lecture). Réglée dans la fenêtre NIVEAUX (curseur « Fenêtre d'analyse »), elle sert à la compensation au remplacement d'un fichier (ancien fichier à partir de START, nouveau à partir de 0). Version réduite de la spec : pas de bande déplaçable sur la forme d'onde.
+
+### Fichiers Opus (2026-10-22)
+- `NEPTUNE_WITH_OPUS` (ON par défaut) : libopus v1.6.1 (BSD) via FetchContent dans `cmake/Dependencies.cmake`, liée à `neptune_core` avec `NEPTUNE_HAS_OPUS`. Sans l'option, les `.opus` sont reconnus mais refusés avec un message.
+- `core/src/OpusFile.cpp` : démultiplexeur Ogg maison (un flux logique, paquets à cheval sur les pages), OpusHead (pré-saut, gain de sortie appliqué, mapping family 0 seulement, mono/stéréo), longueur exacte = dernier granule - pré-saut, décodage `opus_decode_float` à 48 kHz. Détecté par le contenu pour `.opus`, `.ogg`, `.oga`.
+- `loadSampleFile`, `probeAudioFile`, `AudioStreamReader` l'acceptent. Un Opus est toujours chargé en entier en mémoire (pas de streaming disque), en float32 (4 octets par échantillon dans le budget mémoire). Marqueurs et boucles Neptune : fichier voisin `.neptune.json`. Les positions sont celles du signal décodé à 48 kHz.
+- Les sélecteurs de fichiers proposent `*.opus;*.ogg`. Un `.ogg` Vorbis donne l'erreur « not an Ogg Opus file ».
+- Tests : `tests/test_opus.cpp` (encode avec libopus et un écrivain Ogg minimal) ; vérifié aussi à la main avec des fichiers ffmpeg (48000 images exactement pour 1 s).

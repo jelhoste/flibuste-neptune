@@ -27,7 +27,7 @@ const Entry kEntries[] = {
     { "undo.undo", { "Undo", "Annuler" } },
     { "undo.redo", { "Redo", "Rétablir" } },
     { "sampler.load", { "Load sample...", "Charger un sample..." } },
-    { "sampler.choose", { "Choose a sample (WAV, AIFF, FLAC)", "Choisir un sample (WAV, AIFF, FLAC)" } },
+    { "sampler.choose", { "Choose a sample (WAV, AIFF, FLAC, Opus)", "Choisir un sample (WAV, AIFF, FLAC, Opus)" } },
     { "sampler.none", { "No sample loaded", "Aucun sample chargé" } },
     { "sampler.loading", { "Loading...", "Chargement..." } },
     { "sampler.loaded", { "{0} - {1}, {2} Hz, {3} s, {4}-bit, {5} MB", "{0} - {1}, {2} Hz, {3} s, {4} bits, {5} Mo" } },

@@ -1,5 +1,7 @@
 #include "neptune/core/SampleLoader.h"
 
+#include "neptune/core/OpusFile.h"
+
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -37,6 +39,12 @@ std::int64_t residentCount (std::int64_t frames, std::int64_t maxResident, const
     if (maxResident <= 0 || maxResident >= frames) return frames;
     if (path.u8string().size() >= maxStreamPathBytes) return frames;
     return maxResident;
+}
+
+// Opus : détecté par le contenu (OpusHead) pour .opus, .ogg et .oga ; le reste passe par libsndfile / dr_flac.
+bool isOpusPath (const std::filesystem::path& p)
+{
+    return (hasExtension (p, ".opus") || hasExtension (p, ".ogg") || hasExtension (p, ".oga")) && isOpusFile (p);
 }
 
 std::string fileName (const std::filesystem::path& p) { return p.filename().string(); }
@@ -179,6 +187,44 @@ SampleLoadResult loadFlac (const std::filesystem::path& path, std::int64_t maxRe
     return r;
 }
 
+SampleLoadResult loadOpus (const std::filesystem::path& path)
+{
+    auto d = decodeOpusFile (path);
+    if (! d.info.ok) return fail (d.info.error);
+    auto data = std::make_shared<SampleData>();
+    const int ch = d.info.channels;
+    const std::int64_t frames = d.info.frames;
+    data->channels = ch;
+    data->frames = frames;
+    data->residentFrames = frames;   // Opus n'est jamais lu depuis le disque en cours de jeu
+    data->path = path.u8string();
+    data->sampleRate = kOpusRate;
+    data->name = fileName (path);
+    data->sourceBitDepth = 0;
+    data->pcm32.resize (static_cast<std::size_t> (frames) * static_cast<std::size_t> (ch));
+    for (std::int64_t i = 0; i < frames; ++i)
+        for (int c = 0; c < ch; ++c)
+            data->pcm32[static_cast<std::size_t> (c) * static_cast<std::size_t> (frames) + static_cast<std::size_t> (i)] = d.samples[static_cast<std::size_t> (i * ch + c)];
+    SampleLoadResult r;
+    r.sample = std::move (data);
+    return r;
+}
+
+AudioFileInfo probeOpus (const std::filesystem::path& path)
+{
+    const auto o = probeOpusFile (path);
+    AudioFileInfo r;
+    if (! o.ok) { r.error = o.error; return r; }
+    if (! opusDecodingAvailable()) { r.error = "Opus support is not built into this version"; return r; }
+    r.ok = true;
+    r.channels = o.channels;
+    r.frames = o.frames;
+    r.sampleRate = kOpusRate;
+    r.bitDepth = 0;
+    r.keptAsInt16 = false;
+    return r;
+}
+
 AudioFileInfo probeFailure (std::string msg)
 {
     AudioFileInfo i;
@@ -241,7 +287,7 @@ AudioFileInfo probeAudioFile (const std::filesystem::path& path)
 {
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return probeFailure ("file not found: " + path.string());
-    AudioFileInfo r = hasExtension (path, ".flac") ? probeFlac (path) : probeWithSndfile (path);
+    AudioFileInfo r = isOpusPath (path) ? probeOpus (path) : hasExtension (path, ".flac") ? probeFlac (path) : probeWithSndfile (path);
     if (r.ok)
         r.ramBytes = static_cast<std::uint64_t> (r.frames) * static_cast<std::uint64_t> (r.channels) * (r.keptAsInt16 ? 2u : 4u);
     return r;
@@ -251,6 +297,7 @@ SampleLoadResult loadSampleFile (const std::filesystem::path& path, std::int64_t
 {
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return fail ("file not found: " + path.string());
+    if (isOpusPath (path)) return loadOpus (path);
     return hasExtension (path, ".flac") ? loadFlac (path, maxResidentFrames) : loadWithSndfile (path, maxResidentFrames);
 }
 
@@ -259,16 +306,23 @@ struct AudioStreamReader::Impl
 {
     SNDFILE* sf = nullptr;
     drflac* flac = nullptr;
+    std::vector<float> opus;   // Opus : fichier décodé en entier à l'ouverture
+    std::int64_t opusPos = 0;
+    bool isOpus = false;
 };
 
 AudioStreamReader::AudioStreamReader() : impl_ (new Impl) {}
 AudioStreamReader::~AudioStreamReader() { close(); delete impl_; }
-bool AudioStreamReader::isOpen() const noexcept { return impl_->sf != nullptr || impl_->flac != nullptr; }
+bool AudioStreamReader::isOpen() const noexcept { return impl_->sf != nullptr || impl_->flac != nullptr || impl_->isOpus; }
 
 void AudioStreamReader::close()
 {
     if (impl_->sf != nullptr) { sf_close (impl_->sf); impl_->sf = nullptr; }
     if (impl_->flac != nullptr) { drflac_close (impl_->flac); impl_->flac = nullptr; }
+    impl_->opus.clear();
+    impl_->opus.shrink_to_fit();
+    impl_->opusPos = 0;
+    impl_->isOpus = false;
     channels_ = 0;
     totalFrames_ = 0;
 }
@@ -277,7 +331,17 @@ bool AudioStreamReader::open (const std::filesystem::path& path, std::string* er
 {
     close();
     auto bad = [&] (const char* msg) { if (error != nullptr) *error = msg; return false; };
-    if (hasExtension (path, ".flac"))
+    if (isOpusPath (path))
+    {
+        auto d = decodeOpusFile (path);
+        if (! d.info.ok) { if (error != nullptr) *error = d.info.error; return false; }
+        impl_->opus = std::move (d.samples);
+        impl_->opusPos = 0;
+        impl_->isOpus = true;
+        channels_ = d.info.channels;
+        totalFrames_ = d.info.frames;
+    }
+    else if (hasExtension (path, ".flac"))
     {
        #if defined (_WIN32)
         impl_->flac = drflac_open_file_w (path.c_str(), nullptr);
@@ -306,6 +370,12 @@ bool AudioStreamReader::open (const std::filesystem::path& path, std::string* er
 
 bool AudioStreamReader::seek (std::int64_t frame)
 {
+    if (impl_->isOpus)
+    {
+        if (frame < 0 || frame > totalFrames_) return false;
+        impl_->opusPos = frame;
+        return true;
+    }
     if (impl_->sf != nullptr) return sf_seek (impl_->sf, frame, SEEK_SET) >= 0;
     if (impl_->flac != nullptr) return drflac_seek_to_pcm_frame (impl_->flac, static_cast<drflac_uint64> (frame)) != 0;
     return false;
@@ -314,6 +384,13 @@ bool AudioStreamReader::seek (std::int64_t frame)
 std::int64_t AudioStreamReader::read (float* interleaved, std::int64_t frames)
 {
     if (frames <= 0) return 0;
+    if (impl_->isOpus)
+    {
+        const auto n = std::max<std::int64_t> (0, std::min (frames, totalFrames_ - impl_->opusPos));
+        std::copy_n (impl_->opus.begin() + static_cast<std::ptrdiff_t> (impl_->opusPos * channels_), static_cast<std::ptrdiff_t> (n * channels_), interleaved);
+        impl_->opusPos += n;
+        return n;
+    }
     if (impl_->sf != nullptr) return static_cast<std::int64_t> (sf_readf_float (impl_->sf, interleaved, frames));
     if (impl_->flac != nullptr)
         return static_cast<std::int64_t> (drflac_read_pcm_frames_f32 (impl_->flac, static_cast<drflac_uint64> (frames), interleaved));

@@ -76,6 +76,23 @@ if(NEPTUNE_WITH_LIBSNDFILE)
   endif()
 endif()
 
+# --- Opus : libopus v1.6.1 (BSD 3 clauses, compatible AGPLv3), compilée avec ses sources C (aucun paquet système) ---
+# Lecture seule des fichiers .opus (Ogg Opus), décodés en mémoire à 48 kHz. Désactiver avec -DNEPTUNE_WITH_OPUS=OFF.
+option(NEPTUNE_WITH_OPUS "Lire les fichiers .opus (libopus)" ON)
+if(NEPTUNE_WITH_OPUS)
+  set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+  set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+  set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+  set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+  FetchContent_Declare(opus
+    GIT_REPOSITORY https://github.com/xiph/opus.git
+    GIT_TAG        v1.6.1
+    GIT_SHALLOW    TRUE)
+  FetchContent_MakeAvailable(opus)
+endif()
+
 # --- Analyse de niveau : LUFS du Master (EBU R128 / ITU BS.1770) ---
 # libebur128 v1.2.6 (MIT). Désactiver avec -DNEPTUNE_WITH_EBUR128=OFF (le compteur affiche alors « -inf »).
 option(NEPTUNE_WITH_EBUR128 "Activer libebur128 (LUFS du Master)" ON)

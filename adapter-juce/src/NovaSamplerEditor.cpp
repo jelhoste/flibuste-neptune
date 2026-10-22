@@ -1913,7 +1913,7 @@ void NovaSamplerEditor::removeSelectedZones()
 
 void NovaSamplerEditor::chooseSample()
 {
-    chooser_ = std::make_unique<juce::FileChooser> (tx ("sampler.choose"), juce::File(), "*.wav;*.aif;*.aiff;*.flac");
+    chooser_ = std::make_unique<juce::FileChooser> (tx ("sampler.choose"), juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.opus;*.ogg");
     chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                            [safe = juce::Component::SafePointer<NovaSamplerEditor> (this)] (const juce::FileChooser& fc)
                            {
@@ -2179,7 +2179,7 @@ void NovaSamplerEditor::startImport()
         const bool toPool = choice >= 3;
         const bool folder = choice == 2 || choice == 4;
         // Choix d'un dossier : AUCUN filtre (la boîte système l'appliquerait aux dossiers eux-mêmes) ; les fichiers audio sont filtrés ensuite.
-        self->importChooser_ = std::make_unique<juce::FileChooser> (self->tx ("sampler.choose"), juce::File(), folder ? juce::String ("*") : juce::String ("*.wav;*.aif;*.aiff;*.flac"));
+        self->importChooser_ = std::make_unique<juce::FileChooser> (self->tx ("sampler.choose"), juce::File(), folder ? juce::String ("*") : juce::String ("*.wav;*.aif;*.aiff;*.flac;*.opus;*.ogg"));
         const int flags = folder ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories
                                  : juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems;
         self->importChooser_->launchAsync (flags, [safe, folder, toPool] (const juce::FileChooser& fc)
@@ -2190,7 +2190,7 @@ void NovaSamplerEditor::startImport()
             {
                 const auto dir = fc.getResult();
                 if (! dir.isDirectory()) return;
-                for (const auto& f : dir.findChildFiles (juce::File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac")) paths.push_back (f.getFullPathName().toStdString());
+                for (const auto& f : dir.findChildFiles (juce::File::findFiles, true, "*.wav;*.aif;*.aiff;*.flac;*.opus;*.ogg")) paths.push_back (f.getFullPathName().toStdString());
             }
             else
                 for (const auto& f : fc.getResults()) paths.push_back (f.getFullPathName().toStdString());
