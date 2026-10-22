@@ -142,6 +142,50 @@ bool MappingMatrix::placeSelected (const mapping::Place& p) const
     return false;
 }
 
+std::vector<int> MappingMatrix::zonesOfSelectedPlaces() const
+{
+    std::vector<int> out;
+    for (const auto& p : places_)
+        if (placeSelected (p)) out.insert (out.end(), p.zones.begin(), p.zones.end());
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+void MappingMatrix::selectPlaces (const std::vector<int>& placeIndices, bool add)
+{
+    std::set<int> s;
+    if (add) s.insert (selected_.begin(), selected_.end());
+    for (const int i : placeIndices)
+        if (i >= 0 && i < static_cast<int> (places_.size()))
+            s.insert (places_[static_cast<std::size_t> (i)].zones.begin(), places_[static_cast<std::size_t> (i)].zones.end());
+    selected_.assign (s.begin(), s.end());
+    if (onSelect) onSelect (selected_);
+    repaint();
+}
+
+// ---------------------------------------------------------------- géométrie
+
+juce::Rectangle<float> MappingMatrix::plotArea() const
+{
+    return juce::Rectangle<float> (static_cast<float> (kLeftMargin), static_cast<float> (kToolbarH),
+                                   static_cast<float> (getWidth() - kLeftMargin - 4),
+                                   static_cast<float> (getHeight() - kToolbarH - kKeyboardH - kScrollH - 2));
+}
+
+float MappingMatrix::keyX (double key) const
+{
+    const auto a = plotArea();
+    return a.getX() + static_cast<float> ((key - keyStart_) / keySpan_) * a.getWidth();
+}
+
+neptune::core::mapping::View MappingMatrix::currentView() const { return view_; }
+
+int MappingMatrix::keyAtX (float x) const
+{
+    const auto a = plotArea();
+    return juce::jlimit (0, 127, static_cast<int> (std::floor (keyStart_ + (x - a.getX()) / std::max (1.0f, a.getWidth()) * keySpan_)));
+}
+
 std::vector<int> MappingMatrix::indicesOf (const SourceDetails& d, const juce::String& prefix)
 {
     std::vector<int> rows;
