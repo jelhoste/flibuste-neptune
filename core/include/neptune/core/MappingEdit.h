@@ -21,9 +21,13 @@ struct View
     bool operator== (const View& o) const noexcept { return category == o.category && group == o.group; }
 };
 
-// Les vues qui ont au moins une zone, dans un ordre stable : l'attaque sans Groupe d'abord (toujours présente), puis par Groupe
-// et par catégorie.
+// Les vues, dans un ordre stable : les quatre déclenchements sans Groupe (attaque, premier, legato, relâchement : toujours présents, même vides, pour pouvoir y
+// placer des zones), puis les Groupes qui ont au moins une zone, par catégorie.
 std::vector<View> views (const InstrumentDescription&);
+
+// Place des zones dans une vue (glisser depuis la liste) : la i-ème zone prend la note `firstKey + i` (bornée à 127), toutes les vélocités (1 à 127), le
+// déclenchement et le Groupe de la vue ; sa note racine ne change pas. Les indices hors de l'instrument sont ignorés.
+InstrumentDescription assignToView (const InstrumentDescription& base, const std::vector<int>& zones, const View& view, int firstKey);
 View viewOf (const ZoneDescription&) noexcept;
 
 struct Place

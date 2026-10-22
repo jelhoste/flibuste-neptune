@@ -23,7 +23,8 @@ bool View::accepts (const ZoneDescription& z) const noexcept { return viewOf (z)
 std::vector<View> views (const InstrumentDescription& d)
 {
     std::set<std::pair<std::string, int>> present;
-    present.insert ({ std::string(), static_cast<int> (View::Category::Attack) });
+    for (const auto c : { View::Category::Attack, View::Category::First, View::Category::Legato, View::Category::Release })
+        present.insert ({ std::string(), static_cast<int> (c) });
     for (const auto& z : d.zones)
     {
         const auto v = viewOf (z);
@@ -39,6 +40,25 @@ std::vector<View> views (const InstrumentDescription& d)
         out.push_back (v);
     }
     return out;
+}
+
+InstrumentDescription assignToView (const InstrumentDescription& base, const std::vector<int>& zones, const View& view, int firstKey)
+{
+    auto d = base;
+    int offset = 0;
+    for (const int i : zones)
+    {
+        if (i < 0 || i >= static_cast<int> (d.zones.size())) continue;
+        auto& z = d.zones[static_cast<std::size_t> (i)];
+        z.keyLow = z.keyHigh = std::clamp (firstKey + offset, 0, 127);
+        z.velLow = 1;
+        z.velHigh = 127;
+        z.onRelease = view.category == View::Category::Release;
+        z.trigger = view.category == View::Category::First ? TriggerCondition::First : view.category == View::Category::Legato ? TriggerCondition::Legato : TriggerCondition::Always;
+        z.group = view.group;
+        ++offset;
+    }
+    return d;
 }
 
 std::vector<Place> places (const InstrumentDescription& d, const View& view)

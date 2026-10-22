@@ -142,3 +142,66 @@ TEST_CASE ("a format without a simple chunk gets a neighbour file", "[meta]")
     CHECK_FALSE (writeSampleMeta ("/no/such/file.wav", m));
     std::filesystem::remove (path);
 }
+
+TEST_CASE ("loops, region and root note travel in the metadata", "[meta]")
+{
+    const auto path = makeFile ("neptune-meta-loops.wav", SF_FORMAT_WAV | SF_FORMAT_PCM_16);
+    SampleMeta m;
+    m.sampleRate = 44100.0;
+    m.hasRegion = true; m.startFrame = 120; m.endFrame = 4000;
+    m.hasRoot = true; m.rootNote = 57; m.tuneCents = -12.5;
+    m.hasVolumeMarker = true; m.volumeMarkerMs = 33.0;
+    m.loops = { { 500, 1500, 20, 3 }, { 2000, 3000, 0, 0 } };
+    REQUIRE (writeSampleMeta (path, m));
+    SampleMeta back;
+    REQUIRE (readFileMarks (path, back));
+    CHECK (back.loops == m.loops);
+    CHECK (back.hasRegion);
+    CHECK (back.startFrame == 120);
+    CHECK (back.endFrame == 4000);
+    CHECK (back.rootNote == 57);
+    CHECK_THAT (back.tuneCents, WithinAbs (-12.5, 1e-9));
+    CHECK (back.hasVolumeMarker);
+    // un fichier qui ne porte rien
+    REQUIRE (writeSampleMeta (path, SampleMeta {}));
+    CHECK_FALSE (readFileMarks (path, back));
+    std::filesystem::remove (path);
+}
+
+TEST_CASE ("a standard smpl chunk gives loops and root note", "[meta]")
+{
+    const auto path = makeFile ("neptune-meta-smpl.wav", SF_FORMAT_WAV | SF_FORMAT_PCM_16, true);   // boucle 100..900 (incluse), note 60
+    SampleMeta read;
+    REQUIRE (readFileMarks (path, read));
+    REQUIRE (read.loops.size() == 1);
+    CHECK (read.loops[0].start == 100);
+    CHECK (read.loops[0].end == 901);   // fin exclusive : le dernier échantillon de la boucle du smpl est inclus
+    CHECK (read.hasRoot);
+    CHECK (read.rootNote == 60);
+    // les valeurs de Neptune l'emportent sur celles du smpl
+    SampleMeta ours;
+    ours.sampleRate = 44100.0; ours.hasRoot = true; ours.rootNote = 48;
+    ours.loops = { { 200, 700, 0, 0 } };
+    REQUIRE (writeSampleMeta (path, ours));
+    REQUIRE (readFileMarks (path, read));
+    CHECK (read.rootNote == 48);
+    REQUIRE (read.loops.size() == 1);
+    CHECK (read.loops[0].start == 200);
+    std::filesystem::remove (path);
+}
+
+TEST_CASE ("positions follow a file whose sample rate changed", "[meta]")
+{
+    const auto path = makeFile ("neptune-meta-rate.wav", SF_FORMAT_WAV | SF_FORMAT_PCM_16);
+    SampleMeta m;
+    m.sampleRate = 22050.0;                     // écrit pour un fichier deux fois plus lent que celui-ci (44100)
+    m.loops = { { 100, 500, 10, 0 } };
+    REQUIRE (writeSampleMeta (path, m));
+    SampleMeta back;
+    REQUIRE (readFileMarks (path, back));
+    REQUIRE (back.loops.size() == 1);
+    CHECK (back.loops[0].start == 200);
+    CHECK (back.loops[0].end == 1000);
+    CHECK (back.loops[0].crossfade == 20);
+    std::filesystem::remove (path);
+}

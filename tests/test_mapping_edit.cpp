@@ -50,10 +50,39 @@ TEST_CASE ("places group round-robin alternates and respect the view")
     CHECK (places (d, View { View::Category::Attack, "pedal" }).size() == 1);
     CHECK (places (d, View { View::Category::Attack, "absent" }).empty());
     const auto vs = views (d);
-    REQUIRE (vs.size() == 3); // attaque, relâchement, Groupe « pedal »
+    REQUIRE (vs.size() == 5); // les quatre déclenchements sans Groupe (même vides), puis le Groupe « pedal »
     CHECK (vs[0] == View {});
-    CHECK (vs[1].category == View::Category::Release);
-    CHECK (vs[2].group == "pedal");
+    CHECK (vs[1].category == View::Category::First);
+    CHECK (vs[2].category == View::Category::Legato);
+    CHECK (vs[3].category == View::Category::Release);
+    CHECK (vs[4].group == "pedal");
+    CHECK (places (d, vs[1]).empty());   // « premier » : vue vierge
+    // un instrument vide a toujours ses quatre tables
+    CHECK (views (InstrumentDescription {}).size() == 4);
+}
+
+TEST_CASE ("assigning zones to a view sets the note range and the trigger")
+{
+    auto d = sample();
+    const std::size_t before = d.zones.size();
+    const auto out = assignToView (d, { 0, 2 }, View { View::Category::Release, {} }, 70);
+    REQUIRE (out.zones.size() == before);
+    CHECK (out.zones[0].keyLow == 70);
+    CHECK (out.zones[0].keyHigh == 70);
+    CHECK (out.zones[0].velLow == 1);
+    CHECK (out.zones[0].velHigh == 127);
+    CHECK (out.zones[0].onRelease);
+    CHECK (out.zones[2].keyLow == 71);   // notes consécutives
+    CHECK (out.zones[2].onRelease);
+    CHECK (out.zones[1].keyLow == d.zones[1].keyLow);   // les autres ne bougent pas
+    CHECK (out.zones[0].rootNote == d.zones[0].rootNote);
+    const auto first = assignToView (d, { 1 }, View { View::Category::First, "pedal" }, 126);
+    CHECK (first.zones[1].trigger == TriggerCondition::First);
+    CHECK_FALSE (first.zones[1].onRelease);
+    CHECK (first.zones[1].group == "pedal");
+    const auto edge = assignToView (d, { 0, 1, 2 }, View {}, 126);
+    CHECK (edge.zones[2].keyLow == 127);   // borné
+    CHECK (assignToView (d, { 99, -1 }, View {}, 10).zones == d.zones);   // indices invalides ignorés
 }
 
 TEST_CASE ("overlaps are flagged, not prevented")

@@ -266,6 +266,7 @@ NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette&
 
 NovaSamplerEditor::~NovaSamplerEditor()
 {
+    flushFileMeta();
     // une prise en cours continue : elle est fermée avec le processeur ; le fichier reste dans Edited/Recordings
     footprintCancel_ = true;
     if (footprintJob_.valid()) footprintJob_.wait();
@@ -425,6 +426,14 @@ void NovaSamplerEditor::buildZonesPage()
     matrix_->onGestureBegin = [this] { proc_.uiBeginGesture(); };
     matrix_->onGestureEnd = [this] { proc_.uiEndGesture(); };
     matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
+    matrix_->onDropZones = [this] (const std::vector<int>& zones, int firstKey, const neptune::core::mapping::View& view)
+    {
+        auto d = neptune::core::mapping::assignToView (proc_.instrumentDescription(), zones, view, firstKey);
+        proc_.uiEditInstrument (std::move (d), "Assign zones");
+        lastRevision_ = 0xFFFFFFFFu;
+        refreshFromInstrument();
+        setSelection (zones);
+    };
     matrix_->onNoteOn = [this] (int key, float v) { proc_.uiNoteOn (key, v); };
     matrix_->onNoteOff = [this] (int key) { proc_.uiNoteOff (key); };
     matrix_->onOpenVelocity = [this] (juce::Component&) { setPage (3); };   // la réponse de vélocité a sa propre page
@@ -443,11 +452,7 @@ void NovaSamplerEditor::buildSamplePage()
     wave_->onGestureEnd = [this]
     {
         proc_.uiEndGesture();
-        if (volumeDragged_)   // le marqueur de volume est une propriété du sample : à la fin du glissé, il est écrit dans le fichier
-        {
-            volumeDragged_ = false;
-            if (const auto* zz = shownZone()) saveMarker (zz->samplePath, zz->releaseRefFrame);
-        }
+        volumeDragged_ = false;   // le marqueur de volume (comme les boucles) est réécrit dans le fichier par syncFileMeta() quand le geste est fini
     };
     applyMarker_ = [this] (nova::WaveView::Marker m, std::int64_t frame)
     {
@@ -736,14 +741,17 @@ std::int64_t NovaSamplerEditor::fileMarkerFrame (const std::string& path)
 
 std::int64_t NovaSamplerEditor::effectiveMarker (const Zone& z) { return z.releaseRefFrame >= 0 ? z.releaseRefFrame : fileMarkerFrame (z.samplePath); }
 
-// Écrit (ou retire, frame < 0) le marqueur de volume dans les métadonnées du fichier.
+// Écrit (ou retire, frame < 0) le marqueur de volume dans les métadonnées du fichier, en gardant le reste de ce que Neptune y a écrit.
 void NovaSamplerEditor::saveMarker (const std::string& path, std::int64_t frame)
 {
     if (path.empty()) return;
     const auto& info = fileInfo_.info (path);
     if (! info.ok || info.sampleRate <= 0.0) return;
     SampleMeta meta;
-    if (frame >= 0) { meta.hasVolumeMarker = true; meta.volumeMarkerMs = static_cast<double> (frame) * 1000.0 / info.sampleRate; }
+    readSampleMeta (utf8Path (path), meta);
+    meta.hasVolumeMarker = frame >= 0;
+    meta.volumeMarkerMs = frame >= 0 ? static_cast<double> (frame) * 1000.0 / info.sampleRate : 0.0;
+    if (meta.sampleRate <= 0.0) meta.sampleRate = info.sampleRate;
     MetaStore where = MetaStore::None;
     std::string err;
     if (! writeSampleMeta (utf8Path (path), meta, &where, &err)) { setToolStatus (U (translator().format ("sm.st_marker_error", { err }))); return; }
@@ -751,7 +759,78 @@ void NovaSamplerEditor::saveMarker (const std::string& path, std::int64_t frame)
     setToolStatus (frame < 0 ? tx ("sm.st_marker_removed") : tx (where == MetaStore::Sidecar ? "sm.st_marker_sidecar" : "sm.st_marker_saved"));
 }
 
-bool NovaSamplerEditor::writeDerived (const Zone& z, const char* tag, const se::Buffer& b, std::string& newPath)
+// Ce qui appartient au sample dans la zone : ses boucles, sa région, sa note racine, son marqueur de volume (voir SampleMeta.h).
+SampleMeta NovaSamplerEditor::metaOfZone (const Zone& z)
+{
+    SampleMeta m;
+    const auto& info = fileInfo_.info (z.samplePath);
+    if (! info.ok || info.sampleRate <= 0.0) return m;
+    m.sampleRate = info.sampleRate;
+    if (const auto marker = effectiveMarker (z); marker >= 0) { m.hasVolumeMarker = true; m.volumeMarkerMs = static_cast<double> (marker) * 1000.0 / info.sampleRate; }
+    if (z.loopEnd >= 0 || z.loopStart > 0 || ! z.extraLoops.empty())   // des points de boucle ont été définis (la boucle par défaut n'est pas écrite)
+        for (int i = 0; i < loopCountOf (z); ++i)
+        {
+            const auto l = loopView (z, i);
+            m.loops.push_back ({ l.start, l.end, l.crossfade, l.repeats });
+        }
+    if (z.startFrame != 0 || z.endFrame >= 0) { m.hasRegion = true; m.startFrame = z.startFrame; m.endFrame = z.endFrame; }
+    if (z.rootNote != 60 || z.tuneCents != 0.0) { m.hasRoot = true; m.rootNote = z.rootNote; m.tuneCents = z.tuneCents; }
+    return m;
+}
+
+// Une zone toute neuve reprend ce que son fichier dit de lui-même : boucles, région, note racine (et le marqueur de volume, lu à part).
+void NovaSamplerEditor::applyFileMarks (Zone& z, bool withRoot)
+{
+    SampleMeta m;
+    if (z.samplePath.empty() || ! readFileMarks (utf8Path (z.samplePath), m)) return;
+    if (! m.loops.empty())
+    {
+        z.mode = PlayMode::Loop;
+        z.loopStart = m.loops[0].start; z.loopEnd = m.loops[0].end; z.loopCrossfade = m.loops[0].crossfade; z.loopRepeats = m.loops[0].repeats;
+        z.extraLoops.clear();
+        for (std::size_t i = 1; i < m.loops.size(); ++i) z.extraLoops.push_back ({ m.loops[i].start, m.loops[i].end, m.loops[i].crossfade, m.loops[i].repeats });
+    }
+    if (m.hasRegion) { z.startFrame = m.startFrame; z.endFrame = m.endFrame; }
+    if (withRoot && m.hasRoot) { z.rootNote = m.rootNote; z.tuneCents = m.tuneCents; }
+    z = sanitised (z);
+}
+
+// Les réglages qui appartiennent au sample sont réécrits dans son fichier quelques instants après la dernière modification (pas pendant un glissé). Un fichier regardé
+// pour la première fois sert de point de départ : on n'écrit que ce que l'utilisateur change.
+void NovaSamplerEditor::syncFileMeta()
+{
+    const auto now = juce::Time::getMillisecondCounter();
+    if (const auto* z = shownZone(); z != nullptr && ! z->samplePath.empty() && fileInfo_.info (z->samplePath).ok)
+    {
+        const auto meta = metaOfZone (*z);
+        const auto sig = sampleMetaToJson (meta);
+        const auto it = metaBaseline_.find (z->samplePath);
+        if (it == metaBaseline_.end()) metaBaseline_[z->samplePath] = sig;
+        else if (it->second != sig)
+        {
+            if (! pendingMeta_.valid || pendingMeta_.path != z->samplePath || pendingMeta_.sig != sig) pendingMeta_ = { true, z->samplePath, meta, sig, now };
+        }
+        else if (pendingMeta_.valid && pendingMeta_.path == z->samplePath) pendingMeta_.valid = false;   // revenu à l'état du fichier
+    }
+    if (pendingMeta_.valid && now - pendingMeta_.since > 700) flushFileMeta();
+}
+
+void NovaSamplerEditor::flushFileMeta()
+{
+    if (! pendingMeta_.valid) return;
+    pendingMeta_.valid = false;
+    MetaStore where = MetaStore::None;
+    std::string err;
+    if (writeSampleMeta (utf8Path (pendingMeta_.path), pendingMeta_.meta, &where, &err))
+    {
+        metaBaseline_[pendingMeta_.path] = pendingMeta_.sig;
+        fileMarkers_[pendingMeta_.path] = pendingMeta_.meta.hasVolumeMarker ? static_cast<std::int64_t> (std::llround (pendingMeta_.meta.volumeMarkerMs * pendingMeta_.meta.sampleRate / 1000.0)) : -1;
+        setToolStatus (tx (where == MetaStore::Sidecar ? "sm.st_meta_sidecar" : "sm.st_meta_saved"));
+    }
+    else setToolStatus (U (translator().format ("sm.st_marker_error", { err })));
+}
+
+bool NovaSamplerEditor::writeDerivedbool NovaSamplerEditor::writeDerived (const Zone& z, const char* tag, const se::Buffer& b, std::string& newPath)
 {
     std::string err;
     const auto path = se::derivedPath (editedDirectory(), z.samplePath, tag, b);
@@ -1063,7 +1142,6 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
             {
                 safe->applyMarker_ (M::Volume, frame);
                 safe->volumeDragged_ = false;
-                if (const auto* zz = safe->shownZone()) safe->saveMarker (zz->samplePath, zz->releaseRefFrame);
                 break;
             }
             case 6:
@@ -1071,7 +1149,7 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
                 const auto* zz = safe->shownZone();
                 const std::string path = zz != nullptr ? zz->samplePath : std::string();
                 safe->editZone ([] (Zone& zone) { zone.releaseRefFrame = -1; });
-                if (! path.empty()) safe->saveMarker (path, -1);
+                if (! path.empty()) safe->fileMarkers_[path] = -1;   // plus de marqueur, ni dans la zone ni (après la prochaine synchronisation) dans le fichier
                 break;
             }
             case 7: safe->startPreview (3, frame, 0, 1); break;
@@ -1542,6 +1620,7 @@ void NovaSamplerEditor::chooseSample()
                                if (compensate) delta = std::clamp (oldDb - newDb, -24.0, 24.0);
                                z.startFrame = 0; z.endFrame = -1; z.loopStart = 0; z.loopEnd = -1; z.loopCrossfade = 0;   // les repères de l'ancien fichier n'ont plus de sens
                                z.extraLoops.clear(); z.loopRepeats = 0;
+                               safe->applyFileMarks (z, true);   // le nouveau fichier apporte ses propres boucles, sa région et sa note racine
                                if (compensate) z.gainDb = std::clamp (z.gainDb + delta, -60.0, 60.0);
                                d.zones.assign (1, z);
                                safe->proc_.uiEditInstrument (std::move (d), "Replace sample");
@@ -1619,7 +1698,12 @@ void NovaSamplerEditor::applyImport (const ImportWizard::Result& r)
         for (std::size_t i = 0; i < all.size(); ++i) all[i] = static_cast<int> (i);
         d.removeZones (std::move (all));
     }
-    for (const auto& z : r.zones) d.zones.push_back (z);
+    for (const auto& imported : r.zones)
+    {
+        auto z = imported;
+        applyFileMarks (z, false);   // boucles et région déjà écrites dans le fichier ; la note racine vient de l'assistant
+        d.zones.push_back (z);
+    }
     d.mainRoundRobinOnly = r.replace ? r.mainRoundRobinOnly : (d.mainRoundRobinOnly || r.mainRoundRobinOnly);
     d.loadReleaseSamples = r.replace ? r.loadReleaseSamples : (d.loadReleaseSamples && r.loadReleaseSamples);
     d.streamFromDisk = r.replace ? r.streamFromDisk : (d.streamFromDisk || r.streamFromDisk);
@@ -2329,6 +2413,7 @@ void NovaSamplerEditor::tick()
         }
     }
     updateVoices();
+    syncFileMeta();
     updatePlayButton();
     updateRecordButton();
     updateFilterEditor();

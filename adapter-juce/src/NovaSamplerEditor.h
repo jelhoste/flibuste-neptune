@@ -24,10 +24,11 @@
 #include "ZoneTable.h"
 #include "neptune/core/MemoryBudget.h"
 #include "neptune/core/SampleEdit.h"
+#include "neptune/core/SampleMeta.h"
 #include "neptune/core/TimeStretch.h"
 #include "neptune/core/VolumeFootprint.h"
 
-class NovaSamplerEditor : public nova::EditorBase
+class NovaSamplerEditor : public nova::EditorBase, public juce::DragAndDropContainer
 {
 public:
     NovaSamplerEditor (NeptuneProcessor&, const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle, const neptune::core::i18n::Translator&, Options);
@@ -96,6 +97,10 @@ private:
     std::int64_t fileMarkerFrame (const std::string& path);
     std::int64_t effectiveMarker (const Zone&);
     void saveMarker (const std::string& path, std::int64_t frame);
+    neptune::core::SampleMeta metaOfZone (const Zone&);
+    void applyFileMarks (Zone&, bool withRoot);
+    void syncFileMeta();
+    void flushFileMeta();
     void showWaveMenu (std::int64_t frame, juce::Point<int> where);
     void openLoopOptions (juce::Component& anchor);
     void removeLoop();
@@ -141,6 +146,8 @@ private:
     double refLevelDb_ = 0.0;
     bool refLevelKnown_ = false;
     neptune::core::sampleedit::LoopSearchOptions loopOptions_;
+    struct PendingMeta { bool valid = false; std::string path; neptune::core::SampleMeta meta; std::string sig; juce::uint32 since = 0; } pendingMeta_;
+    std::map<std::string, std::string> metaBaseline_;   // ce que le fichier porte (dernier état lu ou écrit), par chemin
     std::map<std::string, std::int64_t> fileMarkers_;   // marqueur de volume des métadonnées de chaque fichier (-1 : aucun)
     bool volumeDragged_ = false;
     int editLoop_ = 0;   // boucle éditée (0 = la première)

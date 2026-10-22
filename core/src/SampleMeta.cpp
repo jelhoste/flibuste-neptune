@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <sndfile.h>
 
 #include "neptune/core/FileUtil.h"
 #include "neptune/core/SampleLoader.h"
@@ -66,7 +68,24 @@ std::string sampleMetaToJson (const SampleMeta& m)
 {
     nlohmann::json o;
     o["schema_version"] = 1;
+    if (m.sampleRate > 0.0) o["sample_rate"] = m.sampleRate;
     if (m.hasVolumeMarker) o["volume_marker_ms"] = m.volumeMarkerMs;
+    if (m.hasRegion) { o["start_frame"] = m.startFrame; o["end_frame"] = m.endFrame; }
+    if (m.hasRoot) { o["root_note"] = m.rootNote; if (m.tuneCents != 0.0) o["tune_cents"] = m.tuneCents; }
+    if (! m.loops.empty())
+    {
+        nlohmann::json loops = nlohmann::json::array();
+        for (const auto& l : m.loops)
+        {
+            nlohmann::json lo;
+            lo["start"] = l.start;
+            lo["end"] = l.end;
+            if (l.crossfade != 0) lo["crossfade"] = l.crossfade;
+            if (l.repeats != 0) lo["repeats"] = l.repeats;
+            loops.push_back (lo);
+        }
+        o["loops"] = loops;
+    }
     return o.dump();
 }
 
@@ -75,11 +94,35 @@ bool sampleMetaFromJson (const std::string& text, SampleMeta& out)
     const auto doc = nlohmann::json::parse (text, nullptr, false);
     if (! doc.is_object()) return false;
     out = {};
+    if (const auto it = doc.find ("sample_rate"); it != doc.end() && it->is_number()) out.sampleRate = it->get<double>();
     if (const auto it = doc.find ("volume_marker_ms"); it != doc.end() && it->is_number())
     {
         out.hasVolumeMarker = true;
         out.volumeMarkerMs = std::max (0.0, it->get<double>());
     }
+    if (const auto s = doc.find ("start_frame"); s != doc.end() && s->is_number_integer())
+    {
+        out.hasRegion = true;
+        out.startFrame = std::max<std::int64_t> (0, s->get<std::int64_t>());
+        if (const auto e = doc.find ("end_frame"); e != doc.end() && e->is_number_integer()) out.endFrame = e->get<std::int64_t>();
+    }
+    if (const auto r = doc.find ("root_note"); r != doc.end() && r->is_number_integer())
+    {
+        out.hasRoot = true;
+        out.rootNote = std::clamp (r->get<int>(), 0, 127);
+        if (const auto t = doc.find ("tune_cents"); t != doc.end() && t->is_number()) out.tuneCents = std::clamp (t->get<double>(), -100.0, 100.0);
+    }
+    if (const auto it = doc.find ("loops"); it != doc.end() && it->is_array())
+        for (const auto& lo : *it)
+        {
+            if (! lo.is_object() || out.loops.size() >= 4) continue;
+            MetaLoop l;
+            if (const auto v = lo.find ("start"); v != lo.end() && v->is_number_integer()) l.start = std::max<std::int64_t> (0, v->get<std::int64_t>());
+            if (const auto v = lo.find ("end"); v != lo.end() && v->is_number_integer()) l.end = v->get<std::int64_t>();
+            if (const auto v = lo.find ("crossfade"); v != lo.end() && v->is_number_integer()) l.crossfade = std::max<std::int64_t> (0, v->get<std::int64_t>());
+            if (const auto v = lo.find ("repeats"); v != lo.end() && v->is_number_integer()) l.repeats = std::clamp (v->get<int>(), 0, 1000);
+            out.loops.push_back (l);
+        }
     return true;
 }
 
@@ -117,7 +160,7 @@ bool readSampleMeta (const std::filesystem::path& path, SampleMeta& out, MetaSto
 bool writeSampleMeta (const std::filesystem::path& path, const SampleMeta& meta, MetaStore* outStore, std::string* error)
 {
     if (outStore != nullptr) *outStore = MetaStore::None;
-    const bool empty = ! meta.hasVolumeMarker;
+    const bool empty = meta.isEmpty();
     std::error_code ec;
     const auto size = std::filesystem::file_size (path, ec);
     if (ec) { if (error != nullptr) *error = "file not found"; return false; }
@@ -226,5 +269,60 @@ bool writeSampleMeta (const std::filesystem::path& path, const SampleMeta& meta,
     if (! fileutil::writeAtomic (side, sampleMetaToJson (meta), error)) return false;
     if (outStore != nullptr) *outStore = MetaStore::Sidecar;
     return true;
+}
+
+bool readFileMarks (const std::filesystem::path& path, SampleMeta& out)
+{
+    out = {};
+    SampleMeta ours;
+    const bool haveOurs = readSampleMeta (path, ours);
+    if (haveOurs) out = ours;
+
+    // chunk d'instrument standard (smpl d'un WAV, instrument d'un AIFF) : ce que Neptune n'a pas écrit
+    SF_INFO info {};
+   #if defined (_WIN32)
+    SNDFILE* f = sf_wchar_open (path.c_str(), SFM_READ, &info);
+   #else
+    SNDFILE* f = sf_open (path.c_str(), SFM_READ, &info);
+   #endif
+    double fileRate = 0.0;
+    if (f != nullptr)
+    {
+        fileRate = static_cast<double> (info.samplerate);
+        SF_INSTRUMENT inst {};
+        if (sf_command (f, SFC_GET_INSTRUMENT, &inst, sizeof inst) == SF_TRUE)
+        {
+            if (! out.hasRoot && inst.basenote >= 0 && inst.basenote <= 127)
+            {
+                out.hasRoot = true;
+                out.rootNote = inst.basenote;
+                out.tuneCents = std::clamp (static_cast<double> (inst.detune), -50.0, 50.0);
+            }
+            if (out.loops.empty())
+                for (int i = 0; i < inst.loop_count && i < 16 && out.loops.size() < 4; ++i)
+                {
+                    const auto& lp = inst.loops[i];
+                    if (lp.mode == SF_LOOP_NONE || lp.end <= lp.start) continue;
+                    MetaLoop l;
+                    l.start = static_cast<std::int64_t> (lp.start);
+                    l.end = static_cast<std::int64_t> (lp.end) + 1;   // smpl : le dernier échantillon de la boucle est inclus ; Neptune : fin exclusive
+                    if (! out.loops.empty() && (l.end <= (out.loops.back().end < 0 ? l.end : out.loops.back().end))) continue;   // les boucles se suivent dans le fichier
+                    out.loops.push_back (l);
+                }
+        }
+        sf_close (f);
+    }
+    else if (! haveOurs) return false;
+    // les positions écrites pour une autre fréquence suivent le fichier tel qu'il est maintenant
+    if (haveOurs && ours.sampleRate > 0.0 && fileRate > 0.0 && std::abs (ours.sampleRate - fileRate) > 0.5)
+    {
+        const double k = fileRate / ours.sampleRate;
+        auto scale = [k] (std::int64_t v) { return v < 0 ? v : static_cast<std::int64_t> (std::llround (static_cast<double> (v) * k)); };
+        for (auto& l : out.loops) { l.start = scale (l.start); l.end = scale (l.end); l.crossfade = scale (l.crossfade); }
+        out.startFrame = scale (out.startFrame);
+        out.endFrame = scale (out.endFrame);
+    }
+    if (fileRate > 0.0) out.sampleRate = fileRate;
+    return ! out.isEmpty();
 }
 } // namespace neptune::core

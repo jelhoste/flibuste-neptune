@@ -178,6 +178,41 @@ float MappingMatrix::keyX (double key) const
     return a.getX() + static_cast<float> ((key - keyStart_) / keySpan_) * a.getWidth();
 }
 
+int MappingMatrix::keyAtX (float x) const
+{
+    const auto a = plotArea();
+    return juce::jlimit (0, 127, static_cast<int> (std::floor (keyStart_ + (x - a.getX()) / std::max (1.0f, a.getWidth()) * keySpan_)));
+}
+
+std::vector<int> MappingMatrix::zonesOf (const SourceDetails& d)
+{
+    std::vector<int> rows;
+    const auto text = d.description.toString();
+    if (! text.startsWith ("neptune-zones:")) return rows;
+    juce::StringArray parts;
+    parts.addTokens (text.fromFirstOccurrenceOf (":", false, false), ",", "");
+    for (const auto& p : parts) if (p.isNotEmpty()) rows.push_back (p.getIntValue());
+    return rows;
+}
+
+bool MappingMatrix::isInterestedInDragSource (const SourceDetails& d) { return ! zonesOf (d).empty(); }
+
+void MappingMatrix::itemDragMove (const SourceDetails& d)
+{
+    const auto pos = d.localPosition.toFloat();
+    const int key = plotArea().expanded (0.0f, 1000.0f).contains (pos) ? keyAtX (pos.x) : -1;
+    if (key != dropKey_) { dropKey_ = key; repaint(); }
+}
+
+void MappingMatrix::itemDropped (const SourceDetails& d)
+{
+    const int key = keyAtX (d.localPosition.toFloat().x);
+    dropKey_ = -1;
+    repaint();
+    const auto rows = zonesOf (d);
+    if (! rows.empty() && onDropZones) onDropZones (rows, key, currentView());
+}
+
 float MappingMatrix::velY (double level) const
 {
     const auto a = plotArea();
@@ -244,6 +279,11 @@ void MappingMatrix::paint (juce::Graphics& g)
     const auto plot = plotArea();
     g.setColour (colour (Token::BgCard));
     g.fillRect (plot);
+    if (dropKey_ >= 0)   // colonne visée par un glisser-déposer de zones
+    {
+        g.setColour (colour (Token::Accent).withAlpha (0.28f));
+        g.fillRect (juce::Rectangle<float> (keyX (dropKey_), plot.getY(), std::max (3.0f, keyX (dropKey_ + 1) - keyX (dropKey_)), plot.getHeight()));
+    }
 
     // Grille : octaves (verticales) et paliers de vélocité (horizontales)
     g.setFont (juce::FontOptions (11.0f));
@@ -504,6 +544,20 @@ bool MappingMatrix::playKeyboard (juce::Point<float> p, bool starting)
 void MappingMatrix::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    if (e.mods.isPopupMenu())
+    {
+        // clic droit sur une cellule : placer ici les zones sélectionnées (même chose que le glisser-déposer, sans glisser)
+        if (plotArea().contains (e.position) && onDropZones && ! selected_.empty())
+        {
+            const int key = keyAtX (e.position.x);
+            const auto view = currentView();
+            juce::PopupMenu menu;
+            menu.addItem (1, text ("map.place_here"));
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (juce::Rectangle<int> (juce::roundToInt (e.position.x), juce::roundToInt (e.position.y), 1, 1))),
+                                [this, key, view, zones = selected_] (int r) { if (r == 1 && onDropZones) onDropZones (zones, key, view); });
+        }
+        return;
+    }
     if (e.mods.isShiftDown() && keyboardArea().contains (e.position))
     {
         // Maj+clic : verrouille / libère une touche (elle reste enfoncée) : accords et legato jouables à la souris

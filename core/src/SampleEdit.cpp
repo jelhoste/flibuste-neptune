@@ -66,7 +66,11 @@ bool writeWav (const std::filesystem::path& path, const Buffer& b, std::string* 
     info.samplerate = static_cast<int> (std::lround (b.sampleRate));
     info.channels = b.channels;
     info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
-    SNDFILE* f = sf_open (path.string().c_str(), SFM_WRITE, &info);
+   #if defined (_WIN32)
+    SNDFILE* f = sf_wchar_open (path.c_str(), SFM_WRITE, &info);   // chemin Unicode (dossier utilisateur accentué)
+   #else
+    SNDFILE* f = sf_open (path.c_str(), SFM_WRITE, &info);
+   #endif
     if (f == nullptr) { if (error != nullptr) *error = sf_strerror (nullptr); return false; }
     const auto n = b.frames();
     const bool ok = sf_writef_float (f, b.data.data(), n) == n;

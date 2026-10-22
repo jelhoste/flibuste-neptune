@@ -32,6 +32,13 @@ private:
     int getNumRows() override { return static_cast<int> (zones_.size()); }
     void paintRowBackground (juce::Graphics&, int row, int width, int height, bool selected) override;
     void paintCell (juce::Graphics&, int row, int column, int width, int height, bool selected) override;
+    // Glisser une ou plusieurs lignes (vers la matrice) : « neptune-zones:<indices> ». Le conteneur de glisser-déposer est l'éditeur.
+    juce::var getDragSourceDescription (const juce::SparseSet<int>& rows) override
+    {
+        juce::StringArray parts;
+        for (int i = 0; i < rows.size(); ++i) parts.add (juce::String (rows[i]));
+        return "neptune-zones:" + parts.joinIntoString (",");
+    }
     void selectedRowsChanged (int) override { if (onSelectionChanged) onSelectionChanged(); }
     void cellClicked (int row, int, const juce::MouseEvent& e) override { if (e.mods.isPopupMenu() && onContextMenu) onContextMenu (row); }
     juce::Component* refreshComponentForCell (int row, int column, bool selected, juce::Component* existing) override;

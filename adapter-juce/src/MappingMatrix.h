@@ -17,7 +17,7 @@
 //  - molette : zoom sur les notes ; barre : défilement. Zones de saisie larges (tactile).
 // La logique des modifications est dans core/MappingEdit.h : chaque geste est recalculé depuis la description du début du
 // geste, et se termine en UNE entrée d'annulation (onGestureBegin/End + clé de fusion côté éditeur).
-class MappingMatrix : public juce::Component, private juce::ScrollBar::Listener, private juce::Timer
+class MappingMatrix : public juce::Component, public juce::DragAndDropTarget, private juce::ScrollBar::Listener, private juce::Timer
 {
 public:
     MappingMatrix (const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
@@ -35,6 +35,8 @@ public:
     std::function<void (neptune::core::InstrumentDescription, const char* name)> onEdit;
     std::function<void()> onGestureBegin, onGestureEnd;
     std::function<void()> onDeleteRequested;
+    // Zones de la liste déposées (ou placées par le clic droit) sur la matrice : indices des zones, première note, vue affichée. L'éditeur applique mapping::assignToView.
+    std::function<void (const std::vector<int>& zones, int firstKey, const neptune::core::mapping::View&)> onDropZones;
     std::function<void (int key, float velocity)> onNoteOn;  // clavier sous la matrice : bas de la touche = vélocité forte, haut = faible
     std::function<void (int key)> onNoteOff;
     std::function<void (juce::Component& anchor)> onOpenVelocity; // réponse de vélocité / fondu entre couches
@@ -48,6 +50,12 @@ public:
     void mouseMove (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed (const juce::KeyPress&) override;
+    // Glisser-déposer des zones de la liste (voir ZoneTable) : la colonne visée s'illumine, la première zone prend la note déposée, les suivantes les notes d'après
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails& d) override { itemDragMove (d); }
+    void itemDragMove (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override { dropKey_ = -1; repaint(); }
+    void itemDropped (const SourceDetails&) override;
 
 private:
     enum class Op { None, Move, Resize, Band };
@@ -63,7 +71,10 @@ private:
     void rebuildViewChoices();
     neptune::core::mapping::View currentView() const;
     juce::Rectangle<float> plotArea() const;
-    float keyX (double key) const;           // bord gauche de la note
+    float keyX (double key) const;
+    int keyAtX (float x) const;
+    static std::vector<int> zonesOf (const SourceDetails&);
+    int dropKey_ = -1;           // bord gauche de la note
     float velY (double level) const;         // level 0..127 (127 en haut)
     juce::Rectangle<float> placeRect (const neptune::core::mapping::Place&) const;
     Hit hitTest (juce::Point<float>) const;
