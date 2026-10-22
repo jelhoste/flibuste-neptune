@@ -318,3 +318,24 @@ TEST_CASE ("limit can be raised to 256 voices; the fade slots absorb a burst of 
     r.settle (2048);
     CHECK (r.v.activeVoices() == 256);
 }
+
+TEST_CASE ("edits of the file pool and of the replace option survive the undo history")
+{
+    InstrumentDescription current;
+    ZoneDescription z; z.samplePath = "a.wav";
+    current.zones.push_back (z);
+    const auto before = current;
+    auto d = current;
+    d.pool = { "/s/a.wav", "/s/b.wav" };
+    d.compensateOnReplace = false;
+    auto get = [&] { return current; };
+    auto set = [&] (const InstrumentDescription& x) { current = x; };
+    UndoManager um;
+    um.perform (std::make_unique<InstrumentEditCommand> (current, d, get, set, "Pool"));   // même nombre de zones : la différence ne porte que sur les réglages
+    CHECK (current.pool == d.pool);
+    CHECK_FALSE (current.compensateOnReplace);
+    um.undo();
+    CHECK (current == before);
+    um.redo();
+    CHECK (current == d);
+}

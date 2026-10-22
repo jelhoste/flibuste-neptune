@@ -175,7 +175,7 @@ struct InstrumentDescription
     // zones disparaissent, voir removeZones) et aux Groupes par leur nom.
     SlotAssignments slots;
 
-    // Copie tout sauf les zones (réglages de chargement, de streaming, de réponse de vélocité, emplacements assignables).
+    // Copie tout sauf les zones (réglages de chargement, de streaming, de réponse de vélocité, emplacements assignables, réserve de fichiers).
     void copySettingsFrom (const InstrumentDescription& o)
     {
         roundRobinMode = o.roundRobinMode; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
@@ -183,7 +183,7 @@ struct InstrumentDescription
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
         cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters;
-        slots = o.slots;
+        slots = o.slots; pool = o.pool; compensateOnReplace = o.compensateOnReplace;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept

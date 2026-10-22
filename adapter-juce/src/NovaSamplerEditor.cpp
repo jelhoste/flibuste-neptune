@@ -398,7 +398,6 @@ void NovaSamplerEditor::buildZonesPage()
     poolViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     poolViewPill_->setText (tx ("pool.view_files"));
     poolViewPill_->onClick = [this] { showPool_ = true; pageChanged(); };
-    addInfo (0, poolViewPill_, "hlp.sm_pool", 1);
     zones_ = add<ZoneTable> (0, skin().palette(), translator());
     zones_->onSelectionChanged = [this] { lastRevision_ = 0xFFFFFFFFu; };
     zones_->onCellEdited = [this] (int row, int column, int value)
@@ -1634,6 +1633,7 @@ void NovaSamplerEditor::chooseSample()
                                safe->applyFileMarks (z, true);   // le nouveau fichier apporte ses propres boucles, sa région et sa note racine
                                if (compensate) z.gainDb = std::clamp (z.gainDb + delta, -60.0, 60.0);
                                d.zones.assign (1, z);
+                               if (std::find (d.pool.begin(), d.pool.end(), z.samplePath) == d.pool.end()) d.pool.push_back (z.samplePath);   // le fichier chargé entre dans la réserve
                                safe->proc_.uiEditInstrument (std::move (d), "Replace sample");
                                safe->lastRevision_ = 0xFFFFFFFFu;
                                if (compensate) safe->setToolStatus (U (safe->translator().format ("sm.st_compensated", { numberText (delta).toStdString() })));
@@ -1853,6 +1853,7 @@ void NovaSamplerEditor::applyImport (const ImportWizard::Result& r)
         auto z = imported;
         applyFileMarks (z, false);   // boucles et région déjà écrites dans le fichier ; la note racine vient de l'assistant
         d.zones.push_back (z);
+        if (std::find (d.pool.begin(), d.pool.end(), z.samplePath) == d.pool.end()) d.pool.push_back (z.samplePath);   // les fichiers importés entrent dans la réserve
     }
     d.mainRoundRobinOnly = r.replace ? r.mainRoundRobinOnly : (d.mainRoundRobinOnly || r.mainRoundRobinOnly);
     d.loadReleaseSamples = r.replace ? r.loadReleaseSamples : (d.loadReleaseSamples && r.loadReleaseSamples);
@@ -2313,7 +2314,6 @@ void NovaSamplerEditor::pageChanged()
     matrixPanel_->setVisible (zonesPage && ! showVoices_);
     voicesView_->setVisible (zonesPage && showVoices_);
     setInfoVisible (tablePanel_, zonesPage && listVisible_ && ! showVoices_);
-    setInfoVisible (poolViewPill_, zonesPage && listVisible_ && ! showVoices_);
     setInfoVisible (matrixPanel_, zonesPage && ! showVoices_);
     resized();
 }
@@ -2532,6 +2532,7 @@ void NovaSamplerEditor::finishRecording (const std::string& path, std::int64_t f
         }
     }
     d.zones.push_back (sanitised (zone));
+    if (std::find (d.pool.begin(), d.pool.end(), zone.samplePath) == d.pool.end()) d.pool.push_back (zone.samplePath);
     const int index = static_cast<int> (d.zones.size()) - 1;
     proc_.uiEditInstrument (std::move (d), "Record sample");
     lastRevision_ = 0xFFFFFFFFu;
