@@ -142,62 +142,18 @@ bool MappingMatrix::placeSelected (const mapping::Place& p) const
     return false;
 }
 
-std::vector<int> MappingMatrix::zonesOfSelectedPlaces() const
-{
-    std::vector<int> out;
-    for (const auto& p : places_)
-        if (placeSelected (p)) out.insert (out.end(), p.zones.begin(), p.zones.end());
-    std::sort (out.begin(), out.end());
-    return out;
-}
-
-void MappingMatrix::selectPlaces (const std::vector<int>& placeIndices, bool add)
-{
-    std::set<int> s;
-    if (add) s.insert (selected_.begin(), selected_.end());
-    for (const int i : placeIndices)
-        if (i >= 0 && i < static_cast<int> (places_.size()))
-            s.insert (places_[static_cast<std::size_t> (i)].zones.begin(), places_[static_cast<std::size_t> (i)].zones.end());
-    selected_.assign (s.begin(), s.end());
-    if (onSelect) onSelect (selected_);
-    repaint();
-}
-
-// ---------------------------------------------------------------- géométrie
-
-juce::Rectangle<float> MappingMatrix::plotArea() const
-{
-    return juce::Rectangle<float> (static_cast<float> (kLeftMargin), static_cast<float> (kToolbarH),
-                                   static_cast<float> (getWidth() - kLeftMargin - 4),
-                                   static_cast<float> (getHeight() - kToolbarH - kKeyboardH - kScrollH - 2));
-}
-
-float MappingMatrix::keyX (double key) const
-{
-    const auto a = plotArea();
-    return a.getX() + static_cast<float> ((key - keyStart_) / keySpan_) * a.getWidth();
-}
-
-neptune::core::mapping::View MappingMatrix::currentView() const { return view_; }
-
-int MappingMatrix::keyAtX (float x) const
-{
-    const auto a = plotArea();
-    return juce::jlimit (0, 127, static_cast<int> (std::floor (keyStart_ + (x - a.getX()) / std::max (1.0f, a.getWidth()) * keySpan_)));
-}
-
-std::vector<int> MappingMatrix::zonesOf (const SourceDetails& d)
+std::vector<int> MappingMatrix::indicesOf (const SourceDetails& d, const juce::String& prefix)
 {
     std::vector<int> rows;
     const auto text = d.description.toString();
-    if (! text.startsWith ("neptune-zones:")) return rows;
+    if (! text.startsWith (prefix)) return rows;
     juce::StringArray parts;
     parts.addTokens (text.fromFirstOccurrenceOf (":", false, false), ",", "");
     for (const auto& p : parts) if (p.isNotEmpty()) rows.push_back (p.getIntValue());
     return rows;
 }
 
-bool MappingMatrix::isInterestedInDragSource (const SourceDetails& d) { return ! zonesOf (d).empty(); }
+bool MappingMatrix::isInterestedInDragSource (const SourceDetails& d) { return ! indicesOf (d, "neptune-zones:").empty() || ! indicesOf (d, "neptune-files:").empty(); }
 
 void MappingMatrix::itemDragMove (const SourceDetails& d)
 {
@@ -211,8 +167,8 @@ void MappingMatrix::itemDropped (const SourceDetails& d)
     const int key = keyAtX (d.localPosition.toFloat().x);
     dropKey_ = -1;
     repaint();
-    const auto rows = zonesOf (d);
-    if (! rows.empty() && onDropZones) onDropZones (rows, key, currentView());
+    if (const auto rows = indicesOf (d, "neptune-zones:"); ! rows.empty() && onDropZones) { onDropZones (rows, key, currentView()); return; }
+    if (const auto files = indicesOf (d, "neptune-files:"); ! files.empty() && onDropFiles) onDropFiles (files, key, currentView());
 }
 
 float MappingMatrix::velY (double level) const
@@ -548,15 +504,21 @@ void MappingMatrix::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     if (e.mods.isPopupMenu())
     {
-        // clic droit sur une cellule : placer ici les zones sélectionnées (même chose que le glisser-déposer, sans glisser)
-        if (plotArea().contains (e.position) && onDropZones && ! selected_.empty())
+        // clic droit sur une cellule : placer ici les zones sélectionnées, ou les fichiers sélectionnés de la réserve (même chose que le glisser-déposer, sans glisser)
+        if (plotArea().contains (e.position))
         {
             const int key = keyAtX (e.position.x);
             const auto view = currentView();
+            const auto files = poolSelection ? poolSelection() : std::vector<int>();
             juce::PopupMenu menu;
-            menu.addItem (1, text ("map.place_here"));
+            menu.addItem (1, text ("map.place_here"), onDropZones && ! selected_.empty());
+            menu.addItem (2, text ("map.place_files_here"), onDropFiles && ! files.empty());
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (juce::Rectangle<int> (juce::roundToInt (e.position.x), juce::roundToInt (e.position.y), 1, 1))),
-                                [this, key, view, zones = selected_] (int r) { if (r == 1 && onDropZones) onDropZones (zones, key, view); });
+                                [this, key, view, zones = selected_, files] (int r)
+                                {
+                                    if (r == 1 && onDropZones) onDropZones (zones, key, view);
+                                    else if (r == 2 && onDropFiles) onDropFiles (files, key, view);
+                                });
         }
         return;
     }

@@ -37,6 +37,10 @@ public:
     std::function<void()> onDeleteRequested;
     // Zones de la liste déposées (ou placées par le clic droit) sur la matrice : indices des zones, première note, vue affichée. L'éditeur applique mapping::assignToView.
     std::function<void (const std::vector<int>& zones, int firstKey, const neptune::core::mapping::View&)> onDropZones;
+    // Fichiers de la réserve déposés (indices dans la réserve) : l'éditeur crée les zones. `poolSelection` donne les fichiers sélectionnés dans la réserve (clic droit).
+    std::function<void (const std::vector<int>& files, int firstKey, const neptune::core::mapping::View&)> onDropFiles;
+    std::function<std::vector<int>()> poolSelection;
+    neptune::core::mapping::View shownView() const { return view_; }
     std::function<void (int key, float velocity)> onNoteOn;  // clavier sous la matrice : bas de la touche = vélocité forte, haut = faible
     std::function<void (int key)> onNoteOff;
     std::function<void (juce::Component& anchor)> onOpenVelocity; // réponse de vélocité / fondu entre couches
@@ -73,7 +77,7 @@ private:
     juce::Rectangle<float> plotArea() const;
     float keyX (double key) const;
     int keyAtX (float x) const;
-    static std::vector<int> zonesOf (const SourceDetails&);
+    static std::vector<int> indicesOf (const SourceDetails&, const juce::String& prefix);
     int dropKey_ = -1;           // bord gauche de la note
     float velY (double level) const;         // level 0..127 (127 en haut)
     juce::Rectangle<float> placeRect (const neptune::core::mapping::Place&) const;

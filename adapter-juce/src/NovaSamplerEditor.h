@@ -13,6 +13,7 @@
 #include "FilterEditor.h"
 #include "ImportWizard.h"
 #include "MappingMatrix.h"
+#include "PoolTable.h"
 #include "NovaEditor.h"
 #include "NovaWaveView.h"
 #include "NovaWidgets.h"
@@ -63,6 +64,10 @@ private:
     void removeSelectedZones();
     void openChokePanel (juce::Component& anchor);
     void openLevelsPanel (juce::Component& anchor);
+    void rebuildPool();
+    void addToPool (const std::vector<std::string>& paths);
+    void placeFiles (const std::vector<int>& files, int firstKey, const neptune::core::mapping::View&);
+    void showPoolMenu (int row);
     void openSlotsPanel (juce::Component& anchor);
     void showSlotAssignMenu (int zone, const std::string& group);
     void openFilterEditor();
@@ -182,6 +187,12 @@ private:
     nova::ChoicePill *triggerChoice_ = nullptr, *chokeChoice_ = nullptr;
     std::vector<std::unique_ptr<nova::ChoicePill>> choices_;
     ZoneTable* zones_ = nullptr;
+    PoolTable* pool_ = nullptr;
+    nova::Pill *zonesViewPill_ = nullptr, *poolViewPill_ = nullptr;
+    bool showPool_ = false;                       // la liste de gauche montre la réserve de fichiers au lieu des zones
+    std::vector<std::string> poolPaths_;          // lignes de la réserve (même ordre que PoolTable)
+    std::string poolSignature_;
+    std::map<std::string, juce::String> poolContents_;   // ce que chaque fichier apporte (boucles, note racine, marqueur de volume), lu une fois
     MappingMatrix* matrix_ = nullptr;
     VoicesView* voicesView_ = nullptr;
 

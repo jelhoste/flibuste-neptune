@@ -435,3 +435,15 @@ TEST_CASE ("preview sources play the raw sample, the region, a point or a loop")
         CHECK_THAT (o[8999], WithinAbs (4000.0 + std::fmod (8999.0 - 3000.0, 1000.0), 1.0));
     }
 }
+
+TEST_CASE ("the file pool is saved with the instrument")
+{
+    InstrumentDescription d;
+    d.pool = { "/samples/a.wav", "/samples/b é.flac" };
+    ZoneDescription z; z.samplePath = "/samples/a.wav";
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back.pool == d.pool);
+    CHECK (back == d);
+    CHECK (instrumentFromJson (toJson (InstrumentDescription {})).pool.empty());
+}

@@ -390,6 +390,15 @@ void NovaSamplerEditor::buildZonesPage()
     matrixPanel_->setTitle (tx ("sm.matrix").toUpperCase());
     addInfo (0, matrixPanel_, "hlp.sm_matrix", 1);
 
+    pool_ = add<PoolTable> (0, skin().palette(), translator());
+    pool_->onContextMenu = [this] (int row) { showPoolMenu (row); };
+    zonesViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    zonesViewPill_->setText (tx ("pool.view_zones"));
+    zonesViewPill_->onClick = [this] { showPool_ = false; pageChanged(); };
+    poolViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    poolViewPill_->setText (tx ("pool.view_files"));
+    poolViewPill_->onClick = [this] { showPool_ = true; pageChanged(); };
+    addInfo (0, poolViewPill_, "hlp.sm_pool", 1);
     zones_ = add<ZoneTable> (0, skin().palette(), translator());
     zones_->onSelectionChanged = [this] { lastRevision_ = 0xFFFFFFFFu; };
     zones_->onCellEdited = [this] (int row, int column, int value)
@@ -426,6 +435,8 @@ void NovaSamplerEditor::buildZonesPage()
     matrix_->onGestureBegin = [this] { proc_.uiBeginGesture(); };
     matrix_->onGestureEnd = [this] { proc_.uiEndGesture(); };
     matrix_->onDeleteRequested = [this] { removeSelectedZones(); };
+    matrix_->onDropFiles = [this] (const std::vector<int>& files, int firstKey, const neptune::core::mapping::View& view) { placeFiles (files, firstKey, view); };
+    matrix_->poolSelection = [this] { return showPool_ && pool_ != nullptr ? pool_->selectedRows() : std::vector<int>(); };
     matrix_->onDropZones = [this] (const std::vector<int>& zones, int firstKey, const neptune::core::mapping::View& view)
     {
         auto d = neptune::core::mapping::assignToView (proc_.instrumentDescription(), zones, view, firstKey);
@@ -1629,21 +1640,158 @@ void NovaSamplerEditor::chooseSample()
                            });
 }
 
+// ---- réserve de fichiers
+// La réserve affichée : les fichiers de la réserve, puis ceux des zones qui n'y figurent pas (tout ce qui sert est visible).
+void NovaSamplerEditor::rebuildPool()
+{
+    std::vector<std::string> paths = cached_.pool;
+    for (const auto& z : cached_.zones)
+        if (! z.samplePath.empty() && std::find (paths.begin(), paths.end(), z.samplePath) == paths.end()) paths.push_back (z.samplePath);
+    std::string signature;
+    std::map<std::string, int> used;
+    for (const auto& z : cached_.zones) ++used[z.samplePath];
+    for (const auto& p : paths) signature += p + "|" + std::to_string (used[p]) + "\n";
+    if (signature == poolSignature_ && paths == poolPaths_) return;
+    poolSignature_ = signature;
+    poolPaths_ = paths;
+    std::vector<PoolTable::Row> rows;
+    for (const auto& p : paths)
+    {
+        PoolTable::Row r;
+        r.path = p;
+        r.name = juce::File (U (p)).getFileName();
+        r.used = used[p];
+        const auto& info = fileInfo_.info (p);
+        r.ok = info.ok;
+        if (info.ok)
+        {
+            r.length = juce::String (static_cast<double> (info.frames) / std::max (1.0, info.sampleRate), 2) + " s";
+            r.channels = juce::String (info.channels);
+            r.rate = juce::String (info.sampleRate, 0);
+            auto it = poolContents_.find (p);
+            if (it == poolContents_.end())
+            {
+                juce::StringArray parts;
+                SampleMeta meta;
+                if (readFileMarks (utf8Path (p), meta))
+                {
+                    if (! meta.loops.empty()) parts.add (tx ("pool.loops") + " " + juce::String (static_cast<int> (meta.loops.size())));
+                    if (meta.hasRoot) parts.add (tx ("pool.root") + " " + noteName (meta.rootNote));
+                    if (meta.hasVolumeMarker) parts.add ("VOL");
+                }
+                it = poolContents_.emplace (p, parts.joinIntoString ("  -  ")).first;
+            }
+            r.contents = it->second;
+        }
+        else r.contents = tx ("pool.missing");
+        rows.push_back (std::move (r));
+    }
+    pool_->setRows (std::move (rows));
+}
+
+void NovaSamplerEditor::addToPool (const std::vector<std::string>& paths)
+{
+    auto d = proc_.instrumentDescription();
+    int added = 0;
+    for (const auto& p : paths)
+        if (std::find (d.pool.begin(), d.pool.end(), p) == d.pool.end()) { d.pool.push_back (p); ++added; }
+    if (added == 0) return;
+    proc_.uiEditInstrument (std::move (d), "Add files to the pool");
+    lastRevision_ = 0xFFFFFFFFu;
+    refreshFromInstrument();
+}
+
+// Des fichiers de la réserve deviennent des zones sur la table affichée : première note déposée, les suivantes ensuite, toutes les vélocités ; la note racine est celle
+// que le fichier annonce, sinon la note déposée (le sample sonne alors à sa hauteur d'origine sur sa touche).
+void NovaSamplerEditor::placeFiles (const std::vector<int>& files, int firstKey, const neptune::core::mapping::View& view)
+{
+    auto d = proc_.instrumentDescription();
+    std::vector<int> created;
+    int offset = 0;
+    for (const int i : files)
+    {
+        if (i < 0 || i >= static_cast<int> (poolPaths_.size())) continue;
+        ZoneDescription z;
+        z.samplePath = poolPaths_[static_cast<std::size_t> (i)];
+        z.rootNote = std::clamp (firstKey + offset, 0, 127);
+        applyFileMarks (z, true);
+        created.push_back (static_cast<int> (d.zones.size()));
+        d.zones.push_back (sanitised (z));
+        if (std::find (d.pool.begin(), d.pool.end(), z.samplePath) == d.pool.end()) d.pool.push_back (z.samplePath);
+        ++offset;
+    }
+    if (created.empty()) return;
+    d = neptune::core::mapping::assignToView (d, created, view, firstKey);
+    proc_.uiEditInstrument (std::move (d), "Create zones from files");
+    lastRevision_ = 0xFFFFFFFFu;
+    refreshFromInstrument();
+    setSelection (created);
+}
+
+void NovaSamplerEditor::showPoolMenu (int row)
+{
+    if (row < 0 || row >= static_cast<int> (poolPaths_.size())) return;
+    auto selected = pool_->selectedRows();
+    if (std::find (selected.begin(), selected.end(), row) == selected.end()) selected = { row };
+    bool removable = false;
+    for (const int r : selected)
+    {
+        const auto& p = poolPaths_[static_cast<std::size_t> (r)];
+        const bool used = std::any_of (cached_.zones.begin(), cached_.zones.end(), [&] (const Zone& z) { return z.samplePath == p; });
+        removable = removable || (! used && std::find (cached_.pool.begin(), cached_.pool.end(), p) != cached_.pool.end());
+    }
+    juce::PopupMenu menu;
+    menu.addItem (1, tx ("pool.menu_create"));
+    menu.addItem (2, tx ("pool.menu_remove"), removable);
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options(), [safe, selected] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        if (r == 1)
+        {
+            // une zone par fichier, sur la note racine annoncée par le fichier (60 à défaut), dans la table affichée
+            for (const int i : selected)
+            {
+                SampleMeta meta;
+                const int key = (readFileMarks (utf8Path (safe->poolPaths_[static_cast<std::size_t> (i)]), meta) && meta.hasRoot) ? meta.rootNote : 60;
+                safe->placeFiles ({ i }, key, safe->matrix_->shownView());
+            }
+        }
+        else
+        {
+            auto d = safe->proc_.instrumentDescription();
+            for (const int i : selected)
+            {
+                const auto p = safe->poolPaths_[static_cast<std::size_t> (i)];
+                const bool used = std::any_of (d.zones.begin(), d.zones.end(), [&] (const Zone& z) { return z.samplePath == p; });
+                if (! used) d.pool.erase (std::remove (d.pool.begin(), d.pool.end(), p), d.pool.end());
+            }
+            safe->proc_.uiEditInstrument (std::move (d), "Remove files from the pool");
+            safe->lastRevision_ = 0xFFFFFFFFu;
+            safe->refreshFromInstrument();
+        }
+    });
+}
+
 void NovaSamplerEditor::startImport()
 {
     juce::PopupMenu menu;
     menu.addItem (1, tx ("sampler.import_files"));
     menu.addItem (2, tx ("sampler.import_folder"));
+    menu.addSeparator();
+    menu.addItem (3, tx ("pool.add_files"));
+    menu.addItem (4, tx ("pool.add_folder"));
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (importPill_), [safe = juce::Component::SafePointer<NovaSamplerEditor> (this)] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
         auto* self = safe.getComponent();
-        const bool folder = choice == 2;
+        const bool toPool = choice >= 3;
+        const bool folder = choice == 2 || choice == 4;
         // Choix d'un dossier : AUCUN filtre (la boîte système l'appliquerait aux dossiers eux-mêmes) ; les fichiers audio sont filtrés ensuite.
         self->importChooser_ = std::make_unique<juce::FileChooser> (self->tx ("sampler.choose"), juce::File(), folder ? juce::String ("*") : juce::String ("*.wav;*.aif;*.aiff;*.flac"));
         const int flags = folder ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories
                                  : juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems;
-        self->importChooser_->launchAsync (flags, [safe, folder] (const juce::FileChooser& fc)
+        self->importChooser_->launchAsync (flags, [safe, folder, toPool] (const juce::FileChooser& fc)
         {
             if (safe == nullptr) return;
             std::vector<std::string> paths;
@@ -1655,7 +1803,9 @@ void NovaSamplerEditor::startImport()
             }
             else
                 for (const auto& f : fc.getResults()) paths.push_back (f.getFullPathName().toStdString());
-            if (! paths.empty()) safe->openWizard (std::move (paths));
+            if (paths.empty()) return;
+            if (toPool) { safe->addToPool (paths); safe->showPool_ = true; safe->pageChanged(); }   // la réserve : rien n'est placé, rien n'est chargé
+            else safe->openWizard (std::move (paths));
         });
     });
 }
@@ -2070,6 +2220,7 @@ void NovaSamplerEditor::refreshFromInstrument()
         cached_ = proc_.instrumentDescription();
         zones_->setZones (cached_.zones);
         matrix_->setDescription (cached_);
+        rebuildPool();
         rebuildLoadPanel();
     }
     matrix_->setSelection (zones_->selectedRows());
@@ -2150,12 +2301,19 @@ void NovaSamplerEditor::pageChanged()
     if (zones_ == nullptr) return;
     const bool zonesPage = currentPage() == 0;
     // moniteur de voix : remplace la liste et la matrice
-    zones_->setVisible (zonesPage && listVisible_ && ! showVoices_);
+    zones_->setVisible (zonesPage && listVisible_ && ! showVoices_ && ! showPool_);
     tablePanel_->setVisible (zonesPage && listVisible_ && ! showVoices_);
+    tablePanel_->setTitle ((showPool_ ? tx ("pool.title") : tx ("sm.table")).toUpperCase());
+    zonesViewPill_->setVisible (zonesPage && listVisible_ && ! showVoices_);
+    poolViewPill_->setVisible (zonesPage && listVisible_ && ! showVoices_);
+    zonesViewPill_->setOn (! showPool_);
+    poolViewPill_->setOn (showPool_);
+    pool_->setVisible (zonesPage && listVisible_ && ! showVoices_ && showPool_);
     matrix_->setVisible (zonesPage && ! showVoices_);
     matrixPanel_->setVisible (zonesPage && ! showVoices_);
     voicesView_->setVisible (zonesPage && showVoices_);
     setInfoVisible (tablePanel_, zonesPage && listVisible_ && ! showVoices_);
+    setInfoVisible (poolViewPill_, zonesPage && listVisible_ && ! showVoices_);
     setInfoVisible (matrixPanel_, zonesPage && ! showVoices_);
     resized();
 }
@@ -2191,6 +2349,9 @@ void NovaSamplerEditor::layout()
     {
         tablePanel_->setBounds (R (X0, 196, 330, 514));
         zones_->setBounds (R (X0 + 10, 230, 310, 470));
+        pool_->setBounds (R (X0 + 10, 230, 310, 470));
+        zonesViewPill_->setBounds (R (X0 + 130, 200, 84, 22));
+        poolViewPill_->setBounds (R (X0 + 218, 200, 96, 22));
         matrixPanel_->setBounds (R (X0 + 342, 196, 600, 514));
         matrix_->setBounds (R (X0 + 350, 228, 584, 474));
     }

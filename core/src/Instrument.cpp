@@ -261,6 +261,7 @@ std::string toJson (const InstrumentDescription& d)
     doc["round_robin_mode"] = toString (d.roundRobinMode);
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.compensateOnReplace) doc["compensate_on_replace"] = false;
+    if (! d.pool.empty()) doc["pool"] = d.pool;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
     if (d.polyphony != PolyphonyMode::Poly) doc["polyphony"] = toString (d.polyphony);
@@ -426,6 +427,9 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
     if (const auto m = doc.find ("compensate_on_replace"); m != doc.end() && m->is_boolean()) d.compensateOnReplace = m->get<bool>();
+    if (const auto m = doc.find ("pool"); m != doc.end() && m->is_array())
+        for (const auto& e : *m)
+            if (e.is_string() && d.pool.size() < 100000) d.pool.push_back (e.get<std::string>());
     if (const auto m = doc.find ("load_release_samples"); m != doc.end() && m->is_boolean()) d.loadReleaseSamples = m->get<bool>();
     auto readString = [&] (const char* k) -> std::string
     {

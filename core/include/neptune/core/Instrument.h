@@ -132,6 +132,9 @@ const char* toString (SameKeyMode) noexcept;
 struct InstrumentDescription
 {
     std::vector<ZoneDescription> zones;
+    // Réserve de fichiers : les samples disponibles pour cet instrument, placés ou non (chemins absolus UTF-8). Les fichiers des zones y sont aussi, de fait ; la
+    // réserve garde en plus ceux qui ne sont (encore) dans aucune zone. Rien n'est chargé en mémoire pour un fichier de la réserve.
+    std::vector<std::string> pool;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
 
     // Ce qui est chargé en mémoire (réglable en cours d'utilisation ; les zones restent toutes dans la description) :
@@ -185,7 +188,7 @@ struct InstrumentDescription
 
     bool operator== (const InstrumentDescription& o) const noexcept
     {
-        return zones == o.zones && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
+        return zones == o.zones && pool == o.pool && roundRobinMode == o.roundRobinMode && mainRoundRobinOnly == o.mainRoundRobinOnly
             && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
