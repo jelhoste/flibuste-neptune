@@ -375,3 +375,63 @@ TEST_CASE ("level markers survive JSON")
     CHECK (back.zones[0] == sanitised (z));
     CHECK (back.zones[0].releaseRefFrame == 12345);
 }
+
+TEST_CASE ("preview sources play the raw sample, the region, a point or a loop")
+{
+    auto run = [] (SamplerVoices::PreviewSpec spec, int frames)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto z = makeFullKeyboardZone (makeRamp (8000), 60, PlayMode::Loop);
+        z.startFrame = 1000; z.endFrame = 6000;
+        z.loopStart = 2000; z.loopEnd = 3000;
+        z.moreLoops[0].start = 4000; z.moreLoops[0].end = 5000; z.moreLoopCount = 1; z.loopRepeats = 1;
+        z.sourceIndex = 0;
+        inst->zones.push_back (std::move (z));
+        inst->finalize();
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        v.previewZone (0, spec);
+        std::vector<float> l (static_cast<std::size_t> (frames), 0.0f), r (l);
+        for (int pos = 0; pos < frames; pos += 256) v.render (l.data() + pos, r.data() + pos, std::min (256, frames - pos), 1.0f, 1.0f, 0.0);
+        std::vector<double> out;
+        for (const float x : l) out.push_back (static_cast<double> (x) * 8000.0 * 254.0 / 128.0);   // l'écoute joue à la vélocité moyenne de la zone
+        return out;
+    };
+    using S = SamplerVoices::PreviewSpec::Source;
+    {   // sample brut : du premier au dernier échantillon, une fois, sans boucle
+        const auto o = run ({ S::Raw, -1, 0 }, 9000);
+        CHECK_THAT (o[0], WithinAbs (0.0, 1.0));
+        CHECK_THAT (o[2500], WithinAbs (2500.0, 1.0));   // pas de retour de boucle
+        CHECK_THAT (o[7990], WithinAbs (7990.0, 1.0));
+        CHECK (o[8500] == 0.0);                           // fini
+    }
+    {   // région : de START à END, une fois
+        const auto o = run ({ S::Region, -1, 0 }, 7000);
+        CHECK_THAT (o[0], WithinAbs (1000.0, 1.0));
+        CHECK_THAT (o[2500], WithinAbs (3500.0, 1.0));
+        CHECK_THAT (o[4990], WithinAbs (5990.0, 1.0));
+        CHECK (o[6500] == 0.0);
+    }
+    {   // depuis un point
+        const auto o = run ({ S::FromFrame, 3500, 0 }, 4000);
+        CHECK_THAT (o[0], WithinAbs (3500.0, 1.0));
+        CHECK_THAT (o[2000], WithinAbs (5500.0, 1.0));
+    }
+    {   // boucle 2, une seule fois
+        const auto o = run ({ S::LoopOnce, -1, 1 }, 2500);
+        CHECK_THAT (o[0], WithinAbs (4000.0, 1.0));
+        CHECK_THAT (o[990], WithinAbs (4990.0, 1.0));
+        CHECK (o[1500] == 0.0);
+    }
+    {   // boucle 1 telle qu'entendue : un retour, puis la lecture continue vers la boucle 2, qui tourne sans fin
+        const auto o = run ({ S::LoopHeard, -1, 0 }, 9000);
+        CHECK_THAT (o[0], WithinAbs (2000.0, 1.0));
+        CHECK_THAT (o[999], WithinAbs (2999.0, 1.0));
+        CHECK_THAT (o[1000], WithinAbs (2000.0, 1.0));    // le retour
+        CHECK_THAT (o[2000], WithinAbs (3000.0, 1.0));    // plus de retour : on avance
+        CHECK_THAT (o[3000], WithinAbs (4000.0, 1.0));
+        CHECK_THAT (o[4000], WithinAbs (4000.0, 1.0));    // la dernière boucle revient sans fin
+        CHECK_THAT (o[8999], WithinAbs (4000.0 + std::fmod (8999.0 - 3000.0, 1000.0), 1.0));
+    }
+}

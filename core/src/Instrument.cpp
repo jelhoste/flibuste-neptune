@@ -223,13 +223,13 @@ std::string toJson (const InstrumentDescription& d)
         if (z.reverse) o["reverse"] = true;
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.pan != 0.0) o["pan"] = z.pan;
+        if (z.releaseRefFrame >= 0) o["release_ref_frame"] = z.releaseRefFrame;   // propriété du sample : posée même sur une zone d'attaque (ignorée tant qu'elle n'est pas de relâchement)
         if (z.releaseFollowsLevel)
         {
             o["release_follows_level"] = true;
             o["release_meter"] = z.releaseMeter;
             o["release_floor_db"] = z.releaseFloorDb;
             o["release_curve"] = z.releaseCurve;
-            if (z.releaseRefFrame >= 0) o["release_ref_frame"] = z.releaseRefFrame;
             if (z.releaseOffsetDb != 0.0) o["release_offset_db"] = z.releaseOffsetDb;
         }
         if (z.loopRepeats != 0) o["loop_repeats"] = z.loopRepeats;

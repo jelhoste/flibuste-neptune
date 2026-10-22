@@ -69,6 +69,8 @@ private:
     void updateFilterEditor();
     void updateVoices();
     void updatePlayButton();
+    void startPreview (int source, std::int64_t frame, int loopIndex, int owner);
+    void stopPreviewNow();
     void toggleRecording();
     void finishRecording (const std::string& path, std::int64_t frames);
     void updateRecordButton();
@@ -145,6 +147,8 @@ private:
     std::string loopCandidatesKey_, seamKey_;
     std::unique_ptr<juce::FileChooser> saveChooser_;
     bool previewing_ = false;
+    int previewOwner_ = 0;                       // 1 : bouton du bas, 2 : bouton des outils du sample
+    int playSourceIndex_ = 3, loopPlayHeard_ = 1;   // outils du sample : quoi jouer (brut, région, curseur, boucle) ; boucle une fois (0) ou telle qu'entendue (1)
     std::string recordingPath_;
     juce::uint32 recordStartMs_ = 0;
     juce::uint32 previewStartMs_ = 0;
@@ -178,6 +182,9 @@ private:
     nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *loopOptionsPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
     nova::ChoicePill *normChoice_ = nullptr, *silenceChoice_ = nullptr, *cutsChoice_ = nullptr;
     nova::Text* toolStatus_ = nullptr;
+    nova::Pill* toolsPlayPill_ = nullptr;
+    nova::ChoicePill *playSourceChoice_ = nullptr, *loopPlayModeChoice_ = nullptr;
+    std::unique_ptr<nova::ChoicePill> toolLoopChoice_;
     std::unique_ptr<nova::ChoicePill> loopEditChoice_;
     nova::Pill *loopAddPill_ = nullptr, *loopRemovePill_ = nullptr;
     nova::NumberPill* loopRepeatsNumber_ = nullptr;

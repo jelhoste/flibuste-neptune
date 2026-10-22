@@ -110,6 +110,8 @@ public:
         float velocity = 0.0f;
         int track = 0;                 // piste visée (NoteOn, NoteOff, Preview*) ; Panic / ReleaseAll : toutes
         std::int64_t frame = -1;       // PreviewZone : point de départ dans le fichier (-1 : le début de la région jouée)
+        std::uint8_t source = 0;       // PreviewZone : SamplerVoices::PreviewSpec::Source
+        std::uint8_t loopIndex = 0;    // PreviewZone : boucle visée (LoopOnce / LoopHeard)
     };
     bool postUiEvent (const UiEvent&) noexcept;
 

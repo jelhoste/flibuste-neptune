@@ -43,7 +43,16 @@ public:
     // Écoute d'une zone (bouton de lecture de la liste) : démarre une voix de CETTE zone à sa note racine, sans passer par la
     // sélection des couches ni le choke. Le canal est hors de la plage MIDI : aucune confusion avec les notes de l'hôte.
     static constexpr int kPreviewChannel = 1000;
-    void previewZone (int sourceIndex, std::int64_t fromFrame = -1) noexcept;   // fromFrame >= 0 : la lecture démarre à ce point du fichier // sourceIndex : indice de la zone dans la DESCRIPTION (Zone::sourceIndex)
+    // Ce que l'écoute joue : la zone telle quelle (région, boucle, comme au clavier), le sample brut en entier, la région START-END une fois, depuis un point (jusqu'à END),
+    // une boucle une seule fois, ou une boucle telle qu'on l'entend (avec ses retours, jusqu'à l'arrêt).
+    struct PreviewSpec
+    {
+        enum class Source : std::uint8_t { Zone, Raw, Region, FromFrame, LoopOnce, LoopHeard } source = Source::Zone;
+        std::int64_t frame = -1;   // Zone / FromFrame : point de départ (-1 : le début de la région)
+        int loopIndex = 0;         // LoopOnce / LoopHeard : boucle visée (0 = la première)
+    };
+    void previewZone (int sourceIndex, const PreviewSpec& spec) noexcept;
+    void previewZone (int sourceIndex) noexcept { previewZone (sourceIndex, PreviewSpec {}); } // sourceIndex : indice de la zone dans la DESCRIPTION (Zone::sourceIndex)
     void releasePreview() noexcept; // Note Off de l'écoute (les boucles se relâchent ; un one-shot va au bout)
     void stopPreview() noexcept;    // coupe l'écoute en fondu
     void allSoundOff() noexcept;
@@ -119,6 +128,7 @@ private:
         std::array<float, 2> fenvValue { 0.0f, 0.0f };
         SlotMods mods;                      // effet des emplacements assignables, fixé au Note On
         int fcount = 0;
+        struct Override { bool on = false, loop = false; std::int64_t start = 0, end = 0; } ovr;   // écoute : région et boucle imposées à la place de celles de la zone
         LevelTracker tracker;               // niveau entendu de la voix (suivi seulement si une zone de relâchement le demande)
         int loopIdx = 0;                    // boucle en cours (0 = la première) quand la zone en a plusieurs
         int repsLeft = -1;                  // retours restants de la boucle en cours ; -1 = sans fin, 0 = passer à la suivante

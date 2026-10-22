@@ -511,19 +511,12 @@ void NovaSamplerEditor::buildSamplePage()
     addInfo (-1, playPill_, "hlp.sm_playbtn", 1);
     playPill_->onClick = [this]
     {
-        if (previewing_)
-        {
-            proc_.uiPreviewStop();
-            previewing_ = false;
-            return;
-        }
-        if (cached_.zones.empty()) return;
-        const auto sel = zones_->selectedRows();
-        const int row = (! sel.empty() && sel.front() >= 0 && sel.front() < static_cast<int> (cached_.zones.size())) ? sel.front() : 0;
-        const auto* zz = row < static_cast<int> (cached_.zones.size()) ? &cached_.zones[static_cast<std::size_t> (row)] : nullptr;
-        proc_.uiPreviewZone (row, (zz != nullptr && cursorFrame_ >= 0 && cursorPath_ == zz->samplePath) ? cursorFrame_ : -1);   // le curseur de la forme d'onde donne le point de départ
-        previewing_ = true;
-        previewStartMs_ = juce::Time::getMillisecondCounter();
+        if (previewing_ && previewOwner_ == 1) { stopPreviewNow(); return; }
+        const auto* zz = shownZone();
+        if (zz == nullptr) return;
+        // le sample joué en une fois : de START à END (ou du curseur à END), sans boucle
+        const bool fromCursor = cursorFrame_ >= 0 && cursorPath_ == zz->samplePath;
+        startPreview (fromCursor ? 3 : 2, fromCursor ? cursorFrame_ : -1, 0, 1);
     };
     showAllPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     showAllPill_->setText (tx ("sm.show_all"));
@@ -573,11 +566,11 @@ void NovaSamplerEditor::buildSamplePage()
     loopEditChoice_->set = [this] (int i) { editLoop_ = i; navPoint_ = -1; lastRevision_ = 0xFFFFFFFFu; };
     loopEditChoice_->attach (*this);
     loopAddPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
-    loopAddPill_->setText ("+");
+    loopAddPill_->setText (tx ("sm.loop_add"));
     loopAddPill_->onClick = [this] { addLoop(); };
     addInfo (1, loopAddPill_, "hlp.sm_multiloop", 1);
     loopRemovePill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
-    loopRemovePill_->setText ("-");
+    loopRemovePill_->setText (tx ("sm.loop_remove"));
     loopRemovePill_->onClick = [this] { removeLoop(); };
     loopRepeatsNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.loop_repeats").toUpperCase(), 0, 99,
                                                 [this] { const auto* z = shownZone(); return z != nullptr ? loopView (*z, editLoop_).repeats : 0; },
@@ -636,6 +629,30 @@ void NovaSamplerEditor::buildSamplePage()
     addInfo (1, pitchNumber_, "hlp.sm_stretch", 1);
     stretchPill_ = tool (tx ("sm.tool_stretch"), "hlp.sm_stretch", [this] { toolStretch(); });
     seam_ = add<nova::LoopSeamView> (1, skin());
+    toolsPlayPill_ = tool (tx ("sm.tp_play"), "hlp.sm_toolplay", [this]
+    {
+        if (previewing_ && previewOwner_ == 2) { stopPreviewNow(); return; }
+        const auto* zz = shownZone();
+        if (zz == nullptr) return;
+        const int mode = playSourceIndex_;   // 0 brut, 1 région, 2 depuis le curseur, 3 boucle
+        if (mode == 0) startPreview (1, -1, 0, 2);
+        else if (mode == 1) startPreview (2, -1, 0, 2);
+        else if (mode == 2)
+        {
+            const bool ok = cursorFrame_ >= 0 && cursorPath_ == zz->samplePath;
+            if (! ok) { setToolStatus (tx ("sm.st_loop_nocursor")); return; }
+            startPreview (3, cursorFrame_, 0, 2);
+        }
+        else startPreview (loopPlayHeard_ ? 5 : 4, -1, std::clamp (editLoop_, 0, loopCountOf (*zz) - 1), 2);
+    });
+    playSourceChoice_ = toolChoice (tx ("sm.tp_source"), { tx ("sm.tp_raw"), tx ("sm.tp_region"), tx ("sm.tp_cursor"), tx ("sm.tp_loop") }, &playSourceIndex_);
+    toolLoopChoice_ = std::make_unique<nova::ChoicePill>();
+    toolLoopChoice_->pill = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
+    toolLoopChoice_->label = [this] { return tx ("sm.loop_n").toUpperCase(); };
+    toolLoopChoice_->get = [this] { return editLoop_; };
+    toolLoopChoice_->set = [this] (int i) { editLoop_ = i; navPoint_ = -1; lastRevision_ = 0xFFFFFFFFu; };
+    toolLoopChoice_->attach (*this);
+    loopPlayModeChoice_ = toolChoice (tx ("sm.tp_mode"), { tx ("sm.tp_once"), tx ("sm.tp_heard") }, &loopPlayHeard_);
 
     // ---- empreintes de volume (rangée d'en-tête du panneau de la forme d'onde)
     auto curveToggle = [this, tool] (const char* key, int bit)
@@ -877,7 +894,9 @@ void NovaSamplerEditor::toolAutoLoop()
         std::string err;
         if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
         const std::int64_t total = b.frames();
-        loopCandidates_ = se::findLoopCandidates (b, zone.startFrame, zone.endFrame < 0 ? total : std::min (zone.endFrame, total), 6, 100.0, options);
+        std::int64_t searchFrom = zone.startFrame;
+        if (editLoop_ > 0 && editLoop_ < loopCountOf (zone)) { const auto prev = loopView (zone, editLoop_ - 1); searchFrom = std::max (searchFrom, prev.end < 0 ? total : prev.end); }   // les boucles se suivent dans le fichier
+        loopCandidates_ = se::findLoopCandidates (b, searchFrom, zone.endFrame < 0 ? total : std::min (zone.endFrame, total), 6, 100.0, options);
         loopCandidatesKey_ = key;
         loopCandidateIndex_ = 0;
         if (loopCandidates_.empty()) { setToolStatus (tx ("sm.st_loop_none")); return; }
@@ -965,7 +984,7 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
     cursorFrame_ = frame;
     cursorPath_ = z->samplePath;
     wave_->setCursor (frame, false);
-    const bool volumeOk = z->onRelease && z->releaseFollowsLevel;
+    const bool volumeOk = true;   // le marqueur de volume est une propriété du sample : posable sur toute zone
     juce::PopupMenu menu;
     menu.addItem (1, tx ("sm.menu_start"));
     menu.addItem (2, tx ("sm.menu_end"));
@@ -990,7 +1009,7 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
             case 4: safe->applyMarker_ (M::LoopEnd, frame); break;
             case 5: safe->applyMarker_ (M::Volume, frame); break;
             case 6: safe->editZone ([] (Zone& zone) { zone.releaseRefFrame = -1; }); break;
-            case 7: { if (! safe->previewing_) safe->playPill_->onClick(); break; }
+            case 7: safe->startPreview (3, frame, 0, 1); break;
             case 8:
             {
                 const bool was = safe->loopOptions_.aroundCursor;
@@ -1864,7 +1883,7 @@ void NovaSamplerEditor::updateSampleInfo()
     m.crossfade = edited.crossfade;
     m.loopStart = std::max (edited.start, z->startFrame);   // la boucle ne revient jamais avant START (même règle que le moteur)
     m.loopNumber = idx + 1;
-    if (z->onRelease && z->releaseFollowsLevel && z->releaseRefFrame >= 0)
+    if (z->releaseRefFrame >= 0)   // propriété du sample : visible sur toute zone (utilisée seulement par les zones de relâchement)
     {
         m.volumeRef = z->releaseRefFrame;
         const std::string key = z->samplePath + "|" + std::to_string (z->releaseRefFrame) + "|" + std::to_string (z->releaseMeter);
@@ -1964,8 +1983,8 @@ void NovaSamplerEditor::layout()
     voicesView_->setBounds (R (X0, 196, 942, 514));
 
     // ---- page SAMPLE
-    wavePanel_->setBounds (R (X0, 72, 942, 236));
-    wave_->setBounds (R (X0 + 10, 104, 922, 194));
+    wavePanel_->setBounds (R (X0, 72, 942, 204));
+    wave_->setBounds (R (X0 + 10, 104, 922, 162));
     peakCurvePill_->setBounds (R (X0 + 150, 76, 54, 22));
     rmsCurvePill_->setBounds (R (X0 + 208, 76, 54, 22));
     lufsCurvePill_->setBounds (R (X0 + 266, 76, 58, 22));
@@ -1975,26 +1994,30 @@ void NovaSamplerEditor::layout()
     rangePill_->setBounds (R (X0 + 630, 76, 72, 22));
     rangeLoNumber_->setBounds (R (X0 + 706, 74, 96, 26));
     rangeHiNumber_->setBounds (R (X0 + 806, 74, 96, 26));
-    infoText_->setBounds (R (X0 + 4, 310, 934, 16));
-    markerText_->setBounds (R (X0 + 4, 326, 934, 16));
-    toolsPanel_->setBounds (R (X0, 346, 942, 170));
-    trimPill_->setBounds (R (X0 + 12, 378, 110, 28));
-    normPill_->setBounds (R (X0 + 128, 378, 116, 28));
-    normChoice_->pill->setBounds (R (X0 + 250, 378, 170, 28));
-    dcPill_->setBounds (R (X0 + 426, 378, 124, 28));
-    saveAsPill_->setBounds (R (X0 + 556, 378, 150, 28));
-    silencePill_->setBounds (R (X0 + 12, 412, 170, 28));
-    silenceChoice_->pill->setBounds (R (X0 + 188, 412, 160, 28));
-    cutsPill_->setBounds (R (X0 + 354, 412, 160, 28));
-    cutsChoice_->pill->setBounds (R (X0 + 520, 412, 186, 28));
-    loopFindPill_->setBounds (R (X0 + 12, 446, 150, 28));
-    loopOptionsPill_->setBounds (R (X0 + 168, 446, 36, 28));
-    snapPill_->setBounds (R (X0 + 210, 446, 150, 28));
-    toolStatus_->setBounds (R (X0 + 368, 446, 338, 28));
-    durationNumber_->setBounds (R (X0 + 12, 480, 200, 28));
-    pitchNumber_->setBounds (R (X0 + 218, 480, 200, 28));
-    stretchPill_->setBounds (R (X0 + 424, 480, 140, 28));
-    seam_->setBounds (R (X0 + 718, 378, 216, 130));
+    infoText_->setBounds (R (X0 + 4, 278, 934, 16));
+    markerText_->setBounds (R (X0 + 4, 294, 934, 16));
+    toolsPanel_->setBounds (R (X0, 314, 942, 202));
+    trimPill_->setBounds (R (X0 + 12, 346, 110, 28));
+    normPill_->setBounds (R (X0 + 128, 346, 116, 28));
+    normChoice_->pill->setBounds (R (X0 + 250, 346, 170, 28));
+    dcPill_->setBounds (R (X0 + 426, 346, 124, 28));
+    saveAsPill_->setBounds (R (X0 + 556, 346, 150, 28));
+    silencePill_->setBounds (R (X0 + 12, 380, 170, 28));
+    silenceChoice_->pill->setBounds (R (X0 + 188, 380, 160, 28));
+    cutsPill_->setBounds (R (X0 + 354, 380, 160, 28));
+    cutsChoice_->pill->setBounds (R (X0 + 520, 380, 186, 28));
+    loopFindPill_->setBounds (R (X0 + 12, 414, 150, 28));
+    loopOptionsPill_->setBounds (R (X0 + 168, 414, 36, 28));
+    snapPill_->setBounds (R (X0 + 210, 414, 150, 28));
+    toolStatus_->setBounds (R (X0 + 368, 414, 338, 28));
+    durationNumber_->setBounds (R (X0 + 12, 448, 200, 28));
+    pitchNumber_->setBounds (R (X0 + 218, 448, 200, 28));
+    stretchPill_->setBounds (R (X0 + 424, 448, 140, 28));
+    toolsPlayPill_->setBounds (R (X0 + 12, 482, 110, 28));
+    playSourceChoice_->pill->setBounds (R (X0 + 128, 482, 250, 28));
+    toolLoopChoice_->pill->setBounds (R (X0 + 384, 482, 120, 28));
+    loopPlayModeChoice_->pill->setBounds (R (X0 + 510, 482, 196, 28));
+    seam_->setBounds (R (X0 + 718, 346, 216, 130));
     playPanel_->setBounds (R (X0, 524, 942, 186));
     loopPill_->setBounds (R (X0 + 12, 558, 170, 28));
     reversePill_->setBounds (R (X0 + 188, 558, 150, 28));
@@ -2002,10 +2025,10 @@ void NovaSamplerEditor::layout()
     playPill_->setBounds (R (1006, 736, 140, 32));
     recPill_->setBounds (R (846, 736, 140, 32));
     rootNumber2_->setBounds (R (X0 + 480, 558, 154, 28));
-    loopEditChoice_->pill->setBounds (R (X0 + 640, 558, 100, 28));
-    loopAddPill_->setBounds (R (X0 + 744, 558, 30, 28));
-    loopRemovePill_->setBounds (R (X0 + 778, 558, 30, 28));
-    loopRepeatsNumber_->setBounds (R (X0 + 814, 556, 118, 32));
+    loopEditChoice_->pill->setBounds (R (X0 + 640, 558, 108, 28));
+    loopAddPill_->setBounds (R (X0 + 754, 558, 120, 28));
+    loopRemovePill_->setBounds (R (X0 + 880, 558, 52, 28));
+    loopRepeatsNumber_->setBounds (R (X0 + 696, 654, 150, 32));
     pan_->setBounds (R (X0 + 468, 650, 214, 46));
     fadeIn_->setBounds (R (X0 + 12, 596, 214, 46));
     fadeOut_->setBounds (R (X0 + 240, 596, 214, 46));
@@ -2043,20 +2066,45 @@ void NovaSamplerEditor::layout()
     if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
 }
 
-// Un one-shot qui finit seul remet le bouton à « play » : on regarde si une voix d'écoute de la piste sonne encore.
+// Écoute : une seule à la fois (le moteur remplace la précédente). `owner` : 1 = bouton du bas, 2 = bouton des outils du sample.
+void NovaSamplerEditor::startPreview (int source, std::int64_t frame, int loopIndex, int owner)
+{
+    if (cached_.zones.empty()) return;
+    const auto sel = zones_->selectedRows();
+    const int row = (! sel.empty() && sel.front() >= 0 && sel.front() < static_cast<int> (cached_.zones.size())) ? sel.front() : 0;
+    proc_.setVoiceMonitor (true);   // l'état du bouton (voix qui sonne encore ou non) se lit dans le moniteur de voix
+    proc_.uiPreviewZone (row, frame, source, loopIndex);
+    previewing_ = true;
+    previewOwner_ = owner;
+    previewStartMs_ = juce::Time::getMillisecondCounter();
+}
+
+void NovaSamplerEditor::stopPreviewNow()
+{
+    proc_.uiPreviewStop();
+    previewing_ = false;
+    previewOwner_ = 0;
+}
+
+// Un one-shot qui finit seul remet le bouton à « play » : on regarde si une voix d'écoute de la piste sonne encore. Le moniteur de voix n'est alimenté que sur demande :
+// il reste allumé tant qu'une écoute est en cours (sans lui, une boucle aurait l'air finie au bout d'un instant et le bouton ne saurait plus l'arrêter).
 void NovaSamplerEditor::updatePlayButton()
 {
-    if (previewing_ && juce::Time::getMillisecondCounter() - previewStartMs_ > 250)
+    if (previewing_ && juce::Time::getMillisecondCounter() - previewStartMs_ > 400)
     {
         Engine::VoiceInfo info[Engine::kVoiceSnapshot];
         const int n = proc_.readVoices (info, Engine::kVoiceSnapshot);
         bool any = false;
         for (int i = 0; i < n; ++i) any = any || (info[i].preview && info[i].track == proc_.selectedTrack());
-        if (! any) previewing_ = false;
+        if (! any) { previewing_ = false; previewOwner_ = 0; }
     }
-    playPill_->setText (tx (previewing_ ? "sm.stop_button" : "sm.play_button"));
-    playPill_->setOn (previewing_);
+    proc_.setVoiceMonitor (showVoices_ || previewing_);
+    const bool bottom = previewing_ && previewOwner_ == 1, tools = previewing_ && previewOwner_ == 2;
+    playPill_->setText (tx (bottom ? "sm.stop_button" : "sm.play_button"));
+    playPill_->setOn (bottom);
     playPill_->setAlpha (cached_.zones.empty() && ! previewing_ ? 0.4f : 1.0f);
+    toolsPlayPill_->setText (tx (tools ? "sm.stop_button" : "sm.tp_play"));
+    toolsPlayPill_->setOn (tools);
 }
 
 void NovaSamplerEditor::toggleRecording()
@@ -2171,7 +2219,14 @@ void NovaSamplerEditor::tick()
         updateSampleInfo();
         updateSeam();
         updateFootprint();
-        for (auto* c : { normChoice_, silenceChoice_, cutsChoice_ }) c->refresh (has);
+        for (auto* c : { normChoice_, silenceChoice_, cutsChoice_, playSourceChoice_ }) c->refresh (has);
+        {
+            const int n = z != nullptr ? loopCountOf (*z) : 1;
+            if (static_cast<int> (toolLoopChoice_->items.size()) != n) toolLoopChoice_->items = loopEditChoice_->items;
+            const bool loopSource = playSourceIndex_ == 3 && has && z->mode == PlayMode::Loop;
+            toolLoopChoice_->refresh (loopSource);
+            loopPlayModeChoice_->refresh (loopSource);
+        }
         for (auto* pl : { trimPill_, normPill_, dcPill_, saveAsPill_, silencePill_, cutsPill_, loopFindPill_ }) pl->setAlpha (has ? 1.0f : 0.4f);
         {
             // boucles multiples : la liste du menu suit le nombre de boucles ; la dernière tourne sans fin (pas de répétitions)

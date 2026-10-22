@@ -464,7 +464,16 @@ void Engine::drainUiEvents() noexcept
         {
             case UiEvent::Type::NoteOn: noteOnTrack (tr, e.channel, e.key, e.velocity); break;
             case UiEvent::Type::NoteOff: noteOffTrack (tr, e.channel, e.key); break;
-            case UiEvent::Type::PreviewZone: if (tracks_[static_cast<std::size_t> (tr)].type.load() == 0) tracks_[static_cast<std::size_t> (tr)].voices.previewZone (e.key, e.frame); break;
+            case UiEvent::Type::PreviewZone:
+                if (tracks_[static_cast<std::size_t> (tr)].type.load() == 0)
+                {
+                    SamplerVoices::PreviewSpec spec;
+                    spec.source = static_cast<SamplerVoices::PreviewSpec::Source> (std::min<std::uint8_t> (e.source, 5));
+                    spec.frame = e.frame;
+                    spec.loopIndex = e.loopIndex;
+                    tracks_[static_cast<std::size_t> (tr)].voices.previewZone (e.key, spec);
+                }
+                break;
             case UiEvent::Type::PreviewRelease: tracks_[static_cast<std::size_t> (tr)].voices.releasePreview(); break;
             case UiEvent::Type::PreviewStop: tracks_[static_cast<std::size_t> (tr)].voices.stopPreview(); break;
             case UiEvent::Type::Panic: panic(); break;

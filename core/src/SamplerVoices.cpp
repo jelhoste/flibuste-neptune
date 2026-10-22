@@ -540,7 +540,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     const Zone& z = *v.zone;
     const SampleData& s = *z.sample;
     const bool stereo = s.channels >= 2;
-    const bool loop = z.mode == PlayMode::Loop;
+    const bool loop = v.ovr.on ? v.ovr.loop : z.mode == PlayMode::Loop;
     const FilterRuntimeBlock* fr = z.filters.get(); // non nul quand Filtered
     const bool on0 = fr != nullptr && fr->settings[0].on, on1 = fr != nullptr && fr->settings[1].on;
     const bool parallelFilters = fr != nullptr && fr->parallel;
@@ -557,7 +557,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     const double dir = reverse ? -1.0 : 1.0;
     double inc = dir * ratio * pitchFactor;
     const double frames = static_cast<double> (s.frames);
-    const std::int64_t startF = z.startFrame, endF = z.endFrame > z.startFrame ? z.endFrame : s.frames;
+    const std::int64_t startF = v.ovr.on ? v.ovr.start : z.startFrame, endF = v.ovr.on ? v.ovr.end : (z.endFrame > z.startFrame ? z.endFrame : s.frames);
     const double endLimit = loop ? frames : static_cast<double> (endF);
     const double fadeInOut = z.fadeInMs > 0.0 ? z.fadeInMs * 0.001 * sampleRate_ : 0.0;
     const double fadeOutOut = (! loop && z.fadeOutMs > 0.0) ? z.fadeOutMs * 0.001 * sampleRate_ : 0.0;
@@ -817,7 +817,7 @@ void SamplerVoices::releaseAll() noexcept
     numDown_ = 0;
 }
 
-void SamplerVoices::previewZone (int sourceIndex, std::int64_t fromFrame) noexcept
+void SamplerVoices::previewZone (int sourceIndex, const PreviewSpec& spec) noexcept
 {
     if (instrument_ == nullptr) return;
     stopPreview(); // une écoute à la fois
@@ -827,26 +827,71 @@ void SamplerVoices::previewZone (int sourceIndex, std::int64_t fromFrame) noexce
         // vélocité : le milieu de la plage de la zone (on entend ce que la zone joue à sa vélocité « typique »)
         const float velocity = static_cast<float> (z.velLow + z.velHigh) / 254.0f;
         startVoice (kPreviewChannel, z.rootNote, std::clamp (velocity, 0.0f, 1.0f), z, 1.0f);
-        if (fromFrame >= 0)
+        using Source = PreviewSpec::Source;
+        for (auto& v : voices_)
         {
-            for (auto& v : voices_)
+            if (! v.active || v.channel != kPreviewChannel || v.order != counter_) continue;
+            const std::int64_t frames = z.sample->frames;
+            const std::int64_t zoneEnd = z.endFrame > z.startFrame ? z.endFrame : frames;
+            const int loops = 1 + z.moreLoopCount;
+            const int li = std::clamp (spec.loopIndex, 0, loops - 1);
+            auto loopRange = [&] (int idx, std::int64_t& ls, std::int64_t& le, int& reps)
             {
-                if (! v.active || v.channel != kPreviewChannel || v.order != counter_) continue;
-                const std::int64_t endF = z.endFrame > z.startFrame ? z.endFrame : z.sample->frames;
-                const std::int64_t at = std::clamp<std::int64_t> (fromFrame, z.startFrame, std::max<std::int64_t> (z.startFrame, endF - 1));
-                v.pos = static_cast<double> (at);
-                // zone à plusieurs boucles : on reprend dans la boucle qui contient le point (ou la suivante)
-                if (z.mode == PlayMode::Loop && z.moreLoopCount > 0 && ! z.reverse)
+                if (idx <= 0) { ls = z.loopStart; le = z.loopEnd; reps = z.moreLoopCount > 0 ? z.loopRepeats : 0; }
+                else { const auto& m = z.moreLoops[static_cast<std::size_t> (idx - 1)]; ls = m.start; le = m.end; reps = m.repeats; }
+            };
+            auto place = [&] (std::int64_t from, std::int64_t to, bool loop)
+            {
+                v.ovr = { true, loop, from, to };
+                v.pos = static_cast<double> (z.reverse ? std::max (from, to - 1) : from);
+            };
+            switch (spec.source)
+            {
+                case Source::Zone:
+                    if (spec.frame >= 0)
+                    {
+                        const std::int64_t at = std::clamp<std::int64_t> (spec.frame, z.startFrame, std::max<std::int64_t> (z.startFrame, zoneEnd - 1));
+                        v.pos = static_cast<double> (at);
+                        // zone à plusieurs boucles : on reprend dans la boucle qui contient le point (ou la suivante)
+                        if (z.mode == PlayMode::Loop && z.moreLoopCount > 0 && ! z.reverse)
+                        {
+                            int idx = 0;
+                            std::int64_t le = z.loopEnd;
+                            while (idx < z.moreLoopCount && at >= le) { le = z.moreLoops[static_cast<std::size_t> (idx)].end; ++idx; }
+                            v.loopIdx = idx;
+                            const int reps = idx == 0 ? z.loopRepeats : (idx < z.moreLoopCount ? z.moreLoops[static_cast<std::size_t> (idx - 1)].repeats : 0);
+                            v.repsLeft = idx >= z.moreLoopCount ? -1 : (reps > 0 ? reps : -1);
+                        }
+                    }
+                    break;
+                case Source::Raw: place (0, frames, false); break;
+                case Source::Region: place (z.startFrame, zoneEnd, false); break;
+                case Source::FromFrame:
                 {
-                    int idx = 0;
-                    std::int64_t le = z.loopEnd;
-                    while (idx < z.moreLoopCount && at >= le) { le = z.moreLoops[static_cast<std::size_t> (idx)].end; ++idx; }
-                    v.loopIdx = idx;
-                    const int reps = idx == 0 ? z.loopRepeats : (idx < z.moreLoopCount ? z.moreLoops[static_cast<std::size_t> (idx - 1)].repeats : 0);
-                    v.repsLeft = idx >= z.moreLoopCount ? -1 : (reps > 0 ? reps : -1);
+                    const std::int64_t at = std::clamp<std::int64_t> (spec.frame < 0 ? z.startFrame : spec.frame, z.startFrame, std::max<std::int64_t> (z.startFrame, zoneEnd - 1));
+                    v.ovr = { true, false, z.startFrame, zoneEnd };
+                    v.pos = static_cast<double> (at);
+                    break;
                 }
-                break;
+                case Source::LoopOnce:
+                {
+                    std::int64_t ls = 0, le = 0; int reps = 0;
+                    loopRange (li, ls, le, reps);
+                    place (ls, std::min (le, frames), false);
+                    break;
+                }
+                case Source::LoopHeard:
+                {
+                    std::int64_t ls = 0, le = 0; int reps = 0;
+                    loopRange (z.reverse ? 0 : li, ls, le, reps);
+                    v.ovr = { true, true, z.startFrame, zoneEnd };
+                    v.pos = static_cast<double> (z.reverse ? le - 1 : ls);
+                    v.loopIdx = z.reverse ? 0 : li;
+                    v.repsLeft = (li >= z.moreLoopCount || reps <= 0 || z.reverse) ? -1 : reps;
+                    break;
+                }
             }
+            break;
         }
         return;
     }
