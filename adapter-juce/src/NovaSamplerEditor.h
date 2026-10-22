@@ -5,6 +5,7 @@
 // sont posés dans des panneaux NOVA.
 #include <atomic>
 #include <future>
+#include <mutex>
 #include <memory>
 #include <map>
 #include <thread>
@@ -26,6 +27,7 @@
 #include "ZoneTable.h"
 #include "neptune/core/MemoryBudget.h"
 #include "neptune/core/SampleEdit.h"
+#include "neptune/core/PitchDetect.h"
 #include "neptune/core/SampleMeta.h"
 #include "neptune/core/TimeStretch.h"
 #include "neptune/core/VolumeFootprint.h"
@@ -66,7 +68,16 @@ private:
     void openChokePanel (juce::Component& anchor);
     void openLevelsPanel (juce::Component& anchor);
     void openMidiCondition();
-    void rebuildPool();
+    neptune::core::EnvelopeDescription parentEnvelope (const Zone&) const;
+    neptune::core::EnvelopeDescription shownEnvelope (bool& editable, bool& linked, juce::String& note) const;
+    void applyEnvelope (const neptune::core::EnvelopeDescription&);
+    void toggleEnvelopeLink();
+    void rebuildPool (bool force = false);
+    void requestPitch (const std::string& path);
+    bool pitchOf (const std::string& path, neptune::core::PitchResult& out);
+    juce::String pitchText (const std::string& path);
+    void applyDetectedPitch();
+    void openHumanizePanel (juce::Component& anchor);
     void addToPool (const std::vector<std::string>& paths);
     void placeFiles (const std::vector<int>& files, int firstKey, const neptune::core::mapping::View&);
     void showPoolMenu (int row);
@@ -191,6 +202,15 @@ private:
     std::vector<std::unique_ptr<nova::ChoicePill>> choices_;
     ZoneTable* zones_ = nullptr;
     PoolTable* pool_ = nullptr;
+    nova::Text* detectedText_ = nullptr;
+    nova::Pill *applyPitchPill_ = nullptr, *humanizePill_ = nullptr;
+    // note détectée, calculée en arrière-plan (une file de fichiers, un seul fil)
+    std::mutex pitchMutex_;
+    std::map<std::string, neptune::core::PitchResult> pitchDone_;
+    std::vector<std::string> pitchQueue_;
+    bool pitchRunning_ = false, pitchQuit_ = false;
+    std::thread pitchThread_;
+    std::atomic<bool> pitchDirty_ { false };
     nova::Pill *zonesViewPill_ = nullptr, *poolViewPill_ = nullptr;
     bool showPool_ = false;                       // la liste de gauche montre la réserve de fichiers au lieu des zones
     std::vector<std::string> poolPaths_;          // lignes de la réserve (même ordre que PoolTable)
@@ -225,6 +245,10 @@ private:
     // page SON
     nova::Panel *envPanel_ = nullptr, *filterPanel_ = nullptr, *slotsAreaPanel_ = nullptr;
     EnvelopeEditor* env_ = nullptr;
+    int envLevel_ = 2;                                 // niveau édité : 0 instrument, 1 Groupe de la zone affichée, 2 zones sélectionnées
+    std::unique_ptr<nova::ChoicePill> envLevelChoice_;
+    nova::Pill* envLinkPill_ = nullptr;
+    nova::Text* envNoteText_ = nullptr;
     std::vector<nova::KnobCard*> filterKnobs_;
     nova::Pill *filtersPill_ = nullptr, *slotsPill_ = nullptr;
     nova::Text* slotsText_ = nullptr;

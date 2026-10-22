@@ -543,3 +543,117 @@ TEST_CASE ("tracking and MIDI condition settings survive JSON")
     const auto built = ZoneDescription {};
     CHECK (built.velTrackPct == 100.0);
 }
+
+TEST_CASE ("humanize varies pitch, volume and start within the set amounts, and zones can opt out")
+{
+    auto make = [] (float amount)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto z = makeFullKeyboardZone (makeRamp (96000), 60, PlayMode::Loop);
+        z.humanizeAmount = amount;
+        inst->zones.push_back (std::move (z));
+        inst->humanizePitchCents = 50.0f; inst->humanizeVolumeDb = 6.0f; inst->humanizeTimingMs = 30.0f;
+        inst->finalize();
+        return inst;
+    };
+    struct Take { double ratio, level; int start; };
+    auto takes = [&] (float amount)
+    {
+        auto inst = make (amount);
+        std::vector<Take> out;
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        for (int n = 0; n < 40; ++n)
+        {
+            v.noteOn (0, 60, 1.0f);
+            std::vector<float> l (3000, 0.0f), r (3000, 0.0f);
+            v.render (l.data(), r.data(), 3000, 1.0f, 1.0f, 0.0);
+            int start = 0;
+            while (start < 3000 && l[static_cast<std::size_t> (start)] == 0.0f) ++start;
+            // rampe : valeur = position / 96000 ; position = (indice - départ) * rapport
+            const double pos = static_cast<double> (l[2500]) * 96000.0;
+            out.push_back ({ 0.0, 0.0, start });
+            out.back().level = pos;   // mémorise la valeur lue (amplitude et position mêlées)
+            v.panic();
+            std::vector<float> t (4096, 0.0f), u (4096, 0.0f);
+            v.render (t.data(), u.data(), 4096, 1.0f, 1.0f, 0.0);
+        }
+        return out;
+    };
+    const auto human = takes (1.0f);
+    int minStart = 99999, maxStart = 0;
+    double minValue = 1e9, maxValue = 0.0;
+    for (const auto& t : human) { minStart = std::min (minStart, t.start); maxStart = std::max (maxStart, t.start); minValue = std::min (minValue, t.level); maxValue = std::max (maxValue, t.level); }
+    CHECK (maxStart - minStart > 200);          // des départs différents
+    CHECK (maxStart <= 1441);                   // jamais plus de 30 ms
+    CHECK (maxValue > minValue * 1.15);         // des valeurs différentes (volume, hauteur et départ mêlés)
+    // une zone à 0 % ne bouge pas : toutes les prises sont identiques
+    const auto steady = takes (0.0f);
+    for (const auto& t : steady) { CHECK (t.start == steady.front().start); CHECK_THAT (t.level, WithinAbs (steady.front().level, 1e-3)); }
+}
+
+TEST_CASE ("humanize settings survive JSON and are bounded")
+{
+    InstrumentDescription d;
+    d.humanizePitchCents = 12.5; d.humanizeVolumeDb = 2.0; d.humanizeTimingMs = 8.0;
+    ZoneDescription z; z.samplePath = "a.wav"; z.humanizePct = 40.0;
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back == d);
+    CHECK (back.zones[0].humanizePct == 40.0);
+    CHECK (instrumentFromJson (toJson (InstrumentDescription {})).humanizePitchCents == 0.0);
+    ZoneDescription bad; bad.humanizePct = 500.0;
+    CHECK (sanitised (bad).humanizePct == 100.0);
+}
+
+TEST_CASE ("envelope and filters are inherited instrument -> group -> zone, block by block")
+{
+    const auto path = std::filesystem::temp_directory_path() / "neptune-inherit.wav";
+    {
+        SF_INFO info {};
+        info.samplerate = 48000; info.channels = 1; info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+        SNDFILE* f = sf_open (path.string().c_str(), SFM_WRITE, &info);
+        REQUIRE (f != nullptr);
+        std::vector<float> data (4800, 0.3f);
+        sf_writef_float (f, data.data(), static_cast<sf_count_t> (data.size()));
+        sf_close (f);
+    }
+    auto envWithAttack = [] (double ms) { EnvelopeDescription e; e.attack.on = true; e.attack.ms = ms; return e; };
+    FilterBlock lowpass;
+    lowpass.filter[0].on = true;
+    InstrumentDescription d;
+    d.defaultEnvelope = envWithAttack (100.0);
+    GroupSettings a;
+    a.envelopeOverride = true; a.envelope = envWithAttack (200.0);
+    a.filterOverride = true; a.filters = lowpass;
+    d.groups["A"] = a;
+    auto zone = [&] (const char* group, bool own) { ZoneDescription z; z.samplePath = path.string(); z.group = group; if (own) { z.envelopeOverride = true; z.envelope = envWithAttack (300.0); } return z; };
+    d.zones = { zone ("", false), zone ("A", false), zone ("A", true), zone ("B", false) };
+    const auto inst = buildInstrument (d);
+    REQUIRE (inst != nullptr);
+    auto attackMs = [&] (std::size_t i) { return EnvelopeTiming::of (inst->zones[i].env).attackSec * 1000.0; };
+    CHECK_THAT (attackMs (0), WithinAbs (100.0, 1e-6));   // sans Groupe : l'instrument
+    CHECK_THAT (attackMs (1), WithinAbs (200.0, 1e-6));   // Groupe A personnalisé
+    CHECK_THAT (attackMs (2), WithinAbs (300.0, 1e-6));   // la zone se détache
+    CHECK_THAT (attackMs (3), WithinAbs (100.0, 1e-6));   // Groupe B sans réglage propre : l'instrument
+    // filtres : seul le Groupe A a les siens (les autres n'ont aucun filtre actif : instrument sans filtre)
+    CHECK (inst->zones[1].filters != nullptr);
+    CHECK (inst->zones[3].filters == nullptr);
+    CHECK (inst->zones[0].filters == nullptr);
+    // une zone qui personnalise ses filtres l'emporte sur le Groupe
+    d.zones[1].filterOverride = true;
+    const auto inst2 = buildInstrument (d);
+    CHECK (inst2->zones[1].filters == nullptr);   // ses filtres à elle : aucun actif
+
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back == d);
+    CHECK (back.groups.count ("A") == 1);
+    CHECK (back.defaultEnvelope.attack.ms == 100.0);
+    // projets d'avant l'héritage : une zone qui porte son enveloppe la garde (personnalisée), une zone neuve suit l'instrument
+    const auto legacy = instrumentFromJson (R"({"zones":[{"sample":"a.wav","envelope":{"attack":{"on":true,"ms":50.0}}},{"sample":"b.wav"}]})");
+    REQUIRE (legacy.zones.size() == 2);
+    CHECK (legacy.zones[0].envelopeOverride);
+    CHECK_FALSE (legacy.zones[1].envelopeOverride);
+    std::filesystem::remove (path);
+}

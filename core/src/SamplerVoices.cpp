@@ -40,7 +40,7 @@ void SamplerVoices::bindZone (Voice& v, const Zone& zone) noexcept
 {
     v.zone = &zone;
     v.mods = slotModsFor (zone);
-    const double semis = static_cast<double> (v.key - zone.rootNote) + (zone.tuneCents + v.mods.tuneCents) / 100.0;
+    const double semis = static_cast<double> (v.key - zone.rootNote) + (zone.tuneCents + v.mods.tuneCents + v.humanCents) / 100.0;
     v.baseRatio = zone.sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
     v.targetRatio = v.baseRatio;
     v.glideLeft = 0;
@@ -407,7 +407,21 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
         v->delayLeft = zone.delayMs > 0.0 ? static_cast<int> (std::lround (zone.delayMs * 0.001 * sampleRate_)) : 0;
         v->fadeInPlayed = 0.0;
     }
+    // humanize : petites variations aléatoires de hauteur, de volume et de départ à chaque déclenchement (pas pour l'écoute depuis l'interface)
+    float humanDb = 0.0f;
+    int humanDelay = 0;
+    v->humanCents = 0.0;
+    if (instrument_ != nullptr && channel != kPreviewChannel && zone.humanizeAmount > 0.0f
+        && (instrument_->humanizePitchCents > 0.0f || instrument_->humanizeVolumeDb > 0.0f || instrument_->humanizeTimingMs > 0.0f))
+    {
+        auto unit = [this] () noexcept { humanRng_ ^= humanRng_ << 13; humanRng_ ^= humanRng_ >> 17; humanRng_ ^= humanRng_ << 5; return static_cast<float> (humanRng_ & 0xFFFFFFu) / 8388608.0f - 1.0f; };   // [-1, 1)
+        const float a = zone.humanizeAmount;
+        v->humanCents = static_cast<double> (instrument_->humanizePitchCents * a * unit());
+        humanDb = instrument_->humanizeVolumeDb * a * unit();
+        humanDelay = static_cast<int> (std::lround (static_cast<double> (instrument_->humanizeTimingMs * a * 0.5f * (unit() + 1.0f)) * 0.001 * sampleRate_));
+    }
     bindZone (*v, zone);
+    v->delayLeft += humanDelay;
     v->loopIdx = 0;
     v->repsLeft = (zone.moreLoopCount > 0 && zone.loopRepeats > 0) ? zone.loopRepeats : -1;
     v->velocity = std::clamp (velocity, 0.0f, 1.0f);
@@ -417,6 +431,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
         float amp = std::max (0.0f, (1.0f - t) + t * v->velocity);
         if (zone.keyTrackDbPerOct != 0.0f)
             amp *= static_cast<float> (std::pow (10.0, static_cast<double> (zone.keyTrackDbPerOct) * static_cast<double> (key - zone.keyTrackCenter) / 12.0 / 20.0));
+        if (humanDb != 0.0f) amp *= static_cast<float> (std::pow (10.0, static_cast<double> (humanDb) / 20.0));
         v->ampVel = amp;
     }
     v->layerGain = layerGain;

@@ -90,6 +90,7 @@ ZoneDescription sanitised (ZoneDescription z)
     z.fadeOutMs = std::isfinite (z.fadeOutMs) ? std::clamp (z.fadeOutMs, 0.0, ZoneDescription::maxFadeMs) : ZoneDescription::defaultFadeOutMs;
     z.delayMs = std::isfinite (z.delayMs) ? std::clamp (z.delayMs, 0.0, ZoneDescription::maxDelayMs) : 0.0;
     z.pan = std::isfinite (z.pan) ? std::clamp (z.pan, -1.0, 1.0) : 0.0;
+    z.humanizePct = std::isfinite (z.humanizePct) ? std::clamp (z.humanizePct, 0.0, 100.0) : 100.0;
     z.velTrackPct = std::isfinite (z.velTrackPct) ? std::clamp (z.velTrackPct, -100.0, 100.0) : 100.0;
     z.keyTrackDbPerOct = std::isfinite (z.keyTrackDbPerOct) ? std::clamp (z.keyTrackDbPerOct, -24.0, 24.0) : 0.0;
     z.keyTrackCenter = std::clamp (z.keyTrackCenter, 0, 127);
@@ -216,6 +217,7 @@ std::string toJson (const InstrumentDescription& d)
         o["root_note"] = z.rootNote;
         o["mode"] = toString (z.mode);
         o["envelope"] = envelopeToJson (z.envelope);
+        o["envelope_override"] = z.envelopeOverride;
         o["tune_cents"] = z.tuneCents;
         o["gain_db"] = z.gainDb;
         o["loop_start"] = z.loopStart;
@@ -228,6 +230,7 @@ std::string toJson (const InstrumentDescription& d)
         if (z.reverse) o["reverse"] = true;
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.pan != 0.0) o["pan"] = z.pan;
+        if (z.humanizePct != 100.0) o["humanize_pct"] = z.humanizePct;
         if (z.velTrackPct != 100.0) o["vel_track_pct"] = z.velTrackPct;
         if (z.keyTrackDbPerOct != 0.0) o["key_track_db_per_oct"] = z.keyTrackDbPerOct;
         if (z.keyTrackCenter != 60) o["key_track_center"] = z.keyTrackCenter;
@@ -269,6 +272,8 @@ std::string toJson (const InstrumentDescription& d)
     doc["round_robin_mode"] = toString (d.roundRobinMode);
     if (d.mainRoundRobinOnly) doc["main_round_robin_only"] = true;
     if (! d.compensateOnReplace) doc["compensate_on_replace"] = false;
+    if (d.humanizePitchCents != 0.0 || d.humanizeVolumeDb != 0.0 || d.humanizeTimingMs != 0.0)
+        doc["humanize"] = { { "pitch_cents", d.humanizePitchCents }, { "volume_db", d.humanizeVolumeDb }, { "timing_ms", d.humanizeTimingMs } };
     if (! d.pool.empty()) doc["pool"] = d.pool;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
@@ -291,6 +296,20 @@ std::string toJson (const InstrumentDescription& d)
         doc["velocity_curve"] = std::move (c);
     }
     if (! (d.defaultFilters == FilterBlock {})) doc["default_filters"] = filterBlockToJson (d.defaultFilters);
+    if (! (d.defaultEnvelope == EnvelopeDescription {})) doc["default_envelope"] = envelopeToJson (d.defaultEnvelope);
+    {
+        nlohmann::json groups = nlohmann::json::array();
+        for (const auto& [name, g] : d.groups)
+        {
+            if (g.isDefault()) continue;
+            nlohmann::json go;
+            go["name"] = name;
+            if (g.envelopeOverride) { go["envelope_override"] = true; go["envelope"] = envelopeToJson (g.envelope); }
+            if (g.filterOverride) { go["filter_override"] = true; go["filters"] = filterBlockToJson (g.filters); }
+            groups.push_back (go);
+        }
+        if (! groups.empty()) doc["groups"] = groups;
+    }
     if (d.streamFromDisk) doc["stream_from_disk"] = true;
     if (d.preloadKB != InstrumentDescription::defaultPreloadKB) doc["preload_kb"] = d.preloadKB;
     nlohmann::json slots = nlohmann::json::array();
@@ -371,6 +390,9 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.rootNote = readInt (o, "root_note", z.rootNote);
     if (const auto it = o.find ("mode"); it != o.end() && it->is_string()) playModeFromString (it->get<std::string>(), z.mode);
     z.envelope = envelopeFromJson (o);
+    // projets d'avant l'héritage : l'enveloppe écrite dans la zone est la sienne
+    z.envelopeOverride = o.contains ("envelope") || o.contains ("release_ms");
+    if (const auto it = o.find ("envelope_override"); it != o.end() && it->is_boolean()) z.envelopeOverride = it->get<bool>();
     z.tuneCents = readNum (o, "tune_cents", z.tuneCents);
     z.gainDb = readNum (o, "gain_db", z.gainDb);
     z.loopStart = readI64 (o, "loop_start", z.loopStart);
@@ -383,6 +405,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     if (const auto it = o.find ("reverse"); it != o.end() && it->is_boolean()) z.reverse = it->get<bool>();
     z.delayMs = readNum (o, "delay_ms", z.delayMs);
     z.pan = readNum (o, "pan", z.pan);
+    z.humanizePct = readNum (o, "humanize_pct", z.humanizePct);
     z.velTrackPct = readNum (o, "vel_track_pct", z.velTrackPct);
     z.keyTrackDbPerOct = readNum (o, "key_track_db_per_oct", z.keyTrackDbPerOct);
     z.keyTrackCenter = readInt (o, "key_track_center", z.keyTrackCenter);
@@ -439,6 +462,12 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         roundRobinModeFromString (m->get<std::string>(), d.roundRobinMode);
     if (const auto m = doc.find ("main_round_robin_only"); m != doc.end() && m->is_boolean()) d.mainRoundRobinOnly = m->get<bool>();
     if (const auto m = doc.find ("compensate_on_replace"); m != doc.end() && m->is_boolean()) d.compensateOnReplace = m->get<bool>();
+    if (const auto m = doc.find ("humanize"); m != doc.end() && m->is_object())
+    {
+        d.humanizePitchCents = std::clamp (readNum (*m, "pitch_cents", 0.0), 0.0, 50.0);
+        d.humanizeVolumeDb = std::clamp (readNum (*m, "volume_db", 0.0), 0.0, 6.0);
+        d.humanizeTimingMs = std::clamp (readNum (*m, "timing_ms", 0.0), 0.0, 30.0);
+    }
     if (const auto m = doc.find ("pool"); m != doc.end() && m->is_array())
         for (const auto& e : *m)
             if (e.is_string() && d.pool.size() < 100000) d.pool.push_back (e.get<std::string>());
@@ -470,6 +499,26 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         d.velocityCurve = sanitised (d.velocityCurve);
     }
     if (const auto m = doc.find ("default_filters"); m != doc.end() && m->is_object()) d.defaultFilters = filterBlockFromJson (*m);
+    if (const auto m = doc.find ("default_envelope"); m != doc.end() && m->is_object())
+    {
+        nlohmann::json wrap;
+        wrap["envelope"] = *m;
+        d.defaultEnvelope = sanitised (envelopeFromJson (wrap));
+    }
+    if (const auto m = doc.find ("groups"); m != doc.end() && m->is_array())
+        for (const auto& go : *m)
+        {
+            if (! go.is_object()) continue;
+            const auto name = go.find ("name");
+            if (name == go.end() || ! name->is_string() || name->get<std::string>().empty() || d.groups.size() >= 64) continue;
+            GroupSettings g;
+            if (const auto v = go.find ("envelope_override"); v != go.end() && v->is_boolean()) g.envelopeOverride = v->get<bool>();
+            if (g.envelopeOverride) g.envelope = sanitised (envelopeFromJson (go));
+            if (const auto v = go.find ("filter_override"); v != go.end() && v->is_boolean()) g.filterOverride = v->get<bool>();
+            if (g.filterOverride)
+                if (const auto f = go.find ("filters"); f != go.end() && f->is_object()) g.filters = filterBlockFromJson (*f);
+            if (! g.isDefault()) d.groups[name->get<std::string>()] = g;
+        }
     if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
     d.preloadKB = std::clamp (readInt (doc, "preload_kb", InstrumentDescription::defaultPreloadKB),
                               InstrumentDescription::minPreloadKB, InstrumentDescription::maxPreloadKB);
@@ -757,6 +806,9 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     inst->stealMode = description.stealMode;
     inst->sameKey = description.sameKey;
     inst->cutFadeMs = std::clamp (description.cutFadeMs, 1, InstrumentDescription::maxCutFadeMs);
+    inst->humanizePitchCents = static_cast<float> (std::clamp (description.humanizePitchCents, 0.0, 50.0));
+    inst->humanizeVolumeDb = static_cast<float> (std::clamp (description.humanizeVolumeDb, 0.0, 6.0));
+    inst->humanizeTimingMs = static_cast<float> (std::clamp (description.humanizeTimingMs, 0.0, 30.0));
     inst->glideMs = std::clamp (description.glideMs, 0, InstrumentDescription::maxGlideMs);
     inst->chokeSameZone = description.chokeSameZone;
     std::map<std::string, int> groupIds;
@@ -781,6 +833,10 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         return rt;
     };
     const auto defaultFilters = makeFilters (description.defaultFilters, true);
+    // filtres personnalisés des Groupes (une seule table par Groupe)
+    std::map<std::string, std::shared_ptr<const FilterRuntimeBlock>> groupFilters;
+    for (const auto& [name, g] : description.groups)
+        if (g.filterOverride) groupFilters[name] = makeFilters (g.filters, false);
     int done = 0;
     const int total = static_cast<int> (std::count (mask.begin(), mask.end(), true));
     // Besoin en mémoire par fichier (streaming) : le maximum des zones qui l'utilisent. -1 = fichier entier.
@@ -840,14 +896,23 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.keyLow = zd.keyLow; z.keyHigh = zd.keyHigh; z.velLow = zd.velLow; z.velHigh = zd.velHigh;
         z.rootNote = zd.rootNote;
         z.mode = zd.mode;
-        z.env = EnvelopeRuntime (zd.envelope);
+        {
+            // enveloppe : la zone personnalisée > le Groupe personnalisé > l'instrument
+            const auto g = description.groups.find (zd.group);
+            const EnvelopeDescription& env = zd.envelopeOverride ? zd.envelope : (g != description.groups.end() && g->second.envelopeOverride ? g->second.envelope : description.defaultEnvelope);
+            z.env = EnvelopeRuntime (env);
+        }
         z.tuneCents = zd.tuneCents;
         z.gain = static_cast<float> (std::pow (10.0, zd.gainDb / 20.0));
         const auto frames = z.sample->frames;
         z.roundRobin = zd.roundRobin;
         z.onRelease = zd.onRelease;
         z.sourceIndex = static_cast<int> (zi);
-        z.filters = zd.filterOverride ? makeFilters (zd.filters, false) : defaultFilters;
+        {
+            // filtres : la zone personnalisée > le Groupe personnalisé > l'instrument
+            const auto gf = groupFilters.find (zd.group);
+            z.filters = zd.filterOverride ? makeFilters (zd.filters, false) : (gf != groupFilters.end() ? gf->second : defaultFilters);
+        }
         z.trigger = zd.trigger;
         z.chokeCuts = zd.chokeCuts;
         z.chokeCutBy = zd.chokeCutBy;
@@ -883,6 +948,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             z.loopRepeats = z.moreLoopCount > 0 ? zd.loopRepeats : 0;
             // seule la dernière boucle tourne jusqu'au relâchement
             if (z.moreLoopCount > 0) z.moreLoops[static_cast<std::size_t> (z.moreLoopCount - 1)].repeats = 0;
+            z.humanizeAmount = static_cast<float> (zd.humanizePct / 100.0);
             z.velTrack = static_cast<float> (zd.velTrackPct / 100.0);
             z.keyTrackDbPerOct = static_cast<float> (zd.keyTrackDbPerOct);
             z.keyTrackCenter = zd.keyTrackCenter;

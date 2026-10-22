@@ -276,6 +276,65 @@ private:
     juce::Label radiusLabel_, hint_;
 };
 
+// Fenêtre « Humanize » : les variations aléatoires de l'instrument à chaque déclenchement, et la part que suivent les zones sélectionnées.
+class HumanizePanel : public juce::Component
+{
+public:
+    std::function<void (double pitchCents, double volumeDb, double timingMs)> onInstrument;
+    std::function<void (double zonePct)> onZone;
+
+    HumanizePanel (const nova::Skin& skin, const i18n::Translator& tr, const InstrumentDescription& d, const ZoneDescription* zone)
+        : skin_ (skin), look_ (skin_)
+    {
+        setLookAndFeel (&look_);
+        auto text = [&] (const char* key) { return juce::String::fromUTF8 (std::string (tr.tr (key)).c_str()); };
+        pitchLabel_.setText (text ("sm.hz_pitch"), juce::dontSendNotification);
+        volumeLabel_.setText (text ("sm.hz_volume"), juce::dontSendNotification);
+        timingLabel_.setText (text ("sm.hz_timing"), juce::dontSendNotification);
+        zoneLabel_.setText (text ("sm.hz_zone"), juce::dontSendNotification);
+        hint_.setText (text ("sm.hz_hint"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (11.5f));
+        hint_.setJustificationType (juce::Justification::topLeft);
+        pitch_.setRange (0.0, 50.0, 0.5);  pitch_.setTextValueSuffix (" ct");
+        volume_.setRange (0.0, 6.0, 0.1);  volume_.setTextValueSuffix (" dB");
+        timing_.setRange (0.0, 30.0, 0.5); timing_.setTextValueSuffix (" ms");
+        zone_.setRange (0.0, 100.0, 1.0);  zone_.setTextValueSuffix (" %");
+        pitch_.setValue (d.humanizePitchCents, juce::dontSendNotification);
+        volume_.setValue (d.humanizeVolumeDb, juce::dontSendNotification);
+        timing_.setValue (d.humanizeTimingMs, juce::dontSendNotification);
+        zone_.setValue (zone != nullptr ? zone->humanizePct : 100.0, juce::dontSendNotification);
+        zone_.setDoubleClickReturnValue (true, 100.0);
+        zone_.setEnabled (zone != nullptr);
+        zoneLabel_.setEnabled (zone != nullptr);
+        auto instrument = [this] { if (onInstrument) onInstrument (pitch_.getValue(), volume_.getValue(), timing_.getValue()); };
+        pitch_.onValueChange = instrument; volume_.onValueChange = instrument; timing_.onValueChange = instrument;
+        zone_.onValueChange = [this] { if (onZone) onZone (zone_.getValue()); };
+        for (auto* c : std::initializer_list<juce::Component*> { &pitch_, &volume_, &timing_, &zone_, &pitchLabel_, &volumeLabel_, &timingLabel_, &zoneLabel_, &hint_ }) addAndMakeVisible (*c);
+        setSize (440, 300);
+    }
+    ~HumanizePanel() override { setLookAndFeel (nullptr); }
+    void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (12);
+        auto row = [&] (juce::Component& label, juce::Component& c) { auto line = r.removeFromTop (28); label.setBounds (line.removeFromLeft (150)); c.setBounds (line); r.removeFromTop (4); };
+        row (pitchLabel_, pitch_);
+        row (volumeLabel_, volume_);
+        row (timingLabel_, timing_);
+        r.removeFromTop (8);
+        row (zoneLabel_, zone_);
+        r.removeFromTop (6);
+        hint_.setBounds (r);
+    }
+
+private:
+    nova::Skin skin_;
+    nova::LookAndFeel look_;
+    juce::Slider pitch_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, volume_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight },
+        timing_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, zone_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label pitchLabel_, volumeLabel_, timingLabel_, zoneLabel_, hint_;
+};
+
 // ------------------------------------------------------------------------------------------------ construction
 NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
     : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("SAMPLER")), proc_ (p)
@@ -298,6 +357,12 @@ NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette&
 
 NovaSamplerEditor::~NovaSamplerEditor()
 {
+    {
+        const std::lock_guard<std::mutex> lock (pitchMutex_);
+        pitchQuit_ = true;
+        pitchQueue_.clear();
+    }
+    if (pitchThread_.joinable()) pitchThread_.join();
     flushFileMeta();
     // une prise en cours continue : elle est fermée avec le processeur ; le fichier reste dans Edited/Recordings
     footprintCancel_ = true;
@@ -414,6 +479,10 @@ void NovaSamplerEditor::buildZonesPage()
         [this] (int g) { editZone ([g] (Zone& z) { z.chokeCuts = g; z.chokeCutBy = g; }); });
     chokeMorePill_ = pill (0, "...", [this] { openChokePanel (*chokeMorePill_); });
     levelsPill_ = pill (0, tx ("sm.levels"), [this] { openLevelsPanel (*levelsPill_); });
+    detectedText_ = add<nova::Text> (0, skin(), Token::TextDim, 11.0f);
+    applyPitchPill_ = pill (0, tx ("sm.apply_pitch"), [this] { applyDetectedPitch(); });
+    addInfo (0, applyPitchPill_, "hlp.sm_pitch", 1);
+    humanizePill_ = pill (0, tx ("sm.humanize"), [this] { openHumanizePanel (*humanizePill_); });
 
     tablePanel_ = add<nova::Panel> (0, skin());
     tablePanel_->setTitle (tx ("sm.table").toUpperCase());
@@ -1474,7 +1543,17 @@ void NovaSamplerEditor::buildSoundPage()
     env_ = add<EnvelopeEditor> (2, skin().palette(), translator());
     env_->onGestureBegin = [this] { proc_.uiBeginGesture(); };
     env_->onGestureEnd = [this] { proc_.uiEndGesture(); };
-    env_->onChange = [this] (const EnvelopeDescription& e) { editZone ([e] (Zone& z) { z.envelope = e; }); };
+    env_->onChange = [this] (const EnvelopeDescription& e) { applyEnvelope (e); };
+    envLevelChoice_ = std::make_unique<nova::ChoicePill>();
+    envLevelChoice_->pill = add<nova::Pill> (2, skin(), nova::Pill::Look::Small);
+    envLevelChoice_->label = [this] { return tx ("sm.env_level").toUpperCase(); };
+    envLevelChoice_->items = { tx ("sm.lvl_instrument"), tx ("sm.lvl_group"), tx ("sm.lvl_zone") };
+    envLevelChoice_->get = [this] { return envLevel_; };
+    envLevelChoice_->set = [this] (int i) { envLevel_ = i; };
+    envLevelChoice_->attach (*this);
+    envLinkPill_ = add<nova::Pill> (2, skin(), nova::Pill::Look::Small);
+    envLinkPill_->onClick = [this] { toggleEnvelopeLink(); };
+    envNoteText_ = add<nova::Text> (2, skin(), Token::TextDim, 11.0f);
 
     filterPanel_ = add<nova::Panel> (2, skin());
     filterPanel_->setTitle (tx ("sm.filters").toUpperCase());
@@ -1672,9 +1751,96 @@ void NovaSamplerEditor::chooseSample()
                            });
 }
 
+// ---- note détectée (YIN), calculée en arrière-plan une fois par fichier
+void NovaSamplerEditor::requestPitch (const std::string& path)
+{
+    bool start = false;
+    {
+        const std::lock_guard<std::mutex> lock (pitchMutex_);
+        if (pitchDone_.count (path) != 0 || std::find (pitchQueue_.begin(), pitchQueue_.end(), path) != pitchQueue_.end()) return;
+        pitchQueue_.push_back (path);
+        if (! pitchRunning_) { pitchRunning_ = true; start = true; }
+    }
+    if (start)
+    {
+        if (pitchThread_.joinable()) pitchThread_.join();
+        pitchThread_ = std::thread ([this]
+        {
+            for (;;)
+            {
+                std::string p;
+                {
+                    const std::lock_guard<std::mutex> lock (pitchMutex_);
+                    if (pitchQueue_.empty() || pitchQuit_) { pitchRunning_ = false; return; }
+                    p = pitchQueue_.front();
+                    pitchQueue_.erase (pitchQueue_.begin());
+                }
+                const auto r = detectPitchOfFile (utf8Path (p));
+                {
+                    const std::lock_guard<std::mutex> lock (pitchMutex_);
+                    pitchDone_[p] = r;
+                }
+                pitchDirty_ = true;
+            }
+        });
+    }
+}
+
+bool NovaSamplerEditor::pitchOf (const std::string& path, PitchResult& out)
+{
+    {
+        const std::lock_guard<std::mutex> lock (pitchMutex_);
+        const auto it = pitchDone_.find (path);
+        if (it != pitchDone_.end()) { out = it->second; return true; }
+    }
+    requestPitch (path);
+    return false;
+}
+
+juce::String NovaSamplerEditor::pitchText (const std::string& path)
+{
+    PitchResult r;
+    if (! pitchOf (path, r)) return "...";
+    if (! r.found) return tx ("sm.pitch_undetermined");
+    const int c = static_cast<int> (std::lround (r.cents));
+    return noteName (r.note) + (c == 0 ? juce::String() : (c > 0 ? " +" : " ") + juce::String (c) + " ct");
+}
+
+// Applique la note détectée à la zone affichée : note racine, et accordage fin pour que le sample sonne juste sur sa touche.
+void NovaSamplerEditor::applyDetectedPitch()
+{
+    const auto* z = shownZone();
+    if (z == nullptr) return;
+    PitchResult r;
+    if (! pitchOf (z->samplePath, r) || ! r.found) return;
+    const int note = r.note;
+    const double tune = std::clamp (-r.cents, -100.0, 100.0);
+    editShownZone ([note, tune] (Zone& zone) { zone.rootNote = note; zone.tuneCents = tune; });
+}
+
+void NovaSamplerEditor::openHumanizePanel (juce::Component& anchor)
+{
+    auto panel = std::make_unique<HumanizePanel> (skin(), translator(), cached_, shownZone());
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    panel->onInstrument = [safe] (double pitch, double volume, double timing)
+    {
+        if (safe == nullptr) return;
+        auto d = safe->proc_.instrumentDescription();
+        d.humanizePitchCents = pitch; d.humanizeVolumeDb = volume; d.humanizeTimingMs = timing;
+        safe->proc_.uiEditInstrument (std::move (d), "Humanize", "humanize");
+        safe->lastRevision_ = 0xFFFFFFFFu;
+    };
+    panel->onZone = [safe] (double pct)
+    {
+        if (safe == nullptr) return;
+        safe->editZone ([pct] (Zone& zone) { zone.humanizePct = pct; });
+    };
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+}
+
 // ---- réserve de fichiers
 // La réserve affichée : les fichiers de la réserve, puis ceux des zones qui n'y figurent pas (tout ce qui sert est visible).
-void NovaSamplerEditor::rebuildPool()
+void NovaSamplerEditor::rebuildPool (bool force)
 {
     std::vector<std::string> paths = cached_.pool;
     for (const auto& z : cached_.zones)
@@ -1683,7 +1849,7 @@ void NovaSamplerEditor::rebuildPool()
     std::map<std::string, int> used;
     for (const auto& z : cached_.zones) ++used[z.samplePath];
     for (const auto& p : paths) signature += p + "|" + std::to_string (used[p]) + "\n";
-    if (signature == poolSignature_ && paths == poolPaths_) return;
+    if (! force && signature == poolSignature_ && paths == poolPaths_) return;
     poolSignature_ = signature;
     poolPaths_ = paths;
     std::vector<PoolTable::Row> rows;
@@ -1700,6 +1866,7 @@ void NovaSamplerEditor::rebuildPool()
             r.length = juce::String (static_cast<double> (info.frames) / std::max (1.0, info.sampleRate), 2) + " s";
             r.channels = juce::String (info.channels);
             r.rate = juce::String (info.sampleRate, 0);
+            r.pitch = pitchText (p);
             auto it = poolContents_.find (p);
             if (it == poolContents_.end())
             {
@@ -2048,6 +2215,18 @@ void NovaSamplerEditor::openFilterEditor()
         }
         safe->proc_.uiEditInstrument (std::move (d), "Filters", "filter");
     };
+    filterEditor_->onGroupChanged = [safe] (bool overrideOn, const FilterBlock& b)
+    {
+        if (safe == nullptr) return;
+        const auto* shown = safe->shownZone();
+        if (shown == nullptr || shown->group.empty()) return;
+        auto d = safe->proc_.instrumentDescription();
+        auto& g = d.groups[shown->group];
+        g.filterOverride = overrideOn;
+        if (overrideOn) g.filters = b;
+        if (g.isDefault()) d.groups.erase (shown->group);
+        safe->proc_.uiEditInstrument (std::move (d), "Group filters", "filter");
+    };
     filterEditor_->onParam = [safe] (int index, double plain, int phase)
     {
         if (safe == nullptr) return;
@@ -2071,6 +2250,92 @@ void NovaSamplerEditor::closeFilterEditor()
     grabKeyboardFocus();
 }
 
+// ---- héritage de l'enveloppe : instrument -> Groupe -> zone
+// Ce que suit une zone qui ne personnalise pas son enveloppe : celle de son Groupe si le Groupe a la sienne, sinon celle de l'instrument.
+EnvelopeDescription NovaSamplerEditor::parentEnvelope (const Zone& z) const
+{
+    const auto g = cached_.groups.find (z.group);
+    return (! z.group.empty() && g != cached_.groups.end() && g->second.envelopeOverride) ? g->second.envelope : cached_.defaultEnvelope;
+}
+
+// L'enveloppe que montre l'éditeur au niveau choisi, et si elle est modifiable à ce niveau ; `note` explique la situation.
+EnvelopeDescription NovaSamplerEditor::shownEnvelope (bool& editable, bool& linked, juce::String& note) const
+{
+    editable = false;
+    linked = false;
+    const auto* z = shownZone();
+    if (envLevel_ == 0)
+    {
+        editable = true;
+        note = tx ("sm.env_note_instrument");
+        return cached_.defaultEnvelope;
+    }
+    if (z == nullptr) return cached_.defaultEnvelope;
+    if (envLevel_ == 1)
+    {
+        if (z->group.empty()) { note = tx ("sm.env_note_nogroup"); return cached_.defaultEnvelope; }
+        const auto g = cached_.groups.find (z->group);
+        const bool own = g != cached_.groups.end() && g->second.envelopeOverride;
+        linked = ! own;
+        editable = own;
+        note = own ? U (translator().format ("sm.env_note_group_own", { z->group })) : tx ("sm.env_note_group_linked");
+        return own ? g->second.envelope : cached_.defaultEnvelope;
+    }
+    linked = ! z->envelopeOverride;
+    editable = z->envelopeOverride;
+    note = z->envelopeOverride ? tx ("sm.env_note_zone_own") : tx ("sm.env_note_zone_linked");
+    return z->envelopeOverride ? z->envelope : parentEnvelope (*z);
+}
+
+void NovaSamplerEditor::applyEnvelope (const EnvelopeDescription& e)
+{
+    if (envLevel_ == 0)
+    {
+        auto d = proc_.instrumentDescription();
+        d.defaultEnvelope = e;
+        proc_.uiEditInstrument (std::move (d), "Envelope", "envelope");
+        lastRevision_ = 0xFFFFFFFFu;
+    }
+    else if (envLevel_ == 1)
+    {
+        const auto* z = shownZone();
+        if (z == nullptr || z->group.empty()) return;
+        auto d = proc_.instrumentDescription();
+        auto& g = d.groups[z->group];
+        g.envelopeOverride = true;
+        g.envelope = e;
+        proc_.uiEditInstrument (std::move (d), "Group envelope", "envelope");
+        lastRevision_ = 0xFFFFFFFFu;
+    }
+    else
+        editZone ([e] (Zone& zone) { zone.envelope = e; zone.envelopeOverride = true; });
+}
+
+// Lié <-> personnalisé : « personnaliser » part d'une copie de ce que le niveau suivait, rien ne change d'un coup à l'oreille.
+void NovaSamplerEditor::toggleEnvelopeLink()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || envLevel_ == 0) return;
+    if (envLevel_ == 1)
+    {
+        if (z->group.empty()) return;
+        auto d = proc_.instrumentDescription();
+        auto& g = d.groups[z->group];
+        if (g.envelopeOverride) g.envelopeOverride = false;
+        else { g.envelopeOverride = true; g.envelope = d.defaultEnvelope; }
+        if (g.isDefault()) d.groups.erase (z->group);
+        proc_.uiEditInstrument (std::move (d), "Group envelope");
+        lastRevision_ = 0xFFFFFFFFu;
+        return;
+    }
+    const bool toCustom = ! z->envelopeOverride;
+    editZone ([this, toCustom] (Zone& zone)
+    {
+        if (toCustom) { zone.envelope = parentEnvelope (zone); zone.envelopeOverride = true; }
+        else zone.envelopeOverride = false;
+    });
+}
+
 void NovaSamplerEditor::updateFilterEditor()
 {
     if (! filterEditor_) return;
@@ -2084,7 +2349,10 @@ void NovaSamplerEditor::updateFilterEditor()
     const auto& d = cached_;
     int count = 0;
     bool overrideOn = false;
-    FilterBlock zoneBlock = d.defaultFilters;
+    const auto* shown = shownZone();
+    const auto groupIt = shown != nullptr && ! shown->group.empty() ? d.groups.find (shown->group) : d.groups.end();
+    const bool groupOwn = groupIt != d.groups.end() && groupIt->second.filterOverride;
+    FilterBlock zoneBlock = groupOwn ? groupIt->second.filters : d.defaultFilters;   // ce que la zone suit tant qu'elle n'a pas les siens
     bool first = true;
     for (const int r : zones_->selectedRows())
     {
@@ -2094,6 +2362,7 @@ void NovaSamplerEditor::updateFilterEditor()
         if (first) { overrideOn = z.filterOverride; if (z.filterOverride) zoneBlock = z.filters; first = false; }
     }
     filterEditor_->setState (d.defaultFilters, p, count, overrideOn, zoneBlock);
+    filterEditor_->setGroup (shown != nullptr && ! shown->group.empty(), shown != nullptr ? shown->group : std::string(), groupOwn, groupOwn ? groupIt->second.filters : d.defaultFilters);
 }
 
 // ------------------------------------------------------------------------------------------------ moniteur des voix
@@ -2393,7 +2662,7 @@ void NovaSamplerEditor::layout()
     layoutNav (542, 168);
 
     // ---- page ZONES
-    zonePanel_->setBounds (R (X0, 72, 942, 114));
+    zonePanel_->setBounds (R (X0, 72, 942, 148));
     loadPill_->setBounds (R (X0 + 12, 106, 120, 30));
     importPill_->setBounds (R (X0 + 138, 106, 120, 30));
     removePill_->setBounds (R (X0 + 264, 106, 120, 30));
@@ -2406,22 +2675,25 @@ void NovaSamplerEditor::layout()
     chokeChoice_->pill->setBounds (R (X0 + 600, 144, 170, 30));
     chokeMorePill_->setBounds (R (X0 + 776, 144, 44, 30));
     levelsPill_->setBounds (R (X0 + 826, 144, 106, 30));
+    detectedText_->setBounds (R (X0 + 14, 188, 360, 20));
+    applyPitchPill_->setBounds (R (X0 + 380, 182, 170, 30));
+    humanizePill_->setBounds (R (X0 + 556, 182, 150, 30));
     if (listVisible_ && ! showVoices_)
     {
-        tablePanel_->setBounds (R (X0, 196, 330, 514));
-        zones_->setBounds (R (X0 + 10, 230, 310, 470));
-        pool_->setBounds (R (X0 + 10, 230, 310, 470));
-        zonesViewPill_->setBounds (R (X0 + 12, 200, 84, 22));
-        poolViewPill_->setBounds (R (X0 + 100, 200, 96, 22));
-        matrixPanel_->setBounds (R (X0 + 342, 196, 600, 514));
-        matrix_->setBounds (R (X0 + 350, 228, 584, 474));
+        tablePanel_->setBounds (R (X0, 230, 330, 480));
+        zones_->setBounds (R (X0 + 10, 264, 310, 436));
+        pool_->setBounds (R (X0 + 10, 264, 310, 436));
+        zonesViewPill_->setBounds (R (X0 + 12, 234, 84, 22));
+        poolViewPill_->setBounds (R (X0 + 100, 234, 96, 22));
+        matrixPanel_->setBounds (R (X0 + 342, 230, 600, 480));
+        matrix_->setBounds (R (X0 + 350, 262, 584, 440));
     }
     else
     {
-        matrixPanel_->setBounds (R (X0, 196, 942, 514));
-        matrix_->setBounds (R (X0 + 8, 228, 926, 474));
+        matrixPanel_->setBounds (R (X0, 230, 942, 480));
+        matrix_->setBounds (R (X0 + 8, 262, 926, 440));
     }
-    voicesView_->setBounds (R (X0, 196, 942, 514));
+    voicesView_->setBounds (R (X0, 230, 942, 480));
 
     // ---- page SAMPLE
     wavePanel_->setBounds (R (X0, 72, 942, 204));
@@ -2481,6 +2753,9 @@ void NovaSamplerEditor::layout()
     // ---- page SON
     envPanel_->setBounds (R (X0, 72, 942, 340));
     env_->setBounds (R (X0 + 10, 104, 922, 298));
+    envLevelChoice_->pill->setBounds (R (X0 + 200, 76, 230, 22));
+    envLinkPill_->setBounds (R (X0 + 436, 76, 150, 22));
+    envNoteText_->setBounds (R (X0 + 594, 78, 300, 18));
     filterPanel_->setBounds (R (X0, 424, 560, 286));
     for (std::size_t i = 0; i < filterKnobs_.size(); ++i) filterKnobs_[i]->setBounds (R (X0 + 12.0f + static_cast<float> (i) * 134.0f, 462, 126, 120));
     filtersPill_->setBounds (R (X0 + 12, 596, 280, 30));
@@ -2638,6 +2913,7 @@ void NovaSamplerEditor::tick()
     }
     updateVoices();
     syncFileMeta();
+    if (pitchDirty_.exchange (false)) { if (showPool_) rebuildPool (true); }   // une note vient d'être détectée : la colonne de la réserve se met à jour
     updatePlayButton();
     updateRecordButton();
     updateFilterEditor();
@@ -2654,6 +2930,26 @@ void NovaSamplerEditor::tick()
         modePill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : "sampler.mode_one_shot")) })));
         modePill_->setOn (loop);
         rootNumber_->update();
+        {
+            // note détectée de la zone affichée, à côté de la note racine
+            juce::String text;
+            bool usable = false;
+            if (has && ! z->samplePath.empty())
+            {
+                PitchResult r;
+                if (! pitchOf (z->samplePath, r)) text = tx ("sm.pitch_detecting");
+                else if (! r.found) text = tx ("sm.pitch_detected") + " " + tx ("sm.pitch_undetermined");
+                else
+                {
+                    const int c = static_cast<int> (std::lround (r.cents));
+                    text = tx ("sm.pitch_detected") + " " + noteName (r.note) + (c == 0 ? juce::String() : (c > 0 ? " +" : " ") + juce::String (c) + " ct")
+                           + "   (" + juce::String (static_cast<int> (std::lround (r.confidence * 100.0))) + " %)";
+                    usable = true;
+                }
+            }
+            detectedText_->setText (text);
+            applyPitchPill_->setAlpha (usable ? 1.0f : 0.4f);
+        }
         triggerChoice_->refresh (has);
         chokeChoice_->refresh (has);
         chokeMorePill_->setOn (has && z->chokeCuts != z->chokeCutBy);
@@ -2712,8 +3008,20 @@ void NovaSamplerEditor::tick()
     }
     if (page == 2)
     {
-        env_->setEnabled (has);
-        if (has) env_->setEnvelope (z->envelope);
+        {
+            bool editable = false, linked = false;
+            juce::String note;
+            const auto env = shownEnvelope (editable, linked, note);
+            env_->setEnabled (editable);
+            env_->setEnvelope (env);
+            envLevelChoice_->refresh (has);
+            envNoteText_->setText (note);
+            const bool canLink = has && envLevel_ != 0 && (envLevel_ != 1 || (z != nullptr && ! z->group.empty()));
+            envLinkPill_->setVisible (envLevel_ != 0);
+            envLinkPill_->setText (tx (linked ? "sm.env_linked" : "sm.env_custom"));
+            envLinkPill_->setOn (! linked && envLevel_ != 0);
+            envLinkPill_->setAlpha (canLink ? 1.0f : 0.4f);
+        }
         int assigned = 0;
         for (const auto& s : cached_.slots) if (s.assigned()) ++assigned;
         slotsText_->setText (U (translator().format ("sm.slots_status", { std::to_string (assigned) })));

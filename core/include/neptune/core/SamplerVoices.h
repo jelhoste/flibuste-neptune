@@ -102,6 +102,7 @@ public:
 
 private:
     const midi::State* midiState_ = nullptr;
+    std::uint32_t humanRng_ = 0x2545F491u;   // générateur des variations de l'humanize
     LevelCoefs levelCoefs_;   // pondération K et lissages du suivi de niveau (voir LevelTracker.h) ; refaits à prepare()
     float heardGain (const Zone&, int channel, int key, float velocity) const noexcept;   // volume de relâchement lié au niveau (0 : rien ne sonnait)
 
@@ -117,6 +118,7 @@ private:
         double pos = 0.0;       // en échantillons du fichier
         double baseRatio = 1.0; // avance par échantillon de sortie, sans l'accordage global
         float velocity = 1.0f;  // le gain de la zone est relu à chaque bloc (édition en direct)
+        double humanCents = 0.0; // variation de hauteur aléatoire de ce déclenchement (humanize)
         float ampVel = 1.0f;    // facteur de volume dû à la vélocité (suivi de la zone) et à la touche (suivi du clavier), fixé au Note On
         float layerGain = 1.0f; // fondu entre couches de vélocité (fixé au Note On)
         EnvelopeRunner env;

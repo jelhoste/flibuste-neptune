@@ -14,7 +14,7 @@ public:
     struct Row
     {
         std::string path;
-        juce::String name, length, channels, rate, contents;
+        juce::String name, length, channels, rate, pitch, contents;
         int used = 0;
         bool ok = true;
     };
@@ -28,8 +28,9 @@ public:
         h.addColumn (name ("pool.col_length"), 2, 62, 40, 120, flags);
         h.addColumn (name ("pool.col_channels"), 3, 34, 24, 70, flags);
         h.addColumn (name ("pool.col_rate"), 4, 56, 40, 100, flags);
-        h.addColumn (name ("pool.col_contents"), 5, 150, 60, 400, flags);
-        h.addColumn (name ("pool.col_used"), 6, 40, 30, 80, flags);
+        h.addColumn (name ("pool.col_pitch"), 5, 64, 40, 110, flags);
+        h.addColumn (name ("pool.col_contents"), 6, 150, 60, 400, flags);
+        h.addColumn (name ("pool.col_used"), 7, 40, 30, 80, flags);
         table_.setMultipleSelectionEnabled (true);
         table_.setRowHeight (24);
         table_.setColour (juce::ListBox::backgroundColourId, colour (neptune::core::theme::Token::BgCard));
@@ -80,8 +81,9 @@ private:
             case 2: text = r.length; break;
             case 3: text = r.channels; break;
             case 4: text = r.rate; break;
-            case 5: text = r.contents; break;
-            case 6: text = r.used > 0 ? juce::String (r.used) : juce::String(); break;
+            case 5: text = r.pitch; break;
+            case 6: text = r.contents; break;
+            case 7: text = r.used > 0 ? juce::String (r.used) : juce::String(); break;
             default: break;
         }
         using neptune::core::theme::Token;

@@ -242,19 +242,28 @@ FilterEditor::FilterEditor (const theme::Palette& palette, const i18n::Translato
     targetLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (targetLabel_);
     targetBox_.addItem (text ("filt.target_instrument"), 1);
-    targetBox_.addItem (text ("filt.target_zones"), 2);
+    targetBox_.addItem (text ("filt.target_group"), 2);
+    targetBox_.addItem (text ("filt.target_zones"), 3);
     targetBox_.setSelectedId (1, juce::dontSendNotification);
-    targetBox_.onChange = [this] { target_ = targetBox_.getSelectedId() - 1; refresh(); };
+    targetBox_.onChange = [this] { const int id = targetBox_.getSelectedId(); target_ = id == 1 ? 0 : id == 2 ? 2 : 1; refresh(); };
     addAndMakeVisible (targetBox_);
 
     overrideToggle_.setButtonText (text ("filt.override"));
     overrideToggle_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
     overrideToggle_.onClick = [this]
     {
-        if (updating_ || target_ != 1) return;
+        if (updating_ || target_ == 0) return;
+        if (target_ == 2)
+        {
+            groupOverride_ = overrideToggle_.getToggleState();
+            if (groupOverride_) groupBlock_ = defaultBlock_;   // « Personnaliser » part d'une copie du réglage d'instrument
+            if (onGroupChanged) onGroupChanged (groupOverride_, groupBlock_);
+            refresh();
+            return;
+        }
         zoneOverride_ = overrideToggle_.getToggleState();
-        // « Personnaliser » part d'une copie du réglage d'instrument : rien ne change d'un coup à l'oreille
-        if (zoneOverride_) zoneBlock_ = defaultBlock_;
+        // « Personnaliser » part d'une copie de ce que la zone suivait (le Groupe ou l'instrument) : rien ne change d'un coup à l'oreille
+        if (zoneOverride_) zoneBlock_ = zoneParent();
         if (onZonesChanged) onZonesChanged (zoneOverride_, zoneBlock_);
         refresh();
     };
@@ -324,13 +333,25 @@ void FilterEditor::setState (const FilterBlock& defaultBlock, const DefaultParam
     refresh();
 }
 
+void FilterEditor::setGroup (bool hasGroup, const std::string& name, bool groupOverride, const FilterBlock& groupBlock)
+{
+    if (dragging_) return;
+    hasGroup_ = hasGroup;
+    groupName_ = name;
+    groupOverride_ = groupOverride;
+    groupBlock_ = groupOverride ? groupBlock : defaultBlock_;   // sans réglage propre, le Groupe montre celui de l'instrument (lecture seule)
+    if (! hasGroup_ && target_ == 2) target_ = 0;
+    refresh();
+}
+
 void FilterEditor::refresh()
 {
     updating_ = true;
-    targetBox_.setSelectedId (target_ + 1, juce::dontSendNotification);
-    targetBox_.setItemEnabled (2, selectedZones_ > 0);
-    overrideToggle_.setVisible (target_ == 1);
-    overrideToggle_.setToggleState (zoneOverride_, juce::dontSendNotification);
+    targetBox_.setSelectedId (target_ == 0 ? 1 : target_ == 2 ? 2 : 3, juce::dontSendNotification);
+    targetBox_.setItemEnabled (2, hasGroup_);
+    targetBox_.setItemEnabled (3, selectedZones_ > 0);
+    overrideToggle_.setVisible (target_ != 0);
+    overrideToggle_.setToggleState (target_ == 2 ? groupOverride_ : zoneOverride_, juce::dontSendNotification);
     const auto& b = current();
     const bool paramControlled = target_ == 0;
     for (int i = 0; i < 2; ++i)
@@ -341,6 +362,7 @@ void FilterEditor::refresh()
     balance_.setEnabled (editable() && b.parallel);
     balanceLabel_.setEnabled (b.parallel);
     noteLabel_.setText (target_ == 0 ? text ("filt.note_instrument")
+                      : target_ == 2 ? (groupOverride_ ? juce::String::fromUTF8 (tr_.format ("filt.note_group_own", { groupName_ }).c_str()) : text ("filt.note_group_inherit"))
                                      : (zoneOverride_ ? juce::String::fromUTF8 (tr_.format ("filt.note_zones_own", { std::to_string (selectedZones_) }).c_str())
                                                       : text ("filt.note_zones_inherit")),
                         juce::dontSendNotification);
@@ -353,6 +375,11 @@ void FilterEditor::emit (const FilterBlock& b)
     {
         defaultBlock_ = b;
         if (onDefaultChanged) onDefaultChanged (b);
+    }
+    else if (target_ == 2)
+    {
+        groupBlock_ = b;
+        if (onGroupChanged) onGroupChanged (true, b);
     }
     else
     {

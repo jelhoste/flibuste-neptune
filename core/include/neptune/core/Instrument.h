@@ -66,6 +66,8 @@ struct ZoneDescription
     int rootNote = 60;
     PlayMode mode = PlayMode::OneShot;
     EnvelopeDescription envelope;  // enveloppe d'amplitude de la zone (voir Envelope.h)
+    // Héritage de l'enveloppe, bloc par bloc (spec §3) : faux = la zone suit celle de son Groupe si le Groupe a la sienne, sinon celle de l'instrument ; vrai = la sienne (ci-dessus).
+    bool envelopeOverride = false;
     double tuneCents = 0.0;        // accordage fin de la zone
     double gainDb = 0.0;
     int roundRobin = 0;            // indice dans le jeu round-robin (0 = non précisé)
@@ -110,6 +112,8 @@ struct ZoneDescription
     // Condition MIDI supplémentaire (même arbre que le filtre MIDI de piste), jugée au déclenchement sur l'état des contrôleurs et sur la note : par exemple
     // « ne joue que si la pédale de sustain (CC 64) est enfoncée ». Éteinte par défaut.
     midi::FilterDescription midiCondition;
+    // Humanize : part des variations aléatoires de l'instrument (hauteur, volume, départ) que cette zone suit : 0 (aucune) à 100 % (toutes), 100 par défaut.
+    double humanizePct = 100.0;
     double pan = 0.0;              // -1 (gauche) .. +1 (droite) ; loi de balance en cosinus, neutre au centre
     bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
@@ -118,7 +122,7 @@ struct ZoneDescription
     bool operator== (const ZoneDescription& o) const noexcept
     {
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
-            && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && tuneCents == o.tuneCents && gainDb == o.gainDb
+            && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && envelopeOverride == o.envelopeOverride && tuneCents == o.tuneCents && gainDb == o.gainDb
             && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
             && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
             && filterOverride == o.filterOverride && filters == o.filters
@@ -127,8 +131,20 @@ struct ZoneDescription
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
             && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
             && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb
-            && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition;
+            && humanizePct == o.humanizePct && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition;
     }
+};
+
+// Réglages propres à un Groupe (spec §3) : chaque bloc (enveloppe, filtres) est soit lié à l'instrument (faux, par défaut : il suit le réglage d'instrument), soit
+// personnalisé pour le Groupe. Une zone du Groupe suit à son tour le Groupe, sauf si elle personnalise le bloc.
+struct GroupSettings
+{
+    bool envelopeOverride = false;
+    EnvelopeDescription envelope;
+    bool filterOverride = false;
+    FilterBlock filters;
+    bool operator== (const GroupSettings& o) const noexcept { return envelopeOverride == o.envelopeOverride && envelope == o.envelope && filterOverride == o.filterOverride && filters == o.filters; }
+    bool isDefault() const noexcept { return ! envelopeOverride && ! filterOverride; }
 };
 
 // Polyphonie de l'instrument (palier 1, jalon 6).
@@ -148,6 +164,10 @@ struct InstrumentDescription
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
 
     // Ce qui est chargé en mémoire (réglable en cours d'utilisation ; les zones restent toutes dans la description) :
+    // Humanize : à chaque déclenchement, de petites variations aléatoires (tirées de -1 à +1, ou de 0 à 1 pour le départ), chacune multipliée par ces quantités.
+    double humanizePitchCents = 0.0;   // 0..50 : ± cents
+    double humanizeVolumeDb = 0.0;     // 0..6 : ± dB
+    double humanizeTimingMs = 0.0;     // 0..30 : retard aléatoire du son
     bool compensateOnReplace = true;           // remplacer le fichier d'une zone compense la différence de niveau (gain de la zone)
     bool mainRoundRobinOnly = false;           // ne charger que l'échantillon principal de chaque place
     bool loadReleaseSamples = true;            // zones déclenchées au relâchement
@@ -178,6 +198,8 @@ struct InstrumentDescription
     // Filtres par défaut de l'instrument, hérités par les zones qui ne les surchargent pas. Leur coupure et leur résonance sont
     // les PARAMÈTRES automatisables (SamplerParams : filterCutoff/filterResonance) : les valeurs stockées ici sont ignorées.
     FilterBlock defaultFilters;
+    EnvelopeDescription defaultEnvelope;                  // enveloppe d'instrument, suivie par les Groupes et les zones qui ne personnalisent pas la leur
+    std::map<std::string, GroupSettings> groups;          // réglages propres aux Groupes (seulement ceux qui personnalisent un bloc), par nom de Groupe
     bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
     static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
 
@@ -192,8 +214,9 @@ struct InstrumentDescription
         unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
-        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters;
+        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups;
         slots = o.slots; pool = o.pool; compensateOnReplace = o.compensateOnReplace;
+        humanizePitchCents = o.humanizePitchCents; humanizeVolumeDb = o.humanizeVolumeDb; humanizeTimingMs = o.humanizeTimingMs;
     }
 
     bool operator== (const InstrumentDescription& o) const noexcept
@@ -204,7 +227,8 @@ struct InstrumentDescription
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
             && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
-            && defaultFilters == o.defaultFilters && slots == o.slots && compensateOnReplace == o.compensateOnReplace;
+            && defaultFilters == o.defaultFilters && defaultEnvelope == o.defaultEnvelope && groups == o.groups && slots == o.slots && compensateOnReplace == o.compensateOnReplace
+            && humanizePitchCents == o.humanizePitchCents && humanizeVolumeDb == o.humanizeVolumeDb && humanizeTimingMs == o.humanizeTimingMs;
     }
     bool empty() const noexcept { return zones.empty(); }
 
@@ -268,6 +292,7 @@ struct Zone
     bool releaseFollowsLevel = false;     // voir ZoneDescription
     int releaseMeter = 2;
     float releaseFloorDb = -48.0f, releaseCurve = 1.0f;
+    float humanizeAmount = 1.0f;          // part de l'humanize de l'instrument suivie par la zone
     float velTrack = 1.0f;                // suivi de la vélocité (1 = comme avant)
     float keyTrackDbPerOct = 0.0f;
     int keyTrackCenter = 60;
@@ -287,6 +312,7 @@ struct Instrument
 {
     std::vector<Zone> zones;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
+    float humanizePitchCents = 0.0f, humanizeVolumeDb = 0.0f, humanizeTimingMs = 0.0f;   // recopiés de la description
     bool trackLevels = false;   // une zone de relâchement suit le niveau des voix : les voix mesurent leur niveau entendu (rempli par finalize)
     SlotRuntimes slots;   // emplacements assignables résolus (voir ZoneSlots.h)
 

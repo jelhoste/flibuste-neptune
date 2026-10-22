@@ -36,6 +36,9 @@ public:
     std::function<void (const neptune::core::FilterBlock&)> onDefaultChanged;      // réglages d'instrument (hors coupure/résonance)
     std::function<void (int index, double plainValue, int phase)> onParam;         // index 0..3 (c1, r1, c2, r2) ; phase 0 début, 1 valeur, 2 fin
     std::function<void (bool overrideOn, const neptune::core::FilterBlock&)> onZonesChanged;
+    // Cible « Groupe » (le Groupe de la zone affichée) : un réglage propre au Groupe ou, sinon, celui de l'instrument.
+    std::function<void (bool overrideOn, const neptune::core::FilterBlock&)> onGroupChanged;
+    void setGroup (bool hasGroup, const std::string& name, bool groupOverride, const neptune::core::FilterBlock& groupBlock);
     std::function<void()> onGestureBegin, onGestureEnd;
     std::function<void()> onClose, onUndo, onRedo;
 
@@ -48,19 +51,23 @@ private:
     struct Column;
     juce::Colour colour (neptune::core::theme::Token t) const;
     juce::String text (const char* key) const;
-    const neptune::core::FilterBlock& current() const { return target_ == 0 ? defaultBlock_ : zoneBlock_; }
-    bool editable() const { return target_ == 0 || zoneOverride_; }
+    const neptune::core::FilterBlock& current() const { return target_ == 0 ? defaultBlock_ : target_ == 2 ? groupBlock_ : zoneBlock_; }
+    bool editable() const { return target_ == 0 || (target_ == 1 && zoneOverride_) || (target_ == 2 && groupOverride_); }
+    // ce que les zones sans réglage propre suivent : le Groupe s'il a le sien, sinon l'instrument
+    const neptune::core::FilterBlock& zoneParent() const { return hasGroup_ && groupOverride_ ? groupBlock_ : defaultBlock_; }
     void refresh();
     void emit (const neptune::core::FilterBlock&);
 
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     std::unique_ptr<NeptuneSliderLook> look_; // avant columns_ : détruit après les curseurs
-    neptune::core::FilterBlock defaultBlock_, zoneBlock_;
+    neptune::core::FilterBlock defaultBlock_, zoneBlock_, groupBlock_;
+    bool hasGroup_ = false, groupOverride_ = false;
+    std::string groupName_;
     DefaultParams params_;
     int selectedZones_ = 0;
     bool zoneOverride_ = false;
-    int target_ = 0; // 0 instrument, 1 zones sélectionnées
+    int target_ = 0; // 0 instrument, 1 zones sélectionnées, 2 Groupe
     bool updating_ = false;
     bool dragging_ = false;
 
