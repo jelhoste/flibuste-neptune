@@ -457,7 +457,7 @@ void NovaSamplerEditor::buildSamplePage()
         const std::int64_t total = info.ok ? info.frames : 0;
         if (snapOn_ && m != nova::WaveView::Marker::Crossfade) frame = snapFrame (shown->samplePath, frame);
         const int idx = editLoop_;
-        editZone ([m, frame, total, idx] (Zone& z)
+        editZone ([this, m, frame, total, idx] (Zone& z)
         {
             const std::int64_t end = z.endFrame < 0 ? total : z.endFrame;
             switch (m)
