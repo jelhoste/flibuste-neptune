@@ -335,6 +335,164 @@ private:
     juce::Label pitchLabel_, volumeLabel_, timingLabel_, zoneLabel_, hint_;
 };
 
+// Fenêtre « Modulateurs » (superposée) : les 16 modulateurs de la piste. Chacun a un nom, un mode (bascule / momentané), un type (discret / continu), une touche de
+// keyswitch (note et canal), un groupe d'exclusion, sa valeur (le paramètre automatisable) et, au niveau de la piste, la case « Piste ».
+class ModulatorsPanel : public juce::Component, private juce::Timer
+{
+public:
+    std::function<void (const InstrumentDescription&)> onEdit;                              // la description modifiée (noms, modes, touches, masque de la piste)
+    std::function<double (int)> getValue;                                                   // valeur 0..100 du modulateur
+    std::function<void (int, double, int phase)> setValue;                                  // phase 0 début, 1 valeur, 2 fin
+    std::function<void()> onClose;
+
+    ModulatorsPanel (const nova::Skin& skin, const i18n::Translator& tr, const InstrumentDescription& d, std::function<juce::String (int)> noteName)
+        : skin_ (skin), look_ (skin_), desc_ (d), noteName_ (std::move (noteName))
+    {
+        setLookAndFeel (&look_);
+        auto text = [&] (const char* key) { return juce::String::fromUTF8 (std::string (tr.tr (key)).c_str()); };
+        title_.setText (text ("mod.title"), juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+        hint_.setText (text ("mod.hint"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (11.5f));
+        hint_.setJustificationType (juce::Justification::topLeft);
+        closeButton_.setButtonText (text ("mod.close"));
+        closeButton_.onClick = [this] { if (onClose) onClose(); };
+        for (auto* c : std::initializer_list<juce::Component*> { &title_, &hint_, &closeButton_ }) addAndMakeVisible (*c);
+        static const char* const heads[] = { "mod.col_name", "mod.col_mode", "mod.col_type", "mod.col_key", "mod.col_channel", "mod.col_radio", "mod.col_value", "mod.col_track" };
+        for (int h = 0; h < 8; ++h) { headers_[h].setText (text (heads[h]), juce::dontSendNotification); headers_[h].setFont (juce::FontOptions (11.0f)); addAndMakeVisible (headers_[h]); }
+        for (int i = 0; i < kModulators; ++i)
+        {
+            auto& r = rows_[static_cast<std::size_t> (i)];
+            r.index.setText (juce::String (i + 1), juce::dontSendNotification);
+            r.name.setText (juce::String::fromUTF8 (desc_.modulators[static_cast<std::size_t> (i)].name.c_str()), juce::dontSendNotification);
+            r.name.setTextToShowWhenEmpty (text ("mod.default") + " " + juce::String (i + 1), skin_.colour (Token::TextDim2));
+            r.name.setInputRestrictions (40);
+            r.name.onTextChange = [this, i] { commit (i); };
+            r.mode.addItem (text ("mod.latch"), 1);
+            r.mode.addItem (text ("mod.momentary"), 2);
+            r.type.addItem (text ("mod.discrete"), 1);
+            r.type.addItem (text ("mod.continuous"), 2);
+            r.channel.addItem (text ("mod.all"), 1);
+            for (int c = 1; c <= 16; ++c) r.channel.addItem (juce::String (c), c + 1);
+            r.radio.addItem ("-", 1);
+            for (int g = 1; g <= 8; ++g) r.radio.addItem (juce::String (g), g + 1);
+            r.key.setRange (-1.0, 127.0, 1.0);
+            r.key.setTextBoxStyle (juce::Slider::TextBoxRight, false, 62, 20);
+            r.key.textFromValueFunction = [this] (double v) { return v < 0.0 ? juce::String ("-") : noteName_ (static_cast<int> (v)); };
+            r.value.setRange (0.0, 100.0, 1.0);
+            r.value.setTextValueSuffix (" %");
+            r.value.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 20);
+            r.track.setButtonText ({});
+            const auto& m = desc_.modulators[static_cast<std::size_t> (i)];
+            r.mode.setSelectedId (m.momentary ? 2 : 1, juce::dontSendNotification);
+            r.type.setSelectedId (m.continuous ? 2 : 1, juce::dontSendNotification);
+            r.channel.setSelectedId (m.keyswitchChannel + 1, juce::dontSendNotification);
+            r.radio.setSelectedId (m.radio + 1, juce::dontSendNotification);
+            r.key.setValue (m.keyswitchNote, juce::dontSendNotification);
+            r.track.setToggleState ((desc_.trackModulators >> i) & 1u, juce::dontSendNotification);
+            r.mode.onChange = [this, i] { commit (i); };
+            r.type.onChange = [this, i] { commit (i); };
+            r.channel.onChange = [this, i] { commit (i); };
+            r.radio.onChange = [this, i] { commit (i); };
+            r.key.onValueChange = [this, i] { commit (i); };
+            r.track.onClick = [this, i] { commit (i); };
+            r.value.onDragStart = [this, i] { if (setValue) setValue (i, rows_[static_cast<std::size_t> (i)].value.getValue(), 0); };
+            r.value.onValueChange = [this, i] { if (setValue && rows_[static_cast<std::size_t> (i)].value.isMouseButtonDown()) setValue (i, rows_[static_cast<std::size_t> (i)].value.getValue(), 1); };
+            r.value.onDragEnd = [this, i] { if (setValue) setValue (i, rows_[static_cast<std::size_t> (i)].value.getValue(), 2); };
+            for (auto* c : std::initializer_list<juce::Component*> { &r.index, &r.name, &r.mode, &r.type, &r.key, &r.channel, &r.radio, &r.value, &r.track }) addAndMakeVisible (*c);
+        }
+        setSize (900, 640);
+        startTimerHz (8);
+    }
+    ~ModulatorsPanel() override { stopTimer(); setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.55f));
+        const auto panel = panelBounds().toFloat();
+        g.setColour (skin_.colour (Token::BgCard));
+        g.fillRoundedRectangle (panel, 8.0f);
+        g.setColour (skin_.colour (Token::Border));
+        g.drawRoundedRectangle (panel, 8.0f, 1.0f);
+    }
+    void resized() override
+    {
+        auto r = panelBounds().reduced (16, 12);
+        auto top = r.removeFromTop (30);
+        closeButton_.setBounds (top.removeFromRight (110));
+        title_.setBounds (top);
+        r.removeFromTop (4);
+        auto head = r.removeFromTop (18);
+        layoutRow (head, headers_[0], headers_[1], headers_[2], headers_[3], headers_[4], headers_[5], headers_[6], headers_[7], nullptr);
+        for (int i = 0; i < kModulators; ++i)
+        {
+            auto line = r.removeFromTop (28);
+            auto& row = rows_[static_cast<std::size_t> (i)];
+            row.index.setBounds (line.removeFromLeft (26));
+            layoutRow (line, row.name, row.mode, row.type, row.key, row.channel, row.radio, row.value, row.track, nullptr);
+            r.removeFromTop (2);
+        }
+        r.removeFromTop (6);
+        hint_.setBounds (r);
+    }
+    void mouseDown (const juce::MouseEvent&) override {}
+    bool keyPressed (const juce::KeyPress& k) override { if (k == juce::KeyPress::escapeKey) { if (onClose) onClose(); return true; } return false; }
+
+private:
+    struct Row
+    {
+        juce::Label index;
+        juce::TextEditor name;
+        juce::ComboBox mode, type, channel, radio;
+        juce::Slider key { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, value { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+        juce::ToggleButton track;
+    };
+    juce::Rectangle<int> panelBounds() const { return getLocalBounds().withSizeKeepingCentre (std::min (getWidth() - 40, 880), std::min (getHeight() - 30, 600)); }
+    static void layoutRow (juce::Rectangle<int> line, juce::Component& name, juce::Component& mode, juce::Component& type, juce::Component& key, juce::Component& channel,
+                           juce::Component& radio, juce::Component& value, juce::Component& track, juce::Component*)
+    {
+        name.setBounds (line.removeFromLeft (170).reduced (2, 1));
+        mode.setBounds (line.removeFromLeft (100).reduced (2, 1));
+        type.setBounds (line.removeFromLeft (100).reduced (2, 1));
+        key.setBounds (line.removeFromLeft (170).reduced (2, 1));
+        channel.setBounds (line.removeFromLeft (70).reduced (2, 1));
+        radio.setBounds (line.removeFromLeft (56).reduced (2, 1));
+        value.setBounds (line.removeFromLeft (150).reduced (2, 1));
+        track.setBounds (line.removeFromLeft (30).reduced (2, 1));
+    }
+    void commit (int i)
+    {
+        auto& r = rows_[static_cast<std::size_t> (i)];
+        auto& m = desc_.modulators[static_cast<std::size_t> (i)];
+        m.name = r.name.getText().toStdString();
+        m.momentary = r.mode.getSelectedId() == 2;
+        m.continuous = r.type.getSelectedId() == 2;
+        m.keyswitchNote = static_cast<int> (r.key.getValue());
+        m.keyswitchChannel = std::max (0, r.channel.getSelectedId() - 1);
+        m.radio = std::max (0, r.radio.getSelectedId() - 1);
+        if (r.track.getToggleState()) desc_.trackModulators = static_cast<std::uint16_t> (desc_.trackModulators | (1u << i));
+        else desc_.trackModulators = static_cast<std::uint16_t> (desc_.trackModulators & ~(1u << i));
+        if (onEdit) onEdit (desc_);
+    }
+    void timerCallback() override
+    {
+        if (! getValue) return;
+        for (int i = 0; i < kModulators; ++i)
+        {
+            auto& v = rows_[static_cast<std::size_t> (i)].value;
+            if (! v.isMouseButtonDown()) v.setValue (getValue (i), juce::dontSendNotification);   // une touche de keyswitch ou un CC l'a peut-être changé
+        }
+    }
+
+    nova::Skin skin_;
+    nova::LookAndFeel look_;
+    InstrumentDescription desc_;
+    std::function<juce::String (int)> noteName_;
+    juce::Label title_, hint_, headers_[8];
+    juce::TextButton closeButton_;
+    std::array<Row, kModulators> rows_;
+};
+
 // ------------------------------------------------------------------------------------------------ construction
 NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
     : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("SAMPLER")), proc_ (p)
@@ -1578,6 +1736,11 @@ void NovaSamplerEditor::buildSoundPage()
     slotsPill_->setText (tx ("slots.button"));
     slotsPill_->onClick = [this] { openSlotsPanel (*slotsPill_); };
     slotsText_ = add<nova::Text> (2, skin(), Token::TextDim, 11.0f);
+    modulatorsPill_ = add<nova::Pill> (2, skin(), nova::Pill::Look::Small);
+    modulatorsPill_->setText (tx ("mod.button"));
+    modulatorsPill_->onClick = [this] { openModulators(); };
+    addInfo (2, modulatorsPill_, "hlp.sm_mod", 1);
+    modulatorsText_ = add<nova::Text> (2, skin(), Token::TextDim, 11.0f);
 }
 
 void NovaSamplerEditor::buildInstrumentPage()
@@ -1648,6 +1811,14 @@ void NovaSamplerEditor::buildInstrumentPage()
         auto d = proc_.instrumentDescription();
         d.streamFromDisk = streamToggle_->getToggleState();
         proc_.uiEditInstrument (std::move (d), "Stream from disk");
+    };
+    borrowToggle_ = add<juce::ToggleButton> (3);
+    borrowToggle_->setButtonText (tx ("load.rr_borrow"));
+    borrowToggle_->onClick = [this]
+    {
+        auto d = proc_.instrumentDescription();
+        d.rrBorrow = borrowToggle_->getToggleState();
+        proc_.uiEditInstrument (std::move (d), "Round-robin borrowing");
     };
     preloadLabel_ = add<juce::Label> (3);
     preloadLabel_->setText (tx ("load.preload"), juce::dontSendNotification);
@@ -2109,6 +2280,37 @@ void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
 }
 
+// Fenêtre des modulateurs de la piste (superposée à l'éditeur du sampler).
+void NovaSamplerEditor::openModulators()
+{
+    if (modulatorsPanel_ || wizard_ || filterEditor_ || midiEditor_) return;
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    modulatorsPanel_ = std::make_unique<ModulatorsPanel> (skin(), translator(), proc_.instrumentDescription(), [safe] (int n) { return safe != nullptr ? safe->noteName (n) : juce::String(); });
+    modulatorsPanel_->onEdit = [safe] (const InstrumentDescription& edited)
+    {
+        if (safe == nullptr) return;
+        auto d = safe->proc_.instrumentDescription();
+        d.modulators = edited.modulators;
+        d.trackModulators = edited.trackModulators;
+        safe->proc_.uiEditInstrument (std::move (d), "Modulators", "modulators");
+        safe->lastRevision_ = 0xFFFFFFFFu;
+    };
+    modulatorsPanel_->getValue = [safe] (int i) { return safe != nullptr ? safe->proc_.parameters().get (mx::modulatorParam (safe->proc_.selectedTrack(), i)) : 100.0; };
+    modulatorsPanel_->setValue = [safe] (int i, double v, int phase)
+    {
+        if (safe == nullptr) return;
+        const auto id = mx::modulatorParam (safe->proc_.selectedTrack(), i);
+        if (phase == 0) safe->proc_.uiBeginEdit (id);
+        else if (phase == 2) safe->proc_.uiEndEdit (id);
+        else if (const auto* spec = safe->proc_.parameters().find (id)) safe->proc_.uiSetNormalised (id, spec->toNormalized (v));
+    };
+    modulatorsPanel_->onClose = [safe] { juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->modulatorsPanel_.reset(); safe->grabKeyboardFocus(); } }); };
+    addAndMakeVisible (*modulatorsPanel_);
+    modulatorsPanel_->setBounds (getLocalBounds());
+    modulatorsPanel_->toFront (true);
+    modulatorsPanel_->grabKeyboardFocus();
+}
+
 // Condition MIDI de la zone affichée : le même éditeur d'arbre que le filtre MIDI de piste, superposé à l'éditeur du sampler.
 void NovaSamplerEditor::openMidiCondition()
 {
@@ -2163,12 +2365,67 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
         menu.addSubMenu (title, sub, true, nullptr, same);
     }
     menu.addSeparator();
+    {
+        // modulateurs qui commandent cette zone / ce Groupe (cases à cocher)
+        juce::PopupMenu sub;
+        const std::uint16_t mask = group.empty() ? d.zones[static_cast<std::size_t> (zone)].modulators : (d.groups.count (group) != 0 ? d.groups.at (group).modulators : std::uint16_t (0));
+        for (int i = 0; i < kModulators; ++i)
+        {
+            const auto& m = d.modulators[static_cast<std::size_t> (i)];
+            sub.addItem (1000 + i, m.name.empty() ? tx ("mod.default") + " " + juce::String (i + 1) : U (m.name), true, ((mask >> i) & 1u) != 0);
+        }
+        menu.addSubMenu (tx ("mod.menu"), sub);
+    }
+    if (group.empty())
+    {
+        // mode du jeu d'alternatives de la zone (round-robin)
+        juce::PopupMenu sub;
+        const int current = d.zones[static_cast<std::size_t> (zone)].rrMode;
+        sub.addItem (2000, tx ("rr.instrument"), true, current < 0);
+        sub.addItem (2001, tx ("rr.sequential"), true, current == 0);
+        sub.addItem (2002, tx ("rr.random"), true, current == 1);
+        sub.addItem (2003, tx ("rr.no_repeat"), true, current == 2);
+        menu.addSubMenu (tx ("rr.menu"), sub);
+    }
+    menu.addSeparator();
     menu.addItem (kOpenWindow, tx ("slots.open_window"));
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options(), [safe, zone, group] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
         if (choice == kOpenWindow) { safe->openSlotsPanel (*safe->slotsPill_); return; }
+        if (choice >= 1000 && choice < 1000 + kModulators)
+        {
+            auto desc = safe->proc_.instrumentDescription();
+            const std::uint16_t bit = static_cast<std::uint16_t> (1u << (choice - 1000));
+            if (group.empty())
+            {
+                auto& z = desc.zones[static_cast<std::size_t> (zone)];
+                z.modulators = static_cast<std::uint16_t> (z.modulators ^ bit);
+            }
+            else
+            {
+                auto& g = desc.groups[group];
+                g.modulators = static_cast<std::uint16_t> (g.modulators ^ bit);
+                if (g.isDefault()) desc.groups.erase (group);
+            }
+            safe->proc_.uiEditInstrument (std::move (desc), "Modulator", "modulator");
+            safe->lastRevision_ = 0xFFFFFFFFu;
+            return;
+        }
+        if (choice >= 2000 && choice <= 2003)
+        {
+            // le mode vaut pour tout le jeu d'alternatives (les zones de la même place)
+            auto desc = safe->proc_.instrumentDescription();
+            const auto ref = desc.zones[static_cast<std::size_t> (zone)];
+            for (auto& z : desc.zones)
+                if (z.keyLow == ref.keyLow && z.keyHigh == ref.keyHigh && z.velLow == ref.velLow && z.velHigh == ref.velHigh && z.group == ref.group
+                    && z.onRelease == ref.onRelease && z.trigger == ref.trigger)
+                    z.rrMode = choice - 2001;
+            safe->proc_.uiEditInstrument (std::move (desc), "Round-robin mode", "rrmode");
+            safe->lastRevision_ = 0xFFFFFFFFu;
+            return;
+        }
         const int slot = (choice - 1) / 16, param = (choice - 1) % 16;
         auto desc = safe->proc_.instrumentDescription();
         if (slot < 0 || slot >= kZoneSlots) return;
@@ -2511,6 +2768,8 @@ void NovaSamplerEditor::rebuildLoadPanel()
     if (preloadBox_->getSelectedId() != d.preloadKB) preloadBox_->setText (juce::String (d.preloadKB) + " KB", juce::dontSendNotification);
     updating_ = false;
     streamToggle_->setEnabled (has);
+    borrowToggle_->setToggleState (d.rrBorrow, juce::dontSendNotification);
+    borrowToggle_->setEnabled (has);
     preloadBox_->setEnabled (has && d.streamFromDisk);
     preloadLabel_->setEnabled (has && d.streamFromDisk);
 
@@ -2761,7 +3020,9 @@ void NovaSamplerEditor::layout()
     filtersPill_->setBounds (R (X0 + 12, 596, 280, 30));
     slotsAreaPanel_->setBounds (R (X0 + 572, 424, 370, 286));
     slotsPill_->setBounds (R (X0 + 584, 462, 346, 30));
-    slotsText_->setBounds (R (X0 + 584, 504, 346, 60));
+    slotsText_->setBounds (R (X0 + 584, 504, 346, 40));
+    modulatorsPill_->setBounds (R (X0 + 584, 556, 346, 30));
+    modulatorsText_->setBounds (R (X0 + 584, 596, 346, 60));
 
     // ---- page INSTRUMENT
     velPanel_->setBounds (R (X0, 72, 442, 638));
@@ -2774,13 +3035,15 @@ void NovaSamplerEditor::layout()
     streamToggle_->setBounds (R (X0 + 466, 572, 300, 26));
     preloadLabel_->setBounds (R (X0 + 770, 572, 70, 26));
     preloadBox_->setBounds (R (X0 + 842, 572, 90, 26));
-    groupsViewport_->setBounds (R (X0 + 466, 606, 464, 96));
+    borrowToggle_->setBounds (R (X0 + 466, 600, 464, 26));
+    groupsViewport_->setBounds (R (X0 + 466, 630, 464, 72));
 
     abPill()->setBounds (R (14, 724 + 12, 40, 32));
     presetPill()->setBounds (R (440, 11, 280, 36));
     if (wizard_) wizard_->setBounds (getLocalBounds());
     if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
     if (midiEditor_) midiEditor_->setBounds (getLocalBounds());
+    if (modulatorsPanel_) modulatorsPanel_->setBounds (getLocalBounds());
 }
 
 // Écoute : une seule à la fois (le moteur remplace la précédente). `owner` : 1 = bouton du bas, 2 = bouton des outils du sample.
@@ -3025,6 +3288,11 @@ void NovaSamplerEditor::tick()
         int assigned = 0;
         for (const auto& s : cached_.slots) if (s.assigned()) ++assigned;
         slotsText_->setText (U (translator().format ("sm.slots_status", { std::to_string (assigned) })));
+        {
+            int defined = 0;
+            for (const auto& m : cached_.modulators) if (! m.isDefault()) ++defined;
+            modulatorsText_->setText (U (translator().format ("mod.status", { std::to_string (defined) })));
+        }
     }
     if (page == 3)
     {

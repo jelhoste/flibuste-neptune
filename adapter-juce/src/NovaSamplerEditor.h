@@ -32,6 +32,8 @@
 #include "neptune/core/TimeStretch.h"
 #include "neptune/core/VolumeFootprint.h"
 
+class ModulatorsPanel;
+
 class NovaSamplerEditor : public nova::EditorBase, public juce::DragAndDropContainer
 {
 public:
@@ -68,6 +70,7 @@ private:
     void openChokePanel (juce::Component& anchor);
     void openLevelsPanel (juce::Component& anchor);
     void openMidiCondition();
+    void openModulators();
     neptune::core::EnvelopeDescription parentEnvelope (const Zone&) const;
     neptune::core::EnvelopeDescription shownEnvelope (bool& editable, bool& linked, juce::String& note) const;
     void applyEnvelope (const neptune::core::EnvelopeDescription&);
@@ -141,6 +144,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser_, importChooser_;
     std::unique_ptr<ImportWizard> wizard_;
     std::unique_ptr<FilterEditor> filterEditor_;
+    std::unique_ptr<ModulatorsPanel> modulatorsPanel_;   // fenêtre des modulateurs
     std::unique_ptr<MidiFilterEditor> midiEditor_;   // condition MIDI de la zone (superposé)
     neptune::core::memory::FileInfoCache fileInfo_;
     juce::Component::SafePointer<ChokePanel> chokePanel_;
@@ -250,14 +254,15 @@ private:
     nova::Pill* envLinkPill_ = nullptr;
     nova::Text* envNoteText_ = nullptr;
     std::vector<nova::KnobCard*> filterKnobs_;
-    nova::Pill *filtersPill_ = nullptr, *slotsPill_ = nullptr;
+    nova::Pill *filtersPill_ = nullptr, *slotsPill_ = nullptr, *modulatorsPill_ = nullptr;
+    nova::Text* modulatorsText_ = nullptr;
     nova::Text* slotsText_ = nullptr;
 
     // page INSTRUMENT
     nova::Panel *velPanel_ = nullptr, *polyPanel_ = nullptr, *memPanel_ = nullptr;
     VelocityPanel* velocity_ = nullptr;
     PolyphonyPanel* poly_ = nullptr;
-    juce::ToggleButton *rrToggle_ = nullptr, *releaseToggle_ = nullptr, *streamToggle_ = nullptr;
+    juce::ToggleButton *rrToggle_ = nullptr, *releaseToggle_ = nullptr, *streamToggle_ = nullptr, *borrowToggle_ = nullptr;
     juce::ComboBox* preloadBox_ = nullptr;
     juce::Label* preloadLabel_ = nullptr;
     juce::Viewport* groupsViewport_ = nullptr;
