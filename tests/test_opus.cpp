@@ -205,9 +205,11 @@ TEST_CASE ("Ogg Opus: Neptune marks go to the sidecar file, the Opus file is lef
     REQUIRE (readSampleMeta (p, back, &readWhere));
     CHECK (back.hasVolumeMarker);
     CHECK (back.volumeMarkerMs == 12.5);
-    std::ifstream f (p, std::ios::binary);
-    const std::vector<unsigned char> after ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
-    CHECK (after == bytes);
+    {
+        std::ifstream f (p, std::ios::binary);
+        const std::vector<unsigned char> after ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+        CHECK (after == bytes);
+    }   // fermé avant le remove (Windows refuse de supprimer un fichier ouvert)
     std::filesystem::remove (p);
     std::filesystem::remove (std::filesystem::path (p.string() + ".neptune.json"));
 }
