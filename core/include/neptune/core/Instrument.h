@@ -97,6 +97,10 @@ struct ZoneDescription
     int releaseMeter = 2;
     double releaseFloorDb = -48.0;
     double releaseCurve = 1.0;
+    // Marqueur de volume (sample de relâchement) : instant du fichier dont le niveau (même mesure) sert de référence. >= 0 : au Note Off, le volume est réglé pour que le sample
+    // de relâchement, à ce marqueur, ait le niveau entendu de la voix d'attaque (plus `releaseOffsetDb`) ; le seuil de silence reste une porte, la courbe n'est plus utilisée.
+    std::int64_t releaseRefFrame = -1;
+    double releaseOffsetDb = 0.0;
     double pan = 0.0;              // -1 (gauche) .. +1 (droite) ; loi de balance en cosinus, neutre au centre
     bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
@@ -112,7 +116,8 @@ struct ZoneDescription
             && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
             && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
-            && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve;
+            && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
+            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb;
     }
 };
 
@@ -250,6 +255,8 @@ struct Zone
     bool releaseFollowsLevel = false;     // voir ZoneDescription
     int releaseMeter = 2;
     float releaseFloorDb = -48.0f, releaseCurve = 1.0f;
+    float releaseRefDb = -1000.0f;        // niveau de référence au marqueur de volume (mesuré au chargement) ; <= -900 : pas de marqueur
+    float releaseOffsetDb = 0.0f;
     int roundRobin = 0;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;

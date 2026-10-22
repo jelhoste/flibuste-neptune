@@ -109,6 +109,7 @@ public:
         int channel = 0, key = 0;      // NoteOn / NoteOff ; PreviewZone : `key` = indice de zone
         float velocity = 0.0f;
         int track = 0;                 // piste visée (NoteOn, NoteOff, Preview*) ; Panic / ReleaseAll : toutes
+        std::int64_t frame = -1;       // PreviewZone : point de départ dans le fichier (-1 : le début de la région jouée)
     };
     bool postUiEvent (const UiEvent&) noexcept;
 

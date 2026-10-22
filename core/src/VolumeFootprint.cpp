@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "neptune/core/LevelTracker.h"
 #include "neptune/core/SampleLoader.h"
 
 #ifdef NEPTUNE_HAS_EBUR128
@@ -79,6 +80,37 @@ VolumeFootprint computeFootprint (const std::filesystem::path& path, const std::
    #endif
     out.ok = true;
     return out;
+}
+
+bool measureLevelAt (const std::filesystem::path& path, std::int64_t frame, int meter, double& db)
+{
+    AudioStreamReader reader;
+    if (! reader.open (path)) return false;
+    const auto info = probeAudioFile (path);
+    const double rate = info.ok && info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
+    frame = std::clamp<std::int64_t> (frame, 0, reader.totalFrames() - 1);
+    const std::int64_t from = std::max<std::int64_t> (0, frame - static_cast<std::int64_t> (rate));   // 1 s d'amorce : les filtres et lissages se stabilisent
+    if (! reader.seek (from)) return false;
+    LevelCoefs coefs;
+    coefs.prepare (rate);
+    LevelTracker t;
+    const int ch = reader.channels();
+    std::vector<float> buf (static_cast<std::size_t> (4096) * static_cast<std::size_t> (ch));
+    std::int64_t pos = from;
+    while (pos <= frame)
+    {
+        const auto want = std::min<std::int64_t> (4096, frame + 1 - pos);
+        const auto got = reader.read (buf.data(), want);
+        if (got <= 0) break;
+        for (std::int64_t i = 0; i < got; ++i)
+        {
+            const float l = buf[static_cast<std::size_t> (i * ch)], r = ch > 1 ? buf[static_cast<std::size_t> (i * ch + 1)] : l;
+            t.process (coefs, l, r);
+        }
+        pos += got;
+    }
+    db = t.db (meter);
+    return db > -90.0;
 }
 
 int loudestPoint (const std::vector<float>& curve, int from, int to) noexcept

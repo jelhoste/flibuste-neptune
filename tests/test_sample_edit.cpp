@@ -141,3 +141,70 @@ TEST_CASE ("write, read back and derived names", "[sampleedit]")
     REQUIRE_THAT (r.at (1000, 1), WithinAbs (b.at (1000, 1), 1e-6));
     std::filesystem::remove_all (dir);
 }
+
+namespace
+{
+// attaque de bruit (100 ms), son tenu de 480 Hz (période exacte de 100 échantillons) de 0,5 à 1,6 s, puis extinction rapide
+Buffer attackSustainTail()
+{
+    Buffer b;
+    b.channels = 1; b.sampleRate = kSr;
+    b.data.assign (static_cast<std::size_t> (kSr * 2.0), 0.0f);
+    unsigned seed = 12345;
+    for (std::int64_t i = 0; i < 4800; ++i) { seed = seed * 1664525u + 1013904223u; b.data[static_cast<std::size_t> (i)] = (static_cast<float> (seed >> 8) / 8388608.0f - 1.0f) * 0.9f; }
+    for (std::int64_t i = 4800; i < 76800; ++i) b.data[static_cast<std::size_t> (i)] = static_cast<float> (0.4 * std::sin (2.0 * 3.14159265358979 * 480.0 * static_cast<double> (i) / kSr));
+    for (std::int64_t i = 76800; i < 96000; ++i)
+        b.data[static_cast<std::size_t> (i)] = static_cast<float> (0.4 * std::exp (-static_cast<double> (i - 76800) / 2500.0) * std::sin (2.0 * 3.14159265358979 * 480.0 * static_cast<double> (i) / kSr));
+    return b;
+}
+}
+
+TEST_CASE ("period detection finds the exact period", "[sampleedit]")
+{
+    const auto b = attackSustainTail();
+    REQUIRE_THAT (detectPeriod (b, 10000, 70000), WithinAbs (100.0, 0.5));
+    Buffer noise; noise.channels = 1; noise.sampleRate = kSr; noise.data.resize (20000);
+    unsigned seed = 7;
+    for (auto& v : noise.data) { seed = seed * 1664525u + 1013904223u; v = static_cast<float> (seed >> 8) / 8388608.0f - 1.0f; }
+    REQUIRE (detectPeriod (noise, 0, 20000) == 0.0);
+}
+
+TEST_CASE ("stable region skips the attack and the tail", "[sampleedit]")
+{
+    const auto b = attackSustainTail();
+    const auto st = findStableRegion (b, 0, b.frames(), 200.0);
+    REQUIRE (st.found);
+    REQUIRE (st.start >= 4800 - 480);
+    REQUIRE (st.start <= 4800 + 2000);
+    REQUIRE (st.end <= 76800 + 960);
+    REQUIRE (st.end >= 70000);
+}
+
+TEST_CASE ("auto loop uses the stable region and whole periods", "[sampleedit]")
+{
+    const auto b = attackSustainTail();
+    const auto c = findLoopCandidates (b, 0, b.frames(), 5, 100.0);
+    REQUIRE_FALSE (c.empty());
+    for (const auto& cand : c)
+    {
+        REQUIRE (cand.start >= 4800);          // jamais dans l'attaque
+        REQUIRE (cand.end <= 76800 + 960);     // jamais loin dans l'extinction
+    }
+    const auto len = c.front().end - c.front().start;
+    REQUIRE ((len % 100 <= 1 || len % 100 >= 99));
+    REQUIRE (c.front().score > 0.8);
+}
+
+TEST_CASE ("auto loop around the cursor keeps the start near it", "[sampleedit]")
+{
+    const auto b = attackSustainTail();
+    LoopSearchOptions opt;
+    opt.aroundCursor = true; opt.cursor = 30000; opt.radiusMs = 100.0;
+    const auto c = findLoopCandidates (b, 0, b.frames(), 5, 100.0, opt);
+    REQUIRE_FALSE (c.empty());
+    for (const auto& cand : c) REQUIRE (std::llabs (cand.start - 30000) <= 4800 + 200);
+    // sans les options, on retrouve le comportement d'origine (formes d'onde seulement)
+    LoopSearchOptions plain;
+    plain.period = false; plain.stableOnly = false; plain.spectral = false;
+    REQUIRE_FALSE (findLoopCandidates (b, 0, b.frames(), 5, 100.0, plain).empty());
+}

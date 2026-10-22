@@ -113,7 +113,7 @@ class LevelsPanel : public juce::Component
 {
 public:
     std::function<void (bool)> onCompensate;
-    std::function<void (bool follow, int meter, double floorDb, double curve)> onRelease;
+    std::function<void (bool follow, int meter, double floorDb, double curve, double offsetDb)> onRelease;
 
     LevelsPanel (const nova::Skin& skin, const i18n::Translator& tr, bool compensate, const ZoneDescription* zone)
         : skin_ (skin), look_ (skin_), tr_ (tr)
@@ -130,25 +130,30 @@ public:
         meterLabel_.setText (text ("sm.lv_meter"), juce::dontSendNotification);
         floorLabel_.setText (text ("sm.lv_floor"), juce::dontSendNotification);
         curveLabel_.setText (text ("sm.lv_curve"), juce::dontSendNotification);
+        offsetLabel_.setText (text ("sm.lv_offset"), juce::dontSendNotification);
         hint_.setText (text ("sm.lv_hint"), juce::dontSendNotification);
         hint_.setFont (juce::FontOptions (11.5f));
         hint_.setJustificationType (juce::Justification::topLeft);
         floor_.setRange (-96.0, -6.0, 1.0);
         floor_.setTextValueSuffix (" dB");
         curve_.setRange (0.25, 4.0, 0.05);
+        offset_.setRange (-24.0, 24.0, 0.5);
+        offset_.setTextValueSuffix (" dB");
         const bool release = zone != nullptr && zone->onRelease;
         follow_.setToggleState (release && zone->releaseFollowsLevel, juce::dontSendNotification);
         meter_.setSelectedId (zone != nullptr ? zone->releaseMeter + 1 : 3, juce::dontSendNotification);
         floor_.setValue (zone != nullptr ? zone->releaseFloorDb : -48.0, juce::dontSendNotification);
         curve_.setValue (zone != nullptr ? zone->releaseCurve : 1.0, juce::dontSendNotification);
-        for (auto* c : std::initializer_list<juce::Component*> { &follow_, &meter_, &floor_, &curve_, &meterLabel_, &floorLabel_, &curveLabel_ }) c->setEnabled (release);
-        auto changed = [this] { if (onRelease) onRelease (follow_.getToggleState(), meter_.getSelectedId() - 1, floor_.getValue(), curve_.getValue()); };
+        offset_.setValue (zone != nullptr ? zone->releaseOffsetDb : 0.0, juce::dontSendNotification);
+        for (auto* c : std::initializer_list<juce::Component*> { &follow_, &meter_, &floor_, &curve_, &offset_, &meterLabel_, &floorLabel_, &curveLabel_, &offsetLabel_ }) c->setEnabled (release);
+        auto changed = [this] { if (onRelease) onRelease (follow_.getToggleState(), meter_.getSelectedId() - 1, floor_.getValue(), curve_.getValue(), offset_.getValue()); };
         follow_.onClick = changed;
         meter_.onChange = changed;
         floor_.onValueChange = changed;
         curve_.onValueChange = changed;
-        for (auto* c : std::initializer_list<juce::Component*> { &compensate_, &follow_, &meter_, &floor_, &curve_, &meterLabel_, &floorLabel_, &curveLabel_, &hint_ }) addAndMakeVisible (*c);
-        setSize (420, 280);
+        offset_.onValueChange = changed;
+        for (auto* c : std::initializer_list<juce::Component*> { &compensate_, &follow_, &meter_, &floor_, &curve_, &offset_, &meterLabel_, &floorLabel_, &curveLabel_, &offsetLabel_, &hint_ }) addAndMakeVisible (*c);
+        setSize (440, 330);
     }
     ~LevelsPanel() override { setLookAndFeel (nullptr); }
     void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
@@ -162,6 +167,7 @@ public:
         row (meterLabel_, meter_);
         row (floorLabel_, floor_);
         row (curveLabel_, curve_);
+        row (offsetLabel_, offset_);
         r.removeFromTop (6);
         hint_.setBounds (r);
     }
@@ -172,8 +178,69 @@ private:
     const i18n::Translator& tr_;
     juce::ToggleButton compensate_, follow_;
     juce::ComboBox meter_;
-    juce::Slider floor_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, curve_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
-    juce::Label meterLabel_, floorLabel_, curveLabel_, hint_;
+    juce::Slider floor_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, curve_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, offset_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label meterLabel_, floorLabel_, curveLabel_, offsetLabel_, hint_;
+};
+
+// Options de la recherche automatique de boucle.
+class LoopOptionsPanel : public juce::Component
+{
+public:
+    std::function<void (const neptune::core::sampleedit::LoopSearchOptions&)> onChange;
+
+    LoopOptionsPanel (const nova::Skin& skin, const i18n::Translator& tr, const neptune::core::sampleedit::LoopSearchOptions& o)
+        : skin_ (skin), look_ (skin_), o_ (o)
+    {
+        setLookAndFeel (&look_);
+        auto text = [&] (const char* key) { return juce::String::fromUTF8 (std::string (tr.tr (key)).c_str()); };
+        period_.setButtonText (text ("sm.lo_period"));
+        stable_.setButtonText (text ("sm.lo_stable"));
+        spectral_.setButtonText (text ("sm.lo_spectral"));
+        around_.setButtonText (text ("sm.lo_around"));
+        radiusLabel_.setText (text ("sm.lo_radius"), juce::dontSendNotification);
+        hint_.setText (text ("sm.lo_hint"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (11.5f));
+        hint_.setJustificationType (juce::Justification::topLeft);
+        period_.setToggleState (o.period, juce::dontSendNotification);
+        stable_.setToggleState (o.stableOnly, juce::dontSendNotification);
+        spectral_.setToggleState (o.spectral, juce::dontSendNotification);
+        around_.setToggleState (o.aroundCursor, juce::dontSendNotification);
+        radius_.setRange (50.0, 3000.0, 10.0);
+        radius_.setTextValueSuffix (" ms");
+        radius_.setValue (o.radiusMs, juce::dontSendNotification);
+        auto changed = [this]
+        {
+            o_.period = period_.getToggleState(); o_.stableOnly = stable_.getToggleState(); o_.spectral = spectral_.getToggleState();
+            o_.aroundCursor = around_.getToggleState(); o_.radiusMs = radius_.getValue();
+            radius_.setEnabled (o_.aroundCursor); radiusLabel_.setEnabled (o_.aroundCursor);
+            if (onChange) onChange (o_);
+        };
+        for (auto* t : { &period_, &stable_, &spectral_, &around_ }) t->onClick = changed;
+        radius_.onValueChange = changed;
+        radius_.setEnabled (o.aroundCursor); radiusLabel_.setEnabled (o.aroundCursor);
+        for (auto* c : std::initializer_list<juce::Component*> { &period_, &stable_, &spectral_, &around_, &radius_, &radiusLabel_, &hint_ }) addAndMakeVisible (*c);
+        setSize (440, 290);
+    }
+    ~LoopOptionsPanel() override { setLookAndFeel (nullptr); }
+    void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (12);
+        for (auto* t : { &period_, &stable_, &spectral_, &around_ }) { t->setBounds (r.removeFromTop (26)); r.removeFromTop (2); }
+        auto line = r.removeFromTop (28);
+        radiusLabel_.setBounds (line.removeFromLeft (150));
+        radius_.setBounds (line);
+        r.removeFromTop (8);
+        hint_.setBounds (r);
+    }
+
+private:
+    nova::Skin skin_;
+    nova::LookAndFeel look_;
+    neptune::core::sampleedit::LoopSearchOptions o_;
+    juce::ToggleButton period_, stable_, spectral_, around_;
+    juce::Slider radius_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label radiusLabel_, hint_;
 };
 
 // ------------------------------------------------------------------------------------------------ construction
@@ -373,7 +440,7 @@ void NovaSamplerEditor::buildSamplePage()
     wave_->setAutoLabel (tx ("sm.no_sample"));
     wave_->onGestureBegin = [this] { proc_.uiBeginGesture(); };
     wave_->onGestureEnd = [this] { proc_.uiEndGesture(); };
-    wave_->onMarker = [this] (nova::WaveView::Marker m, std::int64_t frame)
+    applyMarker_ = [this] (nova::WaveView::Marker m, std::int64_t frame)
     {
         const auto* shown = shownZone();
         if (shown == nullptr) return;
@@ -414,9 +481,13 @@ void NovaSamplerEditor::buildSamplePage()
                     setLoopView (z, idx, l);
                     break;
                 }
+                case nova::WaveView::Marker::Volume: z.releaseRefFrame = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, total - 1)); break;
             }
         });
     };
+    wave_->onMarker = applyMarker_;
+    wave_->onCursor = [this] (std::int64_t frame) { cursorFrame_ = frame; };
+    wave_->onContext = [this] (std::int64_t frame, juce::Point<int> where) { showWaveMenu (frame, where); };
     infoText_ = add<nova::Text> (1, skin(), Token::TextDim, 11.0f);
     markerText_ = add<nova::Text> (1, skin(), Token::TextDim2, 11.0f, true);
 
@@ -449,7 +520,8 @@ void NovaSamplerEditor::buildSamplePage()
         if (cached_.zones.empty()) return;
         const auto sel = zones_->selectedRows();
         const int row = (! sel.empty() && sel.front() >= 0 && sel.front() < static_cast<int> (cached_.zones.size())) ? sel.front() : 0;
-        proc_.uiPreviewZone (row);
+        const auto* zz = row < static_cast<int> (cached_.zones.size()) ? &cached_.zones[static_cast<std::size_t> (row)] : nullptr;
+        proc_.uiPreviewZone (row, (zz != nullptr && cursorFrame_ >= 0 && cursorPath_ == zz->samplePath) ? cursorFrame_ : -1);   // le curseur de la forme d'onde donne le point de départ
         previewing_ = true;
         previewStartMs_ = juce::Time::getMillisecondCounter();
     };
@@ -553,6 +625,7 @@ void NovaSamplerEditor::buildSamplePage()
     cutsPill_ = tool (tx ("sm.tool_cuts"), "hlp.sm_cuts", [this] { toolSplitHits(); });
     cutsChoice_ = toolChoice (tx ("sm.cuts_sens"), { tx ("sm.sens_low"), tx ("sm.sens_mid"), tx ("sm.sens_high") }, &cutsIndex_);
     loopFindPill_ = tool (tx ("sm.tool_loop"), "hlp.sm_loop", [this] { toolAutoLoop(); });
+    loopOptionsPill_ = tool ("...", nullptr, [this] { openLoopOptions (*loopOptionsPill_); });
     snapPill_ = tool (tx ("sm.tool_snap"), "hlp.sm_snap", [this] { snapOn_ = ! snapOn_; snapPill_->setOn (snapOn_); });
     toolStatus_ = add<nova::Text> (1, skin(), Token::TextDim, 11.0f);
     durationNumber_ = add<nova::NumberPill> (1, skin(), tx ("sm.tool_duration").toUpperCase(), 25, 400, [this] { return stretchPercent_; }, [this] (int v) { stretchPercent_ = v; },
@@ -792,14 +865,19 @@ void NovaSamplerEditor::toolAutoLoop()
     const auto* z = shownZone();
     if (z == nullptr || z->samplePath.empty()) return;
     const Zone zone = *z;
-    const std::string key = zone.samplePath + "|" + std::to_string (zone.startFrame) + "|" + std::to_string (zone.endFrame);
+    auto options = loopOptions_;
+    options.cursor = (cursorFrame_ >= 0 && cursorPath_ == zone.samplePath) ? cursorFrame_ : -1;
+    if (options.aroundCursor && options.cursor < 0) { setToolStatus (tx ("sm.st_loop_nocursor")); return; }
+    const std::string key = zone.samplePath + "|" + std::to_string (zone.startFrame) + "|" + std::to_string (zone.endFrame) + "|" + std::to_string (editLoop_)
+                            + "|" + (options.period ? "p" : "-") + (options.stableOnly ? "s" : "-") + (options.spectral ? "f" : "-") + (options.aroundCursor ? "c" : "-")
+                            + std::to_string (options.cursor) + "|" + std::to_string (static_cast<int> (options.radiusMs));
     if (key != loopCandidatesKey_ || loopCandidates_.empty())
     {
         se::Buffer b;
         std::string err;
         if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
         const std::int64_t total = b.frames();
-        loopCandidates_ = se::findLoopCandidates (b, zone.startFrame, zone.endFrame < 0 ? total : std::min (zone.endFrame, total), 6, 100.0);
+        loopCandidates_ = se::findLoopCandidates (b, zone.startFrame, zone.endFrame < 0 ? total : std::min (zone.endFrame, total), 6, 100.0, options);
         loopCandidatesKey_ = key;
         loopCandidateIndex_ = 0;
         if (loopCandidates_.empty()) { setToolStatus (tx ("sm.st_loop_none")); return; }
@@ -877,6 +955,61 @@ void NovaSamplerEditor::toolStretch()
             safe->setToolStatus (U (safe->translator().format ("sm.st_stretch", { std::to_string (newFrames) })));
         });
     });
+}
+
+// Clic droit dans la forme d'onde : poser un marqueur ici, jouer à partir d'ici, chercher une boucle autour d'ici.
+void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where)
+{
+    const auto* z = shownZone();
+    if (z == nullptr) return;
+    cursorFrame_ = frame;
+    cursorPath_ = z->samplePath;
+    wave_->setCursor (frame, false);
+    const bool volumeOk = z->onRelease && z->releaseFollowsLevel;
+    juce::PopupMenu menu;
+    menu.addItem (1, tx ("sm.menu_start"));
+    menu.addItem (2, tx ("sm.menu_end"));
+    menu.addItem (3, tx ("sm.menu_loop_start"), z->mode == PlayMode::Loop);
+    menu.addItem (4, tx ("sm.menu_loop_end"), z->mode == PlayMode::Loop);
+    menu.addSeparator();
+    menu.addItem (5, tx ("sm.menu_volume"), volumeOk);
+    menu.addItem (6, tx ("sm.menu_volume_clear"), volumeOk && z->releaseRefFrame >= 0);
+    menu.addSeparator();
+    menu.addItem (7, tx ("sm.menu_play"));
+    menu.addItem (8, tx ("sm.menu_loop_around"), z->mode == PlayMode::Loop);
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (juce::Rectangle<int> (where.x, where.y, 1, 1)), [safe, frame] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        using M = nova::WaveView::Marker;
+        switch (r)
+        {
+            case 1: safe->applyMarker_ (M::Start, frame); break;
+            case 2: safe->applyMarker_ (M::End, frame); break;
+            case 3: safe->applyMarker_ (M::LoopStart, frame); break;
+            case 4: safe->applyMarker_ (M::LoopEnd, frame); break;
+            case 5: safe->applyMarker_ (M::Volume, frame); break;
+            case 6: safe->editZone ([] (Zone& zone) { zone.releaseRefFrame = -1; }); break;
+            case 7: { if (! safe->previewing_) safe->playPill_->onClick(); break; }
+            case 8:
+            {
+                const bool was = safe->loopOptions_.aroundCursor;
+                safe->loopOptions_.aroundCursor = true;
+                safe->toolAutoLoop();
+                safe->loopOptions_.aroundCursor = was;
+                break;
+            }
+            default: break;
+        }
+    });
+}
+
+void NovaSamplerEditor::openLoopOptions (juce::Component& anchor)
+{
+    auto panel = std::make_unique<LoopOptionsPanel> (skin(), translator(), loopOptions_);
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    panel->onChange = [safe] (const se::LoopSearchOptions& o) { if (safe != nullptr) { safe->loopOptions_ = o; safe->loopCandidates_.clear(); } };
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
 }
 
 // Ajoute une boucle (4 au plus) à la suite de la dernière, jusqu'à la fin de la région jouée.
@@ -1002,7 +1135,8 @@ void NovaSamplerEditor::footprintLoudest()
     const int i = loudestPoint (cv, from, to);
     if (i < 0) return;
     navPoint_ = i;
-    wave_->setCursor (fp.frameOfPoint (static_cast<std::size_t> (i)), true);
+    cursorFrame_ = fp.frameOfPoint (static_cast<std::size_t> (i));
+    wave_->setCursor (cursorFrame_, true);
     setToolStatus (U (translator().format ("sm.st_fp_loudest", { numberText (cv[static_cast<std::size_t> (i)]).toStdString(), numberText (static_cast<double> (fp.frameOfPoint (static_cast<std::size_t> (i))) / fp.sampleRate, 3).toStdString() })));
 }
 
@@ -1020,7 +1154,8 @@ void NovaSamplerEditor::footprintPeak (int direction)
     const int i = neighbourPeak (peaks, start, direction);
     if (i < 0) { setToolStatus (tx ("sm.st_fp_nopeak")); return; }
     navPoint_ = i;
-    wave_->setCursor (fp.frameOfPoint (static_cast<std::size_t> (i)), true);
+    cursorFrame_ = fp.frameOfPoint (static_cast<std::size_t> (i));
+    wave_->setCursor (cursorFrame_, true);
     setToolStatus (U (translator().format ("sm.st_fp_peak", { numberText (cv[static_cast<std::size_t> (i)]).toStdString(), numberText (static_cast<double> (fp.frameOfPoint (static_cast<std::size_t> (i))) / fp.sampleRate, 3).toStdString() })));
 }
 
@@ -1368,10 +1503,10 @@ void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
         safe->proc_.uiEditInstrument (std::move (d), "Compensate on replace");
         safe->lastRevision_ = 0xFFFFFFFFu;
     };
-    panel->onRelease = [safe] (bool follow, int meter, double floorDb, double curve)
+    panel->onRelease = [safe] (bool follow, int meter, double floorDb, double curve, double offsetDb)
     {
         if (safe == nullptr) return;
-        safe->editZone ([=] (Zone& zone) { zone.releaseFollowsLevel = follow; zone.releaseMeter = meter; zone.releaseFloorDb = floorDb; zone.releaseCurve = curve; });
+        safe->editZone ([=] (Zone& zone) { zone.releaseFollowsLevel = follow; zone.releaseMeter = meter; zone.releaseFloorDb = floorDb; zone.releaseCurve = curve; zone.releaseOffsetDb = offsetDb; });
     };
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
 }
@@ -1729,6 +1864,20 @@ void NovaSamplerEditor::updateSampleInfo()
     m.crossfade = edited.crossfade;
     m.loopStart = std::max (edited.start, z->startFrame);   // la boucle ne revient jamais avant START (même règle que le moteur)
     m.loopNumber = idx + 1;
+    if (z->onRelease && z->releaseFollowsLevel && z->releaseRefFrame >= 0)
+    {
+        m.volumeRef = z->releaseRefFrame;
+        const std::string key = z->samplePath + "|" + std::to_string (z->releaseRefFrame) + "|" + std::to_string (z->releaseMeter);
+        if (key != refLevelKey_)
+        {
+            refLevelKey_ = key;
+            refLevelKnown_ = measureLevelAt (std::filesystem::u8path (z->samplePath), z->releaseRefFrame, z->releaseMeter, refLevelDb_);
+        }
+        m.volumeRefKnown = refLevelKnown_;
+        m.volumeRefDb = refLevelDb_;
+    }
+    if (cursorPath_ != z->samplePath) { cursorPath_ = z->samplePath; cursorFrame_ = -1; }
+    wave_->setCursor (cursorFrame_, false);
     for (int i = 0; i < loopCountOf (*z); ++i)
         if (i != idx) { const auto l = loopView (*z, i); m.otherLoops.push_back ({ std::max (l.start, z->startFrame), l.end < 0 ? info.frames : l.end, i + 1 }); }
     const double rate = info.sampleRate;
@@ -1839,8 +1988,9 @@ void NovaSamplerEditor::layout()
     cutsPill_->setBounds (R (X0 + 354, 412, 160, 28));
     cutsChoice_->pill->setBounds (R (X0 + 520, 412, 186, 28));
     loopFindPill_->setBounds (R (X0 + 12, 446, 150, 28));
-    snapPill_->setBounds (R (X0 + 168, 446, 150, 28));
-    toolStatus_->setBounds (R (X0 + 326, 446, 380, 28));
+    loopOptionsPill_->setBounds (R (X0 + 168, 446, 36, 28));
+    snapPill_->setBounds (R (X0 + 210, 446, 150, 28));
+    toolStatus_->setBounds (R (X0 + 368, 446, 338, 28));
     durationNumber_->setBounds (R (X0 + 12, 480, 200, 28));
     pitchNumber_->setBounds (R (X0 + 218, 480, 200, 28));
     stretchPill_->setBounds (R (X0 + 424, 480, 140, 28));
@@ -2043,7 +2193,11 @@ void NovaSamplerEditor::tick()
         stretchPill_->setAlpha (has && ! stretchBusy_ ? 1.0f : 0.4f);
         if (has && z != nullptr)
         {
-            const std::string key = z->samplePath + "|" + std::to_string (z->startFrame) + "|" + std::to_string (z->endFrame);
+            auto options = loopOptions_;
+            options.cursor = (cursorFrame_ >= 0 && cursorPath_ == z->samplePath) ? cursorFrame_ : -1;
+            const std::string key = z->samplePath + "|" + std::to_string (z->startFrame) + "|" + std::to_string (z->endFrame) + "|" + std::to_string (editLoop_)
+                                    + "|" + (options.period ? "p" : "-") + (options.stableOnly ? "s" : "-") + (options.spectral ? "f" : "-") + (options.aroundCursor ? "c" : "-")
+                                    + std::to_string (options.cursor) + "|" + std::to_string (static_cast<int> (options.radiusMs));
             loopFindPill_->setText (tx ("sm.tool_loop") + (key == loopCandidatesKey_ && ! loopCandidates_.empty()
                                                           ? "  " + juce::String (loopCandidateIndex_ + 1) + "/" + juce::String (static_cast<int> (loopCandidates_.size())) : juce::String()));
         }

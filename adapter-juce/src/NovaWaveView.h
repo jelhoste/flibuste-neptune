@@ -20,12 +20,14 @@ namespace nova
 class WaveView : public juce::Component, private juce::Timer
 {
 public:
-    enum class Marker { Start, End, LoopStart, LoopEnd, Crossfade };
+    enum class Marker { Start, End, LoopStart, LoopEnd, Crossfade, Volume };
     struct Markers
     {
         std::int64_t start = 0, end = -1;          // région jouée (end < 0 : fin du fichier)
         std::int64_t loopStart = 0, loopEnd = -1;  // boucle (loopEnd < 0 : fin du fichier)
         std::int64_t crossfade = 0;                // longueur du fondu enchaîné avant la fin de boucle
+        std::int64_t volumeRef = -1;               // marqueur de volume (sample de relâchement) ; < 0 : aucun
+        double volumeRefDb = 0.0; bool volumeRefKnown = false;   // niveau mesuré au marqueur, pour l'affichage
         int loopNumber = 1;                        // numéro de la boucle éditée (1 à 4)
         struct Other { std::int64_t start, end; int number; };
         std::vector<Other> otherLoops;             // les autres boucles de la zone, affichées en retrait
@@ -54,6 +56,8 @@ public:
 
     std::function<void (Marker, std::int64_t frame)> onMarker;   // pendant un glissé (valeur brute : l'éditeur borne)
     std::function<void()> onGestureBegin, onGestureEnd;
+    std::function<void (std::int64_t frame)> onCursor;                              // clic simple dans la forme d'onde (hors marqueurs, sans glissé)
+    std::function<void (std::int64_t frame, juce::Point<int> screenPos)> onContext;   // clic droit
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -103,6 +107,8 @@ private:
     int lastBins_ = 0;
 
     bool dragging_ = false, panning_ = false;
+    bool movedSincePress_ = false;
+    float pressX_ = 0.0f;
     Hit active_;
     float panStartX_ = 0.0f;
     double panStartFrom_ = 0.0, panStartTo_ = 0.0;

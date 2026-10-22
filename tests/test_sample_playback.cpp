@@ -330,3 +330,48 @@ TEST_CASE ("release-level settings and the replace option survive JSON")
     CHECK_FALSE (back.compensateOnReplace);
     CHECK (instrumentFromJson (toJson (InstrumentDescription {})).compensateOnReplace);
 }
+
+TEST_CASE ("a level marker matches the release sample to the attack level")
+{
+    auto run = [] (float attackAmp, float releaseAmp, float offsetDb)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto attack = makeFullKeyboardZone (makeConstant (96000, attackAmp), 60, PlayMode::Loop);
+        attack.panL = 1.0f; attack.panR = 0.0f;
+        auto rel = makeFullKeyboardZone (makeConstant (96000, releaseAmp), 60, PlayMode::OneShot);
+        rel.onRelease = true; rel.panL = 0.0f; rel.panR = 1.0f;
+        rel.releaseFollowsLevel = true; rel.releaseMeter = 0;
+        rel.releaseRefDb = static_cast<float> (20.0 * std::log10 (releaseAmp));   // le marqueur tombe sur un son constant : son niveau de crête
+        rel.releaseOffsetDb = offsetDb;
+        inst->zones.push_back (std::move (attack));
+        inst->zones.push_back (std::move (rel));
+        inst->finalize();
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        v.noteOn (0, 60, 1.0f);
+        std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
+        for (int pos = 0; pos < 24000; pos += 256) v.render (l.data() + pos, r.data() + pos, std::min (256, 24000 - pos), 1.0f, 1.0f, 0.0);
+        v.noteOff (0, 60);
+        std::fill (r.begin(), r.end(), 0.0f);
+        v.render (l.data(), r.data(), 2048, 1.0f, 1.0f, 0.0);
+        return r[1500];
+    };
+    // attaque à 0,5 : le relâchement (0,25 au marqueur) est remonté pour sonner à 0,5
+    CHECK_THAT (run (0.5f, 0.25f, 0.0f), WithinAbs (0.5, 0.02));
+    // une attaque plus faible donne un relâchement plus faible, au même rapport
+    CHECK_THAT (run (0.1f, 0.25f, 0.0f), WithinAbs (0.1, 0.01));
+    // le décalage s'ajoute : +6,02 dB double le volume
+    CHECK_THAT (run (0.25f, 0.25f, 6.0206f), WithinAbs (0.5, 0.02));
+}
+
+TEST_CASE ("level markers survive JSON")
+{
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = "r.wav"; z.onRelease = true; z.releaseFollowsLevel = true; z.releaseRefFrame = 12345; z.releaseOffsetDb = -3.5;
+    d.zones.push_back (z);
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back.zones[0] == sanitised (z));
+    CHECK (back.zones[0].releaseRefFrame == 12345);
+}

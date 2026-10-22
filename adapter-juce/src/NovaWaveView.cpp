@@ -218,6 +218,7 @@ WaveView::Hit WaveView::hitTest (juce::Point<float> pt) const
         test (Marker::LoopEnd, static_cast<double> (effectiveLoopEnd()));
         if (markers_.crossfade > 0 && ! markers_.reverse) test (Marker::Crossfade, static_cast<double> (effectiveLoopEnd() - markers_.crossfade));
     }
+    if (markers_.volumeRef >= 0) test (Marker::Volume, static_cast<double> (markers_.volumeRef));
     return best;
 }
 
@@ -477,6 +478,9 @@ void WaveView::paint (juce::Graphics& g)
         if (markers_.crossfade > 0 && ! markers_.reverse)
             flag (static_cast<double> (effectiveLoopEnd() - markers_.crossfade), Token::Accent2, true, "XFADE", active_.valid && dragging_ && active_.marker == Marker::Crossfade);
     }
+    if (markers_.volumeRef >= 0)
+        flag (static_cast<double> (markers_.volumeRef), Token::Accent2, false,
+              markers_.volumeRefKnown ? "VOL " + juce::String (markers_.volumeRefDb, 1) : juce::String ("VOL"), active_.valid && dragging_ && active_.marker == Marker::Volume);
     if (markers_.reverse)
     {
         g.setColour (skin_.colour (Token::Accent));
@@ -514,6 +518,13 @@ void WaveView::mouseMove (const juce::MouseEvent& e)
 void WaveView::mouseDown (const juce::MouseEvent& e)
 {
     if (frames_ <= 0) return;
+    if (e.mods.isPopupMenu())
+    {
+        if (onContext && plot().contains (e.position)) onContext (static_cast<std::int64_t> (std::llround (std::clamp (frameAt (e.position.x), 0.0, static_cast<double> (frames_)))), e.getScreenPosition());
+        return;
+    }
+    movedSincePress_ = false;
+    pressX_ = e.position.x;
     const auto h = hitTest (e.position);
     if (h.valid && ! e.mods.isPopupMenu())
     {
@@ -532,6 +543,7 @@ void WaveView::mouseDown (const juce::MouseEvent& e)
 void WaveView::mouseDrag (const juce::MouseEvent& e)
 {
     hoverPos_ = e.position;
+    if (std::abs (e.position.x - pressX_) > skin_.px (3.0f)) movedSincePress_ = true;
     if (dragging_ && active_.valid)
     {
         const auto frame = static_cast<std::int64_t> (std::llround (std::clamp (frameAt (e.position.x), 0.0, static_cast<double> (frames_))));
@@ -543,6 +555,7 @@ void WaveView::mouseDrag (const juce::MouseEvent& e)
             case Marker::LoopStart: markers_.loopStart = std::min (frame, effectiveLoopEnd() - 1); break;
             case Marker::LoopEnd: markers_.loopEnd = std::max (frame, markers_.loopStart + 1); break;
             case Marker::Crossfade: markers_.crossfade = std::max<std::int64_t> (0, effectiveLoopEnd() - frame); break;
+            case Marker::Volume: markers_.volumeRef = frame; break;
         }
         if (onMarker)
         {
@@ -553,6 +566,7 @@ void WaveView::mouseDrag (const juce::MouseEvent& e)
                 case Marker::LoopStart: onMarker (active_.marker, markers_.loopStart); break;
                 case Marker::LoopEnd: onMarker (active_.marker, markers_.loopEnd); break;
                 case Marker::Crossfade: onMarker (active_.marker, markers_.crossfade); break;
+                case Marker::Volume: onMarker (active_.marker, markers_.volumeRef); break;
             }
         }
         repaint();
@@ -568,8 +582,10 @@ void WaveView::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
-void WaveView::mouseUp (const juce::MouseEvent&)
+void WaveView::mouseUp (const juce::MouseEvent& e)
 {
+    if (panning_ && ! movedSincePress_ && ! dragging_ && onCursor && plot().contains (e.position))
+        onCursor (static_cast<std::int64_t> (std::llround (std::clamp (frameAt (e.position.x), 0.0, static_cast<double> (frames_)))));   // simple clic : pose le curseur
     if (dragging_)
     {
         dragging_ = false;

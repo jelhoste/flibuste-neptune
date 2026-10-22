@@ -48,8 +48,23 @@ Silence detectSilence (const Buffer&, double thresholdDb) noexcept;
 std::vector<std::int64_t> detectTransients (const Buffer&, double sensitivity, double minGapMs);
 
 struct LoopCandidate { std::int64_t start = 0, end = 0; double score = 0.0; };    // score 0..1 (1 = raccord parfait)
+// Réglages de la recherche de boucle.
+struct LoopSearchOptions
+{
+    bool period = true;        // longueur de boucle = nombre entier de périodes du son (hauteur détectée par autocorrélation)
+    bool stableOnly = true;    // ne chercher que dans la zone stable (niveau et brillance qui varient peu), hors attaque et fin
+    bool spectral = true;      // le score compare aussi le spectre et le niveau avant le saut, pas seulement la forme d'onde
+    bool aroundCursor = false; // le début de boucle doit tomber à moins de `radiusMs` du curseur
+    std::int64_t cursor = -1;
+    double radiusMs = 500.0;
+};
 // Candidats de boucle dans [from, to) : au plus `maxCount`, meilleurs d'abord, longueur au moins `minLengthMs`.
-std::vector<LoopCandidate> findLoopCandidates (const Buffer&, std::int64_t from, std::int64_t to, int maxCount, double minLengthMs);
+std::vector<LoopCandidate> findLoopCandidates (const Buffer&, std::int64_t from, std::int64_t to, int maxCount, double minLengthMs,
+                                               const LoopSearchOptions& = {});
+// Briques de la recherche (publiques pour les tests) :
+struct StableRegion { bool found = false; std::int64_t start = 0, end = 0; };
+StableRegion findStableRegion (const Buffer&, std::int64_t from, std::int64_t to, double minLengthMs);   // plus longue plage où niveau et brillance sont stables
+double detectPeriod (const Buffer&, std::int64_t from, std::int64_t to) noexcept;                       // période en échantillons (0 : son non périodique)
 
 // Passage par zéro (changement de signe du mélange mono) le plus proche de `frame`, dans ±radius ; `frame` si aucun.
 std::int64_t snapToZero (const Buffer&, std::int64_t frame, std::int64_t radius) noexcept;

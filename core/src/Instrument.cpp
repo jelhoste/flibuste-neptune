@@ -1,4 +1,5 @@
 #include "neptune/core/Instrument.h"
+#include "neptune/core/LevelTracker.h"
 #include "neptune/core/DescriptionJson.h"
 
 #include <algorithm>
@@ -91,6 +92,8 @@ ZoneDescription sanitised (ZoneDescription z)
     z.releaseMeter = std::clamp (z.releaseMeter, 0, 2);
     z.releaseFloorDb = std::isfinite (z.releaseFloorDb) ? std::clamp (z.releaseFloorDb, -96.0, -6.0) : -48.0;
     z.releaseCurve = std::isfinite (z.releaseCurve) ? std::clamp (z.releaseCurve, 0.25, 4.0) : 1.0;
+    if (z.releaseRefFrame < -1) z.releaseRefFrame = -1;
+    z.releaseOffsetDb = std::isfinite (z.releaseOffsetDb) ? std::clamp (z.releaseOffsetDb, -24.0, 24.0) : 0.0;
     z.loopRepeats = std::clamp (z.loopRepeats, 0, 1000);
     if (z.extraLoops.size() > ZoneDescription::maxExtraLoops) z.extraLoops.resize (ZoneDescription::maxExtraLoops);
     for (auto& l : z.extraLoops)
@@ -226,6 +229,8 @@ std::string toJson (const InstrumentDescription& d)
             o["release_meter"] = z.releaseMeter;
             o["release_floor_db"] = z.releaseFloorDb;
             o["release_curve"] = z.releaseCurve;
+            if (z.releaseRefFrame >= 0) o["release_ref_frame"] = z.releaseRefFrame;
+            if (z.releaseOffsetDb != 0.0) o["release_offset_db"] = z.releaseOffsetDb;
         }
         if (z.loopRepeats != 0) o["loop_repeats"] = z.loopRepeats;
         if (! z.extraLoops.empty())
@@ -372,6 +377,8 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.releaseMeter = readInt (o, "release_meter", z.releaseMeter);
     z.releaseFloorDb = readNum (o, "release_floor_db", z.releaseFloorDb);
     z.releaseCurve = readNum (o, "release_curve", z.releaseCurve);
+    z.releaseRefFrame = readI64 (o, "release_ref_frame", z.releaseRefFrame);
+    z.releaseOffsetDb = readNum (o, "release_offset_db", z.releaseOffsetDb);
     z.loopRepeats = readInt (o, "loop_repeats", z.loopRepeats);
     if (const auto it = o.find ("extra_loops"); it != o.end() && it->is_array())
         for (const auto& lo : *it)
@@ -853,6 +860,12 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             z.releaseMeter = zd.releaseMeter;
             z.releaseFloorDb = static_cast<float> (zd.releaseFloorDb);
             z.releaseCurve = static_cast<float> (zd.releaseCurve);
+            z.releaseOffsetDb = static_cast<float> (zd.releaseOffsetDb);
+            if (z.releaseFollowsLevel && zd.releaseRefFrame >= 0)
+            {
+                double refDb = 0.0;
+                if (measureLevelAt (std::filesystem::u8path (zd.samplePath), zd.releaseRefFrame, zd.releaseMeter, refDb)) z.releaseRefDb = static_cast<float> (refDb);
+            }
         }
         inst->zones.push_back (std::move (z));
     }

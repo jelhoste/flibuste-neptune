@@ -7,6 +7,7 @@
 #include <functional>
 
 #include "neptune/core/SampleEdit.h"
+#include "neptune/core/LevelTracker.h"
 #include "neptune/core/VolumeFootprint.h"
 
 using namespace neptune::core;
@@ -92,4 +93,20 @@ TEST_CASE ("localPeaks ignores ripples below the prominence", "[footprint]")
     c[250] = -10.0f;                    // vrai pic
     const auto peaks = localPeaks (c, 6.0, 100);
     REQUIRE (peaks == std::vector<int> { 50, 250 });
+}
+
+TEST_CASE ("measureLevelAt reads the causal level at a frame", "[footprint]")
+{
+    const auto path = writeTone ("neptune-fp-level.wav", 2.0, [] (double t) { return t < 1.0 ? 0.5 : 0.05; });
+    double db = 0.0;
+    REQUIRE (measureLevelAt (path, 24000, 0, db));            // pleine force : crête de 0,5
+    REQUIRE_THAT (db, WithinAbs (-6.02, 0.2));
+    REQUIRE (measureLevelAt (path, 90000, 0, db));            // 0,05 plus tard
+    REQUIRE_THAT (db, WithinAbs (-26.02, 0.5));
+    double l1 = 0.0, l2 = 0.0;
+    REQUIRE (measureLevelAt (path, 40000, 2, l1));
+    REQUIRE (measureLevelAt (path, 95000, 2, l2));
+    REQUIRE (l1 - l2 > 15.0);                                  // la sonie baisse bien d'environ 20 dB
+    REQUIRE_FALSE (measureLevelAt ("/nope.wav", 10, 0, db));
+    std::filesystem::remove (path);
 }

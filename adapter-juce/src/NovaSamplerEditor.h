@@ -89,6 +89,8 @@ private:
     void toolAutoLoop();
     void toolSaveAs();
     void addLoop();
+    void showWaveMenu (std::int64_t frame, juce::Point<int> where);
+    void openLoopOptions (juce::Component& anchor);
     void removeLoop();
     void toolStretch();
     void updateSeam();
@@ -126,6 +128,12 @@ private:
     std::shared_ptr<const neptune::core::VolumeFootprint> footprint_;
     std::future<std::shared_ptr<const neptune::core::VolumeFootprint>> footprintJob_;
     std::atomic<bool> footprintCancel_ { false };
+    std::function<void (nova::WaveView::Marker, std::int64_t)> applyMarker_;   // pose un marqueur (glissé, menu clic droit)
+    std::int64_t cursorFrame_ = -1;       // curseur de la forme d'onde (point de départ de l'écoute et des analyses)
+    std::string cursorPath_, refLevelKey_;
+    double refLevelDb_ = 0.0;
+    bool refLevelKnown_ = false;
+    neptune::core::sampleedit::LoopSearchOptions loopOptions_;
     int editLoop_ = 0;   // boucle éditée (0 = la première)
     bool snapOn_ = false;
     int stretchPercent_ = 100, pitchTenths_ = 0;      // durée (%) et hauteur (dixièmes de demi-ton) de l'outil d'étirement
@@ -167,7 +175,7 @@ private:
     nova::ValueSlider *fadeIn_ = nullptr, *fadeOut_ = nullptr, *delay_ = nullptr, *crossfade_ = nullptr, *tune_ = nullptr, *gain_ = nullptr, *pan_ = nullptr;
     nova::NumberPill* rootNumber2_ = nullptr;
     nova::Panel* toolsPanel_ = nullptr;
-    nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
+    nova::Pill *trimPill_ = nullptr, *normPill_ = nullptr, *dcPill_ = nullptr, *silencePill_ = nullptr, *cutsPill_ = nullptr, *loopFindPill_ = nullptr, *loopOptionsPill_ = nullptr, *snapPill_ = nullptr, *saveAsPill_ = nullptr;
     nova::ChoicePill *normChoice_ = nullptr, *silenceChoice_ = nullptr, *cutsChoice_ = nullptr;
     nova::Text* toolStatus_ = nullptr;
     std::unique_ptr<nova::ChoicePill> loopEditChoice_;
