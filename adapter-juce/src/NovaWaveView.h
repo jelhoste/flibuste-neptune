@@ -119,6 +119,7 @@ private:
     double rangeLo_ = -30.0, rangeHi_ = 0.0;
     int rangeKind_ = 0;
     std::int64_t cursorFrame_ = -1;
+    std::vector<std::pair<Marker, juce::Rectangle<float>>> cards_;   // cartes (étiquettes) des marqueurs, remplies à chaque dessin : elles se saisissent comme les traits
     juce::Point<float> hoverPos_;
     bool hovering_ = false;
 };

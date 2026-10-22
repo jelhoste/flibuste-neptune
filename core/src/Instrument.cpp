@@ -1,5 +1,6 @@
 #include "neptune/core/Instrument.h"
 #include "neptune/core/LevelTracker.h"
+#include "neptune/core/SampleMeta.h"
 #include "neptune/core/DescriptionJson.h"
 
 #include <algorithm>
@@ -861,10 +862,18 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             z.releaseFloorDb = static_cast<float> (zd.releaseFloorDb);
             z.releaseCurve = static_cast<float> (zd.releaseCurve);
             z.releaseOffsetDb = static_cast<float> (zd.releaseOffsetDb);
-            if (z.releaseFollowsLevel && zd.releaseRefFrame >= 0)
+            if (z.releaseFollowsLevel)
             {
+                // le marqueur de volume est une propriété du sample : celui de la zone (s'il y en a un) l'emporte, sinon celui des métadonnées du fichier
+                std::int64_t refFrame = zd.releaseRefFrame;
+                if (refFrame < 0)
+                {
+                    SampleMeta meta;
+                    if (readSampleMeta (std::filesystem::u8path (zd.samplePath), meta) && meta.hasVolumeMarker)
+                        refFrame = static_cast<std::int64_t> (std::llround (meta.volumeMarkerMs * z.sample->sampleRate / 1000.0));
+                }
                 double refDb = 0.0;
-                if (measureLevelAt (std::filesystem::u8path (zd.samplePath), zd.releaseRefFrame, zd.releaseMeter, refDb)) z.releaseRefDb = static_cast<float> (refDb);
+                if (refFrame >= 0 && measureLevelAt (std::filesystem::u8path (zd.samplePath), refFrame, zd.releaseMeter, refDb)) z.releaseRefDb = static_cast<float> (refDb);
             }
         }
         inst->zones.push_back (std::move (z));

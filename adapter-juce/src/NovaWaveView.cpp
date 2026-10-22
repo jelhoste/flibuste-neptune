@@ -203,6 +203,8 @@ WaveView::Hit WaveView::hitTest (juce::Point<float> pt) const
 {
     Hit best;
     if (frames_ <= 0) return best;
+    for (auto it = cards_.rbegin(); it != cards_.rend(); ++it)   // une carte (START, END, LOOP, XFADE, VOL) se saisit comme son trait ; la dernière dessinée est au-dessus
+        if (it->second.expanded (skin_.px (2.0f)).contains (pt)) return { true, it->first };
     const float tol = skin_.px (kGrab);
     float bestDist = tol;
     auto test = [&] (Marker m, double frame)
@@ -456,7 +458,8 @@ void WaveView::paint (juce::Graphics& g)
     }
 
     // ---- marqueurs
-    auto flag = [&] (double frame, Token token, bool top, const juce::String& label, bool active)
+    cards_.clear();
+    auto flag = [&] (Marker marker, double frame, Token token, bool top, const juce::String& label, bool active)
     {
         const float x = xOf (frame);
         if (x < p.getX() - 2.0f || x > p.getRight() + 2.0f) return;
@@ -468,18 +471,19 @@ void WaveView::paint (juce::Graphics& g)
         g.setColour (skin_.colour (Token::BgApp));
         g.setFont (skin_.font (9.0f, true));
         g.drawText (label, r, juce::Justification::centred);
+        cards_.push_back ({ marker, r });
     };
-    flag (static_cast<double> (markers_.start), Token::Accent, true, "START", active_.valid && dragging_ && active_.marker == Marker::Start);
-    flag (static_cast<double> (effectiveEnd()), Token::Accent, false, "END", active_.valid && dragging_ && active_.marker == Marker::End);
+    flag (Marker::Start, static_cast<double> (markers_.start), Token::Accent, true, "START", active_.valid && dragging_ && active_.marker == Marker::Start);
+    flag (Marker::End, static_cast<double> (effectiveEnd()), Token::Accent, false, "END", active_.valid && dragging_ && active_.marker == Marker::End);
     if (markers_.loop)
     {
-        flag (static_cast<double> (markers_.loopStart), Token::Pink, true, "LOOP", active_.valid && dragging_ && active_.marker == Marker::LoopStart);
-        flag (static_cast<double> (effectiveLoopEnd()), Token::Pink, false, "LOOP", active_.valid && dragging_ && active_.marker == Marker::LoopEnd);
+        flag (Marker::LoopStart, static_cast<double> (markers_.loopStart), Token::Pink, true, "LOOP", active_.valid && dragging_ && active_.marker == Marker::LoopStart);
+        flag (Marker::LoopEnd, static_cast<double> (effectiveLoopEnd()), Token::Pink, false, "LOOP", active_.valid && dragging_ && active_.marker == Marker::LoopEnd);
         if (markers_.crossfade > 0 && ! markers_.reverse)
-            flag (static_cast<double> (effectiveLoopEnd() - markers_.crossfade), Token::Accent2, true, "XFADE", active_.valid && dragging_ && active_.marker == Marker::Crossfade);
+            flag (Marker::Crossfade, static_cast<double> (effectiveLoopEnd() - markers_.crossfade), Token::Accent2, true, "XFADE", active_.valid && dragging_ && active_.marker == Marker::Crossfade);
     }
     if (markers_.volumeRef >= 0)
-        flag (static_cast<double> (markers_.volumeRef), Token::Accent2, false,
+        flag (Marker::Volume, static_cast<double> (markers_.volumeRef), Token::Accent2, false,
               markers_.volumeRefKnown ? "VOL " + juce::String (markers_.volumeRefDb, 1) : juce::String ("VOL"), active_.valid && dragging_ && active_.marker == Marker::Volume);
     if (markers_.reverse)
     {

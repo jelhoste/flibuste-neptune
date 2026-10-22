@@ -6,6 +6,7 @@
 
 #include "ChokePanel.h"
 #include "neptune/core/Mixer.h"
+#include "neptune/core/SampleMeta.h"
 #include "neptune/core/SamplerParams.h"
 
 using namespace neptune::core;
@@ -439,7 +440,15 @@ void NovaSamplerEditor::buildSamplePage()
     wave_ = add<nova::WaveView> (1, skin());
     wave_->setAutoLabel (tx ("sm.no_sample"));
     wave_->onGestureBegin = [this] { proc_.uiBeginGesture(); };
-    wave_->onGestureEnd = [this] { proc_.uiEndGesture(); };
+    wave_->onGestureEnd = [this]
+    {
+        proc_.uiEndGesture();
+        if (volumeDragged_)   // le marqueur de volume est une propriété du sample : à la fin du glissé, il est écrit dans le fichier
+        {
+            volumeDragged_ = false;
+            if (const auto* zz = shownZone()) saveMarker (zz->samplePath, zz->releaseRefFrame);
+        }
+    };
     applyMarker_ = [this] (nova::WaveView::Marker m, std::int64_t frame)
     {
         const auto* shown = shownZone();
@@ -481,7 +490,7 @@ void NovaSamplerEditor::buildSamplePage()
                     setLoopView (z, idx, l);
                     break;
                 }
-                case nova::WaveView::Marker::Volume: z.releaseRefFrame = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, total - 1)); break;
+                case nova::WaveView::Marker::Volume: z.releaseRefFrame = std::clamp<std::int64_t> (frame, 0, std::max<std::int64_t> (0, total - 1)); volumeDragged_ = true; break;
             }
         });
     };
@@ -567,7 +576,7 @@ void NovaSamplerEditor::buildSamplePage()
     loopEditChoice_->attach (*this);
     loopAddPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     loopAddPill_->setText (tx ("sm.loop_add"));
-    loopAddPill_->onClick = [this] { addLoop(); };
+    loopAddPill_->onClick = [this] { showAddLoopMenu(); };
     addInfo (1, loopAddPill_, "hlp.sm_multiloop", 1);
     loopRemovePill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     loopRemovePill_->setText (tx ("sm.loop_remove"));
@@ -710,6 +719,38 @@ void NovaSamplerEditor::editShownZone (const std::function<void (Zone&)>& change
     refreshFromInstrument();
 }
 
+// Marqueur de volume : celui de la zone s'il y en a un, sinon celui des métadonnées du fichier (lu une fois, gardé en mémoire).
+std::int64_t NovaSamplerEditor::fileMarkerFrame (const std::string& path)
+{
+    if (path.empty()) return -1;
+    const auto it = fileMarkers_.find (path);
+    if (it != fileMarkers_.end()) return it->second;
+    std::int64_t frame = -1;
+    SampleMeta meta;
+    const auto& info = fileInfo_.info (path);
+    if (info.ok && readSampleMeta (utf8Path (path), meta) && meta.hasVolumeMarker)
+        frame = std::clamp<std::int64_t> (static_cast<std::int64_t> (std::llround (meta.volumeMarkerMs * info.sampleRate / 1000.0)), 0, std::max<std::int64_t> (0, info.frames - 1));
+    fileMarkers_[path] = frame;
+    return frame;
+}
+
+std::int64_t NovaSamplerEditor::effectiveMarker (const Zone& z) { return z.releaseRefFrame >= 0 ? z.releaseRefFrame : fileMarkerFrame (z.samplePath); }
+
+// Écrit (ou retire, frame < 0) le marqueur de volume dans les métadonnées du fichier.
+void NovaSamplerEditor::saveMarker (const std::string& path, std::int64_t frame)
+{
+    if (path.empty()) return;
+    const auto& info = fileInfo_.info (path);
+    if (! info.ok || info.sampleRate <= 0.0) return;
+    SampleMeta meta;
+    if (frame >= 0) { meta.hasVolumeMarker = true; meta.volumeMarkerMs = static_cast<double> (frame) * 1000.0 / info.sampleRate; }
+    MetaStore where = MetaStore::None;
+    std::string err;
+    if (! writeSampleMeta (utf8Path (path), meta, &where, &err)) { setToolStatus (U (translator().format ("sm.st_marker_error", { err }))); return; }
+    fileMarkers_[path] = frame;
+    setToolStatus (frame < 0 ? tx ("sm.st_marker_removed") : tx (where == MetaStore::Sidecar ? "sm.st_marker_sidecar" : "sm.st_marker_saved"));
+}
+
 bool NovaSamplerEditor::writeDerived (const Zone& z, const char* tag, const se::Buffer& b, std::string& newPath)
 {
     std::string err;
@@ -755,14 +796,17 @@ void NovaSamplerEditor::toolTrim()
     std::string newPath;
     if (! writeDerived (zone, "trim", t, newPath)) return;
     const std::int64_t n = t.frames();
+    const std::int64_t oldMarker = effectiveMarker (zone), newMarker = (oldMarker >= from && oldMarker < to) ? oldMarker - from : -1;
     editShownZone ([&] (Zone& d)
     {
         d.samplePath = newPath;
+        d.releaseRefFrame = newMarker;
         d.startFrame = 0;
         d.endFrame = -1;
         d.loopStart = std::max<std::int64_t> (0, d.loopStart - from);
         if (d.loopEnd >= 0) d.loopEnd = std::clamp<std::int64_t> (d.loopEnd - from, 1, n);
     });
+    if (newMarker >= 0) saveMarker (newPath, newMarker);
     setToolStatus (U (translator().format ("sm.st_trimmed", { std::to_string (n) })));
 }
 
@@ -785,7 +829,9 @@ void NovaSamplerEditor::toolNormalize()
     se::applyGainDb (b, g);
     std::string newPath;
     if (! writeDerived (zone, "norm", b, newPath)) return;
+    const std::int64_t keptMarker = effectiveMarker (zone);
     editShownZone ([&] (Zone& d) { d.samplePath = newPath; });
+    if (keptMarker >= 0) saveMarker (newPath, keptMarker);
     setToolStatus (limited ? U (translator().format ("sm.st_gain_limited", { numberText (g).toStdString() }))
                            : U (translator().format ("sm.st_gain", { numberText (g).toStdString(), numberText (peakDb).toStdString(), numberText (rmsDb).toStdString() })));
 }
@@ -804,7 +850,9 @@ void NovaSamplerEditor::toolRemoveDc()
     se::removeDc (b);
     std::string newPath;
     if (! writeDerived (zone, "dc", b, newPath)) return;
+    const std::int64_t keptMarker = effectiveMarker (zone);
     editShownZone ([&] (Zone& d) { d.samplePath = newPath; });
+    if (keptMarker >= 0) saveMarker (newPath, keptMarker);
     setToolStatus (U (translator().format ("sm.st_dc", { text })));
 }
 
@@ -927,12 +975,13 @@ void NovaSamplerEditor::toolStretch()
     if (std::fabs (ratio - 1.0) < 1.0e-6 && std::fabs (semis) < 1.0e-9) { setToolStatus (tx ("sm.st_stretch_none")); return; }
     const Zone zone = *z;
     const int index = shownIndex();
+    const std::int64_t markerOld = effectiveMarker (zone);
     if (stretchThread_.joinable()) stretchThread_.join();
     stretchCancel_ = false;
     stretchBusy_ = true;
     setToolStatus (tx ("sm.st_stretch_busy"));
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
-    stretchThread_ = std::thread ([this, safe, zone, index, ratio, semis]
+    stretchThread_ = std::thread ([this, safe, zone, index, ratio, semis, markerOld]
     {
         se::Buffer in, out;
         std::string err;
@@ -953,7 +1002,7 @@ void NovaSamplerEditor::toolStretch()
         const std::int64_t oldFrames = in.frames(), newFrames = out.frames();
         stretchBusy_ = false;
         if (stretchCancel_) return;
-        juce::MessageManager::callAsync ([safe, ok, err, newPath, oldFrames, newFrames, zone, index]
+        juce::MessageManager::callAsync ([safe, ok, err, newPath, oldFrames, newFrames, zone, index, markerOld]
         {
             if (safe == nullptr) return;
             if (! ok) { safe->setToolStatus (U (safe->translator().format ("sm.st_error", { err }))); return; }
@@ -968,9 +1017,12 @@ void NovaSamplerEditor::toolStretch()
             n.loopStart = scale (n.loopStart);
             n.loopEnd = scale (n.loopEnd);
             n.loopCrossfade = scale (n.loopCrossfade);
+            const std::int64_t newMarker = markerOld >= 0 ? scale (markerOld) : -1;
+            n.releaseRefFrame = newMarker;
             n = sanitised (n);
             safe->proc_.uiEditInstrument (std::move (d), "Stretch sample", "sample-edit");
             safe->lastRevision_ = 0xFFFFFFFFu;
+            if (newMarker >= 0) safe->saveMarker (newPath, newMarker);
             safe->setToolStatus (U (safe->translator().format ("sm.st_stretch", { std::to_string (newFrames) })));
         });
     });
@@ -992,7 +1044,7 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
     menu.addItem (4, tx ("sm.menu_loop_end"), z->mode == PlayMode::Loop);
     menu.addSeparator();
     menu.addItem (5, tx ("sm.menu_volume"), volumeOk);
-    menu.addItem (6, tx ("sm.menu_volume_clear"), volumeOk && z->releaseRefFrame >= 0);
+    menu.addItem (6, tx ("sm.menu_volume_clear"), volumeOk && effectiveMarker (*z) >= 0);
     menu.addSeparator();
     menu.addItem (7, tx ("sm.menu_play"));
     menu.addItem (8, tx ("sm.menu_loop_around"), z->mode == PlayMode::Loop);
@@ -1007,8 +1059,21 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
             case 2: safe->applyMarker_ (M::End, frame); break;
             case 3: safe->applyMarker_ (M::LoopStart, frame); break;
             case 4: safe->applyMarker_ (M::LoopEnd, frame); break;
-            case 5: safe->applyMarker_ (M::Volume, frame); break;
-            case 6: safe->editZone ([] (Zone& zone) { zone.releaseRefFrame = -1; }); break;
+            case 5:
+            {
+                safe->applyMarker_ (M::Volume, frame);
+                safe->volumeDragged_ = false;
+                if (const auto* zz = safe->shownZone()) safe->saveMarker (zz->samplePath, zz->releaseRefFrame);
+                break;
+            }
+            case 6:
+            {
+                const auto* zz = safe->shownZone();
+                const std::string path = zz != nullptr ? zz->samplePath : std::string();
+                safe->editZone ([] (Zone& zone) { zone.releaseRefFrame = -1; });
+                if (! path.empty()) safe->saveMarker (path, -1);
+                break;
+            }
             case 7: safe->startPreview (3, frame, 0, 1); break;
             case 8:
             {
@@ -1031,6 +1096,73 @@ void NovaSamplerEditor::openLoopOptions (juce::Component& anchor)
     juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
 }
 
+// Menu du bouton « + BOUCLE » : une boucle vide, la suivante trouvée automatiquement, ou toutes les boucles automatiques d'un coup.
+void NovaSamplerEditor::showAddLoopMenu()
+{
+    const auto* z = shownZone();
+    if (z == nullptr) return;
+    const bool room = loopCountOf (*z) <= static_cast<int> (ZoneDescription::maxExtraLoops);
+    juce::PopupMenu menu;
+    menu.addItem (1, tx ("sm.add_empty"), room);
+    menu.addItem (2, tx ("sm.add_next_auto"), room);
+    menu.addItem (3, tx ("sm.add_all_auto"), room);
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (loopAddPill_), [safe] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        if (r == 1) safe->addLoop();
+        else if (r == 2) { safe->addLoop(); safe->toolAutoLoop(); }   // la nouvelle boucle est sélectionnée : la recherche part de la fin de la précédente
+        else safe->addAllAutoLoops();
+    });
+}
+
+// Toutes les boucles automatiques trouvées deviennent des boucles de la zone (dans l'ordre du fichier, dans la limite des quatre), les nouvelles boucles
+// qui en précèdent une autre reçoivent 2 retours par défaut pour que la lecture avance de l'une à l'autre.
+void NovaSamplerEditor::addAllAutoLoops()
+{
+    const auto* z = shownZone();
+    if (z == nullptr || z->samplePath.empty()) return;
+    const Zone zone = *z;
+    se::Buffer b;
+    std::string err;
+    if (! se::readFile (utf8Path (zone.samplePath), b, &err)) { setToolStatus (U (translator().format ("sm.st_error", { err }))); return; }
+    const std::int64_t total = b.frames();
+    auto options = loopOptions_;
+    options.cursor = (cursorFrame_ >= 0 && cursorPath_ == zone.samplePath) ? cursorFrame_ : -1;
+    if (options.aroundCursor && options.cursor < 0) options.aroundCursor = false;
+    auto found = se::findLoopCandidates (b, zone.startFrame, zone.endFrame < 0 ? total : std::min (zone.endFrame, total), 6, 100.0, options);
+    if (found.empty()) { setToolStatus (tx ("sm.st_loop_none")); return; }
+    std::sort (found.begin(), found.end(), [] (const se::LoopCandidate& a, const se::LoopCandidate& c) { return a.end < c.end; });
+    std::vector<LoopRegion> loops;
+    for (int i = 0; i < loopCountOf (zone); ++i) loops.push_back (loopView (zone, i));
+    int added = 0;
+    for (const auto& c : found)
+    {
+        if (static_cast<int> (loops.size()) > static_cast<int> (ZoneDescription::maxExtraLoops)) break;
+        const auto& last = loops.back();
+        const std::int64_t lastEnd = last.end < 0 ? total : last.end;
+        const std::int64_t gap = static_cast<std::int64_t> (b.sampleRate * 0.02);
+        if (c.end <= lastEnd + gap || c.start < last.start) continue;   // les boucles se suivent dans le fichier
+        LoopRegion l;
+        l.start = c.start; l.end = c.end;
+        loops.push_back (l);
+        ++added;
+    }
+    if (added == 0) { setToolStatus (tx ("sm.st_loops_none_added")); return; }
+    editShownZone ([&] (Zone& d)
+    {
+        d.mode = PlayMode::Loop;
+        d.extraLoops.assign (loops.begin() + 1, loops.end());
+        d.loopStart = loops.front().start; d.loopEnd = loops.front().end; d.loopCrossfade = loops.front().crossfade; d.loopRepeats = loops.front().repeats;
+        for (int i = 0; i + 1 < static_cast<int> (loops.size()); ++i)
+        {
+            auto l = loopView (d, i);
+            if (l.repeats == 0) { l.repeats = 2; setLoopView (d, i, l); }
+        }
+    });
+    setToolStatus (U (translator().format ("sm.st_loops_all_added", { std::to_string (added) })));
+}
+
 // Ajoute une boucle (4 au plus) à la suite de la dernière, jusqu'à la fin de la région jouée.
 void NovaSamplerEditor::addLoop()
 {
@@ -1050,6 +1182,9 @@ void NovaSamplerEditor::addLoop()
         LoopRegion l;
         l.start = start; l.end = end;
         d.extraLoops.push_back (l);
+        // la boucle qui précède doit rendre la main : sans retours finis, elle tournerait sans fin et la nouvelle ne serait jamais jouée
+        auto prev = loopView (d, loopCountOf (d) - 2);
+        if (prev.repeats == 0) { prev.repeats = 2; setLoopView (d, loopCountOf (d) - 2, prev); }
     });
     editLoop_ = newIndex;
     setToolStatus (tx ("sm.st_loops_added"));
@@ -1883,14 +2018,14 @@ void NovaSamplerEditor::updateSampleInfo()
     m.crossfade = edited.crossfade;
     m.loopStart = std::max (edited.start, z->startFrame);   // la boucle ne revient jamais avant START (même règle que le moteur)
     m.loopNumber = idx + 1;
-    if (z->releaseRefFrame >= 0)   // propriété du sample : visible sur toute zone (utilisée seulement par les zones de relâchement)
+    if (const auto marker = effectiveMarker (*z); marker >= 0)   // propriété du sample : visible sur toute zone (utilisée seulement par les zones de relâchement)
     {
-        m.volumeRef = z->releaseRefFrame;
-        const std::string key = z->samplePath + "|" + std::to_string (z->releaseRefFrame) + "|" + std::to_string (z->releaseMeter);
+        m.volumeRef = marker;
+        const std::string key = z->samplePath + "|" + std::to_string (marker) + "|" + std::to_string (z->releaseMeter);
         if (key != refLevelKey_)
         {
             refLevelKey_ = key;
-            refLevelKnown_ = measureLevelAt (std::filesystem::u8path (z->samplePath), z->releaseRefFrame, z->releaseMeter, refLevelDb_);
+            refLevelKnown_ = measureLevelAt (std::filesystem::u8path (z->samplePath), marker, z->releaseMeter, refLevelDb_);
         }
         m.volumeRefKnown = refLevelKnown_;
         m.volumeRefDb = refLevelDb_;

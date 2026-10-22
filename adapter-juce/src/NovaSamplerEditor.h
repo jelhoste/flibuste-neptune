@@ -91,6 +91,11 @@ private:
     void toolAutoLoop();
     void toolSaveAs();
     void addLoop();
+    void showAddLoopMenu();
+    void addAllAutoLoops();
+    std::int64_t fileMarkerFrame (const std::string& path);
+    std::int64_t effectiveMarker (const Zone&);
+    void saveMarker (const std::string& path, std::int64_t frame);
     void showWaveMenu (std::int64_t frame, juce::Point<int> where);
     void openLoopOptions (juce::Component& anchor);
     void removeLoop();
@@ -136,6 +141,8 @@ private:
     double refLevelDb_ = 0.0;
     bool refLevelKnown_ = false;
     neptune::core::sampleedit::LoopSearchOptions loopOptions_;
+    std::map<std::string, std::int64_t> fileMarkers_;   // marqueur de volume des métadonnées de chaque fichier (-1 : aucun)
+    bool volumeDragged_ = false;
     int editLoop_ = 0;   // boucle éditée (0 = la première)
     bool snapOn_ = false;
     int stretchPercent_ = 100, pitchTenths_ = 0;      // durée (%) et hauteur (dixièmes de demi-ton) de l'outil d'étirement
