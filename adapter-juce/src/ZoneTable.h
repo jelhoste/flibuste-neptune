@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <algorithm>
 #include <functional>
 #include <vector>
 #include "neptune/core/I18n.h"
@@ -28,7 +29,12 @@ public:
     // Clic droit sur une ligne (menu contextuel : assigner la zone à un emplacement, etc.).
     std::function<void (int row)> onContextMenu;
 
-    void resized() override { table_.setBounds (getLocalBounds()); }
+    void resized() override
+    {
+        auto b = getLocalBounds();
+        detail_.setBounds (b.removeFromBottom (std::min (140, b.getHeight() / 3)));
+        table_.setBounds (b);
+    }
 
 private:
     int getNumRows() override { return static_cast<int> (zones_.size()); }
@@ -41,7 +47,8 @@ private:
         for (int i = 0; i < rows.size(); ++i) parts.add (juce::String (rows[i]));
         return "neptune-zones:" + parts.joinIntoString (",");
     }
-    void selectedRowsChanged (int) override { if (onSelectionChanged) onSelectionChanged(); }
+    void selectedRowsChanged (int) override { updateDetail(); if (onSelectionChanged) onSelectionChanged(); }
+    void updateDetail();   // tout ce qu'on sait de la première zone sélectionnée, en pleine longueur
     void cellClicked (int row, int, const juce::MouseEvent& e) override { if (e.mods.isPopupMenu() && onContextMenu) onContextMenu (row); }
     juce::Component* refreshComponentForCell (int row, int column, bool selected, juce::Component* existing) override;
     juce::Colour colour (neptune::core::theme::Token t) const;
@@ -52,6 +59,7 @@ private:
     std::vector<int> playing_;
     int previewRow_ = -1;
     juce::TableListBox table_ { "zones", this };
+    juce::TextEditor detail_;
     class ComboCell;
     class PlayCell;
 

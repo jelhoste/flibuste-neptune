@@ -57,6 +57,8 @@ private:
     const nova::Skin& skin_;
 };
 
+constexpr float kZoneButtonFont = 14.0f;   // texte des boutons de la page ZONES (9,5 à l'origine)
+
 juce::Path iconPath (int kind)
 {
     juce::Path p;
@@ -696,15 +698,21 @@ void NovaSamplerEditor::buildZonesPage()
         h->onReset = [this] { listWidth_ = 330.0f; resized(); };
         splitter_ = h;
     }
+    for (nova::Pill* p : { loadPill_, importPill_, removePill_, listPill_, monitorPill_, modePill_, triggerChoice_->pill, chokeChoice_->pill, chokeMorePill_, levelsPill_, applyPitchPill_, humanizePill_ })
+        p->setFontSize (kZoneButtonFont);
     listExpandPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    listExpandPill_->setFontSize (kZoneButtonFont);
     listExpandPill_->onClick = [this] { expanded_ = expanded_ == 1 ? 0 : 1; pageChanged(); };
     matrixExpandPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    matrixExpandPill_->setFontSize (kZoneButtonFont);
     matrixExpandPill_->onClick = [this] { expanded_ = expanded_ == 2 ? 0 : 2; pageChanged(); };
     zonesViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     zonesViewPill_->setText (tx ("pool.view_zones"));
+    zonesViewPill_->setFontSize (kZoneButtonFont);
     zonesViewPill_->onClick = [this] { showPool_ = false; pageChanged(); };
     poolViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     poolViewPill_->setText (tx ("pool.view_files"));
+    poolViewPill_->setFontSize (kZoneButtonFont);
     poolViewPill_->onClick = [this] { showPool_ = true; pageChanged(); };
     zones_ = add<ZoneTable> (0, skin().palette(), translator());
     zones_->onSelectionChanged = [this] { lastRevision_ = 0xFFFFFFFFu; };
@@ -2971,6 +2979,16 @@ void NovaSamplerEditor::pageChanged()
     zonesViewPill_->setOn (! showPool_);
     poolViewPill_->setOn (showPool_);
     pool_->setVisible (zonesPage && listShown() && ! showVoices_ && showPool_);
+    {
+        // pleine page : le bandeau du haut (zones, boutons, réglages) est caché pour donner toute la hauteur
+        const bool band = zonesPage && expanded_ == 0;
+        for (juce::Component* c : std::initializer_list<juce::Component*> { zonePanel_, loadPill_, importPill_, removePill_, listPill_, monitorPill_, selectionText_, modePill_, rootNumber_,
+                                                                           triggerChoice_->pill, chokeChoice_->pill, chokeMorePill_, levelsPill_, detectedText_, applyPitchPill_, humanizePill_ })
+        {
+            c->setVisible (band);
+            setInfoVisible (c, band);
+        }
+    }
     matrix_->setVisible (zonesPage && ! showVoices_ && matrixShown());
     matrixPanel_->setVisible (zonesPage && ! showVoices_ && matrixShown());
     const bool both = zonesPage && ! showVoices_ && listShown() && matrixShown();
@@ -3002,30 +3020,41 @@ void NovaSamplerEditor::layout()
 
     // ---- page ZONES
     zonePanel_->setBounds (R (X0, 72, 942, 148));
-    loadPill_->setBounds (R (X0 + 12, 106, 120, 30));
-    importPill_->setBounds (R (X0 + 138, 106, 120, 30));
-    removePill_->setBounds (R (X0 + 264, 106, 120, 30));
-    listPill_->setBounds (R (X0 + 390, 106, 100, 30));
-    monitorPill_->setBounds (R (X0 + 496, 106, 150, 30));
-    selectionText_->setBounds (R (X0 + 660, 112, 270, 18));
-    modePill_->setBounds (R (X0 + 12, 144, 160, 30));
-    rootNumber_->setBounds (R (X0 + 178, 144, 160, 30));
-    triggerChoice_->pill->setBounds (R (X0 + 344, 144, 250, 30));
-    chokeChoice_->pill->setBounds (R (X0 + 600, 144, 170, 30));
-    chokeMorePill_->setBounds (R (X0 + 776, 144, 44, 30));
-    levelsPill_->setBounds (R (X0 + 826, 144, 106, 30));
-    detectedText_->setBounds (R (X0 + 14, 188, 360, 20));
-    applyPitchPill_->setBounds (R (X0 + 380, 182, 170, 30));
-    humanizePill_->setBounds (R (X0 + 556, 182, 150, 30));
+    {
+        // boutons resserrés autour de leur texte (26 de haut) ; ceux qui changent de texte gardent une largeur fixe
+        constexpr float kGap = 6.0f, kH = 26.0f;
+        auto place = [&] (nova::Pill* p, float x, float y) { const float w = p->idealWidth(); p->setBounds (R (x, y, w, kH)); return x + w + kGap; };
+        float x = place (loadPill_, X0 + 12, 108);
+        x = place (importPill_, x, 108);
+        x = place (removePill_, x, 108);
+        x = place (listPill_, x, 108);
+        x = place (monitorPill_, x, 108);
+        const float selX = std::max (x + 8.0f, X0 + 660.0f);
+        selectionText_->setBounds (R (selX, 112, X0 + 930.0f - selX, 18));
+        modePill_->setBounds (R (X0 + 12, 146, 160, kH));
+        rootNumber_->setBounds (R (X0 + 178, 146, 160, kH));
+        triggerChoice_->pill->setBounds (R (X0 + 344, 146, 250, kH));
+        chokeChoice_->pill->setBounds (R (X0 + 600, 146, 170, kH));
+        chokeMorePill_->setBounds (R (X0 + 776, 146, 44, kH));
+        levelsPill_->setBounds (R (X0 + 932.0f - levelsPill_->idealWidth(), 146, levelsPill_->idealWidth(), kH));
+        detectedText_->setBounds (R (X0 + 14, 188, 360, 20));
+        x = place (applyPitchPill_, X0 + 380, 184);
+        place (humanizePill_, x, 184);
+    }
+    // Conteneurs du bas : côte à côte (230..710) ou, en pleine page, sur toute la hauteur (72..710) ; le bandeau du haut est alors caché.
     const float listW = expanded_ == 1 ? 942.0f : listWidth_;
+    const float top = expanded_ != 0 ? 72.0f : 230.0f, height = expanded_ != 0 ? 638.0f : 480.0f;
     if (listShown() && ! showVoices_)
     {
-        tablePanel_->setBounds (R (X0, 230, listW, 480));
-        zones_->setBounds (R (X0 + 10, 264, listW - 20, 436));
-        pool_->setBounds (R (X0 + 10, 264, listW - 20, 436));
-        zonesViewPill_->setBounds (R (X0 + 12, 234, 84, 22));
-        poolViewPill_->setBounds (R (X0 + 100, 234, 96, 22));
-        listExpandPill_->setBounds (R (X0 + listW - 112, 234, 84, 22));
+        tablePanel_->setBounds (R (X0, top, listW, height));
+        zones_->setBounds (R (X0 + 10, top + 38, listW - 20, height - 48));
+        pool_->setBounds (R (X0 + 10, top + 38, listW - 20, height - 48));
+        const float tabsY = top + 6;
+        float x = X0 + 12;
+        zonesViewPill_->setBounds (R (x, tabsY, zonesViewPill_->idealWidth(), 26));
+        x += zonesViewPill_->idealWidth() + 6;
+        poolViewPill_->setBounds (R (x, tabsY, poolViewPill_->idealWidth(), 26));
+        listExpandPill_->setBounds (R (X0 + listW - 34 - listExpandPill_->idealWidth(), tabsY, listExpandPill_->idealWidth(), 26));
     }
     if (expanded_ == 1)
     {
@@ -3034,16 +3063,16 @@ void NovaSamplerEditor::layout()
     else if (listShown())
     {
         const float mx = X0 + listW + 12.0f, mw = 942.0f - listW - 12.0f;
-        matrixPanel_->setBounds (R (mx, 230, mw, 480));
-        matrix_->setBounds (R (mx + 8, 262, mw - 16, 440));
-        matrixExpandPill_->setBounds (R (mx + mw - 112, 234, 84, 22));
-        splitter_->setBounds (R (X0 + listW, 230, 12, 480));
+        matrixPanel_->setBounds (R (mx, top, mw, height));
+        matrix_->setBounds (R (mx + 8, top + 32, mw - 16, height - 40));
+        matrixExpandPill_->setBounds (R (mx + mw - 34 - matrixExpandPill_->idealWidth(), top + 6, matrixExpandPill_->idealWidth(), 26));
+        splitter_->setBounds (R (X0 + listW, top, 12, height));
     }
     else
     {
-        matrixPanel_->setBounds (R (X0, 230, 942, 480));
-        matrix_->setBounds (R (X0 + 8, 262, 926, 440));
-        matrixExpandPill_->setBounds (R (X0 + 942 - 112, 234, 84, 22));
+        matrixPanel_->setBounds (R (X0, top, 942, height));
+        matrix_->setBounds (R (X0 + 8, top + 32, 926, height - 40));
+        matrixExpandPill_->setBounds (R (X0 + 942 - 34 - matrixExpandPill_->idealWidth(), top + 6, matrixExpandPill_->idealWidth(), 26));
     }
     voicesView_->setBounds (R (X0, 230, 942, 480));
 

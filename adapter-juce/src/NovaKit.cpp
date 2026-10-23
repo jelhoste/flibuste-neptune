@@ -284,6 +284,13 @@ void Pill::mouseUp (const juce::MouseEvent& e)
     if (onClick) onClick();
 }
 
+float Pill::idealWidth() const
+{
+    const float size = fontSize_ > 0.0f ? fontSize_ : (look_ == Look::Pill ? 12.0f : 9.5f);
+    const juce::Font f (juce::FontOptions (size, juce::Font::bold));
+    return std::ceil (f.getStringWidthFloat (text_)) + 2.0f * (look_ == Look::Pill ? 10.0f : 6.0f) + (dot_ ? 12.0f : 0.0f) + 4.0f;
+}
+
 void Pill::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat().reduced (0.5f);
@@ -319,7 +326,7 @@ void Pill::paint (juce::Graphics& g)
         area.removeFromLeft (d + skin_.px (6.0f));
     }
     g.setColour (textColour);
-    g.setFont (skin_.font (fontSize_ > 0.0f ? fontSize_ : look_ == Look::Pill ? 12.0f : 9.5f, true));
+    g.setFont (skin_.font (fontSize_ > 0.0f ? fontSize_ : (look_ == Look::Pill ? 12.0f : 9.5f), true));
     g.drawText (text_, area, juce::Justification::centred, true);
 }
 
@@ -804,11 +811,17 @@ void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, cons
     g.drawRoundedRectangle (r, rad, skin_.borderWidth());
 }
 
-juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int) { return juce::Font (skin_.font (10.5f, true)); }
+float LookAndFeel::buttonFontSize (int buttonHeight) const noexcept
+{
+    if (buttonTextScale_ == 1.0f) return 10.5f;
+    return std::max (10.5f, std::min (10.5f * buttonTextScale_, static_cast<float> (buttonHeight) * 0.55f / skin_.scale()));
+}
+
+juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int h) { return juce::Font (skin_.font (buttonFontSize (h), true)); }
 
 void LookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool highlighted, bool)
 {
-    g.setFont (skin_.font (10.5f, true));
+    g.setFont (skin_.font (buttonFontSize (b.getHeight()), true));
     g.setColour (skin_.colour (b.getToggleState() ? Token::Accent : highlighted ? Token::Text : Token::TextDim).withMultipliedAlpha (b.isEnabled() ? 1.0f : 0.4f));
     g.drawText (b.getButtonText(), b.getLocalBounds().reduced (skin_.ipx (4.0f), 0), juce::Justification::centred, true);
 }

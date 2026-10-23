@@ -136,6 +136,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
     updateViewVisibility();
     root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
+    novaLook_.setButtonTextScale (1.5f);
     root_.setLookAndFeel (&novaLook_);
     root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
     setResizable (true, true);
@@ -468,16 +469,39 @@ void NeptuneEditor::resized()
     recoveryLabel_.setBounds (banner);
     if (modal_) modal_->setBounds (rootBounds());
 
-    viewButton_.setBounds (lw_ - 32 - 100, 32, 100, 36);
-    mappingButton_.setBounds (lw_ - 32 - 100 - 4 - 100, 32, 100, 36);
-    mixerButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100, 32, 100, 36);
-    panicButton_.setBounds (lw_ - 32 - 100 - 4 - 100 - 4 - 100 - 8 - 130, 32, 130, 36);
-    trackBox_.setBounds (190, 32, 180, 36);
-    mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
-    voiceCountButton_.setBounds (376, 32, 150, 36);
-    midiFilterButton_.setBounds (530, 32, 44, 36);
-    controlButton_.setBounds (578, 32, 44, 36);
-    oscButton_.setBounds (626, 32, 44, 36);
+    {
+        // barre du haut : boutons resserrés autour de leur texte (28 de haut, centrés sur l'ancienne rangée)
+        constexpr int barY = 36, barH = 28, pad = 22, gap = 6;
+        auto fit = [this] (const juce::TextButton& b, int minWidth)
+        {
+            const juce::Font f (novaSkin_.font (novaLook_.buttonFontSize (barH), true));
+            return std::max (minWidth, juce::roundToInt (std::ceil (f.getStringWidthFloat (b.getButtonText()))) + pad);
+        };
+        int right = lw_ - 32;
+        for (auto* b : { &viewButton_, &mappingButton_, &mixerButton_ })
+        {
+            const int w = fit (*b, 60);
+            right -= w;
+            b->setBounds (right, barY, w, barH);
+            right -= gap;
+        }
+        const int panicW = fit (panicButton_, 60);
+        right -= 4;
+        panicButton_.setBounds (right - panicW, barY, panicW, barH);
+        int left = 190;
+        trackBox_.setBounds (left, barY, 80, barH);
+        left += 80 + gap + 2;
+        const int voicesW = std::max (fit (voiceCountButton_, 60), 150);   // le texte change avec le nombre de voix : largeur stable
+        voiceCountButton_.setBounds (left, barY, voicesW, barH);
+        left += voicesW + gap;
+        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_ })
+        {
+            const int w = fit (*b, 44);
+            b->setBounds (left, barY, w, barH);
+            left += w + gap;
+        }
+        mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
+    }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (instrumentPanel_ != nullptr)
         instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 40 - 80 - (recoveryShown_ ? 40 : 0))));   // jusqu'à la rangée du bas (et au-dessus du bandeau de récupération)

@@ -111,6 +111,8 @@ public:
     void setIcon (juce::Path, bool strokeOnly = true);     // chemin dans un carré 24 x 24
     void setDot (bool shown) { dot_ = shown; repaint(); }
     void setTintToken (neptune::core::theme::Token t) { tint_ = t; repaint(); }
+    // Largeur (maquette) qui entoure le texte actuel sans le couper
+    float idealWidth() const;
     void setFontSize (float designSize) { fontSize_ = designSize; repaint(); }   // taille du texte (maquette) ; 0 : celle du type de pastille  // couleur de l'état actif (défaut : Accent)
 
     // Liaison à un paramètre : bascule (booléen) ou choix cyclique parmi `choices` (libellés à afficher après `label`).
@@ -325,6 +327,9 @@ public:
     // Commandes JUCE d'origine posées dans un éditeur NOVA (matrice, panneaux de vélocité, de polyphonie, de filtres...) : même habillage que les pastilles.
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool highlighted, bool down) override;
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
+    // Agrandissement du texte des boutons JUCE (1 : taille d'origine). Au-delà de 1, la taille reste proportionnée à la hauteur du bouton.
+    void setButtonTextScale (float s) noexcept { buttonTextScale_ = s; }
+    float buttonFontSize (int buttonHeight) const noexcept;
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool highlighted, bool down) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
     void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown, int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox&) override;
@@ -335,5 +340,6 @@ public:
 
 private:
     const Skin& skin_;
+    float buttonTextScale_ = 1.0f;
 };
 } // namespace nova

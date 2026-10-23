@@ -8,6 +8,7 @@ ZoneTable::ZoneTable (const neptune::core::theme::Palette& palette, const neptun
 {
     auto name = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); };
     auto& h = table_.getHeader();
+    h.addColumn ({}, 10, 26, 26, 26, juce::TableHeaderComponent::notSortable);   // bouton d'écoute, en tête de ligne
     h.addColumn (name ("import.col_file"), 1, 170, 60, 600, juce::TableHeaderComponent::defaultFlags & ~juce::TableHeaderComponent::sortable);
     h.addColumn (name ("import.col_note"), 2, 50, 36, 100, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("import.col_keys"), 3, 70, 40, 140, juce::TableHeaderComponent::notSortable);
@@ -17,13 +18,52 @@ ZoneTable::ZoneTable (const neptune::core::theme::Palette& palette, const neptun
     h.addColumn (name ("trig.label"), 7, 104, 80, 160, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("choke.cuts_short"), 8, 62, 50, 100, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("choke.cut_by_short"), 9, 74, 50, 120, juce::TableHeaderComponent::notSortable);
-    h.addColumn (juce::String::fromUTF8 ("\xe2\x96\xb6"), 10, 36, 30, 60, juce::TableHeaderComponent::notSortable);
     table_.setMultipleSelectionEnabled (true);
     table_.setRowHeight (24);
     table_.setColour (juce::ListBox::backgroundColourId, colour (Token::BgCard));
     table_.setColour (juce::ListBox::outlineColourId, colour (Token::Border));
     table_.setOutlineThickness (1);
     addAndMakeVisible (table_);
+    detail_.setMultiLine (true, true);
+    detail_.setReadOnly (true);
+    detail_.setCaretVisible (false);
+    detail_.setScrollbarsShown (true);
+    detail_.setFont (juce::Font (juce::FontOptions (12.5f)));
+    detail_.setColour (juce::TextEditor::backgroundColourId, colour (Token::BgCard));
+    detail_.setColour (juce::TextEditor::textColourId, colour (Token::Text));
+    detail_.setColour (juce::TextEditor::outlineColourId, colour (Token::Border));
+    detail_.setColour (juce::TextEditor::focusedOutlineColourId, colour (Token::Border));
+    addAndMakeVisible (detail_);
+    updateDetail();
+}
+
+void ZoneTable::updateDetail()
+{
+    auto tx = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); };
+    const auto sel = table_.getSelectedRows();
+    if (sel.size() == 0 || sel[0] >= static_cast<int> (zones_.size())) { detail_.setText (tx ("zone.d_empty"), false); return; }
+    const auto& z = zones_[static_cast<std::size_t> (sel[0])];
+    using neptune::core::PlayMode;
+    juce::String trigger = tx (z.onRelease ? "trig.release" : z.trigger == neptune::core::TriggerCondition::First ? "trig.first"
+                                          : z.trigger == neptune::core::TriggerCondition::Legato ? "trig.legato" : "trig.attack");
+    juce::String t;
+    const juce::String sep = "    ";
+    t << tx ("import.col_file") << ":  " << juce::File (juce::String::fromUTF8 (z.samplePath.c_str())).getFileName() << "\n"
+      << tx ("pool.detail_path") << ":  " << juce::String::fromUTF8 (z.samplePath.c_str()) << "\n"
+      << tx ("import.col_note") << ":  " << z.rootNote << sep << tx ("import.col_keys") << ":  " << z.keyLow << "-" << z.keyHigh
+      << sep << tx ("import.col_velocity") << ":  " << z.velLow << "-" << z.velHigh
+      << sep << tx ("import.col_rr") << ":  " << (z.roundRobin > 0 ? juce::String (z.roundRobin) : juce::String ("-")) << "\n"
+      << "Mode:  " << (z.mode == PlayMode::Loop ? "Loop" : "One-shot") << sep << tx ("trig.label") << ":  " << trigger
+      << sep << tx ("zone.d_group") << ":  " << (z.group.empty() ? juce::String ("-") : juce::String::fromUTF8 (z.group.c_str())) << "\n"
+      << tx ("zone.d_tune") << ":  " << juce::String (z.tuneCents, 1) << " ct" << sep << "Gain:  " << juce::String (z.gainDb, 1) << " dB"
+      << sep << tx ("zone.d_pan") << ":  " << juce::String (z.pan, 2) << (z.reverse ? "    REVERSE" : "") << "\n"
+      << tx ("zone.d_region") << ":  " << static_cast<long long> (z.startFrame) << " > " << (z.endFrame < 0 ? juce::String ("END") : juce::String (static_cast<long long> (z.endFrame))) << "\n";
+    if (z.mode == PlayMode::Loop)
+        t << tx ("zone.d_loop") << ":  " << static_cast<long long> (z.loopStart) << " > " << (z.loopEnd < 0 ? juce::String ("END") : juce::String (static_cast<long long> (z.loopEnd)))
+          << (z.extraLoops.empty() ? juce::String() : " (+" + juce::String (static_cast<int> (z.extraLoops.size())) + ")") << "\n";
+    t << tx ("choke.cuts_short") << ":  " << z.chokeCuts << sep << tx ("choke.cut_by_short") << ":  " << z.chokeCutBy;
+    if (sel.size() > 1) t << "\n(+" << (sel.size() - 1) << ")";
+    detail_.setText (t, false);
 }
 
 // Cellule à liste déroulante (déclenchement, groupes de choke) : modifie la ligne, ou toute la sélection si la ligne en fait partie.
@@ -82,11 +122,13 @@ public:
     void update (int row) { row_ = row; }
     void paint (juce::Graphics& g) override
     {
-        const auto r = getLocalBounds().toFloat().reduced (8.0f, 5.0f);
-        g.setColour (down_ ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent));
-        if (owner_.previewRow() == row_) { g.fillRect (r.reduced (1.0f)); return; }
+        // même figure que le bouton de la réserve : triangle, carré pendant l'écoute
+        const auto box = juce::Rectangle<float> (4.0f, (static_cast<float> (getHeight()) - 12.0f) * 0.5f, 12.0f, 12.0f);
+        const bool playing = owner_.previewRow() == row_;
+        g.setColour (owner_.colour (playing ? Token::Accent : down_ ? Token::KnobHot : Token::TextDim));
+        if (playing) { g.fillRect (box.reduced (1.0f)); return; }
         juce::Path p;
-        p.addTriangle (r.getX() + 2.0f, r.getY(), r.getX() + 2.0f, r.getBottom(), r.getRight(), r.getCentreY());
+        p.addTriangle (box.getX() + 1.0f, box.getY(), box.getX() + 1.0f, box.getBottom(), box.getRight(), box.getCentreY());
         g.fillPath (p);
     }
     void mouseDown (const juce::MouseEvent& e) override
@@ -147,6 +189,7 @@ void ZoneTable::setZones (const std::vector<neptune::core::ZoneDescription>& zon
         table_.setSelectedRows (keep, juce::dontSendNotification);
     }
     table_.repaint();
+    updateDetail();
 }
 
 std::vector<int> ZoneTable::selectedRows() const
