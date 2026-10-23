@@ -3,7 +3,11 @@ add_executable(neptune_core_tests test_engine.cpp test_parameter.cpp test_autosa
 foreach(name convolver display eq ir live meters processor stereo wav)
   set_source_files_properties(conv/test_${name}.cpp PROPERTIES COMPILE_DEFINITIONS "main=llc_test_${name}")
 endforeach()
-target_link_libraries(neptune_core_tests PRIVATE neptune_core SndFile::sndfile Catch2::Catch2WithMain) # SndFile : les tests écrivent des WAV
+target_link_libraries(neptune_core_tests PRIVATE neptune_core SndFile::sndfile Catch2::Catch2WithMain)
+# Un MixerState pèse environ 144 Ko : plusieurs exemplaires locaux dans un même test dépassent les 1 Mo de pile par défaut de Windows (MSVC). 8 Mo, comme sous Linux.
+if(MSVC)
+  target_link_options(neptune_core_tests PRIVATE /STACK:8388608)
+endif() # SndFile : les tests écrivent des WAV
 include(CTest)
 include(Catch)
 catch_discover_tests(neptune_core_tests)
