@@ -878,6 +878,23 @@ void LookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
 
 void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float, juce::Slider::SliderStyle style, juce::Slider& s)
 {
+    const float alpha = s.isEnabled() ? 1.0f : 0.4f;
+    if (style == juce::Slider::LinearVertical && s.getProperties().getWithDefault ("fader", false))
+    {
+        // fader du mixeur : rail sombre, remplissage orange dégradé depuis le bas, poignée blanche arrondie
+        const float cx = static_cast<float> (x) + static_cast<float> (w) / 2.0f, tw = skin_.px (5.0f);
+        const juce::Rectangle<float> track (cx - tw / 2.0f, static_cast<float> (y), tw, static_cast<float> (h));
+        g.setColour (skin_.colour (Token::Grid));
+        g.fillRoundedRectangle (track, tw / 2.0f);
+        const auto fill = track.withTop (pos);
+        g.setGradientFill (juce::ColourGradient (skin_.colour (Token::Accent, alpha).brighter (0.3f), fill.getX(), fill.getY(),
+                                                 skin_.colour (Token::Accent, alpha), fill.getX(), fill.getBottom(), false));
+        g.fillRoundedRectangle (fill, tw / 2.0f);
+        const float tw2 = std::min (static_cast<float> (w) - 2.0f, skin_.px (24.0f)), th = skin_.px (10.0f);
+        g.setColour (skin_.colour (Token::Text, alpha == 1.0f ? 1.0f : 0.5f));
+        g.fillRoundedRectangle (cx - tw2 / 2.0f, pos - th / 2.0f, tw2, th, skin_.px (3.0f));
+        return;
+    }
     if (style != juce::Slider::LinearHorizontal)
     {
         LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0.0f, 0.0f, style, s);
@@ -887,8 +904,14 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int 
     const juce::Rectangle<float> track (static_cast<float> (x), cy - th / 2.0f, static_cast<float> (w), th);
     g.setColour (skin_.colour (Token::Grid));
     g.fillRoundedRectangle (track, th / 2.0f);
-    g.setColour (skin_.colour (Token::Accent, s.isEnabled() ? 1.0f : 0.4f));
-    g.fillRoundedRectangle (track.withRight (pos), th / 2.0f);
+    g.setColour (skin_.colour (Token::Accent, alpha));
+    if (s.getProperties().getWithDefault ("bipolar", false))
+    {
+        // réglage centré (balance) : le remplissage part du milieu
+        const float mid = static_cast<float> (x) + static_cast<float> (w) / 2.0f;
+        g.fillRoundedRectangle (juce::Rectangle<float> (std::min (mid, pos), track.getY(), std::abs (pos - mid), th), th / 2.0f);
+    }
+    else g.fillRoundedRectangle (track.withRight (pos), th / 2.0f);
     const float d = skin_.px (11.0f);
     g.setColour (skin_.colour (Token::Text, s.isEnabled() ? 1.0f : 0.5f));
     g.fillEllipse (pos - d / 2.0f, cy - d / 2.0f, d, d);

@@ -9,7 +9,7 @@ namespace
 {
 constexpr int kStripW = 58;
 constexpr int kMinStripH = 300, kMaxStripH = 360;
-constexpr int kInsertRowH = 16, kVisibleInserts = 4;
+constexpr int kInsertRowH = 18, kVisibleInserts = 4;
 constexpr int kMasterW = 112;
 constexpr double kFaderMinDb = -100.0, kFaderMaxDb = 6.0;
 
@@ -58,14 +58,16 @@ struct BoundToggle : juce::TextButton
     {
         auto r = getLocalBounds().toFloat().reduced (0.5f);
         const bool on = getToggleState();
-        auto fill = findColour (on ? buttonOnColourId : buttonColourId);
+        // même figure que les pastilles NOVA : allumé = teinte de l'état en transparence, bord et texte à sa couleur
+        const auto tint = findColour (buttonOnColourId);
+        auto fill = on ? tint.withAlpha (0.22f) : findColour (buttonColourId);
         if (down) fill = fill.brighter (0.2f); else if (over) fill = fill.brighter (0.1f);
         g.setColour (fill);
-        g.fillRoundedRectangle (r, 3.0f);
-        g.setColour (findColour (juce::ComboBox::outlineColourId).withAlpha (0.8f));
-        g.drawRoundedRectangle (r, 3.0f, 1.0f);
-        g.setColour (findColour (on ? textColourOnId : textColourOffId));
-        g.setFont (juce::FontOptions (juce::jmin (12.0f, r.getHeight() * 0.6f), juce::Font::bold));
+        g.fillRoundedRectangle (r, 5.0f);
+        g.setColour (on ? tint.withAlpha (0.8f) : findColour (juce::ComboBox::outlineColourId).withAlpha (0.8f));
+        g.drawRoundedRectangle (r, 5.0f, 1.0f);
+        g.setColour (on ? tint : findColour (textColourOffId));
+        g.setFont (juce::FontOptions (juce::jmin (12.5f, r.getHeight() * 0.6f), juce::Font::bold));
         g.drawText (getButtonText(), getLocalBounds(), juce::Justification::centred, false);
     }
 
@@ -319,18 +321,33 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.setFont (juce::FontOptions (10.0f));
+        // une puce par emplacement : point d'état + nom ; vide : pointillé discret et « + »
         for (int row = 0; row < kVisibleInserts; ++row)
         {
             const int slot = page_ * kVisibleInserts + row;
-            const auto r = rowRect (row);
+            const auto r = rowRect (row).toFloat().reduced (0.0f, 1.0f);
             const bool used = ! types_[static_cast<std::size_t> (slot)].empty();
-            g.setColour (owner_.colour (used ? Token::BgApp : Token::BgCard));
-            g.fillRect (r);
-            g.setColour (owner_.colour (Token::Border));
-            g.drawRect (r);
-            g.setColour (owner_.colour (used ? (bypassed_[static_cast<std::size_t> (slot)] ? Token::TextDim2 : Token::Accent) : Token::TextDim));
-            g.drawText (used ? name (types_[static_cast<std::size_t> (slot)]) : juce::String ("+"), r.reduced (2, 0), juce::Justification::centred);
+            const bool by = bypassed_[static_cast<std::size_t> (slot)];
+            if (used)
+            {
+                g.setColour (owner_.colour (Token::BgApp));
+                g.fillRoundedRectangle (r, 4.0f);
+                g.setColour (owner_.colour (Token::Border));
+                g.drawRoundedRectangle (r, 4.0f, 1.0f);
+                g.setColour (owner_.colour (by ? Token::TextDim2 : Token::Accent));
+                g.fillEllipse (r.getX() + 5.0f, r.getCentreY() - 2.5f, 5.0f, 5.0f);
+                g.setColour (owner_.colour (by ? Token::TextDim2 : Token::Text));
+                g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+                g.drawText (name (types_[static_cast<std::size_t> (slot)]).toUpperCase(), r.withTrimmedLeft (13.0f).toNearestInt(), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                g.setColour (owner_.colour (Token::Border).withAlpha (0.7f));
+                g.drawRoundedRectangle (r, 4.0f, 1.0f);
+                g.setColour (owner_.colour (Token::TextDim));
+                g.setFont (juce::FontOptions (11.0f));
+                g.drawText ("+", r.toNearestInt(), juce::Justification::centred);
+            }
         }
         // pagination : 1-4 / 5-8
         g.setColour (owner_.colour (Token::TextDim));
@@ -444,7 +461,7 @@ public:
         auto& proc = owner.processor_;
         addAndMakeVisible (inserts_);
         name_.setJustificationType (juce::Justification::centred);
-        name_.setFont (juce::FontOptions (11.0f));
+        name_.setFont (juce::FontOptions (11.5f, juce::Font::bold));
         name_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
         name_.setEditable (false, true, false);
         name_.onTextChange = [this]
@@ -515,6 +532,8 @@ public:
         const ParamId ps = isBus ? mixer::busParam (index, mixer::kBusSolo) : isPar_ ? mixer::parallelParam (index, mixer::kParSolo) : probe::trackParam (index, probe::kSolo);
         pan_.bind (pp, 0.0);
         fader_.bind (pv, 0.0);
+        pan_.getProperties().set ("bipolar", true);
+        fader_.getProperties().set ("fader", true);
         addAndMakeVisible (pan_);
         addAndMakeVisible (fader_);
         mute_.id = pm;
@@ -597,20 +616,23 @@ public:
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (2);
+        auto r = getLocalBounds().reduced (3);
         auto head = r.removeFromTop (24);
+        head.removeFromLeft (14);   // pastille de couleur (dessinée)
         if (! isBus_)
         {
             removeButton_.setBounds (head.removeFromRight (20).reduced (0, 1));
             if (isPar_ && hasFold_) foldButton_.setBounds (head.removeFromRight (26).reduced (0, 1));
             typeButton_.setBounds (head.reduced (0, 1));
         }
-        name_.setBounds (r.removeFromTop (18));
         if (isPar_) tapBox_.setBounds (r.removeFromTop (22).reduced (0, 1));
         else if (! isBus_) midi_.setBounds (r.removeFromTop (22).reduced (0, 1));
         routing_.setBounds (r.removeFromTop (22).reduced (0, 1));
+        r.removeFromTop (2);
         inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
-        pan_.setBounds (r.removeFromTop (20));
+        panText_ = r.removeFromTop (13);
+        pan_.setBounds (r.removeFromTop (18));
+        name_.setBounds (r.removeFromBottom (20));
         auto bottom = r.removeFromBottom (24);
         if (isBus_)
         {
@@ -631,26 +653,37 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const auto card = getLocalBounds().toFloat().reduced (1.0f);
         g.setColour (owner_.colour (selected_ ? Token::Nav1 : (isPar_ ? Token::BgApp : Token::BgCard)));
-        g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f);
+        g.fillRoundedRectangle (card, 8.0f);
         g.setColour (owner_.colour (selected_ ? Token::Accent : Token::Border));
-        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, selected_ ? 2.0f : 1.0f);
+        g.drawRoundedRectangle (card, 8.0f, selected_ ? 1.5f : 1.0f);
         if (isPar_) // une piste parallèle : bord d'accent à gauche, plus marqué en profondeur
         {
             g.setColour (owner_.colour (Token::Accent).withAlpha (depth_ >= 2 ? 0.55f : 1.0f));
-            g.fillRect (0, 6, 3, getHeight() - 12);
+            g.fillRoundedRectangle (1.0f, 8.0f, 3.0f, static_cast<float> (getHeight()) - 16.0f, 1.5f);
         }
-        if (isBus_) // le haut d'une bande de bus : l'étiquette que les pistes remplacent par leur générateur
-        {
-            g.setColour (owner_.colour (Token::TextDim));
-            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
-            g.drawText ("BUS", 2, 6, getWidth() - 4, 14, juce::Justification::centred);
-        }
-        // pastille de couleur
+        // pastille de couleur de la bande
         static const juce::uint32 palette[16] = { 0xff5c6bc0, 0xff26a69a, 0xffffa726, 0xffef5350, 0xff8d6e63, 0xff66bb6a, 0xffab47bc, 0xff42a5f5,
                                                  0xffffee58, 0xffec407a, 0xff78909c, 0xff26c6da, 0xffd4e157, 0xffff7043, 0xff7e57c2, 0xffbdbdbd };
         g.setColour (juce::Colour (palette[colourIndex_ & 15]));
-        g.fillRect (juce::Rectangle<int> (4, 3, getWidth() - 8, 3));
+        g.fillEllipse (8.0f, 11.0f, 8.0f, 8.0f);
+        if (isBus_) // le haut d'une bande de bus : l'étiquette que les pistes remplacent par leur type de générateur
+        {
+            const juce::Rectangle<float> tag (static_cast<float> (getWidth()) - 34.0f, 7.0f, 28.0f, 16.0f);
+            g.setColour (owner_.colour (Token::Border));
+            g.drawRoundedRectangle (tag, 5.0f, 1.0f);
+            g.setColour (owner_.colour (Token::TextDim));
+            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+            g.drawText ("BUS", tag.toNearestInt(), juce::Justification::centred);
+        }
+        // balance : C, L24, R12
+        {
+            const int v = juce::roundToInt (pan_.getValue());
+            g.setColour (owner_.colour (Token::TextDim));
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText (v == 0 ? juce::String ("C") : (v < 0 ? "L" : "R") + juce::String (std::abs (v)), panText_, juce::Justification::centred);
+        }
 
         // vu-mètre stéréo
         const auto m = meterArea();
@@ -658,17 +691,19 @@ public:
         {
             const float db = dbOf (lin);
             const float h = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f) * static_cast<float> (m.getHeight());
-            g.setColour (owner_.colour (Token::Border));
-            g.fillRect (x, m.getY(), 5, m.getHeight());
-            g.setColour (db > 0.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent2));
-            g.fillRect (x, m.getBottom() - static_cast<int> (h), 5, static_cast<int> (h));
+            g.setColour (owner_.colour (Token::Grid));
+            g.fillRoundedRectangle (static_cast<float> (x), static_cast<float> (m.getY()), 5.0f, static_cast<float> (m.getHeight()), 2.5f);
+            const juce::Rectangle<float> level (static_cast<float> (x), static_cast<float> (m.getBottom()) - h, 5.0f, h);
+            const auto top = db > 0.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent).brighter (0.3f);
+            g.setGradientFill (juce::ColourGradient (top, level.getX(), level.getY(), owner_.colour (Token::Accent), level.getX(), level.getBottom(), false));
+            g.fillRoundedRectangle (level, 2.5f);
         };
         bar (peakL_, m.getX());
         bar (peakR_, m.getX() + 6);
-        g.setColour (owner_.colour (Token::TextDim));
-        g.setFont (juce::FontOptions (10.0f));
-        g.drawText (juce::String (fader_.getValue() <= kFaderMinDb ? juce::String::fromUTF8 ("-inf") : juce::String (fader_.getValue(), 1)),
-                    2, getHeight() - 42, getWidth() - 4, 14, juce::Justification::centred);
+        g.setColour (owner_.colour (Token::Text));
+        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.drawText (fader_.getValue() <= kFaderMinDb ? juce::String::fromUTF8 ("-inf") : juce::String (fader_.getValue(), 1) + " dB",
+                    2, getHeight() - 62, getWidth() - 4, 14, juce::Justification::centred);
     }
 
 private:
@@ -726,7 +761,7 @@ private:
     juce::TextButton routing_;
     BoundSlider pan_, fader_;
     BoundToggle mute_, solo_, parallel_;
-    juce::Rectangle<int> faderArea_;
+    juce::Rectangle<int> faderArea_, panText_;
     juce::Component::SafePointer<RoutingPanel> panelRef_;
     InsertList inserts_;
 
@@ -744,12 +779,16 @@ public:
           inserts_ (owner, NeptuneProcessor::StripKind::Master, 0)
     {
         addAndMakeVisible (inserts_);
-        title_.setText ("Master", juce::dontSendNotification);
+        title_.setText ("MASTER", juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         title_.setJustificationType (juce::Justification::centred);
         title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
         addAndMakeVisible (title_);
         pan_.setRange (-100.0, 100.0, 1.0);
         pan_.bind (probe::masterPan, 0.0);
+        pan_.getProperties().set ("bipolar", true);
+        trim_.getProperties().set ("bipolar", true);
+        fader_.getProperties().set ("fader", true);
         trim_.setRange (-12.0, 12.0, 0.1);
         trim_.bind (mixer::masterTrim, 0.0);
         fader_.setRange (kFaderMinDb, kFaderMaxDb, 0.1);
@@ -852,19 +891,21 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.setColour (owner_.colour (Token::BgCard));
-        g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f);
+        g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 8.0f);
         g.setColour (owner_.colour (Token::Accent));
-        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 1.5f);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 8.0f, 1.5f);
         const juce::Rectangle<int> m (getWidth() - 38, faderArea_.getY(), 34, faderArea_.getHeight());
         auto bar = [&] (float lin, float rms, int x)
         {
             const float db = dbOf (lin), rdb = dbOf (rms);
             const float h = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 66.0f) * static_cast<float> (m.getHeight());
             const float rh = juce::jlimit (0.0f, 1.0f, (rdb + 60.0f) / 66.0f) * static_cast<float> (m.getHeight());
-            g.setColour (owner_.colour (Token::Border));
-            g.fillRect (x, m.getY(), 12, m.getHeight());
-            g.setColour (db > 0.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent2));
-            g.fillRect (x, m.getBottom() - static_cast<int> (h), 12, static_cast<int> (h));
+            g.setColour (owner_.colour (Token::Grid));
+            g.fillRoundedRectangle (static_cast<float> (x), static_cast<float> (m.getY()), 12.0f, static_cast<float> (m.getHeight()), 4.0f);
+            const juce::Rectangle<float> level (static_cast<float> (x), static_cast<float> (m.getBottom()) - h, 12.0f, h);
+            const auto top = db > 0.0f ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent).brighter (0.3f);
+            g.setGradientFill (juce::ColourGradient (top, level.getX(), level.getY(), owner_.colour (Token::Accent), level.getX(), level.getBottom(), false));
+            g.fillRoundedRectangle (level, 4.0f);
             g.setColour (owner_.colour (Token::Text).withAlpha (0.6f)); // RMS
             g.fillRect (x + 3, m.getBottom() - static_cast<int> (rh), 6, static_cast<int> (rh));
         };
@@ -885,9 +926,9 @@ public:
                 g.drawText (value (values[i]) + (i == 3 ? " dB" : " LUFS"), row, juce::Justification::centredRight);
             }
         }
-        g.setColour (owner_.colour (Token::TextDim));
-        g.setFont (juce::FontOptions (10.0f));
-        g.drawText (fader_.getValue() <= kFaderMinDb ? juce::String::fromUTF8 ("-inf") : juce::String (fader_.getValue(), 1),
+        g.setColour (owner_.colour (Token::Text));
+        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.drawText (fader_.getValue() <= kFaderMinDb ? juce::String::fromUTF8 ("-inf") : juce::String (fader_.getValue(), 1) + " dB",
                     2, getHeight() - 42, getWidth() - 4, 14, juce::Justification::centred);
     }
 
@@ -940,7 +981,9 @@ MixerView::MixerView (NeptuneProcessor& p, const theme::Palette& palette, const 
     busesTitle_.setText (juce::String::fromUTF8 (std::string (tr.tr ("mix.buses")).c_str()), juce::dontSendNotification);
     for (auto* l : { &tracksTitle_, &busesTitle_ })
     {
-        l->setColour (juce::Label::textColourId, colour (Token::TextDim));
+        l->setText (l->getText().toUpperCase(), juce::dontSendNotification);
+        l->setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        l->setColour (juce::Label::textColourId, colour (Token::TextDim2));
         addAndMakeVisible (*l);
     }
     startTimerHz (30);
