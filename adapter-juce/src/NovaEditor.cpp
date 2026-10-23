@@ -394,6 +394,7 @@ void EditorBase::showPresetMenu()
         menu.addSubMenu (tx ("nv.pr_delete"), del);
     }
     menu.addItem (901, tx ("nv.pr_folder"));
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (preset_), [safe = juce::Component::SafePointer<EditorBase> (this), names, sorted] (int choice)
     {
         if (safe == nullptr || choice <= 0) return;

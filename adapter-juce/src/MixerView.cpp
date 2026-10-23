@@ -386,6 +386,7 @@ private:
             menu.addItem (2, u8 (std::string (owner_.tr_.tr ("insert.bypass"))), true, bypassed_[static_cast<std::size_t> (slot)]);
             menu.addItem (3, u8 (std::string (owner_.tr_.tr ("insert.remove"))));
         }
+        menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
                             [safe = juce::Component::SafePointer<InsertList> (this), slot, used] (int choice)
                             {
@@ -681,6 +682,7 @@ private:
         menu.addItem (3, u8 (std::string (owner_.tr_.tr ("mix.type_fm"))), true, current == TrackType::Fm);
         menu.addItem (5, u8 (std::string (owner_.tr_.tr ("mix.type_organ"))), true, current == TrackType::Organ);
         menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), true, current == TrackType::AudioIn);
+        menu.setLookAndFeel (&typeButton_.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (160),
                             [safe = juce::Component::SafePointer<Strip> (this)] (int choice)
                             {

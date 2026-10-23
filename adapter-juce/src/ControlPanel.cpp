@@ -289,6 +289,7 @@ void ControlPanel::showSourceMenu (std::size_t index, juce::Component& anchor)
     menu.addSubMenu (text ("cpanel.macro"), macros);
     menu.addItem (kSourceOsc, text ("cpanel.osc_address"));
     juce::Component::SafePointer<ControlPanel> safe (this);
+    menu.setLookAndFeel (&anchor.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&anchor), [safe, index] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
@@ -338,6 +339,7 @@ void ControlPanel::showTargetMenu (std::size_t index, juce::Component& anchor)
         actions.addItem (kActionBase + a, text (actionKey (static_cast<ctl::Action> (a))), true, current.isAction && static_cast<int> (current.action) == a);
     menu.addSubMenu (text ("cpanel.actions"), actions);
     juce::Component::SafePointer<ControlPanel> safe (this);
+    menu.setLookAndFeel (&anchor.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&anchor).withMaximumNumColumns (1), [safe, index, ids] (int choice)
     {
         if (safe == nullptr || choice == 0) return;

@@ -486,6 +486,7 @@ NovaOrganEditor::MenuPill* NovaOrganEditor::makeMenuPill (int page, std::functio
         juce::PopupMenu menu;
         for (std::size_t i = 0; i < m->items.size(); ++i) menu.addItem (static_cast<int> (i) + 1, m->items[i], true, static_cast<int> (i) == m->get());
         juce::Component::SafePointer<juce::Component> safe (this);
+        menu.setLookAndFeel (&m->pill->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (m->pill), [m, safe] (int r) { if (safe != nullptr && r > 0) m->set (r - 1); });
     };
     return m;

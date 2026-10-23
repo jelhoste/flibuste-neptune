@@ -192,6 +192,7 @@ struct ChoicePill
         {
             juce::PopupMenu menu;
             for (std::size_t i = 0; i < items.size(); ++i) menu.addItem (static_cast<int> (i) + 1, items[i], true, static_cast<int> (i) == get());
+            menu.setLookAndFeel (&pill->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (pill), [this, safe] (int r) { if (safe != nullptr && r > 0) set (r - 1); });
         };
     }
@@ -293,6 +294,7 @@ private:
         menu.addItem (2, textAssign, ! current.empty());
         menu.addItem (3, textClear, ! id.empty());
         juce::Component::SafePointer<PresetTiles> safe (this);
+        menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options(), [safe, i, id, current] (int r)
         {
             if (safe == nullptr || r == 0) return;

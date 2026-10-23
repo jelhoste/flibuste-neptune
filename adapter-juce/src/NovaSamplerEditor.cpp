@@ -535,6 +535,7 @@ private:
 NovaSamplerEditor::NovaSamplerEditor (NeptuneProcessor& p, const theme::Palette& palette, theme::KnobStyle knob, const i18n::Translator& tr, Options options)
     : EditorBase (p, palette, knob, tr, std::move (options), juce::String::fromUTF8 ("SAMPLER")), proc_ (p)
 {
+    skin().setPillTextScale (1.5f);   // texte des boutons (pages ZONES, SAMPLE, SON, INSTRUMENT, RÉGLAGES) : 1,5 fois la taille d'origine
     groupMenuListener_ = std::make_unique<GroupMenuListener> (*this);
     addPage (tx ("sm.page_zones"), iconPath (0));
     addPage (tx ("sm.page_sample"), iconPath (1));
@@ -594,6 +595,7 @@ void NovaSamplerEditor::buildLeftColumn()
         const int current = proc_.masterSettings().maxVoices;
         menu.addSectionHeader (tx ("voices.global_limit"));
         for (const int n : { 16, 32, 64, 128, 256, 512, 1024 }) menu.addItem (n, juce::String (n), true, n == current);
+        menu.setLookAndFeel (&voicesPill_->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (voicesPill_), [this] (int chosen)
         {
             if (chosen <= 0) return;
@@ -1469,6 +1471,7 @@ void NovaSamplerEditor::showWaveMenu (std::int64_t frame, juce::Point<int> where
     menu.addItem (7, tx ("sm.menu_play"));
     menu.addItem (8, tx ("sm.menu_loop_around"), z->mode == PlayMode::Loop);
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (juce::Rectangle<int> (where.x, where.y, 1, 1)), [safe, frame] (int r)
     {
         if (safe == nullptr || r == 0) return;
@@ -1526,6 +1529,7 @@ void NovaSamplerEditor::showAddLoopMenu()
     menu.addItem (2, tx ("sm.add_next_auto"), room);
     menu.addItem (3, tx ("sm.add_all_auto"), room);
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.setLookAndFeel (&loopAddPill_->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (loopAddPill_), [safe] (int r)
     {
         if (safe == nullptr || r == 0) return;
@@ -2186,6 +2190,7 @@ void NovaSamplerEditor::showPoolMenu (int row)
     menu.addItem (1, tx ("pool.menu_create"));
     menu.addItem (2, tx ("pool.menu_remove"), removable);
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options(), [safe, selected] (int r)
     {
         if (safe == nullptr || r == 0) return;
@@ -2223,6 +2228,7 @@ void NovaSamplerEditor::startImport()
     menu.addSeparator();
     menu.addItem (3, tx ("pool.add_files"));
     menu.addItem (4, tx ("pool.add_folder"));
+    menu.setLookAndFeel (&importPill_->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (importPill_), [safe = juce::Component::SafePointer<NovaSamplerEditor> (this)] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
@@ -2470,6 +2476,7 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
     menu.addSeparator();
     menu.addItem (kOpenWindow, tx ("slots.open_window"));
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options(), [safe, zone, group] (int choice)
     {
         if (safe == nullptr || choice == 0) return;

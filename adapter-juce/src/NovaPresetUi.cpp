@@ -87,6 +87,7 @@ void PresetUi::showMenu (juce::Component* anchor, int matrixBank)
     }
     menu.addSubMenu (tx ("og.all_presets"), allMenu);
     juce::Component::SafePointer<juce::Component> safe (&owner_);
+    menu.setLookAndFeel (&owner_.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor), [this, safe, ids, all] (int r)
     {
         if (safe == nullptr || r == 0) return;

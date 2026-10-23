@@ -46,6 +46,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         menu.addSectionHeader (text ("voices.global_limit"));
         for (const int n : { 16, 32, 64, 128, 256, 512, 1024 })
             menu.addItem (n, juce::String (n), true, n == current);
+        menu.setLookAndFeel (&voiceCountButton_.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&voiceCountButton_), [this] (int chosen)
         {
             if (chosen <= 0) return;
@@ -341,6 +342,7 @@ void NeptuneEditor::showControlMenu()
     const bool reduced = processor_.reducedHostList();
     menu.addItem (4, text ("macro.reduced"), true, reduced);
     juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlButton_), [safe, on, reduced] (int choice)
     {
         if (safe == nullptr) return;
@@ -383,6 +385,7 @@ void NeptuneEditor::showOscMenu()
         }
     }
     juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&oscButton_), [safe, on, settings] (int choice)
     {
         if (safe == nullptr) return;

@@ -557,6 +557,7 @@ void MappingMatrix::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             menu.addItem (1, text ("map.place_here"), onDropZones && ! selected_.empty());
             menu.addItem (2, text ("map.place_files_here"), onDropFiles && ! files.empty());
+            menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (juce::Rectangle<int> (juce::roundToInt (e.position.x), juce::roundToInt (e.position.y), 1, 1))),
                                 [this, key, view, zones = selected_, files] (int r)
                                 {

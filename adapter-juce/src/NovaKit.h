@@ -33,6 +33,9 @@ public:
     neptune::core::theme::ControlStyle controlStyle() const noexcept { return control_; }
     bool highContrast() const noexcept { return control_ == neptune::core::theme::ControlStyle::HighContrast; }
 
+    // Agrandissement du texte des pastilles dont la taille n'est pas fixée à la main (1 : taille d'origine). Un texte trop long pour sa pastille est réduit.
+    float pillTextScale() const noexcept { return pillTextScale_; }
+    void setPillTextScale (float s) noexcept { pillTextScale_ = s; }
     float scale() const noexcept { return scale_; }
     void setScale (float s) noexcept { scale_ = juce::jlimit (0.3f, 4.0f, s); }
     float px (float v) const noexcept { return v * scale_; }
@@ -53,6 +56,7 @@ private:
     neptune::core::theme::Metrics metrics_;
     neptune::core::theme::ControlStyle control_;
     float scale_ = 1.0f;
+    float pillTextScale_ = 1.0f;
 };
 
 // Facteur d'échelle pour une fenêtre w x h et un gabarit dw x dh (proportions conservées).

@@ -484,6 +484,7 @@ void NovaCompressorEditor::buildSidechainPage()
         juce::PopupMenu menu;
         for (int c = 0; c <= 16; ++c) menu.addItem (c + 1, c == 0 ? tx ("nv.midi_all") : juce::String (c), true, choiceValue (cm::midiChannel) == c);
         juce::Component::SafePointer<juce::Component> safe (this);   // (MSVC : pas de `this` dans la capture d'initialisation d'une lambda imbriquée)
+        menu.setLookAndFeel (&channelPill_->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (channelPill_), [this, safe] (int r)
         {
             if (safe != nullptr && r > 0) nova::setParam (host(), cm::midiChannel, r - 1);

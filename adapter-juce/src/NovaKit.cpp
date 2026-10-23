@@ -286,7 +286,7 @@ void Pill::mouseUp (const juce::MouseEvent& e)
 
 float Pill::idealWidth() const
 {
-    const float size = fontSize_ > 0.0f ? fontSize_ : (look_ == Look::Pill ? 12.0f : 9.5f);
+    const float size = fontSize_ > 0.0f ? fontSize_ : (look_ == Look::Pill ? 12.0f : 9.5f) * skin_.pillTextScale();
     const juce::Font f (juce::FontOptions (size, juce::Font::bold));
     return std::ceil (f.getStringWidthFloat (text_)) + 2.0f * (look_ == Look::Pill ? 10.0f : 6.0f) + (dot_ ? 12.0f : 0.0f) + 4.0f;
 }
@@ -326,7 +326,10 @@ void Pill::paint (juce::Graphics& g)
         area.removeFromLeft (d + skin_.px (6.0f));
     }
     g.setColour (textColour);
-    g.setFont (skin_.font (fontSize_ > 0.0f ? fontSize_ : (look_ == Look::Pill ? 12.0f : 9.5f), true));
+    float size = fontSize_ > 0.0f ? fontSize_ : (look_ == Look::Pill ? 12.0f : 9.5f) * skin_.pillTextScale();
+    const float wanted = juce::Font (juce::FontOptions (size * skin_.scale(), juce::Font::bold)).getStringWidthFloat (text_);
+    if (wanted > area.getWidth() && wanted > 0.0f) size *= std::max (0.6f, area.getWidth() / wanted);   // texte trop long : réduit plutôt que coupé
+    g.setFont (skin_.font (size, true));
     g.drawText (text_, area, juce::Justification::centred, true);
 }
 

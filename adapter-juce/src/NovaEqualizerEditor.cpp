@@ -585,6 +585,7 @@ void NovaEqualizerEditor::showChoiceMenu (juce::Component* target, ParamId id, s
     juce::PopupMenu menu;
     const int cur = choiceValue (id);
     for (std::size_t i = 0; i < labels.size(); ++i) menu.addItem (static_cast<int> (i) + 1, labels[i], true, static_cast<int> (i) == cur);
+    menu.setLookAndFeel (&target->getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target), [this, id, safe = juce::Component::SafePointer<juce::Component> (this)] (int choice)
     {
         if (safe == nullptr || choice <= 0) return;
@@ -607,6 +608,7 @@ void NovaEqualizerEditor::showBandMenu (int band)
     menu.addItem (2, tx ("nv.dynamic"), hasGain (curType), value (eq::bandParam (band, eq::kDynOn)) >= 0.5);
     menu.addSeparator();
     menu.addItem (3, tx ("nv.delete_band"));
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options(), [this, band, safe = juce::Component::SafePointer<juce::Component> (this)] (int r)
     {
         if (safe == nullptr || r <= 0) return;

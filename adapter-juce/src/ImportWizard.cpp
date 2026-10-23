@@ -429,6 +429,7 @@ void ImportWizard::addRuleFromSelection (int from, int to)
     menu.addItem (1000, t ("import.expr_from_selection"));
     const int len = to - from + 1;
     juce::Component::SafePointer<ImportWizard> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (strip_.get()), [safe, from, len] (int chosen)
     {
         if (safe == nullptr || chosen <= 0) return;

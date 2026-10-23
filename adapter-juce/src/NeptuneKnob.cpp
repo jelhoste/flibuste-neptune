@@ -138,6 +138,7 @@ void NeptuneKnob::showMacroMenu()
     menu.addSubMenu (juce::String::fromUTF8 (processor_.uiText ("macro.assign").c_str()), sub);
     menu.addItem (1, juce::String::fromUTF8 (processor_.uiText ("macro.clear").c_str()), ! assigned.empty());
     juce::Component::SafePointer<NeptuneKnob> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
