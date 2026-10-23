@@ -17,6 +17,7 @@
 #include <map>
 #include <string>
 
+#include "neptune/core/Facade.h"
 #include "neptune/core/MidiFilter.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/ProbePool.h"
@@ -207,11 +208,12 @@ struct StripSettings
     std::array<InsertState, numInserts> inserts;
     bool slim = false;
     bool hostInput = true;               // piste « Entrée audio » : l'entrée audio du plugin (hôte) alimente la piste
+    facade::Facade facade;               // pistes : la Façade (interface personnalisée), vide par défaut
 
     bool operator== (const StripSettings& o) const noexcept
     {
         return hostInput == o.hostInput && name == o.name && color == o.color && midiChannel == o.midiChannel && midiFilter == o.midiFilter && routing == o.routing
-            && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim;
+            && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim && facade == o.facade;
     }
 };
 
