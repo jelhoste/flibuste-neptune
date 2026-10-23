@@ -471,7 +471,7 @@ void NeptuneEditor::resized()
 
     {
         // barre du haut : boutons resserrés autour de leur texte (28 de haut, centrés sur l'ancienne rangée)
-        constexpr int barY = 36, barH = 28, pad = 22, gap = 6;
+        static constexpr int barY = 36, barH = 28, pad = 22, gap = 6;
         auto fit = [this] (const juce::TextButton& b, int minWidth)
         {
             const juce::Font f (novaSkin_.font (novaLook_.buttonFontSize (barH), true));
