@@ -15,6 +15,8 @@ namespace cvl = neptune::core::convolution;
 
 namespace
 {
+constexpr float kPillFont = 14.0f;   // texte des petites pastilles de la page (9,5 à l'origine)
+
 float dbOf (float lin) { return lin <= 1.0e-6f ? -120.0f : 20.0f * std::log10 (lin); }
 
 juce::Path iconPath (int kind)
@@ -742,17 +744,21 @@ void NovaConvolutionEditor::buildIrPage()
     addInfo (0, irPanel_, "hlp.cv_ir", 1);
     loadPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     loadPill_->setText (tx ("cv.load"));
+    loadPill_->setFontSize (kPillFont);
     loadPill_->onClick = [this] { chooseFile(); };
     clearPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     clearPill_->setText (tx ("cv.clear"));
+    clearPill_->setFontSize (kPillFont);
     clearPill_->onClick = [this] { module_->setIrPath ({}); };
     fileText_ = add<nova::Text> (0, skin(), Token::Text, 12.0f, true);
     statusText_ = add<nova::Text> (0, skin(), Token::TextDim2, 11.0f);
     wavePill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     wavePill_->setText (tx ("cv.wave"));
+    wavePill_->setFontSize (kPillFont);
     wavePill_->setOn (true);
     spectrumPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     spectrumPill_->setText (tx ("cv.spectrum"));
+    spectrumPill_->setFontSize (kPillFont);
     irView_ = add<IrView> (0, skin(), host(), *module_);
     irView_->emptyText = [this] { return statusText(); };
     wavePill_->onClick = [this] { irView_->setSpectrum (false); wavePill_->setOn (true); spectrumPill_->setOn (false); };
@@ -811,6 +817,7 @@ void NovaConvolutionEditor::buildTonePage()
         c.on->bindToggle (host(), cvl::bandParam (b, cvl::kOn), "EQ " + juce::String (b + 1));
         c.type = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
         c.type->bindChoice (host(), cvl::bandParam (b, cvl::kType), {}, types);
+        for (auto* pill : { c.on, c.type }) pill->setFontSize (kPillFont);
         eqColumns_.push_back (c);
     }
     for (int p = 0; p < 2; ++p)
@@ -820,6 +827,7 @@ void NovaConvolutionEditor::buildTonePage()
         c.on->bindToggle (host(), p == 0 ? cvl::hpOn : cvl::lpOn, p == 0 ? tx ("cv.hp") : tx ("cv.lp"));
         c.slope = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
         c.slope->bindChoice (host(), p == 0 ? cvl::hpSlope : cvl::lpSlope, {}, slopes);
+        for (auto* pill : { c.on, c.slope }) pill->setFontSize (kPillFont);
         eqColumns_.push_back (c);
     }
 }
