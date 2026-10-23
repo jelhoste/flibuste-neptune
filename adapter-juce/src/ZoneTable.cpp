@@ -84,6 +84,7 @@ public:
     {
         const auto r = getLocalBounds().toFloat().reduced (8.0f, 5.0f);
         g.setColour (down_ ? owner_.colour (Token::KnobHot) : owner_.colour (Token::Accent));
+        if (owner_.previewRow() == row_) { g.fillRect (r.reduced (1.0f)); return; }
         juce::Path p;
         p.addTriangle (r.getX() + 2.0f, r.getY(), r.getX() + 2.0f, r.getBottom(), r.getRight(), r.getCentreY());
         g.fillPath (p);
@@ -91,13 +92,12 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         down_ = true;
-        shift_ = e.mods.isShiftDown();
+        shift_ = e.mods.isShiftDown() || owner_.previewRow() == row_;   // sur la zone qui sonne, un clic arrête
         if (owner_.onPlay) owner_.onPlay (row_, true, shift_);
         repaint();
     }
     void mouseUp (const juce::MouseEvent&) override
     {
-        if (down_ && ! shift_ && owner_.onPlay) owner_.onPlay (row_, false, false);
         down_ = false;
         repaint();
     }

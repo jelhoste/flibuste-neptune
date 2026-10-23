@@ -190,6 +190,7 @@ private:
     std::string loopCandidatesKey_, seamKey_;
     std::unique_ptr<juce::FileChooser> saveChooser_;
     bool previewing_ = false;
+    int previewZone_ = -1;                        // zone en cours d'écoute (bouton de la liste ou du bas)
     std::string previewPath_;                     // fichier de la réserve en cours d'écoute libre
     std::future<neptune::core::SampleLoadResult> previewLoad_;           // chargement d'un fichier de la réserve à écouter
     std::string previewLoadPath_;

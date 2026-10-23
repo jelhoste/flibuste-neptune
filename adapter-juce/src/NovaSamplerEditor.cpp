@@ -730,9 +730,16 @@ void NovaSamplerEditor::buildZonesPage()
     };
     zones_->onPlay = [this] (int row, bool down, bool stop)
     {
-        if (stop) proc_.uiPreviewStop();
-        else if (down) proc_.uiPreviewZone (row);
-        else proc_.uiPreviewRelease();
+        // bascule : un clic lance l'écoute de la zone (la boucle tient jusqu'à l'arrêt), un second clic l'arrête
+        if (! down) return;
+        if (stop) { stopPreviewNow(); return; }
+        proc_.setVoiceMonitor (true);
+        proc_.uiPreviewZone (row);
+        previewing_ = true;
+        previewOwner_ = 1;
+        previewPath_.clear();
+        previewZone_ = row;
+        previewStartMs_ = juce::Time::getMillisecondCounter();
     };
     zones_->onContextMenu = [this] (int row) { showSlotAssignMenu (row, {}); };
 
@@ -3143,6 +3150,7 @@ void NovaSamplerEditor::startPreview (int source, std::int64_t frame, int loopIn
     previewing_ = true;
     previewOwner_ = owner;
     previewPath_.clear();
+    previewZone_ = row;
     previewStartMs_ = juce::Time::getMillisecondCounter();
 }
 
@@ -3235,7 +3243,7 @@ void NovaSamplerEditor::stopPreviewNow()
 // il reste allumé tant qu'une écoute est en cours (sans lui, une boucle aurait l'air finie au bout d'un instant et le bouton ne saurait plus l'arrêter).
 void NovaSamplerEditor::updatePlayButton()
 {
-    if (previewing_ && juce::Time::getMillisecondCounter() - previewStartMs_ > 400)
+    if (previewing_ && static_cast<juce::int32> (juce::Time::getMillisecondCounter() - previewStartMs_) > 400)   // signé : le départ peut être dans le futur (chargement)
     {
         Engine::VoiceInfo info[Engine::kVoiceSnapshot];
         const int n = proc_.readVoices (info, Engine::kVoiceSnapshot);
@@ -3251,6 +3259,7 @@ void NovaSamplerEditor::updatePlayButton()
             for (std::size_t i = 0; i < poolPaths_.size(); ++i)
                 if (poolPaths_[i] == previewPath_) { playingRow = static_cast<int> (i); break; }
         pool_->setPlayingRow (playingRow);
+        zones_->setPreviewRow (bottom && previewPath_.empty() ? previewZone_ : -1);
     }
     playPill_->setText (tx (bottom ? "sm.stop_button" : "sm.play_button"));
     playPill_->setOn (bottom);
