@@ -792,7 +792,16 @@ void LookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
     g.drawRect (0, 0, w, h, 1);
 }
 
-juce::Font LookAndFeel::getPopupMenuFont() { return juce::Font (skin_.font (13.0f)); }
+juce::Font LookAndFeel::getPopupMenuFont() { return juce::Font (skin_.font (13.0f * popupScale_)); }
+
+// Bulle ancrée (routage, etc.) : carte NOVA avec sa flèche, au lieu du cadre JUCE d'origine
+void LookAndFeel::drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics& g, const juce::Path& path, juce::Image&)
+{
+    g.setColour (skin_.colour (Token::BgCard));
+    g.fillPath (path);
+    g.setColour (skin_.colour (Token::CtlBd));
+    g.strokePath (path, juce::PathStrokeType (1.0f));
+}
 
 void LookAndFeel::drawScrollbar (juce::Graphics& g, juce::ScrollBar&, int x, int y, int width, int height, bool vertical, int thumbStart,
                                  int thumbSize, bool over, bool down)

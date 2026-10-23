@@ -326,6 +326,9 @@ public:
     explicit LookAndFeel (const Skin&);
     void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
     juce::Font getPopupMenuFont() override;
+    // Agrandissement du texte (et donc des lignes) des menus ouverts avec ce style (1 : taille d'origine)
+    void setPopupScale (float s) noexcept { popupScale_ = s; }
+    void drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics&, const juce::Path&, juce::Image&) override;
     void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height, bool vertical, int thumbStart,
                         int thumbSize, bool isMouseOver, bool isMouseDown) override;
     // Commandes JUCE d'origine posées dans un éditeur NOVA (matrice, panneaux de vélocité, de polyphonie, de filtres...) : même habillage que les pastilles.
@@ -344,6 +347,6 @@ public:
 
 private:
     const Skin& skin_;
-    float buttonTextScale_ = 1.0f;
+    float buttonTextScale_ = 1.0f, popupScale_ = 1.0f;
 };
 } // namespace nova

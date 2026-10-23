@@ -218,7 +218,7 @@ public:
             r.mute.onClick = [this, i] { s_.sends[static_cast<std::size_t> (i)].mute = rows_[static_cast<std::size_t> (i)].mute.getToggleState(); push(); };
             addAndMakeVisible (r.mute);
         }
-        setSize (620, isPar_ ? 432 : 400);
+        setSize (700, isPar_ ? 470 : 436);
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (colour (Token::BgCard)); }
@@ -228,9 +228,9 @@ public:
         auto r = getLocalBounds().reduced (10);
         auto row = [&r] (juce::Label& l, juce::Component& c, int lw = 130)
         {
-            auto line = r.removeFromTop (30);
+            auto line = r.removeFromTop (32);
             l.setBounds (line.removeFromLeft (lw));
-            c.setBounds (line.removeFromLeft (200).reduced (2));
+            c.setBounds (line.removeFromLeft (220).reduced (2));
             return line;
         };
         auto extra = row (mainLabel_, mainBox_);
@@ -241,13 +241,13 @@ public:
         r.removeFromTop (8);
         for (auto& row2 : rows_)
         {
-            auto line = r.removeFromTop (30);
-            row2.title.setBounds (line.removeFromLeft (60));
-            row2.dest.setBounds (line.removeFromLeft (100).reduced (1));
-            row2.tap.setBounds (line.removeFromLeft (130).reduced (1));
-            row2.level->setBounds (line.removeFromLeft (150).reduced (1));
+            auto line = r.removeFromTop (32);
+            row2.title.setBounds (line.removeFromLeft (64));
+            row2.dest.setBounds (line.removeFromLeft (120).reduced (1, 2));
+            row2.tap.setBounds (line.removeFromLeft (150).reduced (1, 2));
+            row2.level->setBounds (line.removeFromLeft (160).reduced (1));
             row2.pan.setBounds (line.removeFromLeft (90).reduced (1));
-            row2.mute.setBounds (line.removeFromLeft (30).reduced (1));
+            row2.mute.setBounds (line.removeFromLeft (34).reduced (1, 2));
         }
     }
 
@@ -404,7 +404,7 @@ private:
             menu.addItem (3, u8 (std::string (owner_.tr_.tr ("insert.remove"))));
         }
         menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMinimumWidth (220),
                             [safe = juce::Component::SafePointer<InsertList> (this), slot, used] (int choice)
                             {
                                 if (safe == nullptr || choice == 0) return;
@@ -519,7 +519,9 @@ public:
         {
             auto panel = std::make_unique<RoutingPanel> (owner_.processor_, owner_.palette_, owner_.tr_, isBus_ ? 1 : isPar_ ? 2 : 0, index_);
             panelRef_ = panel.get();
-            juce::CallOutBox::launchAsynchronously (std::move (panel), routing_.getScreenBounds(), nullptr);
+            // la bulle prend le style NOVA de la barre (cadre, listes, curseurs), pas celui de JUCE
+            auto& box = juce::CallOutBox::launchAsynchronously (std::move (panel), routing_.getScreenBounds(), nullptr);
+            box.setLookAndFeel (&routing_.getLookAndFeel());
         };
         addAndMakeVisible (routing_);
 
@@ -718,7 +720,7 @@ private:
         menu.addItem (5, u8 (std::string (owner_.tr_.tr ("mix.type_organ"))), true, current == TrackType::Organ);
         menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), true, current == TrackType::AudioIn);
         menu.setLookAndFeel (&typeButton_.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (160),
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (220),
                             [safe = juce::Component::SafePointer<Strip> (this)] (int choice)
                             {
                                 if (safe == nullptr || choice == 0) return;
@@ -986,6 +988,15 @@ MixerView::MixerView (NeptuneProcessor& p, const theme::Palette& palette, const 
         l->setColour (juce::Label::textColourId, colour (Token::TextDim2));
         addAndMakeVisible (*l);
     }
+    zoomOut_.setButtonText (juce::String::fromUTF8 ("\xe2\x88\x92"));
+    zoomIn_.setButtonText ("+");
+    zoomOut_.onClick = [this] { setZoom (zoom_ - 0.1f); };
+    zoomIn_.onClick = [this] { setZoom (zoom_ + 0.1f); };
+    zoomOut_.setTooltip (juce::String::fromUTF8 (std::string (tr.tr ("mix.zoom_tip")).c_str()));
+    zoomIn_.setTooltip (zoomOut_.getTooltip());
+    zoomLabel_.setJustificationType (juce::Justification::centred);
+    zoomLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    for (auto* c : std::initializer_list<juce::Component*> { &zoomOut_, &zoomIn_, &zoomLabel_ }) addAndMakeVisible (*c);
     startTimerHz (30);
     refresh();
 }
@@ -1000,12 +1011,20 @@ juce::Colour MixerView::colour (Token t) const
 
 void MixerView::placeScaled (juce::Rectangle<int> area)
 {
-    const float s = juce::jmin (1.0f, static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / designHeight);
-    const float scale = juce::jmax (0.4f, s);
+    lastArea_ = area;
+    const float fit = juce::jmin (static_cast<float> (area.getWidth()) / designWidth, static_cast<float> (area.getHeight()) / designHeight);
+    const float scale = juce::jmax (0.4f, juce::jmin (zoom_, fit));
+    zoomLabel_.setText (juce::String (juce::roundToInt (scale * 100.0f)) + " %", juce::dontSendNotification);
     setTransform (juce::AffineTransform::scale (scale));
     // la transformation s'applique aux limites dans le repère du parent (autour de son origine) : position = zone / échelle
     setBounds (juce::roundToInt (static_cast<float> (area.getX()) / scale), juce::roundToInt (static_cast<float> (area.getY()) / scale),
                juce::roundToInt (static_cast<float> (area.getWidth()) / scale), juce::roundToInt (static_cast<float> (area.getHeight()) / scale));
+}
+
+void MixerView::setZoom (float z)
+{
+    zoom_ = juce::jlimit (0.6f, 1.6f, z);
+    if (! lastArea_.isEmpty()) placeScaled (lastArea_);
 }
 
 void MixerView::resized()
@@ -1039,7 +1058,14 @@ void MixerView::layoutTracks()
     auto masterArea = r.removeFromRight (kMasterW + 6);
     master_->setBounds (masterArea.withTrimmedLeft (6).withHeight (stripHeight_ * 2 + 40 + scrollbar));
     const int gap = 1;
-    tracksTitle_.setBounds (r.removeFromTop (20));
+    {
+        // rangée du titre : « PISTES » à gauche, réglage du zoom (− pourcentage +) à droite
+        auto top = r.removeFromTop (22);
+        zoomIn_.setBounds (top.removeFromRight (26).reduced (0, 1));
+        zoomLabel_.setBounds (top.removeFromRight (50));
+        zoomOut_.setBounds (top.removeFromRight (26).reduced (0, 1));
+        tracksTitle_.setBounds (top);
+    }
     {
         auto area = r.removeFromTop (stripHeight_ + scrollbar);
         trackViewport_.setBounds (area);

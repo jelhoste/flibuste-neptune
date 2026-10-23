@@ -1022,6 +1022,7 @@ const Entry kEntries[] = {
     { "zone.d_loop", { "Loop (frames)", "Boucle (échantillons)" } },
     { "zone.d_empty", { "Select a zone to see all its details here.", "Choisissez une zone pour voir ici tous ses détails." } },
     { "pool.detail_empty", { "Select a file to see all its details here.", "Choisissez un fichier pour voir ici tous ses détails." } },
+    { "mix.zoom_tip", { "Mixer zoom (grows only if the window has room)", "Zoom du mixeur (il ne grossit que si la fenêtre a la place)" } },
     { "pool.expand", { "Full page", "Pleine page" } },
     { "pool.reduce", { "Back", "Retour" } },
     { "mod.title", { "Modulators", "Modulateurs" } },

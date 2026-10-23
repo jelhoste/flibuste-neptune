@@ -138,6 +138,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     updateViewVisibility();
     root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
     novaLook_.setButtonTextScale (1.5f);
+    novaLook_.setPopupScale (1.25f);   // menus de la barre et du mixeur : plus lisibles
     root_.setLookAndFeel (&novaLook_);
     root_.adopt (*this); // tout le contenu dans la racine mise à l'échelle
     setResizable (true, true);
