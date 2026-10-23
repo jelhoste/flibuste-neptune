@@ -119,14 +119,9 @@ Ces briques doivent exister *avant* de coder la moindre fonctionnalité "métier
 
 ---
 
-## Palier 9 — Hébergement de plugins tiers (host-in-plugin)
+## Palier 9 — Hébergement de plugins tiers (host-in-plugin) : ABANDONNÉ (2026-10-23)
 
-- Dernier palier, à n'aborder que si le projet est toujours actif à ce stade.
-- **Scope restreint au format CLAP uniquement** (pas de VST3/LV2) : élimine la couche de traduction entre formats, le principal poste de complexité du host-in-plugin générique. CLAP a une spécification plus jeune et plus propre (ABI C simple, règles de threading documentées, extension d'état directe), avec du code de référence existant à étudier (host d'exemple du dépôt CLAP officiel, composants publiés par Bitwig).
-- Ce qui reste difficile malgré cette restriction : l'isolation robuste (idéalement, un plugin hébergé qui plante ne doit pas planter le sampleur — sandboxing/process séparé), et l'intégration GUI native cross-plateforme.
-- **Arbitrage latence à trancher à ce palier** : hébergement in-process (overhead quasi nul, latence propre du plugin invité gérée via la compensation de latence de Reaper/PDC) vs hébergement en processus séparé (plus robuste à l'isolation, mais ajoute une latence/gigue incompressible liée au transfert audio inter-processus).
-- Mini-host : GUI embarqué, sauvegarde/restauration d'état, threading séparé.
-- Reste un des plus gros morceaux techniques du projet après le noyau lui-même, mais nettement plus abordable qu'un host multi-format générique.
+Décision de l'utilisateur : on intègre les effets dans Neptune (moteur dans le cœur, interface NOVA, un seul plugin à maintenir) plutôt que d'héberger des plugins tiers. C'est ce qui a été fait pour la convolution (LowLatConv, palier 8) et pour les effets stock. Le texte d'origine de ce palier (CLAP seul, isolation, latence) est retiré ; il reste dans l'historique git.
 
 ---
 
