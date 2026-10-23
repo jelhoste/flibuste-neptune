@@ -93,6 +93,8 @@ public:
     void uiToggleMacro (neptune::core::ParamId, int macro) override;
     void uiClearMacros (neptune::core::ParamId) override;
     std::string uiText (std::string_view key) const override;
+    int mixerZoomPercent() const { return settings_.mixerZoomPercent; }
+    void uiSetMixerZoomPercent (int percent);   // mémorisé dans les réglages globaux
     bool reducedHostList() const { return settings_.reducedHostList; }   // lu à la création de l'instance
     void uiSetReducedHostList (bool on);                                 // écrit settings.json ; joue au prochain chargement
     bool uiUndo() override;

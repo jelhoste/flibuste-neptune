@@ -1348,6 +1348,15 @@ void NeptuneProcessor::uiSetReducedHostList (bool on)
     neptune::core::settings::saveFile (settingsFile_, settings_, &error);   // lu au prochain chargement du plugin
 }
 
+void NeptuneProcessor::uiSetMixerZoomPercent (int percent)
+{
+    percent = std::clamp (percent, 60, 160);
+    if (settings_.mixerZoomPercent == percent) return;
+    settings_.mixerZoomPercent = percent;
+    std::string error;
+    neptune::core::settings::saveFile (settingsFile_, settings_, &error);
+}
+
 void NeptuneProcessor::syncOsc()
 {
     const auto now = control_.settings();

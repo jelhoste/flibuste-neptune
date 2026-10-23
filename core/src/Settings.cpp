@@ -70,6 +70,7 @@ std::string toJson (const GlobalSettings& s)
     o["autosave_interval_seconds"] = s.autosaveIntervalSeconds;
     o["autosave_keep_days"] = s.autosaveKeepDays;
     o["reduced_host_list"] = s.reducedHostList;
+    o["mixer_zoom_percent"] = s.mixerZoomPercent;
     return o.dump (2);
 }
 
@@ -122,6 +123,7 @@ GlobalSettings fromJson (std::string_view text, std::vector<std::string>* warnin
     }
     s.autosaveIntervalSeconds = interval;
     s.autosaveKeepDays = readInt (doc, "autosave_keep_days", s.autosaveKeepDays, 1, 365, warnings);
+    s.mixerZoomPercent = readInt (doc, "mixer_zoom_percent", s.mixerZoomPercent, 60, 160, warnings);
     if (const auto it = doc.find ("reduced_host_list"); it != doc.end() && it->is_boolean()) s.reducedHostList = it->get<bool>();
     return s;
 }

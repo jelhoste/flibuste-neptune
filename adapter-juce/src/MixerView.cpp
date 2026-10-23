@@ -988,6 +988,7 @@ MixerView::MixerView (NeptuneProcessor& p, const theme::Palette& palette, const 
         l->setColour (juce::Label::textColourId, colour (Token::TextDim2));
         addAndMakeVisible (*l);
     }
+    zoom_ = juce::jlimit (0.6f, 1.6f, static_cast<float> (processor_.mixerZoomPercent()) / 100.0f);
     zoomOut_.setButtonText (juce::String::fromUTF8 ("\xe2\x88\x92"));
     zoomIn_.setButtonText ("+");
     zoomOut_.onClick = [this] { setZoom (zoom_ - 0.1f); };
@@ -1024,6 +1025,7 @@ void MixerView::placeScaled (juce::Rectangle<int> area)
 void MixerView::setZoom (float z)
 {
     zoom_ = juce::jlimit (0.6f, 1.6f, z);
+    processor_.uiSetMixerZoomPercent (juce::roundToInt (zoom_ * 100.0f));
     if (! lastArea_.isEmpty()) placeScaled (lastArea_);
 }
 
