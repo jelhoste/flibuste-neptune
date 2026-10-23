@@ -727,14 +727,41 @@ void NovaConvolutionEditor::chooseFile()
 {
     const juce::File current (juce::String::fromUTF8 (module_->irPath().c_str()));
     const juce::File start = current.existsAsFile() ? current.getParentDirectory() : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
-    chooser_ = std::make_unique<juce::FileChooser> (tx ("cv.choose"), start, "*.wav;*.wave;*.w64");
+    chooser_ = std::make_unique<juce::FileChooser> (tx ("cv.choose"), start, "*.wav;*.wave;*.w64;*.aif;*.aiff;*.aifc;*.flac");
     juce::Component::SafePointer<NovaConvolutionEditor> safe (this);
     chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe] (const juce::FileChooser& fc)
     {
         if (safe == nullptr) return;
         const auto f = fc.getResult();
-        if (f != juce::File()) safe->module_->setIrPath (f.getFullPathName().toStdString());
+        if (f != juce::File()) safe->setIrFile (f.getFullPathName().toStdString());
     });
+}
+
+void NovaConvolutionEditor::setIrFile (const std::string& path)
+{
+    ConvolutionModule* module = module_;
+    host().uiEditText ([module] (const std::string& p) { module->setIrPath (p); }, module_->irPath(), path, "IR file");
+}
+
+namespace
+{
+bool isAudioIrFile (const juce::String& name)
+{
+    const auto ext = juce::File (name).getFileExtension().toLowerCase();
+    return ext == ".wav" || ext == ".wave" || ext == ".w64" || ext == ".aif" || ext == ".aiff" || ext == ".aifc" || ext == ".flac";
+}
+} // namespace
+
+bool NovaConvolutionEditor::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files) if (isAudioIrFile (f)) return true;
+    return false;
+}
+
+void NovaConvolutionEditor::filesDropped (const juce::StringArray& files, int, int)
+{
+    for (const auto& f : files)
+        if (isAudioIrFile (f)) { setIrFile (f.toStdString()); return; }
 }
 
 void NovaConvolutionEditor::buildIrPage()
@@ -749,7 +776,7 @@ void NovaConvolutionEditor::buildIrPage()
     clearPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     clearPill_->setText (tx ("cv.clear"));
     clearPill_->setFontSize (kPillFont);
-    clearPill_->onClick = [this] { module_->setIrPath ({}); };
+    clearPill_->onClick = [this] { setIrFile ({}); };
     fileText_ = add<nova::Text> (0, skin(), Token::Text, 12.0f, true);
     statusText_ = add<nova::Text> (0, skin(), Token::TextDim2, 11.0f);
     wavePill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);

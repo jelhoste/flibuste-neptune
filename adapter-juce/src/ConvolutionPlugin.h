@@ -45,6 +45,7 @@ public:
 
     // ParamHost
     neptune::core::ParameterSet& parameters() override { return runner_.params(); }
+    void uiEditText (std::function<void (const std::string&)> apply, std::string oldValue, std::string newValue, std::string name) override;
     void uiBeginEdit (neptune::core::ParamId) override;
     void uiSetNormalised (neptune::core::ParamId, double) override;
     void uiEndEdit (neptune::core::ParamId) override;

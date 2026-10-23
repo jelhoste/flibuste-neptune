@@ -2,6 +2,7 @@
 // Ce que les composants d'interface génériques (potard, modale, éditeurs de modules stock) attendent de leur hôte :
 // un jeu de paramètres et les gestes d'édition (annulation, automation). Neptune l'implémente par son processeur, un insert par
 // un adaptateur sur le jeu de paramètres du module, le plugin CLAP séparé par son propre processeur.
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +26,8 @@ public:
     virtual void uiToggleMacro (neptune::core::ParamId, int /*macro*/) {}
     virtual void uiClearMacros (neptune::core::ParamId) {}
     virtual std::string uiText (std::string_view key) const { return std::string (key); }  // texte de l'interface dans la langue des réglages
+    // Changement d'un état « texte » d'un module (le fichier d'IR de la convolution), annulable : `apply` écrit la valeur dans le module. Sans historique : appliqué tel quel.
+    virtual void uiEditText (std::function<void (const std::string&)> apply, std::string /*oldValue*/, std::string newValue, std::string /*name*/) { apply (newValue); }
     virtual bool uiUndo() { return false; }
     virtual bool uiRedo() { return false; }
 

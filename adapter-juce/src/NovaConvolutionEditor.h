@@ -7,7 +7,7 @@
 #include "NovaEditor.h"
 #include "neptune/core/ConvolutionModule.h"
 
-class NovaConvolutionEditor : public nova::EditorBase
+class NovaConvolutionEditor : public nova::EditorBase, public juce::FileDragAndDropTarget
 {
 public:
     NovaConvolutionEditor (ParamHost&, neptune::core::ConvolutionModule*, const neptune::core::theme::Palette&, neptune::core::theme::KnobStyle,
@@ -29,6 +29,9 @@ private:
     void buildTonePage();
     void buildLevelsPage();
     void chooseFile();
+    void setIrFile (const std::string& path);   // annulable
+    bool isInterestedInFileDrag (const juce::StringArray&) override;
+    void filesDropped (const juce::StringArray&, int, int) override;
     juce::String statusText() const;
 
     neptune::core::ConvolutionModule* module_;

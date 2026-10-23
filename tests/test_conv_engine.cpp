@@ -40,13 +40,13 @@ TEST_CASE ("conv engine: the original DSP test suites pass", "[conv]")
 
 namespace
 {
-std::filesystem::path writeDelayIr (int delaySamples, double sampleRate = 48000.0)
+std::filesystem::path writeDelayIr (int delaySamples, double sampleRate = 48000.0, bool aiff = false)
 {
-    const auto file = std::filesystem::temp_directory_path() / ("neptune_conv_ir_" + std::to_string (delaySamples) + ".wav");
+    const auto file = std::filesystem::temp_directory_path() / ("neptune_conv_ir_" + std::to_string (delaySamples) + (aiff ? ".aiff" : ".wav"));
     SF_INFO info {};
     info.samplerate = static_cast<int> (sampleRate);
     info.channels = 1;
-    info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+    info.format = (aiff ? SF_FORMAT_AIFF : SF_FORMAT_WAV) | SF_FORMAT_FLOAT;
     SNDFILE* f = sf_open (file.string().c_str(), SFM_WRITE, &info);
     REQUIRE (f != nullptr);
     std::vector<float> ir (static_cast<std::size_t> (delaySamples) + 64, 0.0f);
@@ -128,6 +128,27 @@ TEST_CASE ("convolution module: transparent without an IR, exact delay with one"
 
     module.setIrPath ({});
     REQUIRE (waitFor (module, convolution::kNoIr));
+    std::filesystem::remove (file);
+}
+
+TEST_CASE ("convolution module: an AIFF impulse response loads through the sample loader", "[conv][module]")
+{
+    auto inst = createInsert ("convolution", 48000.0, 256);
+    REQUIRE (inst != nullptr);
+    auto& runner = inst->runner;
+    auto& module = static_cast<ConvolutionModule&> (runner.module());
+    runner.params().set (convolution::autoTrim, 0.0);
+    runner.params().set (convolution::norm, 0.0);
+    const auto file = writeDelayIr (57, 48000.0, true);
+    module.setIrPath (file.string());
+    std::vector<float> l (256, 0.0f), r (256, 0.0f);
+    for (int i = 0; i < 400 && module.irStatus() != convolution::kLoaded; ++i)
+    {
+        runner.process (l.data(), r.data(), 256, false);
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+    CHECK (module.irStatus() == convolution::kLoaded);
+    CHECK (module.irLengthMs() > 1.0);
     std::filesystem::remove (file);
 }
 

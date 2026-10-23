@@ -1,9 +1,12 @@
 #include "neptune/core/ConvolutionModule.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 
+#include "neptune/core/SampleLoader.h"
 #include "neptune/core/conv/processor.hpp"
 #include "neptune/core/conv/wav_loader.hpp"
 
@@ -14,6 +17,26 @@ using namespace convolution;
 namespace
 {
 constexpr int kSlopes[3] = { 12, 24, 48 };
+
+// Lit un fichier d'IR : WAV / Wave64 par le lecteur du moteur (jusqu'à 8 canaux : mono, stéréo ou vraie stéréo à 4 canaux) ; tout autre format (AIFF, FLAC, Opus...) ou un WAV
+// que ce lecteur refuse passe par le chargeur de samples de Neptune (mono ou stéréo).
+bool loadIrFile (const std::string& path, llc::IRBuffer& out)
+{
+    std::string ext = std::filesystem::u8path (path).extension().string();
+    for (auto& ch : ext) ch = static_cast<char> (std::tolower (static_cast<unsigned char> (ch)));
+    if ((ext == ".wav" || ext == ".wave" || ext == ".w64") && llc::loadWavFile (path, out) == llc::WavStatus::Ok) return true;
+    const auto result = loadSampleFile (std::filesystem::u8path (path));
+    if (! result.ok()) return false;
+    const auto& s = *result.sample;
+    constexpr std::int64_t kMaxFrames = std::int64_t (1) << 24;
+    if (s.channels < 1 || s.frames <= 0 || s.frames > kMaxFrames || s.sampleRate < 1000.0 || s.sampleRate > 768000.0) return false;
+    out = llc::IRBuffer {};
+    out.sampleRate = s.sampleRate;
+    out.ch.assign (static_cast<std::size_t> (s.channels), std::vector<float> (static_cast<std::size_t> (s.frames)));
+    for (int c = 0; c < s.channels; ++c)
+        for (std::int64_t f = 0; f < s.frames; ++f) out.ch[static_cast<std::size_t> (c)][static_cast<std::size_t> (f)] = s.at (c, f);
+    return true;
+}
 
 // Réglages de l'EQ du moteur à partir des paramètres (`at` : identifiant -> valeur)
 template <class At>
@@ -261,7 +284,7 @@ void ConvolutionModule::workerLoop()
         setStatus (kLoading, 0.0);
         if (path != rawPath)
         {
-            const bool ok = llc::loadWavFile (path, raw) == llc::WavStatus::Ok;
+            const bool ok = loadIrFile (path, raw);
             if (stale (stamp)) continue;
             if (! ok)
             {

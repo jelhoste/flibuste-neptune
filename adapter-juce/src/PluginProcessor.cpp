@@ -733,6 +733,13 @@ public:
         uiSetNormalised (id, ps.spec (index).toNormalized (ps.spec (index).defaultValue));
         uiEndEdit (id);
     }
+    void uiEditText (std::function<void (const std::string&)> apply, std::string oldValue, std::string newValue, std::string name) override
+    {
+        if (oldValue == newValue) return;
+        owner_.undo_.perform (std::make_unique<neptune::core::SnapshotCommand<std::string>> (std::move (oldValue), std::move (newValue), std::move (apply), std::move (name)));
+        ++owner_.revision_;
+        owner_.notifyStateChanged();
+    }
     bool uiUndo() override { return owner_.uiUndo(); }
     bool uiRedo() override { return owner_.uiRedo(); }
     neptune::core::uistate::Size modalSize (neptune::core::uistate::Terminal t) const override { return owner_.modalSize (t); }

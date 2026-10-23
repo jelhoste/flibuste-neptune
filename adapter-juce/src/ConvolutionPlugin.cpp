@@ -98,6 +98,14 @@ void ConvolutionProcessor::setStateInformation (const void* data, int size)
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
 }
 
+// ---- changement de fichier d'IR : annulable
+void ConvolutionProcessor::uiEditText (std::function<void (const std::string&)> apply, std::string oldValue, std::string newValue, std::string name)
+{
+    if (oldValue == newValue) return;
+    undo_.perform (std::make_unique<SnapshotCommand<std::string>> (std::move (oldValue), std::move (newValue), std::move (apply), std::move (name)));
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+}
+
 // ---- gestes d'édition (annulation + automation de l'hôte)
 void ConvolutionProcessor::uiBeginEdit (ParamId id)
 {
