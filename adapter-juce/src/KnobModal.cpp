@@ -105,14 +105,14 @@ void KnobModal::setFacadeAdd (std::function<void (int)> onPick)
     if (! onFacadeAdd_ || tr_ == nullptr) return;
     auto label = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_->tr (key)).c_str()); };
     facadeButton_.setButtonText (label ("facade.modal_add"));
-    facadeButton_.onClick = [this, label]
+    facadeButton_.onClick = [modal = this, label]
     {
         juce::PopupMenu menu;
         menu.addItem (1, label ("facade.type_knob"));
         menu.addItem (2, label ("facade.type_button"));
         menu.addItem (3, label ("facade.type_menu"));
-        menu.setLookAndFeel (&getLookAndFeel());
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&facadeButton_), [safe = juce::Component::SafePointer<KnobModal> (this)] (int choice)
+        menu.setLookAndFeel (&modal->getLookAndFeel());
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&modal->facadeButton_), [safe = juce::Component::SafePointer<KnobModal> (modal)] (int choice)
         {
             if (safe == nullptr || choice <= 0 || ! safe->onFacadeAdd_) return;
             safe->onFacadeAdd_ (choice == 1 ? 0 : choice == 2 ? 1 : 3);   // WidgetType::Knob, Button, Menu
