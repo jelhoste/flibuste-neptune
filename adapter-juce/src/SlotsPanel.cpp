@@ -22,12 +22,6 @@ struct SlotsPanel::Row
     SlotParam shownParam = SlotParam::None;
 };
 
-juce::Colour SlotsPanel::colour (Token t) const
-{
-    const auto& c = palette_.color (t);
-    return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
-}
-
 juce::String SlotsPanel::text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
 
 juce::String SlotsPanel::zoneLabel (const InstrumentDescription& d, int zone) const
@@ -37,9 +31,18 @@ juce::String SlotsPanel::zoneLabel (const InstrumentDescription& d, int zone) co
     return text ("slots.zone") + " " + juce::String (zone + 1) + " - " + name;
 }
 
-SlotsPanel::SlotsPanel (ParamHost& host, const theme::Palette& palette, const i18n::Translator& tr, int track)
-    : host_ (host), palette_ (palette), tr_ (tr), track_ (track)
+SlotsPanel::SlotsPanel (ParamHost& host, const nova::Skin& skin, const i18n::Translator& tr, int track)
+    : host_ (host), skin_ (skin), look_ (skin_), tr_ (tr), track_ (track)
 {
+    setLookAndFeel (&look_);
+    setWantsKeyboardFocus (true);
+    title_.setText (text ("slots.title"), juce::dontSendNotification);
+    title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    title_.setColour (juce::Label::textColourId, colour (Token::Accent));
+    addAndMakeVisible (title_);
+    closeButton_.setButtonText (text ("mod.close"));
+    closeButton_.onClick = [this] { if (onClose) onClose(); };
+    addAndMakeVisible (closeButton_);
     for (int s = 0; s < kZoneSlots; ++s)
     {
         auto* row = rows_.add (new Row);
@@ -91,15 +94,14 @@ SlotsPanel::SlotsPanel (ParamHost& host, const theme::Palette& palette, const i1
     }
     hint_.setText (text ("slots.hint"), juce::dontSendNotification);
     hint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
-    hint_.setFont (juce::FontOptions (11.0f));
+    hint_.setFont (juce::FontOptions (11.5f));
     hint_.setJustificationType (juce::Justification::topLeft);
     addAndMakeVisible (hint_);
-    setSize (panelWidth, panelHeight);
     refresh();
     startTimerHz (6);
 }
 
-SlotsPanel::~SlotsPanel() { stopTimer(); }
+SlotsPanel::~SlotsPanel() { stopTimer(); setLookAndFeel (nullptr); }
 
 void SlotsPanel::assign (int slot, int targetId, int paramId)
 {
@@ -194,18 +196,20 @@ void SlotsPanel::timerCallback()
 
 void SlotsPanel::resized()
 {
-    auto r = getLocalBounds().reduced (12, 10);
-    r.removeFromTop (22);                       // titre
-    auto head = r.removeFromTop (18); (void) head;
+    auto r = panelBounds().reduced (16, 12);
+    auto top = r.removeFromTop (30);
+    closeButton_.setBounds (top.removeFromRight (110));
+    title_.setBounds (top);
     r.removeFromTop (4);
+    r.removeFromTop (18);   // en-têtes de colonnes (dessinés)
     for (auto* row : rows_)
     {
         auto line = r.removeFromTop (kRowH);
         row->number.setBounds (line.removeFromLeft (26));
         line.removeFromLeft (6);
-        row->target.setBounds (line.removeFromLeft (290).reduced (0, 2));
+        row->target.setBounds (line.removeFromLeft (320).reduced (0, 2));
         line.removeFromLeft (6);
-        row->param.setBounds (line.removeFromLeft (130).reduced (0, 2));
+        row->param.setBounds (line.removeFromLeft (150).reduced (0, 2));
         line.removeFromLeft (8);
         row->value.setBounds (line.reduced (0, 2));
     }
@@ -213,15 +217,26 @@ void SlotsPanel::resized()
     hint_.setBounds (r);
 }
 
+bool SlotsPanel::keyPressed (const juce::KeyPress& k)
+{
+    if (k != juce::KeyPress::escapeKey) return false;
+    if (onClose) onClose();
+    return true;
+}
+
 void SlotsPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (colour (Token::BgCard));
-    g.setColour (colour (Token::Accent));
-    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-    g.drawText (text ("slots.title"), 12, 8, getWidth() - 24, 22, juce::Justification::centredLeft);
+    g.fillAll (juce::Colours::black.withAlpha (0.55f));
+    const auto panel = panelBounds().toFloat();
+    g.setColour (colour (Token::BgCard));
+    g.fillRoundedRectangle (panel, 8.0f);
+    g.setColour (colour (Token::Border));
+    g.drawRoundedRectangle (panel, 8.0f, 1.0f);
     g.setColour (colour (Token::TextDim));
-    g.setFont (juce::FontOptions (10.0f));
-    g.drawText (text ("slots.target"), 44, 32, 290, 14, juce::Justification::centredLeft);
-    g.drawText (text ("slots.parameter"), 340, 32, 130, 14, juce::Justification::centredLeft);
-    g.drawText (text ("slots.value"), 478, 32, 200, 14, juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (11.0f));
+    const auto inner = panelBounds().reduced (16, 12);
+    const int y = inner.getY() + 34, x0 = inner.getX() + 32;
+    g.drawText (text ("slots.target"), x0, y, 320, 16, juce::Justification::centredLeft);
+    g.drawText (text ("slots.parameter"), x0 + 326, y, 150, 16, juce::Justification::centredLeft);
+    g.drawText (text ("slots.value"), x0 + 484, y, 200, 16, juce::Justification::centredLeft);
 }

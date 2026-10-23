@@ -2417,15 +2417,19 @@ void NovaSamplerEditor::openMidiCondition()
 }
 
 // Emplacements assignables : fenêtre flottante (les 16 lignes) ou menu contextuel d'une zone / d'un Groupe.
-void NovaSamplerEditor::openSlotsPanel (juce::Component& anchor)
+void NovaSamplerEditor::openSlotsPanel (juce::Component&)
 {
-    auto panel = std::make_unique<SlotsPanel> (proc_, skin().palette(), translator(), proc_.selectedTrack());
+    if (slotsPanel_ != nullptr || modulatorsPanel_ || wizard_ || filterEditor_ || midiEditor_) return;
+    slotsPanel_ = std::make_unique<SlotsPanel> (proc_, skin(), translator(), proc_.selectedTrack());
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
-    panel->getDescription = [safe] { return safe != nullptr ? safe->proc_.instrumentDescription() : InstrumentDescription {}; };
-    panel->getSelectedZones = [safe] { return safe != nullptr ? safe->zones_->selectedRows() : std::vector<int> {}; };
-    panel->onEdit = [safe] (InstrumentDescription d) { if (safe != nullptr) safe->proc_.uiEditInstrument (std::move (d), "Slots", "slots"); };
-    slotsPanel_ = panel.get();
-    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor.getScreenBounds(), nullptr);
+    slotsPanel_->getDescription = [safe] { return safe != nullptr ? safe->proc_.instrumentDescription() : InstrumentDescription {}; };
+    slotsPanel_->getSelectedZones = [safe] { return safe != nullptr ? safe->zones_->selectedRows() : std::vector<int> {}; };
+    slotsPanel_->onEdit = [safe] (InstrumentDescription d) { if (safe != nullptr) safe->proc_.uiEditInstrument (std::move (d), "Slots", "slots"); };
+    slotsPanel_->onClose = [safe] { juce::MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->slotsPanel_.reset(); safe->grabKeyboardFocus(); } }); };
+    addAndMakeVisible (*slotsPanel_);
+    slotsPanel_->setBounds (getLocalBounds());
+    slotsPanel_->toFront (true);
+    slotsPanel_->grabKeyboardFocus();
 }
 
 void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
@@ -3173,6 +3177,7 @@ void NovaSamplerEditor::layout()
     if (filterEditor_) filterEditor_->setBounds (getLocalBounds());
     if (midiEditor_) midiEditor_->setBounds (getLocalBounds());
     if (modulatorsPanel_) modulatorsPanel_->setBounds (getLocalBounds());
+    if (slotsPanel_) slotsPanel_->setBounds (getLocalBounds());
 }
 
 // Écoute : une seule à la fois (le moteur remplace la précédente). `owner` : 1 = bouton du bas, 2 = bouton des outils du sample.

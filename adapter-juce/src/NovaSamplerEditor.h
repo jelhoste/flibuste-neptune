@@ -154,7 +154,7 @@ private:
     std::unique_ptr<MidiFilterEditor> midiEditor_;   // condition MIDI de la zone (superposé)
     neptune::core::memory::FileInfoCache fileInfo_;
     juce::Component::SafePointer<ChokePanel> chokePanel_;
-    juce::Component::SafePointer<SlotsPanel> slotsPanel_;
+    std::unique_ptr<SlotsPanel> slotsPanel_;   // fenêtre des emplacements assignables
     std::string groupsSignature_;
     std::vector<std::string> groupNames_;
     struct SeenVoice { neptune::core::Engine::VoiceInfo info; juce::uint32 lastSeen = 0; bool present = false; };
