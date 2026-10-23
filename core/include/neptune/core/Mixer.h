@@ -167,8 +167,9 @@ struct InsertState
 {
     std::string type;
     std::map<ParamId, double> values;
+    std::string text;   // état « texte » du module s'il en a un (le fichier d'IR de la convolution) ; vide sinon
     bool empty() const noexcept { return type.empty(); }
-    bool operator== (const InsertState& o) const noexcept { return type == o.type && values == o.values; }
+    bool operator== (const InsertState& o) const noexcept { return type == o.type && values == o.values && text == o.text; }
 };
 
 struct SendSettings

@@ -59,8 +59,8 @@ jobs:
           path: perf/*.json
           if-no-files-found: ignore
 
-      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur et Microdécale)
-        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP
+      - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur, Microdécale et Convolution)
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -122,6 +122,9 @@ jobs:
           MIC=$(find build/adapter-juce/Microdecale_artefacts -name 'Microdecale.clap' -print -quit)
           test -n "$MIC" || { echo "Microdecale.clap introuvable"; exit 1; }
           "$CV" validate "$MIC"
+          CNV=$(find build/adapter-juce/Convolution_artefacts -name 'Convolution.clap' -print -quit)
+          test -n "$CNV" || { echo "Convolution.clap introuvable"; exit 1; }
+          "$CV" validate "$CNV"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -385,6 +388,30 @@ jobs:
         with:
           name: Microdecale-${{ matrix.name }}
           path: dist-mic/*
+          if-no-files-found: error
+
+      # Convolution séparé, archivé à part.
+      - name: Archive Convolution.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Convolution_artefacts -name 'Convolution.clap' -print -quit)
+          test -n "$CLAP" || { echo "Convolution.clap introuvable"; exit 1; }
+          mkdir -p dist-cnv/stage
+          cp -R "$CLAP" dist-cnv/stage/
+          cd dist-cnv/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Convolution-${{ matrix.name }}.zip" Convolution.clap
+          else
+            tar -czf "../Convolution-${{ matrix.name }}.tar.gz" Convolution.clap
+          fi
+          cd ../..
+          rm -rf dist-cnv/stage
+          ls -la dist-cnv
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Convolution-${{ matrix.name }}
+          path: dist-cnv/*
           if-no-files-found: error
 
   release:

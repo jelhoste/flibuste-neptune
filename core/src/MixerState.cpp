@@ -24,6 +24,7 @@ json insertsToJson (const std::array<mixer::InsertState, mixer::numInserts>& ins
             json values = json::object();
             for (const auto& [id, v] : in.values) values[std::to_string (id)] = v;
             o["values"] = std::move (values);
+            if (! in.text.empty()) o["text"] = in.text;
         }
         arr.push_back (std::move (o));
     }
@@ -56,6 +57,7 @@ void insertsFromJson (const json& o, std::array<mixer::InsertState, mixer::numIn
                 const long long id = std::strtoll (key.c_str(), nullptr, 10);
                 if (id > 0 && id < 1000000) st.values[static_cast<ParamId> (id)] = val.get<double>();
             }
+        if (const auto tx = e.find ("text"); tx != e.end() && tx->is_string() && tx->get<std::string>().size() <= 4096) st.text = tx->get<std::string>();
         out[i] = std::move (st);
     }
 }

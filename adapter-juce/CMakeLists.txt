@@ -65,6 +65,7 @@ target_sources(Neptune PRIVATE
   src/NovaDelayEditor.cpp
   src/NovaChorusEditor.cpp
   src/NovaMicrodecaleEditor.cpp
+  src/NovaConvolutionEditor.cpp
   src/NovaCompressorEditor.cpp
   src/NovaHistoryView.cpp
   src/NovaEditor.cpp
@@ -376,6 +377,47 @@ target_compile_definitions(Microdecale PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(Microdecale
+  PRIVATE
+    neptune_core
+    juce::juce_audio_utils
+    juce::juce_audio_plugin_client
+    clap_juce_extensions
+  PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+# ---- Convolution (nom provisoire) : chargeur de réponses impulsionnelles à latence nulle (série NOVA, moteur LowLatConv), plugin CLAP effet indépendant ------------------------------
+set(CONVOLUTION_CLAP_ID "com.tournedosrossini.convolution" CACHE STRING "Identifiant CLAP de Convolution")
+
+juce_add_plugin(Convolution
+  COMPANY_NAME                "Le Tournedos Rossini"
+  PRODUCT_NAME                "Convolution"
+  PLUGIN_MANUFACTURER_CODE    Trss
+  PLUGIN_CODE                 Conv
+  IS_SYNTH                    FALSE
+  NEEDS_MIDI_INPUT            FALSE
+  FORMATS                     Standalone)
+
+clap_juce_extensions_plugin(
+  TARGET        Convolution
+  CLAP_ID       "${CONVOLUTION_CLAP_ID}"
+  CLAP_FEATURES audio-effect reverb stereo)
+
+target_sources(Convolution PRIVATE
+  src/ConvolutionPlugin.cpp
+  src/NovaConvolutionEditor.cpp
+  src/NovaEditor.cpp
+  src/NovaKit.cpp
+  src/NeptuneKnob.cpp
+  src/KnobModal.cpp)
+
+target_compile_definitions(Convolution PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(Convolution
   PRIVATE
     neptune_core
     juce::juce_audio_utils

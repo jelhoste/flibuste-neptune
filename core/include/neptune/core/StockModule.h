@@ -56,6 +56,11 @@ public:
     // Valeurs d'affichage (vu-mètres, corrélateur...), lisibles depuis l'interface sans verrou.
     virtual int numMeters() const noexcept { return 0; }
     virtual float meter (int) const noexcept { return 0.0f; }
+
+    // État « texte » du module, hors paramètres numériques (par exemple le fichier d'une réponse impulsionnelle). Sauvegardé avec l'insert ou le projet.
+    virtual bool hasStateString() const noexcept { return false; }
+    virtual std::string stateString() const { return {}; }
+    virtual void setStateString (const std::string&) {}
 };
 
 class ModuleRunner
@@ -86,8 +91,9 @@ public:
     int latencySamples() const noexcept { return module_->latencySamples (params_); }
 
 private:
-    std::unique_ptr<StockModule> module_;
+    // Les paramètres sont déclarés AVANT le module : à la destruction, le module (et un éventuel thread qui lit les paramètres) disparaît le premier.
     ParameterSet params_;
+    std::unique_ptr<StockModule> module_;
     bool ok_ = true;
     std::size_t idxIn_ = ParameterSet::npos, idxOut_ = ParameterSet::npos, idxMix_ = ParameterSet::npos, idxBypass_ = ParameterSet::npos;
     double sampleRate_ = 0.0;

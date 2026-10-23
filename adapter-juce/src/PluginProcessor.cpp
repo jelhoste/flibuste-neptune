@@ -622,6 +622,7 @@ void syncInserts (std::array<neptune::core::mixer::InsertState, neptune::core::m
         out[s].type = live[s]->type;
         const auto& ps = live[s]->runner.params();
         for (std::size_t i = 0; i < ps.size(); ++i) out[s].values[ps.spec (i).id] = ps.getAt (i);
+        if (live[s]->runner.module().hasStateString()) out[s].text = live[s]->runner.module().stateString();
     }
 }
 } // namespace
@@ -1137,7 +1138,10 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
                 {
                     inst = neptune::core::createInsert (st.type, engine_.sampleRate(), engine_.maxBlockSize());
                     if (inst != nullptr)
+                    {
                         for (const auto& [id, v] : st.values) inst->runner.params().set (id, v);
+                        if (! st.text.empty() && inst->runner.module().hasStateString()) inst->runner.module().setStateString (st.text);
+                    }
                 }
                 {
                     const juce::ScopedLock lock (instrumentLock_);

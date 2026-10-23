@@ -7,6 +7,7 @@
 #include "NovaChorusEditor.h"
 #include "NovaDelayEditor.h"
 #include "NovaMicrodecaleEditor.h"
+#include "NovaConvolutionEditor.h"
 #include "NovaEqualizerEditor.h"
 #include "NovaShaperEditor.h"
 #include "UtilityEditor.h"
@@ -47,6 +48,7 @@ private:
     std::unique_ptr<NovaDelayEditor> delayContent_;
     std::unique_ptr<NovaChorusEditor> chorusContent_;
     std::unique_ptr<NovaMicrodecaleEditor> microContent_;
+    std::unique_ptr<NovaConvolutionEditor> convContent_;
     std::unique_ptr<NovaCompressorEditor> compressorContent_;
     juce::TextButton bypassButton_, closeButton_;
     juce::String title_;
