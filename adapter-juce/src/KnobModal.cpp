@@ -50,6 +50,7 @@ KnobModal::KnobModal (ParamHost& p, neptune::core::ParamId id, neptune::core::ui
     closeButton_.setButtonText (juce::String::fromUTF8 (std::string (tr.tr ("modal.close")).c_str()));
     closeButton_.onClick = [this] { if (onClose_) onClose_(); };
     panel_.addAndMakeVisible (closeButton_);
+    tr_ = &tr;
 
     auto size = processor_.modalSize (terminal_);
     // Taille jamais mémorisée (plugin séparé : l'hôte ne fournit rien) : valeur par défaut, sinon le panneau serait invisible derrière le voile.
@@ -98,12 +99,37 @@ void KnobModal::resized()
 
 void KnobModal::parentSizeChanged() { centrePanel(); }
 
+void KnobModal::setFacadeAdd (std::function<void (int)> onPick)
+{
+    onFacadeAdd_ = std::move (onPick);
+    if (! onFacadeAdd_ || tr_ == nullptr) return;
+    auto label = [this] (const char* key) { return juce::String::fromUTF8 (std::string (tr_->tr (key)).c_str()); };
+    facadeButton_.setButtonText (label ("facade.modal_add"));
+    facadeButton_.onClick = [this, label]
+    {
+        juce::PopupMenu menu;
+        menu.addItem (1, label ("facade.type_knob"));
+        menu.addItem (2, label ("facade.type_button"));
+        menu.addItem (3, label ("facade.type_menu"));
+        menu.setLookAndFeel (&getLookAndFeel());
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&facadeButton_), [safe = juce::Component::SafePointer<KnobModal> (this)] (int choice)
+        {
+            if (safe == nullptr || choice <= 0 || ! safe->onFacadeAdd_) return;
+            safe->onFacadeAdd_ (choice == 1 ? 0 : choice == 2 ? 1 : 3);   // WidgetType::Knob, Button, Menu
+        });
+    };
+    panel_.addAndMakeVisible (facadeButton_);
+    layoutPanel();
+}
+
 void KnobModal::layoutPanel()
 {
     // Cibles tactiles : champs et boutons au moins 44 px de haut.
     const int rowH = 44;
     auto r = panel_.getLocalBounds().reduced (16);
-    title_.setBounds (r.removeFromTop (28));
+    auto titleRow = r.removeFromTop (28);
+    if (facadeButton_.isVisible()) facadeButton_.setBounds (titleRow.removeFromRight (120));
+    title_.setBounds (titleRow);
     r.removeFromTop (8);
     text_.setBounds (r.removeFromTop (rowH));
     r.removeFromTop (12);

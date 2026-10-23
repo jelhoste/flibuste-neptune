@@ -22,6 +22,10 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
     void parentSizeChanged() override;
 
+    // « Ajouter à la Façade » : bouton dans la barre de titre (Neptune seulement) ; `onPick` reçoit le type de widget choisi
+    // (0 potard, 1 bouton, 3 menu : valeurs de neptune::core::facade::WidgetType).
+    void setFacadeAdd (std::function<void (int widgetType)> onPick);
+
     // Taille actuelle du panneau, pour la mémoriser.
     neptune::core::uistate::Size panelSize() const { return { panel_.getWidth(), panel_.getHeight() }; }
     neptune::core::uistate::Terminal terminal() const { return terminal_; }
@@ -56,7 +60,9 @@ private:
     juce::Label title_;
     juce::TextEditor text_;
     juce::Slider slider_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::TextButton resetButton_, closeButton_;
+    juce::TextButton resetButton_, closeButton_, facadeButton_;
+    std::function<void (int)> onFacadeAdd_;
+    const neptune::core::i18n::Translator* tr_ = nullptr;
     juce::ComponentBoundsConstrainer constrainer_;
     juce::ResizableCornerComponent resizer_ { &panel_, &constrainer_ };
     std::uint32_t lastVersion_ = 0;

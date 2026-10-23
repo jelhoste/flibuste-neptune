@@ -2,7 +2,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 #include <memory>
-#include <optional>
+#include <set>
 #include <vector>
 #include "PluginProcessor.h"
 #include "NeptuneKnob.h"
@@ -24,6 +24,9 @@ public:
     void resized() override;
     void paint (juce::Graphics&) override;
 
+    // « Ajouter à la Façade » (fenêtre d'un potard) : pose un widget déjà lié au paramètre, sur la Façade de la piste sélectionnée.
+    void addLinked (neptune::core::facade::WidgetType, neptune::core::ParamId);
+
 private:
     class Canvas;
     class Picker;
@@ -33,11 +36,14 @@ private:
     void addWidget (neptune::core::facade::WidgetType);
     void chooseImage();
     void showFitMenu();
-    void openPicker();
+    void openPicker (bool capture = false);
+    void showAlignMenu();
+    int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
     void editText();
     void duplicateSelected();
     void deleteSelected();
     void updateButtons();
+    void pruneSelection();
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token) const;
 
@@ -50,11 +56,11 @@ private:
     int track_ = -1;
     std::uint32_t revision_ = 0xFFFFFFFFu;
     neptune::core::facade::Facade facade_;       // copie de travail (celle de la piste, ou celle d'un glissement en cours)
-    int selected_ = 0;                           // identifiant du widget sélectionné, 0 : aucun
+    std::set<int> selection_;                    // widgets sélectionnés (mode Édition)
     bool editMode_ = false;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, imageButton_, fitButton_, clearImageButton_;
-    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
     std::unique_ptr<juce::FileChooser> chooser_;

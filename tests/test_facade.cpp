@@ -73,3 +73,55 @@ TEST_CASE ("Facade: stored with the track in the mixer state")
     // un état sans Façade n'écrit rien de plus
     CHECK (toJson (MixerState {}).find ("facade") == std::string::npos);
 }
+
+TEST_CASE ("Facade: menu, action and curve widgets round-trip, snapshot is bounded")
+{
+    facade::Facade f;
+    auto a = facade::defaultWidget (facade::WidgetType::Action, 1, 10, 10);
+    a.snapshot = { { 9000, 8.0 }, { 9001, 0.0 }, { 9002, 3.0 } };
+    f.widgets.push_back (a);
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Menu, 2, 200, 10));
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Curve, 3, 300, 100));
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+
+    f.widgets[0].snapshot.assign (200, { 5, 1.0 });
+    f.widgets[0].snapshot.push_back ({ 0, 1.0 });
+    CHECK (facade::sanitised (f).widgets[0].snapshot.size() == facade::maxSnapshot);
+}
+
+TEST_CASE ("Facade: align, distribute and grid tools")
+{
+    facade::Facade f;
+    for (int i = 0; i < 4; ++i)
+    {
+        auto w = facade::defaultWidget (facade::WidgetType::Button, i + 1, 40 + i * 150, 30 + i * 70);
+        f.widgets.push_back (w);
+    }
+    const std::set<int> all { 1, 2, 3, 4 };
+
+    auto g = f;
+    facade::alignWidgets (g, all, facade::Align::Left);
+    for (const auto& w : g.widgets) CHECK (w.x == 40);
+    g = f;
+    facade::alignWidgets (g, all, facade::Align::Bottom);
+    for (const auto& w : g.widgets) CHECK (w.y + w.h == 30 + 3 * 70 + 44);
+
+    g = f;
+    const int xs[] = { 0, 100, 300, 880 };
+    for (std::size_t i = 0; i < 4; ++i) g.widgets[i].x = xs[i];
+    facade::distributeWidgets (g, all, true);
+    CHECK (g.widgets[0].x == 0);
+    CHECK (g.widgets[3].x + g.widgets[3].w >= 998);
+    CHECK (g.widgets[1].x - (g.widgets[0].x + g.widgets[0].w) == g.widgets[2].x - (g.widgets[1].x + g.widgets[1].w));
+
+    g = f;
+    facade::arrangeGrid (g, all, 2);
+    CHECK (g.widgets[0].x == g.widgets[2].x);
+    CHECK (g.widgets[1].x > g.widgets[0].x);
+    CHECK (g.widgets[2].y > g.widgets[0].y);
+    CHECK (g.widgets[1].y == g.widgets[0].y);
+
+    g = f;
+    facade::alignWidgets (g, { 1 }, facade::Align::Left); // un seul widget : sans effet
+    CHECK (g == f);
+}

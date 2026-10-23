@@ -197,6 +197,12 @@ void NeptuneEditor::openModal (neptune::core::ParamId id, neptune::core::uistate
                                               // Fermeture différée : la modale ne se détruit pas depuis son propre gestionnaire.
                                               juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
                                           });
+    modal_->setFacadeAdd ([safe = juce::Component::SafePointer<NeptuneEditor> (this), id] (int type)
+    {
+        if (safe == nullptr) return;
+        safe->facadeView_->addLinked (static_cast<neptune::core::facade::WidgetType> (type), id);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->closeModal(); });
+    });
     root_.addAndMakeVisible (*modal_);
     modal_->setBounds (rootBounds());
     modal_->toFront (true);
