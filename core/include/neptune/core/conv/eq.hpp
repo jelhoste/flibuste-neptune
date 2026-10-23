@@ -73,6 +73,11 @@ public:
         }
     }
 
+    // Réponse en fréquence (dB) de la chaîne pour des réglages donnés, à la fréquence `freq` : pour l'affichage de la courbe (hors temps réel).
+    static double responseDb(const EQParams& p, double freq, double fs);
+    static double bandResponseDb(const EQBand& b, double freq, double fs);
+    static double passResponseDb(const EQPass& pass, bool isHP, double freq, double fs);
+
 private:
     static constexpr int kChunk = 16;
     struct Coef { double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
@@ -125,12 +130,15 @@ private:
         p.active = p.enabled || std::fabs(std::log(p.f / idle)) > 1e-3;
     }
 
-    void designBand(Band& b) {
-        const double w0 = 2.0 * M_PI * clampd(b.f, 10.0, fmax()) / fs_;
-        const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * b.q);
-        const double A = std::pow(10.0, b.g / 40.0);
+    void designBand(Band& b) { b.sec.c = bandCoef(b.type, b.f, b.g, b.q, fs_); }
+    void designPass(Pass& p) { for (int i = 0; i < p.sections; ++i) p.sec[i].c = passCoef(p.isHP, p.f, i, p.sections, fs_); }
+
+    static Coef bandCoef(BandType type, double f, double g, double q, double fs) {
+        const double w0 = 2.0 * M_PI * clampd(f, 10.0, 0.45 * fs) / fs;
+        const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+        const double A = std::pow(10.0, g / 40.0);
         double b0, b1, b2, a0, a1, a2;
-        switch (b.type) {
+        switch (type) {
         case BandType::Bell:
             b0 = 1 + alpha * A; b1 = -2 * cw; b2 = 1 - alpha * A; a0 = 1 + alpha / A; a1 = -2 * cw; a2 = 1 - alpha / A; break;
         case BandType::LowShelf: {
@@ -142,20 +150,25 @@ private:
             b0 = A * ((A + 1) + (A - 1) * cw + t); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - t);
             a0 = (A + 1) - (A - 1) * cw + t;       a1 = 2 * ((A - 1) - (A + 1) * cw);     a2 = (A + 1) - (A - 1) * cw - t; break; }
         }
-        b.sec.c = {b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
+        return {b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
     }
-    void designPass(Pass& p) {
-        const double w0 = 2.0 * M_PI * clampd(p.f, 1.0, fmax()) / fs_;
+    // Section `i` (sur `sections`) d'un passe-haut / passe-bas de Butterworth à la fréquence `f`
+    static Coef passCoef(bool isHP, double f, int i, int sections, double fs) {
+        const double w0 = 2.0 * M_PI * clampd(f, 1.0, 0.45 * fs) / fs;
         const double cw = std::cos(w0), sw = std::sin(w0);
-        const int n = 2 * p.sections;                                 // Butterworth order
-        for (int i = 0; i < p.sections; ++i) {
-            const double Q = 1.0 / (2.0 * std::cos(M_PI * double(2 * i + 1) / double(2 * n)));
-            const double alpha = sw / (2.0 * Q), a0 = 1 + alpha;
-            double b0, b1, b2;
-            if (p.isHP) { b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = b0; }
-            else        { b0 = (1 - cw) / 2; b1 = 1 - cw;    b2 = b0; }
-            p.sec[i].c = {b0 / a0, b1 / a0, b2 / a0, -2 * cw / a0, (1 - alpha) / a0};
-        }
+        const int n = 2 * sections;                                   // Butterworth order
+        const double Q = 1.0 / (2.0 * std::cos(M_PI * double(2 * i + 1) / double(2 * n)));
+        const double alpha = sw / (2.0 * Q), a0 = 1 + alpha;
+        double b0, b1, b2;
+        if (isHP) { b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = b0; }
+        else      { b0 = (1 - cw) / 2; b1 = 1 - cw;    b2 = b0; }
+        return {b0 / a0, b1 / a0, b2 / a0, -2 * cw / a0, (1 - alpha) / a0};
+    }
+    static double magnitudeDb(const Coef& c, double f, double fs) {
+        const double w = 2.0 * M_PI * f / fs, c1 = std::cos(w), s1 = std::sin(w), c2 = std::cos(2 * w), s2 = std::sin(2 * w);
+        const double nr = c.b0 + c.b1 * c1 + c.b2 * c2, ni = -(c.b1 * s1 + c.b2 * s2);
+        const double dr = 1.0 + c.a1 * c1 + c.a2 * c2, di = -(c.a1 * s1 + c.a2 * s2);
+        return 10.0 * std::log10(std::max(1e-30, (nr * nr + ni * ni) / std::max(1e-30, dr * dr + di * di)));
     }
     static void runSection(Section& s, float* l, float* r, int n) {
         const Coef c = s.c;
@@ -178,5 +191,24 @@ private:
     Band bands_[3];
     Pass hp_, lp_;
 };
+
+inline double ParametricEQ::bandResponseDb(const EQBand& b, double freq, double fs) {
+    if (!b.enabled || std::fabs(b.gainDb) < 1e-4) return 0.0;
+    return magnitudeDb(bandCoef(b.type, clampd(b.freq, 20.0, 20000.0), clampd(b.gainDb, -18.0, 18.0), clampd(b.q, 0.1, 10.0), fs), freq, fs);
+}
+inline double ParametricEQ::passResponseDb(const EQPass& pass, bool isHP, double freq, double fs) {
+    if (!pass.enabled) return 0.0;
+    const int slope = pass.slope >= 48 ? 48 : (pass.slope >= 24 ? 24 : 12);
+    const int secs = slope == 12 ? 1 : (slope == 24 ? 2 : 4);
+    const double lo = isHP ? 20.0 : 1000.0, hi = isHP ? 1000.0 : 20000.0;
+    double db = 0.0;
+    for (int i = 0; i < secs; ++i) db += magnitudeDb(passCoef(isHP, clampd(pass.freq, lo, std::min(hi, 0.45 * fs)), i, secs, fs), freq, fs);
+    return db;
+}
+inline double ParametricEQ::responseDb(const EQParams& p, double freq, double fs) {
+    double db = passResponseDb(p.hp, true, freq, fs) + passResponseDb(p.lp, false, freq, fs);
+    for (const auto& b : p.band) db += bandResponseDb(b, freq, fs);
+    return db;
+}
 
 } // namespace llc

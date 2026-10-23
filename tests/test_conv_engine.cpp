@@ -67,6 +67,28 @@ bool waitFor (const ConvolutionModule& m, int status, int ms = 5000)
 }
 } // namespace
 
+TEST_CASE ("convolution module: the EQ response curve matches the filters", "[conv][module]")
+{
+    auto inst = createInsert ("convolution", 48000.0, 256);
+    REQUIRE (inst != nullptr);
+    auto& set = inst->runner.params();
+    using namespace convolution;
+    CHECK (ConvolutionModule::eqResponseDb (set, 1000.0, 48000.0) == 0.0);   // bandes et filtres coupés : plat
+    set.set (bandParam (0, kOn), 1.0);
+    set.set (bandParam (0, kType), 0.0);
+    set.set (bandParam (0, kFreq), 1000.0);
+    set.set (bandParam (0, kGain), 12.0);
+    CHECK (std::fabs (ConvolutionModule::eqResponseDb (set, 1000.0, 48000.0) - 12.0) < 0.05);       // cloche : le gain à sa fréquence
+    CHECK (std::fabs (ConvolutionModule::eqResponseDb (set, 30.0, 48000.0)) < 0.5);                // loin de la cloche : plat
+    set.set (hpOn, 1.0);
+    set.set (hpFreq, 200.0);
+    set.set (hpSlope, 1.0);   // 24 dB/oct
+    CHECK (std::fabs (ConvolutionModule::eqBandResponseDb (set, 3, 200.0, 48000.0) + 6.02) < 0.1);  // Butterworth : -3 dB par section à la coupure, deux sections
+    CHECK (ConvolutionModule::eqBandResponseDb (set, 3, 20.0, 48000.0) < -40.0);
+    set.set (eqOn, 0.0);
+    CHECK (ConvolutionModule::eqResponseDb (set, 200.0, 48000.0) == 0.0);                           // EQ coupé : plat
+}
+
 TEST_CASE ("convolution module: transparent without an IR, exact delay with one", "[conv][module]")
 {
     auto inst = createInsert ("convolution", 48000.0, 256);

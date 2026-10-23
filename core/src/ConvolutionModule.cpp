@@ -14,7 +14,26 @@ using namespace convolution;
 namespace
 {
 constexpr int kSlopes[3] = { 12, 24, 48 };
+
+// Réglages de l'EQ du moteur à partir des paramètres (`at` : identifiant -> valeur)
+template <class At>
+llc::EQParams makeEq (At at)
+{
+    llc::EQParams eq;
+    for (int b = 0; b < 3; ++b)
+    {
+        auto& band = eq.band[b];
+        band.enabled = at (bandParam (b, kOn)) >= 0.5;
+        band.type = static_cast<llc::BandType> (std::clamp (static_cast<int> (at (bandParam (b, kType)) + 0.5), 0, 2));
+        band.freq = at (bandParam (b, kFreq));
+        band.gainDb = at (bandParam (b, kGain));
+        band.q = at (bandParam (b, kQ));
+    }
+    eq.hp = { at (hpOn) >= 0.5, at (hpFreq), kSlopes[std::clamp (static_cast<int> (at (hpSlope) + 0.5), 0, 2)] };
+    eq.lp = { at (lpOn) >= 0.5, at (lpFreq), kSlopes[std::clamp (static_cast<int> (at (lpSlope) + 0.5), 0, 2)] };
+    return eq;
 }
+} // namespace
 
 ConvolutionModule::ConvolutionModule()
 {
@@ -106,17 +125,7 @@ void ConvolutionModule::pushProcessorParams (const std::array<double, numParams>
     q.preDelayMs = at (preDelay);
     q.width = at (width) / 100.0;
     q.eqEnabled = at (eqOn) >= 0.5;
-    for (int b = 0; b < 3; ++b)
-    {
-        auto& band = q.eq.band[b];
-        band.enabled = at (bandParam (b, kOn)) >= 0.5;
-        band.type = static_cast<llc::BandType> (std::clamp (static_cast<int> (at (bandParam (b, kType)) + 0.5), 0, 2));
-        band.freq = at (bandParam (b, kFreq));
-        band.gainDb = at (bandParam (b, kGain));
-        band.q = at (bandParam (b, kQ));
-    }
-    q.eq.hp = { at (hpOn) >= 0.5, at (hpFreq), kSlopes[std::clamp (static_cast<int> (at (hpSlope) + 0.5), 0, 2)] };
-    q.eq.lp = { at (lpOn) >= 0.5, at (lpFreq), kSlopes[std::clamp (static_cast<int> (at (lpSlope) + 0.5), 0, 2)] };
+    q.eq = makeEq (at);
     proc_.setParams (q, snap);
 }
 
@@ -151,6 +160,22 @@ void ConvolutionModule::process (float* left, float* right, int n, const Paramet
     meters_[kLufsMOut].store (f.lufsM[1], std::memory_order_relaxed);
     meters_[kLufsSIn].store (f.lufsS[0], std::memory_order_relaxed);
     meters_[kLufsSOut].store (f.lufsS[1], std::memory_order_relaxed);
+}
+
+double ConvolutionModule::eqResponseDb (const ParameterSet& set, double freq, double sampleRate)
+{
+    if (set.get (eqOn) < 0.5) return 0.0;
+    return llc::ParametricEQ::responseDb (makeEq ([&set] (ParamId id) { return set.get (id); }), freq, sampleRate);
+}
+
+double ConvolutionModule::eqBandResponseDb (const ParameterSet& set, int band, double freq, double sampleRate)
+{
+    if (set.get (eqOn) < 0.5) return 0.0;
+    const auto eq = makeEq ([&set] (ParamId id) { return set.get (id); });
+    if (band >= 0 && band < 3) return llc::ParametricEQ::bandResponseDb (eq.band[band], freq, sampleRate);
+    if (band == 3) return llc::ParametricEQ::passResponseDb (eq.hp, true, freq, sampleRate);
+    if (band == 4) return llc::ParametricEQ::passResponseDb (eq.lp, false, freq, sampleRate);
+    return 0.0;
 }
 
 void ConvolutionModule::setIrPath (const std::string& path)

@@ -18,10 +18,10 @@ public:
 private:
     class IrView;
     class LevelsView;
+    class EqView;
 
     void layout() override;
     void tick() override;
-    void pageChanged() override;
     std::vector<juce::String> presetNames() const override;
     std::vector<std::pair<neptune::core::ParamId, double>> presetValues (int) const override;
     std::vector<neptune::core::ParamId> presetParamIds() const override;
@@ -52,8 +52,9 @@ private:
     nova::Panel *voicePanel_ = nullptr, *eqPanel_ = nullptr;
     std::vector<nova::KnobCard*> voiceKnobs_;              // pré-délai, largeur, mix, sortie
     nova::Pill* eqPill_ = nullptr;
-    struct EqColumn { nova::Pill *on, *type, *slope; nova::KnobCard *freq, *gain, *q; };
+    struct EqColumn { nova::Pill *on, *type, *slope; };
     std::vector<EqColumn> eqColumns_;                      // 3 bandes, passe-haut, passe-bas
+    EqView* eqView_ = nullptr;                             // courbe de réponse avec une poignée par bande et par filtre
 
     // page LEVELS
     nova::Panel* levelsPanel_ = nullptr;

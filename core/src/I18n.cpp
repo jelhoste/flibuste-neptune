@@ -1440,6 +1440,8 @@ const Entry kEntries[] = {
     { "hlp.cv_mix", { "Balance between the input (dry) and the convolved signal (wet).", "Équilibre entre l'entrée (sec) et le signal convolué (traité)." } },
     { "hlp.cv_output.t", { "OUTPUT", "SORTIE" } },
     { "hlp.cv_output", { "Output trim, -24 to +24 dB.", "Gain de sortie, -24 à +24 dB." } },
+    { "hlp.cv_eqview.t", { "EQ CURVE", "COURBE D'ÉGALISATION" } },
+    { "hlp.cv_eqview", { "Drag a handle: left/right sets the frequency, up/down the gain (Shift = fine). Mouse wheel: Q of a band, or slope of the high/low-pass. Double-click: switch a band or filter on or off. Grabbing an off handle switches it on.", "Tirez une poignée : gauche/droite règle la fréquence, haut/bas le gain (Maj : fin). Molette : Q d'une bande, ou pente du passe-haut / passe-bas. Double-clic : met une bande ou un filtre en service ou le coupe. Saisir une poignée coupée la met en service." } },
     { "hlp.cv_eq.t", { "EQUALIZER", "ÉGALISEUR" } },
     { "hlp.cv_eq", { "Three bands (bell, low shelf, high shelf) plus high-pass and low-pass filters, applied after the convolution.", "Trois bandes (cloche, plateau grave, plateau aigu) plus filtres passe-haut et passe-bas, appliqués après la convolution." } },
     { "fm.import_failed", { "This file does not contain a DX7 voice or bank.", "Ce fichier ne contient ni voix ni banque DX7." } },

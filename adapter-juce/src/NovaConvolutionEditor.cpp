@@ -364,6 +364,231 @@ private:
     bool spectrum_ = false;
 };
 
+// ------------------------------------------------------------------------------------------------ égaliseur graphique : courbe de réponse et poignées à glisser
+// Cinq poignées : les trois bandes (fréquence et gain), puis le passe-haut et le passe-bas (fréquence). Glisser une poignée règle ses paramètres (Maj : fin),
+// la molette règle le Q d'une bande ou la pente d'un filtre, un double-clic met le filtre en service ou le coupe ; saisir une poignée coupée la met en service.
+class NovaConvolutionEditor::EqView : public juce::Component
+{
+public:
+    EqView (const nova::Skin& s, ParamHost& h, const i18n::Translator& tr, std::function<double()> rate) : skin_ (s), host_ (h), tr_ (tr), rate_ (std::move (rate)) {}
+
+    void update()
+    {
+        std::uint32_t key = 0;
+        for (ParamId id = cvl::eqOn; id <= cvl::lpSlope; ++id) key = key * 31u + host_.parameters().version (id);
+        if (key == key_) return;
+        key_ = key;
+        valid_ = false;
+        repaint();
+    }
+
+    void resized() override { valid_ = false; }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto b = getLocalBounds().toFloat();
+        skin_.fill (g, Token::StageBg, b, skin_.px (6.0f));
+        const auto plot = plotArea();
+        g.setFont (skin_.font (9.0f));
+        for (const double f : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
+        {
+            g.setColour (skin_.colour (Token::Grid, 0.5f));
+            g.drawVerticalLine (juce::roundToInt (xOf (f)), plot.getY(), plot.getBottom());
+            if (f == 100.0 || f == 1000.0 || f == 10000.0 || f == 20.0 || f == 20000.0)
+            {
+                g.setColour (skin_.colour (Token::TextDim2));
+                g.drawText (f >= 1000.0 ? juce::String (f / 1000.0, 0) + "k" : juce::String (f, 0),
+                            juce::Rectangle<float> (xOf (f) - skin_.px (18.0f), plot.getBottom() + skin_.px (3.0f), skin_.px (36.0f), skin_.px (12.0f)), juce::Justification::centred);
+            }
+        }
+        for (int d = -18; d <= 18; d += 6)
+        {
+            g.setColour (skin_.colour (Token::Grid, d == 0 ? 0.9f : 0.5f));
+            g.drawHorizontalLine (juce::roundToInt (yOf (d)), plot.getX(), plot.getRight());
+            g.setColour (skin_.colour (Token::TextDim2));
+            g.drawText (juce::String (d), juce::Rectangle<float> (b.getX() + skin_.px (2.0f), yOf (d) - skin_.px (6.0f), plot.getX() - b.getX() - skin_.px (6.0f), skin_.px (12.0f)), juce::Justification::centredRight);
+        }
+        if (! valid_) rebuild();
+        const bool eqOn = host_.parameters().get (cvl::eqOn) >= 0.5;
+        juce::Path filled (total_);
+        filled.lineTo (plot.getRight(), yOf (0.0));
+        filled.lineTo (plot.getX(), yOf (0.0));
+        filled.closeSubPath();
+        g.setColour (skin_.colour (Token::Accent, eqOn ? 0.12f : 0.04f));
+        g.fillPath (filled);
+        g.setColour (skin_.colour (Token::Accent, eqOn ? 1.0f : 0.35f));
+        g.strokePath (total_, juce::PathStrokeType (skin_.px (2.2f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        for (int i = 0; i < kHandles; ++i)
+        {
+            const auto pt = pointOf (i);
+            const bool on = host_.parameters().get (onId (i)) >= 0.5, active = i == drag_ || (drag_ < 0 && i == hover_);
+            const float r = skin_.px (active ? 7.0f : 5.5f);
+            g.setColour (skin_.colour (colourFor (i), on ? 1.0f : 0.5f));
+            if (on) g.fillEllipse (pt.x - r, pt.y - r, r * 2, r * 2);
+            else g.drawEllipse (pt.x - r, pt.y - r, r * 2, r * 2, skin_.px (1.6f));
+            if (on)
+            {
+                g.setColour (skin_.colour (Token::StageBg));
+                g.drawEllipse (pt.x - r, pt.y - r, r * 2, r * 2, skin_.px (1.2f));
+            }
+        }
+        const int shown = drag_ >= 0 ? drag_ : hover_;
+        if (shown >= 0)
+        {
+            g.setColour (skin_.colour (colourFor (shown)));
+            g.setFont (skin_.font (11.0f, true));
+            g.drawText (describe (shown), juce::Rectangle<float> (plot.getX() + skin_.px (8.0f), plot.getY() + skin_.px (4.0f), plot.getWidth() - skin_.px (16.0f), skin_.px (16.0f)), juce::Justification::centredLeft);
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const int h = hit (e.position);
+        if (h != hover_) { hover_ = h; repaint(); }
+        setMouseCursor (h >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+    }
+    void mouseExit (const juce::MouseEvent&) override { if (hover_ >= 0) { hover_ = -1; repaint(); } }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const int h = hit (e.position);
+        if (h < 0 || e.mods.isPopupMenu()) return;
+        drag_ = h;
+        if (host_.parameters().get (onId (h)) < 0.5)   // saisir une poignée coupée la met en service
+        {
+            host_.uiBeginEdit (onId (h));
+            setPlain (host_, onId (h), 1.0);
+            host_.uiEndEdit (onId (h));
+        }
+        host_.uiBeginEdit (freqId (h));
+        if (h < 3) host_.uiBeginEdit (gainId (h));
+        startPos_ = e.position;
+        startFreq_ = host_.parameters().get (freqId (h));
+        startGain_ = h < 3 ? host_.parameters().get (gainId (h)) : 0.0;
+        repaint();
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (drag_ < 0) return;
+        const int h = drag_;
+        const float k = e.mods.isShiftDown() ? 0.1f : 1.0f;   // Maj : déplacement fin
+        const auto plot = plotArea();
+        const double octaves = std::log2 (1000.0) * static_cast<double> ((e.position.x - startPos_.x) * k / plot.getWidth());
+        const double lo = h == 4 ? 1000.0 : 20.0, hi = h == 3 ? 1000.0 : 20000.0;
+        setPlain (host_, freqId (h), std::clamp (startFreq_ * std::pow (2.0, octaves), lo, hi));
+        if (h < 3)
+        {
+            const double dDb = -static_cast<double> ((e.position.y - startPos_.y) * k / (plot.getHeight() * 0.5f)) * 18.0;
+            setPlain (host_, gainId (h), std::clamp (startGain_ + dDb, -18.0, 18.0));
+        }
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (drag_ < 0) return;
+        if (drag_ < 3) host_.uiEndEdit (gainId (drag_));
+        host_.uiEndEdit (freqId (drag_));
+        drag_ = -1;
+        repaint();
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        const int h = hit (e.position);
+        if (h < 0) return;
+        host_.uiBeginEdit (onId (h));
+        setPlain (host_, onId (h), host_.parameters().get (onId (h)) >= 0.5 ? 0.0 : 1.0);
+        host_.uiEndEdit (onId (h));
+    }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        const int h = hit (e.position, 22.0f);
+        if (h < 0 || w.deltaY == 0.0f) return;
+        const int dir = w.deltaY > 0.0f ? 1 : -1;
+        if (h < 3)
+        {
+            const auto id = cvl::bandParam (h, cvl::kQ);
+            nova::setParam (host_, id, std::clamp (host_.parameters().get (id) * std::pow (1.12, dir), 0.1, 10.0));
+        }
+        else
+        {
+            const auto id = h == 3 ? cvl::hpSlope : cvl::lpSlope;
+            nova::setParam (host_, id, std::clamp (static_cast<int> (std::lround (host_.parameters().get (id))) + dir, 0, 2));
+        }
+    }
+
+private:
+    static constexpr int kHandles = 5;
+    static ParamId onId (int i) { return i < 3 ? cvl::bandParam (i, cvl::kOn) : i == 3 ? cvl::hpOn : cvl::lpOn; }
+    static ParamId freqId (int i) { return i < 3 ? cvl::bandParam (i, cvl::kFreq) : i == 3 ? cvl::hpFreq : cvl::lpFreq; }
+    static ParamId gainId (int i) { return cvl::bandParam (i, cvl::kGain); }
+    static Token colourFor (int i) { return i == 0 ? Token::Band1 : i == 1 ? Token::Band2 : i == 2 ? Token::Band3 : Token::Pink; }
+    juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
+
+    juce::String describe (int i) const
+    {
+        const double f = host_.parameters().get (freqId (i));
+        const juce::String freq = f >= 1000.0 ? juce::String (f / 1000.0, 2) + " kHz" : juce::String (f, 0) + " Hz";
+        if (i < 3)
+        {
+            static const char* const types[3] = { "cv.t_bell", "cv.t_low", "cv.t_high" };
+            const int t = std::clamp (static_cast<int> (std::lround (host_.parameters().get (cvl::bandParam (i, cvl::kType)))), 0, 2);
+            const double gain = host_.parameters().get (cvl::bandParam (i, cvl::kGain));
+            return "EQ " + juce::String (i + 1) + "   " + text (types[t]) + "   " + freq + "   " + (gain >= 0.0 ? "+" : "") + juce::String (gain, 1) + " dB   Q " + juce::String (host_.parameters().get (cvl::bandParam (i, cvl::kQ)), 2);
+        }
+        const int slope = 12 << std::clamp (static_cast<int> (std::lround (host_.parameters().get (i == 3 ? cvl::hpSlope : cvl::lpSlope))), 0, 2);
+        return text (i == 3 ? "cv.hp" : "cv.lp") + "   " + freq + "   " + juce::String (slope) + " dB/oct";
+    }
+
+    juce::Rectangle<float> plotArea() const
+    {
+        const auto b = getLocalBounds().toFloat();
+        return { b.getX() + skin_.px (34.0f), b.getY() + skin_.px (10.0f), b.getWidth() - skin_.px (34.0f + 14.0f), b.getHeight() - skin_.px (10.0f + 22.0f) };
+    }
+    float xOf (double f) const { const auto p = plotArea(); return p.getX() + static_cast<float> (std::log (f / 20.0) / std::log (1000.0)) * p.getWidth(); }
+    float yOf (double db) const { const auto p = plotArea(); return p.getCentreY() - static_cast<float> (db / 18.0) * p.getHeight() * 0.5f; }
+    juce::Point<float> pointOf (int i) const
+    {
+        const double f = std::clamp (host_.parameters().get (freqId (i)), 20.0, 20000.0);
+        const double g = i < 3 ? host_.parameters().get (gainId (i)) : 0.0;
+        return { xOf (f), yOf (std::clamp (g, -18.0, 18.0)) };
+    }
+    int hit (juce::Point<float> p, float radius = 14.0f) const
+    {
+        int best = -1;
+        float bestD = skin_.px (radius);
+        for (int i = 0; i < kHandles; ++i)
+        {
+            const float d = pointOf (i).getDistanceFrom (p);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+    void rebuild()
+    {
+        total_.clear();
+        const double fs = std::max (8000.0, rate_());
+        const auto plot = plotArea();
+        const int n = std::max (2, static_cast<int> (plot.getWidth() / 3.0f));
+        for (int i = 0; i <= n; ++i)
+        {
+            const double f = 20.0 * std::pow (1000.0, static_cast<double> (i) / n);
+            const double db = std::clamp (ConvolutionModule::eqResponseDb (host_.parameters(), f, fs), -18.0, 18.0);
+            if (i == 0) total_.startNewSubPath (xOf (f), yOf (db)); else total_.lineTo (xOf (f), yOf (db));
+        }
+        valid_ = true;
+    }
+
+    const nova::Skin& skin_;
+    ParamHost& host_;
+    const i18n::Translator& tr_;
+    std::function<double()> rate_;
+    juce::Path total_;
+    bool valid_ = false;
+    std::uint32_t key_ = 0xFFFFFFFFu;
+    int drag_ = -1, hover_ = -1;
+    juce::Point<float> startPos_;
+    double startFreq_ = 1000.0, startGain_ = 0.0;
+};
+
 // ------------------------------------------------------------------------------------------------ niveaux
 class NovaConvolutionEditor::LevelsView : public juce::Component
 {
@@ -577,12 +802,8 @@ void NovaConvolutionEditor::buildTonePage()
     eqPill_->bindToggle (host(), cvl::eqOn, tx ("cv.eq_on"));
     addInfo (1, eqPill_, "hlp.cv_eq");
     const std::vector<juce::String> types { tx ("cv.t_bell"), tx ("cv.t_low"), tx ("cv.t_high") }, slopes { "12 dB/oct", "24 dB/oct", "48 dB/oct" };
-    auto knob = [this] (ParamId id, const char* title)
-    {
-        auto* kc = add<nova::KnobCard> (1, skin(), host(), id, tx (title), modalOpener(), false);
-        kc->setCompact (true);
-        return kc;
-    };
+    eqView_ = add<EqView> (1, skin(), host(), translator(), [this] { const double r = options().sampleRate ? options().sampleRate() : 48000.0; return r > 0.0 ? r : 48000.0; });
+    addInfo (1, eqView_, "hlp.cv_eqview");
     for (int b = 0; b < 3; ++b)
     {
         EqColumn c {};
@@ -590,9 +811,6 @@ void NovaConvolutionEditor::buildTonePage()
         c.on->bindToggle (host(), cvl::bandParam (b, cvl::kOn), "EQ " + juce::String (b + 1));
         c.type = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
         c.type->bindChoice (host(), cvl::bandParam (b, cvl::kType), {}, types);
-        c.freq = knob (cvl::bandParam (b, cvl::kFreq), "cv.freq");
-        c.gain = knob (cvl::bandParam (b, cvl::kGain), "cv.gain");
-        c.q = knob (cvl::bandParam (b, cvl::kQ), "cv.q");
         eqColumns_.push_back (c);
     }
     for (int p = 0; p < 2; ++p)
@@ -602,7 +820,6 @@ void NovaConvolutionEditor::buildTonePage()
         c.on->bindToggle (host(), p == 0 ? cvl::hpOn : cvl::lpOn, p == 0 ? tx ("cv.hp") : tx ("cv.lp"));
         c.slope = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
         c.slope->bindChoice (host(), p == 0 ? cvl::hpSlope : cvl::lpSlope, {}, slopes);
-        c.freq = knob (p == 0 ? cvl::hpFreq : cvl::lpFreq, "cv.freq");
         eqColumns_.push_back (c);
     }
 }
@@ -663,18 +880,16 @@ void NovaConvolutionEditor::layout()
     }
     eqPanel_->setBounds (R (204, 286, 942, 424));
     eqPill_->setBounds (R (220, 322, 150, 30));
+    eqView_->setBounds (R (220, 358, 910, 262));
     {
         const float cw = (910.0f - 12.0f * 4.0f) / 5.0f;
         for (std::size_t i = 0; i < eqColumns_.size(); ++i)
         {
             const auto& c = eqColumns_[i];
             const float x = 220.0f + static_cast<float> (i) * (cw + 12.0f);
-            c.on->setBounds (R (x, 362, cw, 28));
-            if (c.type != nullptr) c.type->setBounds (R (x, 396, cw, 28));
-            if (c.slope != nullptr) c.slope->setBounds (R (x, 396, cw, 28));
-            c.freq->setBounds (R (x, 434, cw, 84));
-            if (c.gain != nullptr) c.gain->setBounds (R (x, 524, cw, 84));
-            if (c.q != nullptr) c.q->setBounds (R (x, 614, cw, 84));
+            c.on->setBounds (R (x, 630, cw, 28));
+            if (c.type != nullptr) c.type->setBounds (R (x, 664, cw, 28));
+            if (c.slope != nullptr) c.slope->setBounds (R (x, 664, cw, 28));
         }
     }
 
@@ -693,19 +908,6 @@ void NovaConvolutionEditor::layout()
     if (bypassPill() != nullptr) bypassPill()->setBounds (R (1160 - 14 - 36, 11, 36, 36));
 }
 
-void NovaConvolutionEditor::pageChanged()
-{
-    // les colonnes du passe-haut et du passe-bas n'ont ni type ni gain ni Q : leurs composants n'existent pas
-    for (const auto& c : eqColumns_)
-    {
-        const bool show = currentPage() == 1;
-        if (c.type != nullptr) c.type->setVisible (show);
-        if (c.slope != nullptr) c.slope->setVisible (show);
-        if (c.gain != nullptr) c.gain->setVisible (show);
-        if (c.q != nullptr) c.q->setVisible (show);
-    }
-}
-
 void NovaConvolutionEditor::tick()
 {
     if (module_ == nullptr) return;
@@ -720,5 +922,6 @@ void NovaConvolutionEditor::tick()
         const auto status = statusText();
         if (status != shownStatus_) { shownStatus_ = status; statusText_->setText (status); }
     }
+    if (currentPage() == 1) eqView_->update();
     if (currentPage() == 2) levelsView_->update();
 }

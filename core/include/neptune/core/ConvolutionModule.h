@@ -92,6 +92,9 @@ public:
     llc::IROptions irOptions() const;                                                                  // retouches actuelles, à la cadence de travail
     llc::InputMode inputModeValue() const;
     void resetPeakMax() noexcept { resetPeak_.store (true, std::memory_order_release); }
+    // Réponse en fréquence (dB) de l'EQ pour les réglages donnés (0 si l'EQ est coupé) : pour la courbe de l'interface, hors temps réel.
+    static double eqResponseDb (const ParameterSet&, double freq, double sampleRate);
+    static double eqBandResponseDb (const ParameterSet&, int band, double freq, double sampleRate);   // 0..2 : bandes, 3 : passe-haut, 4 : passe-bas
 
 private:
     double value (ParamId id) const noexcept
