@@ -96,6 +96,7 @@ private:
     void startPreview (int source, std::int64_t frame, int loopIndex, int owner);
     void stopPreviewNow();
     void previewFile (const std::string& path);
+    void togglePoolPreview (int row);
     void pollPreviewLoad();
     void previewSeam();
     void toggleRecording();
@@ -189,6 +190,7 @@ private:
     std::string loopCandidatesKey_, seamKey_;
     std::unique_ptr<juce::FileChooser> saveChooser_;
     bool previewing_ = false;
+    std::string previewPath_;                     // fichier de la réserve en cours d'écoute libre
     std::future<neptune::core::SampleLoadResult> previewLoad_;           // chargement d'un fichier de la réserve à écouter
     std::string previewLoadPath_;
     std::map<std::string, std::shared_ptr<const neptune::core::SampleData>> previewCache_;   // les derniers fichiers écoutés
@@ -224,6 +226,13 @@ private:
     std::thread pitchThread_;
     std::atomic<bool> pitchDirty_ { false };
     nova::Pill *zonesViewPill_ = nullptr, *poolViewPill_ = nullptr;
+    // Séparateur entre la liste (zones / fichiers) et la matrice, largeur de la liste (unités de la maquette), et agrandissement d'un des deux conteneurs
+    juce::Component* splitter_ = nullptr;
+    nova::Pill *listExpandPill_ = nullptr, *matrixExpandPill_ = nullptr;
+    float listWidth_ = 330.0f, dragStartWidth_ = 330.0f;
+    bool listShown() const { return (listVisible_ || expanded_ == 1) && expanded_ != 2; }
+    bool matrixShown() const { return expanded_ != 1; }
+    int expanded_ = 0;                            // 0 : côte à côte, 1 : la liste prend toute la largeur, 2 : la matrice prend toute la largeur
     bool showPool_ = false;                       // la liste de gauche montre la réserve de fichiers au lieu des zones
     std::vector<std::string> poolPaths_;          // lignes de la réserve (même ordre que PoolTable)
     std::string poolSignature_;

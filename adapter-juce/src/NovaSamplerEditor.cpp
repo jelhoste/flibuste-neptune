@@ -33,6 +33,30 @@ void setLoopView (ZoneDescription& z, int idx, const LoopRegion& l)
     else z.extraLoops[static_cast<std::size_t> (idx - 1)] = l;
 }
 
+// Poignée entre deux conteneurs : se tire à la souris (le glissé donne le décalage en pixels depuis le début), double-clic = retour à la largeur d'origine.
+class SplitHandle : public juce::Component
+{
+public:
+    explicit SplitHandle (const nova::Skin& skin) : skin_ (skin) { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); }
+    std::function<void()> onBegin, onReset;
+    std::function<void (int dx)> onDrag;
+    void paint (juce::Graphics& g) override
+    {
+        const bool hot = isMouseOverOrDragging();
+        g.setColour (skin_.colour (hot ? neptune::core::theme::Token::Accent : neptune::core::theme::Token::Border));
+        const float cx = static_cast<float> (getWidth()) * 0.5f, cy = static_cast<float> (getHeight()) * 0.5f;
+        g.fillRoundedRectangle (cx - 2.0f, cy - 24.0f, 4.0f, 48.0f, 2.0f);
+    }
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+    void mouseDown (const juce::MouseEvent&) override { if (onBegin) onBegin(); }
+    void mouseDrag (const juce::MouseEvent& e) override { if (onDrag) onDrag (e.getDistanceFromDragStartX()); }
+    void mouseDoubleClick (const juce::MouseEvent&) override { if (onReset) onReset(); }
+
+private:
+    const nova::Skin& skin_;
+};
+
 juce::Path iconPath (int kind)
 {
     juce::Path p;
@@ -596,7 +620,7 @@ void NovaSamplerEditor::buildZonesPage()
     loadPill_ = pill (0, tx ("sampler.load"), [this] { chooseSample(); });
     importPill_ = pill (0, tx ("sampler.import"), [this] { startImport(); });
     removePill_ = pill (0, tx ("sampler.remove"), [this] { removeSelectedZones(); });
-    listPill_ = pill (0, tx ("map.list"), [this] { listVisible_ = ! listVisible_; layout(); pageChanged(); });
+    listPill_ = pill (0, tx ("map.list"), [this] { expanded_ = 0; listVisible_ = ! listVisible_; layout(); pageChanged(); });
     monitorPill_ = pill (0, tx ("voices.button"), [this]
     {
         showVoices_ = ! showVoices_;
@@ -663,7 +687,19 @@ void NovaSamplerEditor::buildZonesPage()
 
     pool_ = add<PoolTable> (0, skin().palette(), translator());
     pool_->onContextMenu = [this] (int row) { showPoolMenu (row); };
+    pool_->onPlay = [this] (int row) { togglePoolPreview (row); };
     pool_->onDoubleClick = [this] (int row) { if (row >= 0 && row < static_cast<int> (poolPaths_.size())) previewFile (poolPaths_[static_cast<std::size_t> (row)]); };
+    {
+        auto* h = add<SplitHandle> (0, skin());
+        h->onBegin = [this] { dragStartWidth_ = listWidth_; };
+        h->onDrag = [this] (int dx) { listWidth_ = std::clamp (dragStartWidth_ + static_cast<float> (dx) / skin().px (1.0f), 300.0f, 700.0f); resized(); };
+        h->onReset = [this] { listWidth_ = 330.0f; resized(); };
+        splitter_ = h;
+    }
+    listExpandPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    listExpandPill_->onClick = [this] { expanded_ = expanded_ == 1 ? 0 : 1; pageChanged(); };
+    matrixExpandPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    matrixExpandPill_->onClick = [this] { expanded_ = expanded_ == 2 ? 0 : 2; pageChanged(); };
     zonesViewPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     zonesViewPill_->setText (tx ("pool.view_zones"));
     zonesViewPill_->onClick = [this] { showPool_ = false; pageChanged(); };
@@ -2920,19 +2956,27 @@ void NovaSamplerEditor::pageChanged()
     if (zones_ == nullptr) return;
     const bool zonesPage = currentPage() == 0;
     // moniteur de voix : remplace la liste et la matrice
-    zones_->setVisible (zonesPage && listVisible_ && ! showVoices_ && ! showPool_);
-    tablePanel_->setVisible (zonesPage && listVisible_ && ! showVoices_);
+    zones_->setVisible (zonesPage && listShown() && ! showVoices_ && ! showPool_);
+    tablePanel_->setVisible (zonesPage && listShown() && ! showVoices_);
     tablePanel_->setTitle ({});   // les deux onglets (ZONES / FICHIERS) tiennent lieu de titre
-    zonesViewPill_->setVisible (zonesPage && listVisible_ && ! showVoices_);
-    poolViewPill_->setVisible (zonesPage && listVisible_ && ! showVoices_);
+    zonesViewPill_->setVisible (zonesPage && listShown() && ! showVoices_);
+    poolViewPill_->setVisible (zonesPage && listShown() && ! showVoices_);
     zonesViewPill_->setOn (! showPool_);
     poolViewPill_->setOn (showPool_);
-    pool_->setVisible (zonesPage && listVisible_ && ! showVoices_ && showPool_);
-    matrix_->setVisible (zonesPage && ! showVoices_);
-    matrixPanel_->setVisible (zonesPage && ! showVoices_);
+    pool_->setVisible (zonesPage && listShown() && ! showVoices_ && showPool_);
+    matrix_->setVisible (zonesPage && ! showVoices_ && matrixShown());
+    matrixPanel_->setVisible (zonesPage && ! showVoices_ && matrixShown());
+    const bool both = zonesPage && ! showVoices_ && listShown() && matrixShown();
+    splitter_->setVisible (both);
+    listExpandPill_->setVisible (zonesPage && ! showVoices_ && listShown());
+    matrixExpandPill_->setVisible (zonesPage && ! showVoices_ && matrixShown());
+    listExpandPill_->setText (tx (expanded_ == 1 ? "pool.reduce" : "pool.expand"));
+    matrixExpandPill_->setText (tx (expanded_ == 2 ? "pool.reduce" : "pool.expand"));
+    listExpandPill_->setOn (expanded_ == 1);
+    matrixExpandPill_->setOn (expanded_ == 2);
     voicesView_->setVisible (zonesPage && showVoices_);
-    setInfoVisible (tablePanel_, zonesPage && listVisible_ && ! showVoices_);
-    setInfoVisible (matrixPanel_, zonesPage && ! showVoices_);
+    setInfoVisible (tablePanel_, zonesPage && listShown() && ! showVoices_);
+    setInfoVisible (matrixPanel_, zonesPage && ! showVoices_ && matrixShown());
     resized();
 }
 
@@ -2966,20 +3010,33 @@ void NovaSamplerEditor::layout()
     detectedText_->setBounds (R (X0 + 14, 188, 360, 20));
     applyPitchPill_->setBounds (R (X0 + 380, 182, 170, 30));
     humanizePill_->setBounds (R (X0 + 556, 182, 150, 30));
-    if (listVisible_ && ! showVoices_)
+    const float listW = expanded_ == 1 ? 942.0f : listWidth_;
+    if (listShown() && ! showVoices_)
     {
-        tablePanel_->setBounds (R (X0, 230, 330, 480));
-        zones_->setBounds (R (X0 + 10, 264, 310, 436));
-        pool_->setBounds (R (X0 + 10, 264, 310, 436));
+        tablePanel_->setBounds (R (X0, 230, listW, 480));
+        zones_->setBounds (R (X0 + 10, 264, listW - 20, 436));
+        pool_->setBounds (R (X0 + 10, 264, listW - 20, 436));
         zonesViewPill_->setBounds (R (X0 + 12, 234, 84, 22));
         poolViewPill_->setBounds (R (X0 + 100, 234, 96, 22));
-        matrixPanel_->setBounds (R (X0 + 342, 230, 600, 480));
-        matrix_->setBounds (R (X0 + 350, 262, 584, 440));
+        listExpandPill_->setBounds (R (X0 + listW - 112, 234, 84, 22));
+    }
+    if (expanded_ == 1)
+    {
+        // la liste a toute la largeur ; la matrice est cachée
+    }
+    else if (listShown())
+    {
+        const float mx = X0 + listW + 12.0f, mw = 942.0f - listW - 12.0f;
+        matrixPanel_->setBounds (R (mx, 230, mw, 480));
+        matrix_->setBounds (R (mx + 8, 262, mw - 16, 440));
+        matrixExpandPill_->setBounds (R (mx + mw - 112, 234, 84, 22));
+        splitter_->setBounds (R (X0 + listW, 230, 12, 480));
     }
     else
     {
         matrixPanel_->setBounds (R (X0, 230, 942, 480));
         matrix_->setBounds (R (X0 + 8, 262, 926, 440));
+        matrixExpandPill_->setBounds (R (X0 + 942 - 112, 234, 84, 22));
     }
     voicesView_->setBounds (R (X0, 230, 942, 480));
 
@@ -3085,10 +3142,19 @@ void NovaSamplerEditor::startPreview (int source, std::int64_t frame, int loopIn
     proc_.uiPreviewZone (row, frame, source, loopIndex);
     previewing_ = true;
     previewOwner_ = owner;
+    previewPath_.clear();
     previewStartMs_ = juce::Time::getMillisecondCounter();
 }
 
 // Écoute libre d'un fichier de la réserve, sans en faire une zone : chargé en arrière-plan, puis joué par une zone temporaire du moteur.
+void NovaSamplerEditor::togglePoolPreview (int row)
+{
+    if (row < 0 || row >= static_cast<int> (poolPaths_.size())) return;
+    const auto& path = poolPaths_[static_cast<std::size_t> (row)];
+    if (previewing_ && previewOwner_ == 1 && previewPath_ == path) { stopPreviewNow(); return; }
+    previewFile (path);
+}
+
 void NovaSamplerEditor::previewFile (const std::string& path)
 {
     if (previewLoad_.valid()) return;   // un chargement est déjà en cours
@@ -3098,6 +3164,7 @@ void NovaSamplerEditor::previewFile (const std::string& path)
     proc_.setVoiceMonitor (true);
     previewing_ = true;
     previewOwner_ = 1;
+    previewPath_ = path;
     previewStartMs_ = juce::Time::getMillisecondCounter() + 600;   // laisse le temps du chargement avant de juger que « rien ne sonne »
     if (const auto it = previewCache_.find (path); it != previewCache_.end())
     {
@@ -3178,6 +3245,13 @@ void NovaSamplerEditor::updatePlayButton()
     }
     proc_.setVoiceMonitor (showVoices_ || previewing_);
     const bool bottom = previewing_ && previewOwner_ == 1, tools = previewing_ && previewOwner_ == 2;
+    {
+        int playingRow = -1;
+        if (bottom)
+            for (std::size_t i = 0; i < poolPaths_.size(); ++i)
+                if (poolPaths_[i] == previewPath_) { playingRow = static_cast<int> (i); break; }
+        pool_->setPlayingRow (playingRow);
+    }
     playPill_->setText (tx (bottom ? "sm.stop_button" : "sm.play_button"));
     playPill_->setOn (bottom);
     const bool poolHasSelection = showPool_ && pool_ != nullptr && ! pool_->selectedRows().empty();
