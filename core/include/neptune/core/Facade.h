@@ -24,8 +24,31 @@ constexpr std::size_t maxImagePath = 1024;
 // Curve : courbe de transfert de vélocité de la piste (Sampler).
 // Zone : conteneur (cadre avec titre) qui possède les widgets posés dedans et, au choix, les range en ligne, en colonne ou en matrice.
 // Keyboard : clavier virtuel lié à un canal MIDI de la piste (un manuel d'orgue = un clavier) ; allume les notes jouées sur ce canal.
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7 };
-constexpr int numWidgetTypes = 8;
+// Slider : curseur (tirant) horizontal ou vertical lié à un paramètre ; crans automatiques sur un paramètre à pas.
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8 };
+constexpr int numWidgetTypes = 9;
+constexpr int maxStyles = 64;
+constexpr int maxStripFrames = 512;
+
+// Style d'images (PNG, JPG ou SVG), réutilisable par plusieurs widgets. Chaque widget n'utilise que ce qui le concerne ; une image absente
+// laisse le dessin d'origine.
+//  - Bouton, Action : `off` et `on` (deux états, par exemple un tirant fermé et un tirant ouvert).
+//  - Curseur : `track` (le rail) et `handle` (la poignée).
+//  - Potard : `strip`, une bande de `frames` images (empilées verticalement, ou côte à côte si `stripHorizontal`), une par position.
+struct ImageStyle
+{
+    int id = 0;
+    std::string name;
+    std::string off, on, track, handle, strip;
+    int frames = 0;
+    bool stripHorizontal = false;
+
+    bool operator== (const ImageStyle& o) const noexcept
+    {
+        return id == o.id && name == o.name && off == o.off && on == o.on && track == o.track && handle == o.handle && strip == o.strip
+            && frames == o.frames && stripHorizontal == o.stripHorizontal;
+    }
+};
 constexpr int zonePad = 10;          // marge intérieure d'une zone
 constexpr int zoneTitleHeight = 24;  // bandeau du titre (quand la zone a un titre)
 
@@ -63,12 +86,15 @@ struct Widget
     int firstNote = 36;             // Clavier : première touche affichée à gauche (do) ; le nombre de touches suit la largeur
     int hold = 0;                   // Clavier : 1, une touche cliquée reste enfoncée jusqu'au clic suivant
     int velocity = 100;             // Clavier : vélocité envoyée, 1..127
+    int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
+    int vertical = 0;               // Curseur : 1, vertical
 
     bool operator== (const Widget& o) const noexcept
     {
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
-            && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity;
+            && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
+            && style == o.style && vertical == o.vertical;
     }
 };
 
@@ -77,12 +103,15 @@ struct Facade
     std::string image;              // chemin du fichier image (PNG / JPG) ; vide : fond uni
     ImageFit fit = ImageFit::Fit;
     std::vector<Widget> widgets;    // l'ordre est l'ordre d'empilement (le dernier est dessus)
+    std::vector<ImageStyle> styles; // bibliothèque de styles d'images
 
-    bool operator== (const Facade& o) const noexcept { return image == o.image && fit == o.fit && widgets == o.widgets; }
+    bool operator== (const Facade& o) const noexcept { return image == o.image && fit == o.fit && widgets == o.widgets && styles == o.styles; }
     bool operator!= (const Facade& o) const noexcept { return ! (*this == o); }
 
     // Identifiant libre pour un nouveau widget.
     int freeId() const noexcept;
+    int freeStyleId() const noexcept;
+    const ImageStyle* findStyle (int id) const noexcept;
     const Widget* find (int id) const noexcept;
     Widget* find (int id) noexcept;
 };

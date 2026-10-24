@@ -32,6 +32,7 @@ private:
     class Picker;
     class TextPrompt;
     class HelpPanel;
+    class StylePanel;
     void timerCallback() override;
     void refresh();                              // relit la Façade de la piste sélectionnée si elle a changé
     void commit (neptune::core::facade::Facade, const char* undoName);
@@ -51,6 +52,8 @@ private:
     int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
     void editText();
     void openHelp();
+    void openStyles();
+    void showStyleMenu();
     void duplicateSelected();
     void deleteSelected();
     void updateButtons();
@@ -71,12 +74,13 @@ private:
     int lastClicked_ = 0;                        // dernier widget cliqué : la référence du rangement en cercle
     bool editMode_ = false;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
     std::unique_ptr<TextPrompt> prompt_;
     std::unique_ptr<HelpPanel> help_;
+    std::unique_ptr<StylePanel> stylePanel_;
     std::unique_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FacadeView)

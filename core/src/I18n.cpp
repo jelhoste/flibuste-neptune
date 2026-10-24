@@ -267,6 +267,29 @@ const Entry kEntries[] = {
     { "facade.tip_kb_hold", { "A clicked key stays down until you click it again (Shift-click does the same)", "Une touche cliquée reste enfoncée jusqu'au clic suivant (Maj-clic fait pareil)" } },
     { "facade.kb_velocity", { "Velocity...", "Vélocité..." } },
     { "facade.tip_kb_velocity", { "Velocity sent when a key is clicked", "Vélocité envoyée quand on clique une touche" } },
+    { "facade.add_slider", { "+ Slider", "+ Curseur" } },
+    { "facade.tip_slider", { "A slider (drawbar) linked to a parameter, horizontal or vertical; it jumps from notch to notch on a stepped parameter", "Un curseur (tirant) lié à un paramètre, horizontal ou vertical ; il saute de cran en cran sur un paramètre à pas" } },
+    { "facade.vertical", { "Vertical", "Vertical" } },
+    { "facade.tip_vertical", { "Turn the slider between horizontal and vertical (its width and height are swapped)", "Passe le curseur d'horizontal à vertical (sa largeur et sa hauteur sont échangées)" } },
+    { "facade.styles", { "Styles...", "Styles..." } },
+    { "facade.tip_styles", { "The library of image styles (drawbar open / closed, knob strips...)", "La bibliothèque de styles d'images (tirant ouvert / fermé, bandes de potard...)" } },
+    { "facade.style", { "Style...", "Style..." } },
+    { "facade.tip_style", { "Give the selected widgets an image style", "Donne un style d'images aux widgets sélectionnés" } },
+    { "facade.style_none", { "None", "Aucun" } },
+    { "facade.styles_title", { "Image styles", "Styles d'images" } },
+    { "facade.style_new", { "New", "Nouveau" } },
+    { "facade.style_name", { "Name", "Nom" } },
+    { "facade.style_default_name", { "Style", "Style" } },
+    { "facade.style_off", { "Off / closed", "Éteint / fermé" } },
+    { "facade.style_on", { "On / open", "Allumé / ouvert" } },
+    { "facade.style_track", { "Slider rail", "Rail du curseur" } },
+    { "facade.style_handle", { "Slider handle", "Poignée du curseur" } },
+    { "facade.style_strip", { "Knob strip", "Bande du potard" } },
+    { "facade.style_choose", { "Choose...", "Choisir..." } },
+    { "facade.style_clear", { "Clear", "Effacer" } },
+    { "facade.style_frames", { "Strip frames", "Images de la bande" } },
+    { "facade.style_strip_h", { "Frames side by side (otherwise stacked vertically)", "Images côte à côte (sinon : empilées verticalement)" } },
+    { "facade.style_hint", { "PNG, JPG or SVG. A widget uses only what concerns it; a missing image keeps the default drawing.", "PNG, JPG ou SVG. Un widget n'utilise que ce qui le concerne ; une image absente garde le dessin d'origine." } },
     { "facade.add_zone", { "+ Zone", "+ Zone" } },
     { "facade.tip_zone", { "A container: widgets dropped inside follow it, and it can arrange them in a row, a column or a grid", "Un conteneur : les widgets posés dedans le suivent, et il peut les ranger en ligne, en colonne ou en matrice" } },
     { "facade.same_size", { "Same size for all", "Même taille pour tous" } },
@@ -310,6 +333,8 @@ const Entry kEntries[] = {
         "+ VELOCITY CURVE (Sampler tracks): the transfer curve applied to the incoming MIDI velocity before it reaches the sound modules. Double-click the graph to add a point, drag a point to move it, right-click a point to remove it. The two square handles on the left and right edges raise the floor or lower the ceiling: the whole range is remapped between them. You can choose a smooth curve or sharp angles between points. The same curve is available from the V button next to the MIDI channel on the track strip of the Mixer; its checkbox bypasses the curve without losing the settings.\n\n"
         "+ LABEL: free text. Text... changes the text of any widget (the caption of a knob, a button or a curve).\n\n"
         "+ ZONE: a container with a title. Widgets whose centre is inside it belong to it and follow it when you move it. Layout... makes it arrange its content as a row, a column or a grid (Alignment... centres or aligns it, Spacing... sets the gaps); the content is rearranged automatically when you add, remove, move or resize things, and dragging a widget inside the zone reorders it. Zones can contain zones. Align... > Spread on a circle puts three or more selected widgets at equal angles on a circle; the widget you clicked last goes to the side you choose and the others follow in their current order. A zone can also arrange its content on a circle (Layout...).\n\n"
+        "+ SLIDER: a drawbar-style slider linked to a parameter, horizontal or vertical (Vertical swaps its shape). On a parameter with steps (a drawbar 0 to 8, a mode) the handle jumps from notch to notch. Drag it or click on the rail; double-click: default value.\n\n"
+        "STYLES...: the library of image styles. A style is a named set of images (PNG, JPG or SVG): off and on pictures for buttons and actions (a closed and an open drawbar tab), a rail and a handle for sliders, and a strip of frames for knobs (one picture per position). Make it once, then give it to any widgets with Style...; editing a style changes all the widgets that use it. A missing image keeps the default drawing.\n\n"
         "+ KEYBOARD: a virtual keyboard bound to one MIDI channel of this track (give each organ manual its own keyboard, channels 1, 2, 3 by default). Click or drag across keys to play; the keys of notes played from outside on that channel light up too. Channel..., First note..., Velocity... and Hold set it up; the width of the widget decides how many keys are shown.\n\n"
         "SAME SIZE FOR ALL gives every widget of the selected one's type (all the knobs, for instance) its size.\n\n"
         "LINK... chooses the parameter of the selected widget (the list starts on this track's parameters; clear the filter to see all). ALIGN... aligns, distributes and arranges several widgets in a grid. BACKGROUND... puts an image (PNG or JPG) behind the widgets.\n\n"
@@ -324,6 +349,8 @@ const Entry kEntries[] = {
         "+ COURBE DE VÉLOCITÉ (pistes Sampler) : la courbe de transfert appliquée à la vélocité MIDI reçue avant qu'elle n'atteigne les modules de son. Double-clic dans le graphe : ajoute un point, glisser un point : le déplace, clic droit sur un point : le supprime. Les deux poignées carrées des bords gauche et droit relèvent le plancher ou abaissent le plafond : toute la plage est remappée entre les deux. On choisit une courbe lissée ou des angles nets entre les points. La même courbe est accessible par le bouton V à côté du canal MIDI dans la bande de la piste du Mixeur ; sa case à cocher contourne la courbe sans perdre les réglages.\n\n"
         "+ ÉTIQUETTE : du texte libre. Texte... change le texte de n'importe quel widget (la légende d'un potard, d'un bouton ou d'une courbe).\n\n"
         "+ ZONE : un conteneur avec un titre. Les widgets dont le centre est dedans lui appartiennent et le suivent quand on le déplace. Disposition... lui fait ranger son contenu en ligne, en colonne ou en matrice (Alignement... le centre ou l'aligne, Espacement... règle les écarts) ; le contenu se réorganise tout seul quand on ajoute, retire, déplace ou redimensionne, et glisser un widget dans la zone le réordonne. Les zones peuvent contenir des zones. Aligner... > Répartir en cercle place trois widgets sélectionnés ou plus à angles égaux sur un cercle ; le dernier widget cliqué va du côté choisi et les autres suivent dans leur ordre actuel. Une zone peut aussi ranger son contenu en cercle (Disposition...).\n\n"
+        "+ CURSEUR : un curseur façon tirant lié à un paramètre, horizontal ou vertical (Vertical échange sa forme). Sur un paramètre à pas (un tirant de 0 à 8, un mode) la poignée saute de cran en cran. Glissez-la ou cliquez sur le rail ; double-clic : valeur par défaut.\n\n"
+        "STYLES... : la bibliothèque de styles d'images. Un style est un jeu d'images nommé (PNG, JPG ou SVG) : images éteint et allumé pour les boutons et les actions (une plaquette de tirant fermée et ouverte), un rail et une poignée pour les curseurs, et une bande d'images pour les potards (une image par position). On le crée une fois, puis on le donne à des widgets avec Style... ; modifier un style change tous les widgets qui l'utilisent. Une image absente garde le dessin d'origine.\n\n"
         "+ CLAVIER : un clavier virtuel lié à un canal MIDI de cette piste (donnez à chaque manuel d'orgue son clavier, canaux 1, 2, 3 par défaut). Cliquez ou glissez sur les touches pour jouer ; les touches des notes jouées de l'extérieur sur ce canal s'allument aussi. Canal..., Première note..., Vélocité... et Maintien le règlent ; la largeur du widget décide du nombre de touches affichées.\n\n"
         "MÊME TAILLE POUR TOUS donne à tous les widgets du même type que celui sélectionné (tous les potards, par exemple) sa taille.\n\n"
         "LIER... choisit le paramètre du widget sélectionné (la liste commence par les paramètres de cette piste ; effacez le filtre pour tout voir). ALIGNER... aligne, répartit et dispose en matrice plusieurs widgets. FOND... place une image (PNG ou JPG) derrière les widgets.\n\n"

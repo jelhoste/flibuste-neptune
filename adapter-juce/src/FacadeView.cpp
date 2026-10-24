@@ -72,7 +72,41 @@ int snapped (int v) { return (v + 2) / 4 * 4; } // aimantation sur une grille de
 
 juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
-bool needsParam (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Menu; }
+bool needsParam (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Menu || t == fc::WidgetType::Slider; }
+
+// Les widgets qui peuvent prendre un style d'images.
+bool takesStyle (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Action || t == fc::WidgetType::Slider; }
+
+// Charge une image PNG, JPG ou SVG (le SVG est rastérisé, côté le plus long = maxSide). Image vide si le fichier est absent ou illisible.
+juce::Image loadPicture (const std::string& path, int maxSide)
+{
+    if (path.empty()) return {};
+    const juce::File file (juce::String::fromUTF8 (path.c_str()));
+    if (! file.existsAsFile()) return {};
+    if (file.hasFileExtension ("svg"))
+    {
+        const std::unique_ptr<juce::Drawable> drawable (juce::Drawable::createFromImageFile (file));
+        if (drawable == nullptr) return {};
+        const auto bounds = drawable->getDrawableBounds();
+        if (bounds.isEmpty()) return {};
+        const float k = static_cast<float> (maxSide) / std::max (bounds.getWidth(), bounds.getHeight());
+        const int w = std::max (1, juce::roundToInt (bounds.getWidth() * k)), h = std::max (1, juce::roundToInt (bounds.getHeight() * k));
+        juce::Image img (juce::Image::ARGB, w, h, true);
+        juce::Graphics g (img);
+        drawable->drawWithin (g, juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (w), static_cast<float> (h)), juce::RectanglePlacement::centred, 1.0f);
+        return img;
+    }
+    return juce::ImageFileFormat::loadFrom (file);
+}
+
+// Taille de la poignée d'un curseur le long de son axe : celle de son image, sinon un rectangle étroit.
+float sliderHandleLength (const fc::Widget& w, const juce::Image& handle)
+{
+    const float cross = static_cast<float> (w.vertical != 0 ? w.w : w.h);
+    const float aspect = handle.isValid() ? static_cast<float> (handle.getWidth()) / static_cast<float> (handle.getHeight()) : (w.vertical != 0 ? 2.0f : 0.5f);   // largeur / hauteur
+    const float len = w.vertical != 0 ? cross / aspect : cross * aspect;
+    return std::clamp (len, 10.0f, static_cast<float> (w.vertical != 0 ? w.h : w.w) * 0.5f);
+}
 
 // Valeurs proposées par un menu : un paramètre à choix ou à pas (rendu vide pour les autres).
 int menuCount (const neptune::core::ParamSpec& s)
@@ -92,6 +126,9 @@ public:
     ~Canvas() override { releaseKeys(); }
 
     bool dragging() const noexcept { return mode_ != Mode::None; }
+
+    // Oublie les images chargées (un style a changé ou un fichier a été remplacé).
+    void clearPictures() { pictures_.clear(); repaint(); }
 
     // Relâche toutes les notes tenues par les claviers (changement de piste, sortie du mode Jeu, fermeture).
     void releaseKeys()
@@ -170,7 +207,7 @@ public:
         g.setColour (o.colour (Token::PanelBg));
         g.fillRect (area);
 
-        loadImageIfNeeded();
+        const juce::Image image_ = picture (o.facade_.image, 2048);
         {
             juce::Graphics::ScopedSaveState keep (g);
             g.reduceClipRegion (area.toNearestInt());
@@ -233,7 +270,14 @@ public:
             return;
         }
         playId_ = w->param;
-        if (w->type == fc::WidgetType::Button)
+        if (w->type == fc::WidgetType::Slider)
+        {
+            o.processor_.uiBeginEdit (w->param);
+            mode_ = Mode::Slide;
+            slideId_ = w->id;
+            slideTo (*w, p);
+        }
+        else if (w->type == fc::WidgetType::Button)
         {
             toggle (w->param);
             playId_ = 0;
@@ -269,6 +313,11 @@ public:
                 o.processor_.uiNoteOnTrack (o.track_, key, static_cast<float> (w->velocity) / 127.0f, w->channel - 1);
                 repaint();
             }
+            return;
+        }
+        if (mode_ == Mode::Slide)
+        {
+            if (const auto* w = o.facade_.find (slideId_)) slideTo (*w, toCanvas (e.position));
             return;
         }
         if (mode_ == Mode::Turn)
@@ -328,7 +377,7 @@ public:
         }
         const auto mode = mode_;
         mode_ = Mode::None;
-        if (mode == Mode::Turn)
+        if (mode == Mode::Turn || mode == Mode::Slide)
         {
             o.processor_.uiEndEdit (playId_);
             playId_ = 0;
@@ -356,7 +405,7 @@ public:
             else if (needsParam (w->type)) o.openPicker();
             return;
         }
-        if (w->type == fc::WidgetType::Knob && w->param != 0) o.processor_.uiResetToDefault (w->param);
+        if ((w->type == fc::WidgetType::Knob || w->type == fc::WidgetType::Slider) && w->param != 0) o.processor_.uiResetToDefault (w->param);
     }
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
@@ -364,11 +413,14 @@ public:
         auto& o = owner_;
         if (o.editMode_) return;
         const auto* w = widgetAt (toCanvas (e.position));
-        if (w == nullptr || w->type != fc::WidgetType::Knob || w->param == 0) return;
+        if (w == nullptr || (w->type != fc::WidgetType::Knob && w->type != fc::WidgetType::Slider) || w->param == 0) return;
         auto& ps = o.processor_.parameters();
         if (ps.indexOf (w->param) == neptune::core::ParameterSet::npos) return;
+        const auto* spec = ps.find (w->param);
+        const bool stepped = spec != nullptr && spec->max > spec->min && (spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped);
+        const double delta = stepped ? (wheel.deltaY > 0 ? 1.0 : -1.0) / (spec->max - spec->min) : wheel.deltaY * 0.1;   // un cran par molette sur un paramètre à pas
         o.processor_.uiBeginEdit (w->param);
-        o.processor_.uiSetNormalised (w->param, juce::jlimit (0.0, 1.0, ps.getNormalized (w->param) + wheel.deltaY * 0.1));
+        o.processor_.uiSetNormalised (w->param, juce::jlimit (0.0, 1.0, ps.getNormalized (w->param) + delta));
         o.processor_.uiEndEdit (w->param);
     }
 
@@ -405,7 +457,30 @@ public:
     }
 
 private:
-    enum class Mode { None, Move, Resize, Turn, Band, Key };
+    enum class Mode { None, Move, Resize, Turn, Band, Key, Slide };
+
+    // Place la poignée du curseur sous le point (canevas) : crans automatiques sur un paramètre à pas ou à choix.
+    void slideTo (const fc::Widget& w, juce::Point<float> p)
+    {
+        auto& o = owner_;
+        const auto* spec = o.processor_.parameters().find (w.param);
+        if (spec == nullptr) return;
+        const juce::Image handle = w.style != 0 && o.facade_.findStyle (w.style) != nullptr ? picture (o.facade_.findStyle (w.style)->handle) : juce::Image();
+        const float len = sliderHandleLength (w, handle);
+        const bool vertical = w.vertical != 0;
+        const float start = (vertical ? static_cast<float> (w.y) : static_cast<float> (w.x)) + len * 0.5f;
+        const float travel = std::max (1.0f, static_cast<float> (vertical ? w.h : w.w) - len);
+        double t = ((vertical ? p.y : p.x) - start) / travel;
+        if (vertical) t = 1.0 - t;
+        t = std::clamp (t, 0.0, 1.0);
+        if (spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped || spec->kind == neptune::core::Kind::Toggle)
+        {
+            const double steps = spec->max - spec->min;
+            if (steps > 0.0) t = spec->toNormalized (spec->min + std::round (t * steps));
+        }
+        o.processor_.uiSetNormalised (w.param, t);
+        repaint();
+    }
 
     void noteOn (const fc::Widget& w, int key)
     {
@@ -594,15 +669,13 @@ private:
         return true;
     }
 
-    void loadImageIfNeeded()
+    // Image du cache (chargée au premier besoin) ; vide si absente ou illisible. L'échec est mémorisé : pas de relecture à chaque image.
+    juce::Image picture (const std::string& path, int maxSide = 1024) const
     {
-        const auto& path = owner_.facade_.image;
-        if (path == imagePath_) return;
-        imagePath_ = path;
-        image_ = {};
-        if (path.empty()) return;
-        const juce::File file (utf8 (path));
-        if (file.existsAsFile()) image_ = juce::ImageFileFormat::loadFrom (file);
+        if (path.empty()) return {};
+        const auto it = pictures_.find (path);
+        if (it != pictures_.end()) return it->second;
+        return pictures_[path] = loadPicture (path, maxSide);
     }
 
     void paintWidget (juce::Graphics& g, const fc::Widget& w) const
@@ -622,7 +695,23 @@ private:
                 auto r = b;
                 auto valueRow = r.removeFromBottom (15.0f);
                 auto captionRow = r.removeFromBottom (17.0f);
-                paintNeptuneKnob (g, r, n, o.palette_, o.knobStyle_);
+                const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const juce::Image strip = style != nullptr && style->frames > 1 ? picture (style->strip, 4096) : juce::Image();
+                if (strip.isValid())
+                {
+                    // bande d'images : une image par position du potard
+                    const int frames = style->frames, frame = juce::jlimit (0, frames - 1, juce::roundToInt (n * static_cast<float> (frames - 1)));
+                    const int fw = style->stripHorizontal ? strip.getWidth() / frames : strip.getWidth();
+                    const int fh = style->stripHorizontal ? strip.getHeight() : strip.getHeight() / frames;
+                    if (fw > 0 && fh > 0)
+                    {
+                        const auto dest = juce::RectanglePlacement::centred.appliedTo (juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (fw), static_cast<float> (fh)), r).toNearestInt();
+                        g.drawImage (strip, dest.getX(), dest.getY(), dest.getWidth(), dest.getHeight(),
+                                     style->stripHorizontal ? frame * fw : 0, style->stripHorizontal ? 0 : frame * fh, fw, fh);
+                    }
+                }
+                else
+                    paintNeptuneKnob (g, r, n, o.palette_, o.knobStyle_);
                 g.setColour (o.colour (Token::Text));
                 g.setFont (juce::FontOptions (14.0f));
                 g.drawFittedText (caption, captionRow.toNearestInt(), juce::Justification::centred, 1);
@@ -637,6 +726,21 @@ private:
                 const bool isAction = w.type == fc::WidgetType::Action;
                 const bool on = isAction ? actionIsLit (w) : linked && n >= 0.5f;
                 const bool empty = isAction ? w.snapshot.empty() : ! linked;
+                if (const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr)
+                {
+                    const juce::Image face = picture (on ? style->on : style->off);
+                    if (face.isValid())
+                    {
+                        g.drawImage (face, b, juce::RectanglePlacement::centred);
+                        if (! w.text.empty())
+                        {
+                            g.setColour (o.colour (Token::Text));
+                            g.setFont (juce::FontOptions (juce::jlimit (11.0f, 24.0f, b.getHeight() * 0.3f), juce::Font::bold));
+                            g.drawFittedText (utf8 (w.text), b.toNearestInt().reduced (4), juce::Justification::centred, 2);
+                        }
+                        break;
+                    }
+                }
                 const auto r = b.reduced (1.0f);
                 g.setColour (on ? o.colour (Token::Accent) : o.colour (Token::Pb));
                 g.fillRoundedRectangle (r, 8.0f);
@@ -686,6 +790,46 @@ private:
                 g.setColour (o.colour (Token::TextDim));
                 g.setFont (juce::FontOptions (16.0f));
                 g.drawFittedText (o.text ("facade.curve_title"), body.toNearestInt().reduced (12), juce::Justification::centred, 3);
+                break;
+            }
+            case fc::WidgetType::Slider:
+            {
+                const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const juce::Image rail = style != nullptr ? picture (style->track) : juce::Image();
+                const juce::Image handle = style != nullptr ? picture (style->handle) : juce::Image();
+                const bool vertical = w.vertical != 0;
+                if (rail.isValid()) g.drawImage (rail, b, juce::RectanglePlacement::stretchToFit);
+                else
+                {
+                    g.setColour (o.colour (Token::Border));
+                    if (vertical) g.fillRoundedRectangle (juce::Rectangle<float> (4.0f, b.getHeight()).withCentre (b.getCentre()), 2.0f);
+                    else g.fillRoundedRectangle (juce::Rectangle<float> (b.getWidth(), 4.0f).withCentre (b.getCentre()), 2.0f);
+                }
+                const float len = sliderHandleLength (w, handle);
+                const float travel = (vertical ? b.getHeight() : b.getWidth()) - len;
+                const float pos = linked ? n : 0.0f;
+                juce::Rectangle<float> hr = vertical ? juce::Rectangle<float> (b.getX(), b.getBottom() - len - pos * travel, b.getWidth(), len)
+                                                     : juce::Rectangle<float> (b.getX() + pos * travel, b.getY(), len, b.getHeight());
+                if (handle.isValid()) g.drawImage (handle, hr, juce::RectanglePlacement::centred);
+                else
+                {
+                    g.setColour (linked ? o.colour (Token::Accent) : o.colour (Token::TextDim2));
+                    g.fillRoundedRectangle (hr.reduced (1.0f), 4.0f);
+                    g.setColour (o.colour (Token::Text));
+                    g.drawRoundedRectangle (hr.reduced (1.0f), 4.0f, 1.0f);
+                }
+                if (! w.text.empty())
+                {
+                    g.setColour (o.colour (Token::TextDim));
+                    g.setFont (juce::FontOptions (12.0f));
+                    g.drawFittedText (utf8 (w.text), b.toNearestInt(), vertical ? juce::Justification::centredBottom : juce::Justification::centredBottom, 1);
+                }
+                else if (! linked && o.editMode_)
+                {
+                    g.setColour (o.colour (Token::TextDim));
+                    g.setFont (juce::FontOptions (12.0f));
+                    g.drawFittedText (o.text ("facade.unlinked"), b.toNearestInt(), juce::Justification::centred, 1);
+                }
                 break;
             }
             case fc::WidgetType::Keyboard:
@@ -768,8 +912,8 @@ private:
     neptune::core::ParamId playId_ = 0;
     double startNorm_ = 0.0;
     float startY_ = 0.0f;
-    std::string imagePath_;
-    juce::Image image_;
+    int slideId_ = 0;
+    mutable std::map<std::string, juce::Image> pictures_;   // chemin -> image (vide : introuvable)
     std::map<int, std::unique_ptr<VelocityPanel>> panels_;
     std::uint32_t panelRevision_ = 0xFFFFFFFFu;
 
@@ -1090,6 +1234,259 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpPanel)
 };
 
+// ============================== Bibliothèque de styles d'images ==============================
+
+// Fenêtre des styles : liste, nom, une image par usage (bouton éteint / allumé, rail et poignée de curseur, bande de potard).
+class FacadeView::StylePanel : public juce::Component, private juce::ListBoxModel
+{
+public:
+    explicit StylePanel (FacadeView& owner) : owner_ (owner)
+    {
+        title_.setText (owner.text ("facade.styles_title"), juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (title_);
+        list_.setModel (this);
+        list_.setRowHeight (28);
+        list_.setColour (juce::ListBox::backgroundColourId, owner.colour (Token::BgApp));
+        addAndMakeVisible (list_);
+        newButton_.setButtonText (owner.text ("facade.style_new"));
+        newButton_.onClick = [this] { createStyle(); };
+        deleteButton_.setButtonText (owner.text ("facade.delete"));
+        deleteButton_.onClick = [this] { deleteStyle(); };
+        closeButton_.setButtonText (owner.text ("modal.close"));
+        closeButton_.onClick = [this] { close(); };
+        for (auto* b : { &newButton_, &deleteButton_, &closeButton_ }) addAndMakeVisible (*b);
+
+        nameLabel_.setText (owner.text ("facade.style_name"), juce::dontSendNotification);
+        nameLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (nameLabel_);
+        name_.setFont (juce::FontOptions (18.0f));
+        name_.setInputRestrictions (static_cast<int> (fc::maxTextLength));
+        name_.onReturnKey = [this] { commitName(); };
+        name_.onFocusLost = [this] { commitName(); };
+        addAndMakeVisible (name_);
+
+        static constexpr const char* keys[5] = { "facade.style_off", "facade.style_on", "facade.style_track", "facade.style_handle", "facade.style_strip" };
+        static constexpr std::string fc::ImageStyle::* members[5] = { &fc::ImageStyle::off, &fc::ImageStyle::on, &fc::ImageStyle::track, &fc::ImageStyle::handle, &fc::ImageStyle::strip };
+        for (int i = 0; i < 5; ++i)
+        {
+            auto& r = rows_[static_cast<std::size_t> (i)];
+            r.member = members[i];
+            r.label.setText (owner.text (keys[i]), juce::dontSendNotification);
+            r.label.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+            r.path.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
+            r.path.setMinimumHorizontalScale (0.7f);
+            r.choose.setButtonText (owner.text ("facade.style_choose"));
+            r.choose.onClick = [this, i] { chooseImage (i); };
+            r.clear.setButtonText (owner.text ("facade.style_clear"));
+            r.clear.onClick = [this, i] { edit ([i] (fc::ImageStyle& st) { st.*(members[i]) = std::string(); }); };
+            for (auto* c : std::initializer_list<juce::Component*> { &r.label, &r.path, &r.choose, &r.clear }) addAndMakeVisible (*c);
+        }
+        framesLabel_.setText (owner.text ("facade.style_frames"), juce::dontSendNotification);
+        framesLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (framesLabel_);
+        frames_.setInputRestrictions (3, "0123456789");
+        frames_.setFont (juce::FontOptions (18.0f));
+        frames_.onReturnKey = [this] { commitFrames(); };
+        frames_.onFocusLost = [this] { commitFrames(); };
+        addAndMakeVisible (frames_);
+        stripH_.setButtonText (owner.text ("facade.style_strip_h"));
+        stripH_.setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
+        stripH_.onClick = [this] { edit ([this] (fc::ImageStyle& st) { st.stripHorizontal = stripH_.getToggleState(); }); };
+        addAndMakeVisible (stripH_);
+        hint_.setText (owner.text ("facade.style_hint"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (13.0f));
+        hint_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
+        addAndMakeVisible (hint_);
+
+        list_.updateContent();
+        if (! owner_.facade_.styles.empty()) list_.selectRow (0);
+        syncFields();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (owner_.colour (Token::PanelBg));
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (panel().toFloat(), 10.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto r = panel().reduced (18);
+        title_.setBounds (r.removeFromTop (32));
+        r.removeFromTop (6);
+        auto bottom = r.removeFromBottom (40);
+        closeButton_.setBounds (bottom.removeFromRight (140));
+        hint_.setBounds (bottom);
+        r.removeFromBottom (8);
+        auto left = r.removeFromLeft (220);
+        auto leftButtons = left.removeFromBottom (40);
+        left.removeFromBottom (6);
+        list_.setBounds (left);
+        newButton_.setBounds (leftButtons.removeFromLeft (leftButtons.getWidth() / 2).reduced (2, 0));
+        deleteButton_.setBounds (leftButtons.reduced (2, 0));
+        r.removeFromLeft (14);
+        auto nameRow = r.removeFromTop (34);
+        nameLabel_.setBounds (nameRow.removeFromLeft (110));
+        name_.setBounds (nameRow);
+        r.removeFromTop (10);
+        for (auto& row : rows_)
+        {
+            auto line = r.removeFromTop (34);
+            r.removeFromTop (6);
+            row.label.setBounds (line.removeFromLeft (110));
+            row.clear.setBounds (line.removeFromRight (80).reduced (2, 0));
+            row.choose.setBounds (line.removeFromRight (110).reduced (2, 0));
+            row.path.setBounds (line);
+        }
+        auto fl = r.removeFromTop (34);
+        framesLabel_.setBounds (fl.removeFromLeft (110));
+        frames_.setBounds (fl.removeFromLeft (80));
+        fl.removeFromLeft (14);
+        stripH_.setBounds (fl);
+    }
+
+private:
+    struct Row
+    {
+        std::string fc::ImageStyle::* member = nullptr;
+        juce::Label label, path;
+        juce::TextButton choose, clear;
+    };
+
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (800, juce::jmin (560, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+
+    const fc::ImageStyle* current() const
+    {
+        const int row = list_.getSelectedRow();
+        const auto& styles = owner_.facade_.styles;
+        return row >= 0 && row < static_cast<int> (styles.size()) ? &styles[static_cast<std::size_t> (row)] : nullptr;
+    }
+
+    // Change le style sélectionné (un seul geste annulable) puis relit les champs.
+    void edit (const std::function<void (fc::ImageStyle&)>& change)
+    {
+        const int row = list_.getSelectedRow();
+        auto f = owner_.facade_;
+        if (row < 0 || row >= static_cast<int> (f.styles.size())) return;
+        change (f.styles[static_cast<std::size_t> (row)]);
+        owner_.commit (std::move (f), "Facade: styles");
+        owner_.canvas_->clearPictures();
+        list_.updateContent();
+        list_.repaint();
+        syncFields();
+    }
+
+    void syncFields()
+    {
+        const auto* st = current();
+        const bool has = st != nullptr;
+        for (auto* c : std::initializer_list<juce::Component*> { &name_, &frames_, &stripH_, &deleteButton_ }) c->setEnabled (has);
+        name_.setText (has ? utf8 (st->name) : juce::String(), false);
+        frames_.setText (has ? juce::String (st->frames) : juce::String(), false);
+        stripH_.setToggleState (has && st->stripHorizontal, juce::dontSendNotification);
+        for (auto& r : rows_)
+        {
+            r.choose.setEnabled (has);
+            r.clear.setEnabled (has);
+            const std::string path = has ? st->*(r.member) : std::string();
+            r.path.setText (path.empty() ? owner_.text ("facade.style_none") : juce::File (utf8 (path)).getFileName(), juce::dontSendNotification);
+        }
+    }
+
+    void commitName()
+    {
+        const auto value = name_.getText().toStdString();
+        if (const auto* st = current(); st != nullptr && st->name != value) edit ([value] (fc::ImageStyle& s) { s.name = value; });
+    }
+
+    void commitFrames()
+    {
+        const int value = frames_.getText().getIntValue();
+        if (const auto* st = current(); st != nullptr && st->frames != value) edit ([value] (fc::ImageStyle& s) { s.frames = value; });
+    }
+
+    void chooseImage (int index)
+    {
+        chooser_ = std::make_unique<juce::FileChooser> (owner_.text ("facade.choose_image"), juce::File::getSpecialLocation (juce::File::userPicturesDirectory), "*.png;*.jpg;*.jpeg;*.svg");
+        chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                               [safe = juce::Component::SafePointer<StylePanel> (this), index] (const juce::FileChooser& c)
+                               {
+                                   if (safe == nullptr) return;
+                                   const auto file = c.getResult();
+                                   if (! file.existsAsFile()) return;
+                                   const auto member = safe->rows_[static_cast<std::size_t> (index)].member;
+                                   const std::string path = file.getFullPathName().toStdString();
+                                   safe->edit ([member, path] (fc::ImageStyle& st) { st.*member = path; });
+                               });
+    }
+
+    void createStyle()
+    {
+        auto f = owner_.facade_;
+        if (static_cast<int> (f.styles.size()) >= fc::maxStyles) return;
+        fc::ImageStyle st;
+        st.id = f.freeStyleId();
+        st.name = owner_.text ("facade.style_default_name").toStdString() + " " + std::to_string (st.id);
+        f.styles.push_back (st);
+        const int row = static_cast<int> (f.styles.size()) - 1;
+        owner_.commit (std::move (f), "Facade: add style");
+        list_.updateContent();
+        list_.selectRow (row);
+        syncFields();
+    }
+
+    void deleteStyle()
+    {
+        const int row = list_.getSelectedRow();
+        auto f = owner_.facade_;
+        if (row < 0 || row >= static_cast<int> (f.styles.size())) return;
+        f.styles.erase (f.styles.begin() + row);
+        owner_.commit (std::move (f), "Facade: delete style");
+        owner_.canvas_->clearPictures();
+        list_.updateContent();
+        list_.selectRow (juce::jmin (row, static_cast<int> (owner_.facade_.styles.size()) - 1));
+        syncFields();
+    }
+
+    void close()
+    {
+        commitName();
+        commitFrames();
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (&owner_)]
+        {
+            if (safe != nullptr) { safe->stylePanel_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
+        });
+    }
+
+    int getNumRows() override { return static_cast<int> (owner_.facade_.styles.size()); }
+    void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override
+    {
+        const auto& styles = owner_.facade_.styles;
+        if (row < 0 || row >= static_cast<int> (styles.size())) return;
+        if (selected) { g.setColour (owner_.colour (Token::Accent).withAlpha (0.35f)); g.fillRect (0, 0, w, h); }
+        g.setColour (owner_.colour (Token::Text));
+        g.setFont (juce::FontOptions (15.0f));
+        g.drawText (utf8 (styles[static_cast<std::size_t> (row)].name), 8, 0, w - 16, h, juce::Justification::centredLeft);
+    }
+    void selectedRowsChanged (int) override { syncFields(); }
+
+    FacadeView& owner_;
+    juce::Label title_, nameLabel_, framesLabel_, hint_;
+    juce::ListBox list_;
+    juce::TextButton newButton_, deleteButton_, closeButton_;
+    juce::TextEditor name_, frames_;
+    juce::ToggleButton stripH_;
+    std::array<Row, 5> rows_;
+    std::unique_ptr<juce::FileChooser> chooser_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StylePanel)
+};
+
 // ============================== Vue ==============================
 
 FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
@@ -1124,6 +1521,16 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (labelButton_, "facade.add_label", fc::WidgetType::Label);
     setupAdd (zoneButton_, "facade.add_zone", fc::WidgetType::Zone);
     setupAdd (keyboardButton_, "facade.add_keyboard", fc::WidgetType::Keyboard);
+    setupAdd (sliderButton_, "facade.add_slider", fc::WidgetType::Slider);
+    stylesButton_.setButtonText (text ("facade.styles"));
+    stylesButton_.setTooltip (text ("facade.tip_styles"));
+    stylesButton_.onClick = [this] { openStyles(); };
+    styleButton_.setButtonText (text ("facade.style"));
+    styleButton_.setTooltip (text ("facade.tip_style"));
+    styleButton_.onClick = [this] { showStyleMenu(); };
+    orientButton_.setButtonText (text ("facade.vertical"));
+    orientButton_.setTooltip (text ("facade.tip_vertical"));
+    orientButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.vertical = w.vertical != 0 ? 0 : 1; std::swap (w.w, w.h); }, "Facade: slider orientation"); };
     imageButton_.setButtonText (text ("facade.image"));
     imageButton_.onClick = [this] { chooseImage(); };
     fitButton_.setButtonText (text ("facade.fit_fit"));
@@ -1188,13 +1595,14 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     actionButton_.setTooltip (text ("facade.tip_action"));
     curveButton_.setTooltip (text ("facade.tip_curve"));
     zoneButton_.setTooltip (text ("facade.tip_zone"));
+    sliderButton_.setTooltip (text ("facade.tip_slider"));
     keyboardButton_.setTooltip (text ("facade.tip_keyboard"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
     for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -1215,7 +1623,7 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
     linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type));
@@ -1227,6 +1635,12 @@ void FacadeView::updateButtons()
     const bool zone = editMode_ && one != nullptr && one->type == fc::WidgetType::Zone;
     const bool keyboard = editMode_ && one != nullptr && one->type == fc::WidgetType::Keyboard;
     for (auto* b : { &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_ }) b->setVisible (keyboard);
+    bool anyStylable = false;
+    for (const auto& w : facade_.widgets)
+        if (selection_.count (w.id) != 0 && takesStyle (w.type)) anyStylable = true;
+    styleButton_.setVisible (editMode_ && anyStylable);
+    orientButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Slider);
+    if (one != nullptr && one->type == fc::WidgetType::Slider) orientButton_.setToggleState (one->vertical != 0, juce::dontSendNotification);
     if (keyboard) kbHoldButton_.setToggleState (one->hold != 0, juce::dontSendNotification);
     layoutButton_.setVisible (zone);
     zoneAlignButton_.setVisible (zone);
@@ -1255,23 +1669,39 @@ void FacadeView::resized()
             row.removeFromLeft (gap);
         }
     };
+    // Rangées qui passent à la ligne quand la place manque.
+    auto flow = [&] (std::initializer_list<juce::TextButton*> buttons)
+    {
+        const auto rect = area;
+        int x = 0, y = 0;
+        bool any = false;
+        for (auto* b : buttons)
+        {
+            if (! b->isVisible()) continue;
+            const int w = fit (*b);
+            if (x > 0 && x + w > rect.getWidth()) { x = 0; y += rowH + gap; }
+            b->setBounds (rect.getX() + x, rect.getY() + y, w, rowH);
+            x += w + gap;
+            any = true;
+        }
+        if (any) area.removeFromTop (y + rowH + gap);
+    };
     {
         auto top = area.removeFromTop (rowH);
         helpButton_.setBounds (top.removeFromRight (rowH + 8));   // « ? » à droite de la première rangée
-        layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_ });
+        layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_, &stylesButton_ });
     }
     area.removeFromTop (gap);
     if (editMode_)
     {
-        layoutRow (area.removeFromTop (rowH), { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_ });
-        area.removeFromTop (gap);
-        layoutRow (area.removeFromTop (rowH), { &linkButton_, &textButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
-        area.removeFromTop (gap);
+        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &orientButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
     if (prompt_ != nullptr) prompt_->setBounds (getLocalBounds());
     if (help_ != nullptr) help_->setBounds (getLocalBounds());
+    if (stylePanel_ != nullptr) stylePanel_->setBounds (getLocalBounds());
 }
 
 void FacadeView::paint (juce::Graphics&) {}
@@ -1524,7 +1954,7 @@ void FacadeView::showZoneGapMenu()
 
 void FacadeView::chooseImage()
 {
-    chooser_ = std::make_unique<juce::FileChooser> (text ("facade.choose_image"), juce::File::getSpecialLocation (juce::File::userPicturesDirectory), "*.png;*.jpg;*.jpeg");
+    chooser_ = std::make_unique<juce::FileChooser> (text ("facade.choose_image"), juce::File::getSpecialLocation (juce::File::userPicturesDirectory), "*.png;*.jpg;*.jpeg;*.svg");
     chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                            [safe = juce::Component::SafePointer<FacadeView> (this)] (const juce::FileChooser& c)
                            {
@@ -1600,6 +2030,35 @@ void FacadeView::editText()
     addAndMakeVisible (*prompt_);
     prompt_->setBounds (getLocalBounds());
     prompt_->toFront (true);
+}
+
+void FacadeView::openStyles()
+{
+    if (stylePanel_ != nullptr) return;
+    stylePanel_ = std::make_unique<StylePanel> (*this);
+    addAndMakeVisible (*stylePanel_);
+    stylePanel_->setBounds (getLocalBounds());
+    stylePanel_->toFront (true);
+}
+
+// Affecte un style à la sélection (les widgets qui en prennent un) ; « Gérer les styles... » ouvre la bibliothèque.
+void FacadeView::showStyleMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("facade.style_none"));
+    for (const auto& st : facade_.styles) menu.addItem (100 + st.id, utf8 (st.name));
+    menu.addSeparator();
+    menu.addItem (2, text ("facade.styles"));
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&styleButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        if (choice == 2) { safe->openStyles(); return; }
+        auto f = safe->facade_;
+        for (auto& w : f.widgets)
+            if (safe->selection_.count (w.id) != 0 && takesStyle (w.type)) w.style = choice == 1 ? 0 : choice - 100;
+        safe->commit (std::move (f), "Facade: widget style");
+    });
 }
 
 void FacadeView::openHelp()

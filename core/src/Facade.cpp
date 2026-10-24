@@ -18,6 +18,20 @@ int Facade::freeId() const noexcept
     return id;
 }
 
+int Facade::freeStyleId() const noexcept
+{
+    int id = 1;
+    for (const auto& s : styles) id = std::max (id, s.id + 1);
+    return id;
+}
+
+const ImageStyle* Facade::findStyle (int id) const noexcept
+{
+    for (const auto& s : styles)
+        if (s.id == id) return &s;
+    return nullptr;
+}
+
 const Widget* Facade::find (int id) const noexcept
 {
     for (const auto& w : widgets)
@@ -47,6 +61,7 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Curve:  w.w = 340; w.h = 260; break;
         case WidgetType::Zone:   w.w = 320; w.h = 200; break;
         case WidgetType::Keyboard: w.w = 520; w.h = 110; break;
+        case WidgetType::Slider: w.w = 260; w.h = 44; break;
     }
     w.x = x;
     w.y = y;
@@ -65,6 +80,23 @@ std::string clipped (std::string s, std::size_t maxLength)
 Facade sanitised (Facade f)
 {
     f.image = clipped (std::move (f.image), maxImagePath);
+    if (f.styles.size() > static_cast<std::size_t> (maxStyles)) f.styles.resize (maxStyles);
+    {
+        std::set<int> usedStyles;
+        for (auto& st : f.styles)
+        {
+            st.name = clipped (std::move (st.name), maxTextLength);
+            for (auto* path : { &st.off, &st.on, &st.track, &st.handle, &st.strip }) *path = clipped (std::move (*path), maxImagePath);
+            st.frames = std::clamp (st.frames, 0, maxStripFrames);
+            if (st.id <= 0 || usedStyles.count (st.id) != 0)
+            {
+                int id = 1;
+                while (usedStyles.count (id) != 0) ++id;
+                st.id = id;
+            }
+            usedStyles.insert (st.id);
+        }
+    }
     const int fit = static_cast<int> (f.fit);
     if (fit < 0 || fit >= numImageFits) f.fit = ImageFit::Fit;
     if (f.widgets.size() > static_cast<std::size_t> (maxWidgets)) f.widgets.resize (maxWidgets);
@@ -89,6 +121,7 @@ Facade sanitised (Facade f)
         w.firstNote = std::clamp (w.firstNote, 0, 120);
         w.hold = w.hold != 0 ? 1 : 0;
         w.velocity = std::clamp (w.velocity, 1, 127);
+        w.vertical = w.vertical != 0 ? 1 : 0;
         if (w.id <= 0 || used.count (w.id) != 0)
         {
             int id = 1;
@@ -97,6 +130,8 @@ Facade sanitised (Facade f)
         }
         used.insert (w.id);
     }
+    for (auto& w : f.widgets)
+        if (w.style != 0 && f.findStyle (w.style) == nullptr) w.style = 0;   // style supprimé
     // rattachements valides : la zone existe, n'est pas le widget lui-même, et la chaîne de parents ne boucle pas
     for (auto& w : f.widgets)
     {
@@ -477,6 +512,8 @@ std::string toJson (const Facade& f)
         if (w.param != 0) e["param"] = w.param;
         if (! w.text.empty()) e["text"] = w.text;
         if (w.parent != 0) e["parent"] = w.parent;
+        if (w.style != 0) e["style"] = w.style;
+        if (w.type == WidgetType::Slider) e["vertical"] = w.vertical;
         if (w.type == WidgetType::Keyboard)
         {
             e["ch"] = w.channel;
@@ -501,6 +538,25 @@ std::string toJson (const Facade& f)
         arr.push_back (std::move (e));
     }
     o["widgets"] = std::move (arr);
+    if (! f.styles.empty())
+    {
+        json st = json::array();
+        for (const auto& s : f.styles)
+        {
+            json e;
+            e["id"] = s.id;
+            e["name"] = s.name;
+            if (! s.off.empty()) e["off"] = s.off;
+            if (! s.on.empty()) e["on"] = s.on;
+            if (! s.track.empty()) e["track"] = s.track;
+            if (! s.handle.empty()) e["handle"] = s.handle;
+            if (! s.strip.empty()) e["strip"] = s.strip;
+            if (s.frames != 0) e["frames"] = s.frames;
+            if (s.stripHorizontal) e["strip_h"] = true;
+            st.push_back (std::move (e));
+        }
+        o["styles"] = std::move (st);
+    }
     return o.dump();
 }
 
@@ -520,6 +576,19 @@ Facade fromJson (std::string_view text)
     if (! o.is_object()) return f;
     if (const auto it = o.find ("image"); it != o.end() && it->is_string()) f.image = it->get<std::string>();
     f.fit = static_cast<ImageFit> (intOf (o, "fit", 0));
+    if (const auto it = o.find ("styles"); it != o.end() && it->is_array())
+        for (const auto& e : *it)
+        {
+            if (! e.is_object() || f.styles.size() >= static_cast<std::size_t> (maxStyles)) continue;
+            ImageStyle s;
+            s.id = intOf (e, "id", 0);
+            auto str = [&e] (const char* key) { const auto v = e.find (key); return v != e.end() && v->is_string() ? v->get<std::string>() : std::string(); };
+            s.name = str ("name");
+            s.off = str ("off"); s.on = str ("on"); s.track = str ("track"); s.handle = str ("handle"); s.strip = str ("strip");
+            s.frames = intOf (e, "frames", 0);
+            if (const auto h = e.find ("strip_h"); h != e.end() && h->is_boolean()) s.stripHorizontal = h->get<bool>();
+            f.styles.push_back (std::move (s));
+        }
     if (const auto it = o.find ("widgets"); it != o.end() && it->is_array())
         for (const auto& e : *it)
         {
@@ -537,6 +606,8 @@ Facade fromJson (std::string_view text)
             w.justify = intOf (e, "justify", 0);
             w.gap = intOf (e, "gap", 8);
             w.columns = intOf (e, "cols", 2);
+            w.style = intOf (e, "style", 0);
+            w.vertical = intOf (e, "vertical", 0);
             w.channel = intOf (e, "ch", 1);
             w.firstNote = intOf (e, "first", 36);
             w.hold = intOf (e, "hold", 0);

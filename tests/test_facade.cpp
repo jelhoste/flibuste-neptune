@@ -426,3 +426,34 @@ TEST_CASE ("held keys are tracked per MIDI channel for the Facade keyboards")
     engine.panic();
     CHECK (engine.heldChannelWord (0, 2, 1) == 0u);
 }
+
+TEST_CASE ("Facade image styles and sliders: round trip, deleted styles are dropped, bounds")
+{
+    facade::Facade f;
+    facade::ImageStyle st;
+    st.id = 1; st.name = "Tirant"; st.off = "tirant_ferme.svg"; st.on = "tirant_ouvert.png";
+    st.track = "rail.png"; st.handle = "poignee.svg"; st.strip = "potard.png"; st.frames = 64; st.stripHorizontal = true;
+    f.styles.push_back (st);
+    auto b = facade::defaultWidget (facade::WidgetType::Button, 1, 10, 10);
+    b.style = 1;
+    f.widgets.push_back (b);
+    auto sl = facade::defaultWidget (facade::WidgetType::Slider, 2, 10, 100);
+    sl.style = 1; sl.vertical = 1; sl.param = 9000;
+    f.widgets.push_back (sl);
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+    CHECK (f.freeStyleId() == 2);
+    REQUIRE (f.findStyle (1) != nullptr);
+
+    f.styles.clear();                                  // style supprimé : les widgets le lâchent
+    CHECK (facade::sanitised (f).widgets[0].style == 0);
+
+    facade::Facade g;
+    for (int i = 0; i < facade::maxStyles + 5; ++i) { facade::ImageStyle s; s.id = 7; s.frames = 99999; s.name = std::string (300, 'n'); g.styles.push_back (s); }
+    const auto clean = facade::sanitised (g);
+    CHECK (clean.styles.size() == static_cast<std::size_t> (facade::maxStyles));
+    CHECK (clean.styles[0].frames == facade::maxStripFrames);
+    CHECK (clean.styles[0].name.size() == facade::maxTextLength);
+    std::set<int> ids;
+    for (const auto& s : clean.styles) ids.insert (s.id);
+    CHECK (ids.size() == clean.styles.size());         // identifiants uniques
+}
