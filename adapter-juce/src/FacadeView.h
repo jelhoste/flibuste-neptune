@@ -57,6 +57,11 @@ private:
     int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
     void editText();
     void openHelp();
+    void openNotice (const juce::String& title, const juce::String& body);
+    void saveFacadeFile();
+    void loadFacadeFile();
+    void relocate();
+    void refreshMissing();
     void openStyles();
     void openNotches();
     void showStyleMenu();
@@ -79,8 +84,10 @@ private:
     std::set<int> selection_;                    // widgets sélectionnés (mode Édition)
     int lastClicked_ = 0;                        // dernier widget cliqué : la référence du rangement en cercle
     bool editMode_ = false;
+    int missing_ = 0;                            // images de la Façade introuvables (fond, styles)
+    int missingTick_ = 0;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;

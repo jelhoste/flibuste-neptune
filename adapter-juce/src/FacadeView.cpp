@@ -5,6 +5,7 @@
 #include <array>
 #include <map>
 
+#include "FacadeBundle.h"
 #include "FacadeExamples.h"
 #include "FacadeSpec.h"
 #include "StyleLibrary.h"
@@ -1198,9 +1199,9 @@ private:
 class FacadeView::HelpPanel : public juce::Component
 {
 public:
-    explicit HelpPanel (FacadeView& owner) : owner_ (owner)
+    HelpPanel (FacadeView& owner, const juce::String& title, const juce::String& body) : owner_ (owner)
     {
-        title_.setText (owner.text ("facade.help_title"), juce::dontSendNotification);
+        title_.setText (title, juce::dontSendNotification);
         title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
         title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
         addAndMakeVisible (title_);
@@ -1211,7 +1212,7 @@ public:
         body_.setColour (juce::TextEditor::backgroundColourId, owner.colour (Token::BgApp));
         body_.setColour (juce::TextEditor::textColourId, owner.colour (Token::Text));
         body_.setColour (juce::TextEditor::outlineColourId, owner.colour (Token::Border));
-        body_.setText (owner.text ("facade.help_body"), false);
+        body_.setText (body, false);
         addAndMakeVisible (body_);
         close_.setButtonText (owner.text ("modal.close"));
         close_.onClick = [this] { close(); };
@@ -1561,7 +1562,9 @@ private:
             r.choose.setEnabled (has);
             r.clear.setEnabled (has);
             const std::string path = has ? st->*(r.member) : std::string();
-            r.path.setText (path.empty() ? owner_.text ("facade.style_none") : juce::File (utf8 (path)).getFileName(), juce::dontSendNotification);
+            const bool missing = ! path.empty() && ! stylelib::exists (path);
+            r.path.setText (path.empty() ? owner_.text ("facade.style_none") : juce::File (utf8 (path)).getFileName() + (missing ? "  (" + owner_.text ("facade.missing") + ")" : juce::String()), juce::dontSendNotification);
+            r.path.setColour (juce::Label::textColourId, owner_.colour (missing ? Token::KnobHot : Token::TextDim));
         }
     }
 
@@ -2002,6 +2005,15 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     invertButton_.setButtonText (text ("facade.invert"));
     invertButton_.setTooltip (text ("facade.tip_invert"));
     invertButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.invert = w.invert != 0 ? 0 : 1; }, "Facade: invert"); };
+    saveFacadeButton_.setButtonText (text ("facade.save_facade"));
+    saveFacadeButton_.setTooltip (text ("facade.tip_save_facade"));
+    saveFacadeButton_.onClick = [this] { saveFacadeFile(); };
+    loadFacadeButton_.setButtonText (text ("facade.load_facade"));
+    loadFacadeButton_.setTooltip (text ("facade.tip_load_facade"));
+    loadFacadeButton_.onClick = [this] { loadFacadeFile(); };
+    relocateButton_.setButtonText (text ("facade.relocate"));
+    relocateButton_.setTooltip (text ("facade.tip_relocate"));
+    relocateButton_.onClick = [this] { relocate(); };
     stylesButton_.setButtonText (text ("facade.styles"));
     stylesButton_.setTooltip (text ("facade.tip_styles"));
     stylesButton_.onClick = [this] { openStyles(); };
@@ -2082,7 +2094,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     alignButton_.setTooltip (text ("facade.tip_align"));
 
     for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -2103,7 +2115,8 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
+    relocateButton_.setVisible (missing_ > 0);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
     linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type));
@@ -2173,7 +2186,7 @@ void FacadeView::resized()
     {
         auto top = area.removeFromTop (rowH);
         helpButton_.setBounds (top.removeFromRight (rowH + 8));   // « ? » à droite de la première rangée
-        layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_, &stylesButton_ });
+        layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_, &stylesButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_ });
     }
     area.removeFromTop (gap);
     if (editMode_)
@@ -2212,6 +2225,7 @@ void FacadeView::timerCallback()
 {
     if (! isShowing()) return;
     refresh();
+    if (++missingTick_ >= 30) { missingTick_ = 0; refreshMissing(); }   // les fichiers peuvent apparaître ou disparaître : on regarde toutes les deux secondes
     canvas_->syncChildren();
     canvas_->repaint();   // les valeurs peuvent changer (automation, autre vue)
 }
@@ -2226,6 +2240,7 @@ void FacadeView::refresh()
     track_ = t;
     revision_ = rev;
     facade_ = processor_.trackSettings (t).facade;
+    refreshMissing();
     updateButtons();
     resized();
 }
@@ -2573,10 +2588,108 @@ void FacadeView::showStyleMenu()
     });
 }
 
+void FacadeView::openNotice (const juce::String& title, const juce::String& body)
+{
+    help_.reset();
+    help_ = std::make_unique<HelpPanel> (*this, title, body);
+    addAndMakeVisible (*help_);
+    help_->setBounds (getLocalBounds());
+    help_->toFront (true);
+    help_->grabKeyboardFocus();
+}
+
+void FacadeView::saveFacadeFile()
+{
+    if (track_ < 0) return;
+    chooser_ = std::make_unique<juce::FileChooser> (text ("facade.save_title"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Facade.neptunefacade"), "*.neptunefacade");
+    chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                           [safe = juce::Component::SafePointer<FacadeView> (this), facade = facade_, track = track_] (const juce::FileChooser& c)
+                           {
+                               if (safe == nullptr || c.getResult() == juce::File()) return;
+                               auto target = c.getResult();
+                               if (! target.hasFileExtension ("neptunefacade")) target = target.withFileExtension ("neptunefacade");
+                               const auto report = facade_bundle::save (facade, track, target);
+                               const auto message = report.ok
+                                   ? juce::String::fromUTF8 (safe->tr_.format ("facade.saved", { target.getFullPathName().toStdString(), std::to_string (report.images), std::to_string (report.packs), std::to_string (report.missing) }).c_str())
+                                   : juce::String::fromUTF8 (safe->tr_.format ("facade.save_failed", { target.getFullPathName().toStdString() }).c_str());
+                               safe->openNotice (safe->text ("facade.save_title"), message);
+                           });
+}
+
+void FacadeView::loadFacadeFile()
+{
+    if (track_ < 0) return;
+    chooser_ = std::make_unique<juce::FileChooser> (text ("facade.load_title"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.neptunefacade");
+    chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                           [safe = juce::Component::SafePointer<FacadeView> (this)] (const juce::FileChooser& c)
+                           {
+                               if (safe == nullptr || ! c.getResult().existsAsFile()) return;
+                               fc::Facade loaded;
+                               const auto assets = stylelib::directory().getParentDirectory().getChildFile ("facade-assets");
+                               const auto report = facade_bundle::load (c.getResult(), safe->track_, assets, loaded);
+                               if (! report.ok)
+                               {
+                                   safe->openNotice (safe->text ("facade.load_title"), juce::String::fromUTF8 (safe->tr_.format ("facade.load_failed", { report.error.toStdString() }).c_str()));
+                                   return;
+                               }
+                               const int widgets = static_cast<int> (loaded.widgets.size());
+                               safe->selection_.clear();
+                               safe->canvas_->clearPictures();
+                               safe->commit (std::move (loaded), "Facade: load a Facade file");
+                               safe->openNotice (safe->text ("facade.load_title"), juce::String::fromUTF8 (safe->tr_.format ("facade.loaded", { std::to_string (widgets), std::to_string (report.images), std::to_string (report.packsInstalled) }).c_str()));
+                           });
+}
+
+// Images introuvables (fond, styles) : compte, et affiche le bouton « Relocaliser... ».
+void FacadeView::refreshMissing()
+{
+    int missing = 0;
+    auto copy = facade_;
+    fc::forEachImagePath (copy, [&missing] (std::string& path) { if (! stylelib::exists (path)) ++missing; });
+    if (missing != missing_) { missing_ = missing; updateButtons(); }
+}
+
+// Un fichier d'image déplacé : on désigne le nouvel emplacement de la première image manquante ; si le nom est le même, tous les chemins
+// qui partageaient son ancien dossier suivent (pour peu que le fichier existe au nouvel endroit).
+void FacadeView::relocate()
+{
+    std::string firstMissing;
+    auto copy = facade_;
+    fc::forEachImagePath (copy, [&firstMissing] (std::string& path) { if (firstMissing.empty() && ! stylelib::exists (path)) firstMissing = path; });
+    if (firstMissing.empty()) return;
+    const juce::File oldFile (juce::String::fromUTF8 (firstMissing.c_str()));
+    chooser_ = std::make_unique<juce::FileChooser> (juce::String::fromUTF8 (tr_.format ("facade.relocate_choose", { oldFile.getFileName().toStdString() }).c_str()),
+                                                    juce::File::getSpecialLocation (juce::File::userPicturesDirectory), "*.png;*.jpg;*.jpeg;*.svg");
+    chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                           [safe = juce::Component::SafePointer<FacadeView> (this), firstMissing, oldFile] (const juce::FileChooser& c)
+                           {
+                               if (safe == nullptr || ! c.getResult().existsAsFile()) return;
+                               const auto chosen = c.getResult();
+                               const bool sameName = chosen.getFileName() == oldFile.getFileName();
+                               const auto oldDir = oldFile.getParentDirectory().getFullPathName() + juce::File::getSeparatorString();
+                               const auto newDir = chosen.getParentDirectory();
+                               auto f = safe->facade_;
+                               fc::forEachImagePath (f, [&] (std::string& path)
+                               {
+                                   if (stylelib::exists (path)) return;
+                                   if (path == firstMissing) { path = chosen.getFullPathName().toStdString(); return; }
+                                   const auto p = juce::String::fromUTF8 (path.c_str());
+                                   if (sameName && p.startsWith (oldDir))
+                                   {
+                                       const auto candidate = newDir.getChildFile (p.substring (oldDir.length()));
+                                       if (candidate.existsAsFile()) path = candidate.getFullPathName().toStdString();
+                                   }
+                               });
+                               safe->canvas_->clearPictures();
+                               safe->commit (std::move (f), "Facade: relocate images");
+                               safe->refreshMissing();
+                           });
+}
+
 void FacadeView::openHelp()
 {
     if (help_ != nullptr) return;
-    help_ = std::make_unique<HelpPanel> (*this);
+    help_ = std::make_unique<HelpPanel> (*this, text ("facade.help_title"), text ("facade.help_body"));
     addAndMakeVisible (*help_);
     help_->setBounds (getLocalBounds());
     help_->toFront (true);

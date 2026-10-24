@@ -87,6 +87,48 @@ inline std::vector<Pack> scan()
     return packs;
 }
 
+// Le fichier .neptunestyle ou le dossier d'un pack de la bibliothèque, par identifiant ; File() si absent.
+inline juce::File findSource (const std::string& packId)
+{
+    const auto dir = directory();
+    if (! dir.isDirectory()) return {};
+    for (const auto& f : dir.findChildFiles (juce::File::findFilesAndDirectories, false))
+    {
+        if (f.isDirectory() && lowerName (f.getFileName()) == packId) return f;
+        if (f.existsAsFile() && f.hasFileExtension ("neptunestyle") && lowerName (f.getFileNameWithoutExtension()) == packId) return f;
+    }
+    return {};
+}
+
+// Les octets d'un pack sous forme d'archive .neptunestyle (un pack-dossier est zippé à la volée). Faux si le pack est absent.
+inline bool packArchiveBytes (const std::string& packId, juce::MemoryBlock& out)
+{
+    const auto source = findSource (packId);
+    if (source == juce::File()) return false;
+    if (source.existsAsFile()) return source.loadFileAsData (out);
+    juce::ZipFile::Builder builder;
+    for (const auto& f : source.findChildFiles (juce::File::findFiles, true))
+    {
+        juce::MemoryBlock bytes;
+        if (f.loadFileAsData (bytes)) builder.addEntry (new juce::MemoryInputStream (bytes, true), 9, f.getRelativePathFrom (source).replaceCharacter ('\\', '/'), f.getLastModificationTime());
+    }
+    juce::MemoryOutputStream stream (out, false);
+    return builder.writeToStream (stream, nullptr);
+}
+
+// L'image existe-t-elle (fichier présent, ou entrée présente dans un pack installé) ? Ne lit pas l'image.
+inline bool exists (const std::string& path)
+{
+    if (path.empty()) return false;
+    std::string packId, entry;
+    if (! sp::parseReference (path, packId, entry)) return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile();
+    const auto source = findSource (packId);
+    if (source == juce::File()) return false;
+    if (source.isDirectory()) return source.getChildFile (juce::String::fromUTF8 (entry.c_str())).existsAsFile();
+    juce::ZipFile zip (source);
+    return zip.getIndexOfFileName (juce::String::fromUTF8 (entry.c_str())) >= 0;
+}
+
 // Octets d'une image désignée par une référence `pack:` ou par un chemin de fichier ordinaire. Faux si introuvable.
 inline bool readBytes (const std::string& path, juce::MemoryBlock& out)
 {
