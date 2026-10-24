@@ -391,3 +391,38 @@ TEST_CASE ("track MIDI channels can be a set: normal forms, state round trip and
     CHECK (playedOnTrack0 (2, 61));         // canal 3 : joué
     CHECK (playedOnTrack0 (0, 62));         // canal 1 : joué
 }
+
+TEST_CASE ("Facade keyboards: settings round-trip and are bounded")
+{
+    facade::Facade f;
+    auto k = facade::defaultWidget (facade::WidgetType::Keyboard, 1, 20, 400);
+    k.channel = 3; k.firstNote = 48; k.hold = 1; k.velocity = 90;
+    f.widgets.push_back (k);
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+
+    f.widgets[0].channel = 99; f.widgets[0].firstNote = -5; f.widgets[0].velocity = 0; f.widgets[0].hold = 7;
+    const auto s = facade::sanitised (f);
+    CHECK (s.widgets[0].channel == 16);
+    CHECK (s.widgets[0].firstNote == 0);
+    CHECK (s.widgets[0].velocity == 1);
+    CHECK (s.widgets[0].hold == 1);
+}
+
+TEST_CASE ("held keys are tracked per MIDI channel for the Facade keyboards")
+{
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    engine.setTrackActive (0, true);
+    engine.setTrackType (0, TrackType::Synth);
+    engine.publishSynth (0, std::make_shared<SynthPatch> (SynthDescription {}));
+    engine.noteOnTrack (0, 1, 60, 0.5f);   // canal 2 (indice 1)
+    engine.noteOnTrack (0, 2, 72, 0.5f);   // canal 3
+    CHECK ((engine.heldChannelWord (0, 1, 0) >> 60 & 1u) == 1u);
+    CHECK (engine.heldChannelWord (0, 0, 0) == 0u);
+    CHECK ((engine.heldChannelWord (0, 2, 1) >> (72 - 64) & 1u) == 1u);
+    CHECK (engine.heldChannelWord (0, 1, 1) == 0u);
+    engine.noteOffTrack (0, 1, 60);
+    CHECK (engine.heldChannelWord (0, 1, 0) == 0u);
+    engine.panic();
+    CHECK (engine.heldChannelWord (0, 2, 1) == 0u);
+}

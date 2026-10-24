@@ -46,6 +46,7 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Action: w.w = 130; w.h = 44;  break;
         case WidgetType::Curve:  w.w = 340; w.h = 260; break;
         case WidgetType::Zone:   w.w = 320; w.h = 200; break;
+        case WidgetType::Keyboard: w.w = 520; w.h = 110; break;
     }
     w.x = x;
     w.y = y;
@@ -84,6 +85,10 @@ Facade sanitised (Facade f)
         w.justify = std::clamp (w.justify, 0, 3);
         w.gap = std::clamp (w.gap, 0, maxZoneGap);
         w.columns = std::clamp (w.columns, 1, maxZoneColumns);
+        w.channel = std::clamp (w.channel, 1, 16);
+        w.firstNote = std::clamp (w.firstNote, 0, 120);
+        w.hold = w.hold != 0 ? 1 : 0;
+        w.velocity = std::clamp (w.velocity, 1, 127);
         if (w.id <= 0 || used.count (w.id) != 0)
         {
             int id = 1;
@@ -472,6 +477,13 @@ std::string toJson (const Facade& f)
         if (w.param != 0) e["param"] = w.param;
         if (! w.text.empty()) e["text"] = w.text;
         if (w.parent != 0) e["parent"] = w.parent;
+        if (w.type == WidgetType::Keyboard)
+        {
+            e["ch"] = w.channel;
+            e["first"] = w.firstNote;
+            e["hold"] = w.hold;
+            e["vel"] = w.velocity;
+        }
         if (w.type == WidgetType::Zone)
         {
             e["layout"] = w.layout;
@@ -525,6 +537,10 @@ Facade fromJson (std::string_view text)
             w.justify = intOf (e, "justify", 0);
             w.gap = intOf (e, "gap", 8);
             w.columns = intOf (e, "cols", 2);
+            w.channel = intOf (e, "ch", 1);
+            w.firstNote = intOf (e, "first", 36);
+            w.hold = intOf (e, "hold", 0);
+            w.velocity = intOf (e, "vel", 100);
             if (const auto p = e.find ("param"); p != e.end() && p->is_number_integer())
             {
                 const auto v = p->get<long long>();

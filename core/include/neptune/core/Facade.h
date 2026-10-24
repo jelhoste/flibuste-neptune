@@ -23,8 +23,9 @@ constexpr std::size_t maxImagePath = 1024;
 // Menu : liste de valeurs d'un paramètre à choix ou à pas. Action : instantané de valeurs (plusieurs paramètres restaurés d'un coup).
 // Curve : courbe de transfert de vélocité de la piste (Sampler).
 // Zone : conteneur (cadre avec titre) qui possède les widgets posés dedans et, au choix, les range en ligne, en colonne ou en matrice.
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6 };
-constexpr int numWidgetTypes = 7;
+// Keyboard : clavier virtuel lié à un canal MIDI de la piste (un manuel d'orgue = un clavier) ; allume les notes jouées sur ce canal.
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7 };
+constexpr int numWidgetTypes = 8;
 constexpr int zonePad = 10;          // marge intérieure d'une zone
 constexpr int zoneTitleHeight = 24;  // bandeau du titre (quand la zone a un titre)
 
@@ -58,11 +59,16 @@ struct Widget
     int align = 0, justify = 0;     // Zone : CrossAlign, Justify
     int gap = 8;                    // Zone : espace entre les widgets rangés
     int columns = 2;                // Zone en matrice : nombre de colonnes
+    int channel = 1;                // Clavier : canal MIDI 1..16
+    int firstNote = 36;             // Clavier : première touche affichée à gauche (do) ; le nombre de touches suit la largeur
+    int hold = 0;                   // Clavier : 1, une touche cliquée reste enfoncée jusqu'au clic suivant
+    int velocity = 100;             // Clavier : vélocité envoyée, 1..127
 
     bool operator== (const Widget& o) const noexcept
     {
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
-            && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns;
+            && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
+            && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity;
     }
 };
 

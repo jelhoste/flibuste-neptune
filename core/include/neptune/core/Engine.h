@@ -150,6 +150,12 @@ public:
     int activeVoices() const noexcept;
     // Nombre de voix actives de toutes les pistes, publié par le thread audio à chaque bloc (lisible depuis l'interface sans verrou).
     // Touches tenues d'une piste (mot 0 : notes 0..63, mot 1 : 64..127), publiées par le thread audio.
+    // Touches tenues d'une piste sur un canal MIDI (0..15) : bits 0..63 (word 0) et 64..127 (word 1).
+    std::uint64_t heldChannelWord (int track, int channel, int word) const noexcept
+    {
+        if (track < 0 || track >= kTracks || word < 0 || word > 1) return 0;
+        return tracks_[static_cast<std::size_t> (track)].heldChannel[channel & 15][word].load (std::memory_order_relaxed);
+    }
     std::uint64_t heldKeyWord (int track, int word) const noexcept
     {
         if (track < 0 || track >= kTracks || word < 0 || word > 1) return 0;
@@ -224,6 +230,7 @@ private:
         SynthPatchKeeper synthKeeper; // thread de message : anciens patchs utilisés par des voix figées
         SynthVoices synth;
         std::atomic<std::uint64_t> held[2] {}; // touches tenues (bits 0..127), pour l'affichage du clavier
+        std::atomic<std::uint64_t> heldChannel[16][2] {}; // idem par canal MIDI (0..15) : un clavier de la Façade n'allume que son canal
         std::atomic<int> type { 0 };   // TrackType
         std::atomic<int> active { 1 };
         int appliedType = 0, appliedActive = 1; // thread audio : ce qui a déjà été pris en compte

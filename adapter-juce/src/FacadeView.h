@@ -45,6 +45,8 @@ private:
     void showZoneLayoutMenu();
     void showZoneAlignMenu();
     void showZoneGapMenu();
+    void applySingle (const std::function<void (neptune::core::facade::Widget&)>&, const char* undoName);
+    void showKeyboardMenu (int what);
     void applyZone (const std::function<void (neptune::core::facade::Widget&)>&, const char* undoName);
     int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
     void editText();
@@ -69,8 +71,8 @@ private:
     int lastClicked_ = 0;                        // dernier widget cliqué : la référence du rangement en cercle
     bool editMode_ = false;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, imageButton_, fitButton_, clearImageButton_;
-    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
     std::unique_ptr<TextPrompt> prompt_;

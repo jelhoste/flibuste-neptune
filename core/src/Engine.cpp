@@ -312,6 +312,16 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
 
 // ---------------------------------------------------------------------------------------------------- notes
 
+namespace
+{
+template <class Track>
+void clearHeldChannels (Track& t) noexcept
+{
+    for (auto& ch : t.heldChannel)
+        for (auto& w : ch) w.store (0, std::memory_order_relaxed);
+}
+} // namespace
+
 void Engine::pushTrace (int track, int key, float shaped) noexcept
 {
     const auto head = traceHead_.load (std::memory_order_relaxed);
@@ -328,7 +338,11 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (t.active.load (std::memory_order_relaxed) == 0 || t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn)) return;
     enforceGlobalVoiceLimit();
-    if (key >= 0 && key < 128) t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
+    if (key >= 0 && key < 128)
+    {
+        t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
+        t.heldChannel[channel & 15][key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
+    }
     ++activeNotes_;
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ))
     {
@@ -418,7 +432,11 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn)) return;   // pas de notes sur une entrée audio
     activeNotes_ = std::max (0, activeNotes_ - 1);
-    if (key >= 0 && key < 128) t.held[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
+    if (key >= 0 && key < 128)
+    {
+        t.held[key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
+        t.heldChannel[channel & 15][key >> 6].fetch_and (~(std::uint64_t (1) << (key & 63)), std::memory_order_relaxed);
+    }
     const int type = t.type.load (std::memory_order_relaxed);
     if (type == static_cast<int> (TrackType::Organ)) t.organ.noteOff (channel, key);
     else if (type == static_cast<int> (TrackType::Fm)) t.fm.noteOff (channel, key);
@@ -469,13 +487,13 @@ void Engine::noteOff (int channel, int key) noexcept
 void Engine::panic() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.fm.panic(); t.organ.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
+    for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.fm.panic(); t.organ.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); clearHeldChannels (t); }
 }
 
 void Engine::releaseAll() noexcept
 {
     activeNotes_ = 0;
-    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.fm.releaseAll(); t.organ.allNotesOff(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); }
+    for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.fm.releaseAll(); t.organ.allNotesOff(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); clearHeldChannels (t); }
 }
 
 void Engine::setParameter (std::uint32_t, double) noexcept {}
@@ -570,6 +588,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
             t.organ.allNotesOff();
             t.held[0].store (0, std::memory_order_relaxed);
             t.held[1].store (0, std::memory_order_relaxed);
+            clearHeldChannels (t);
             t.appliedType = type;
         }
         t.appliedActive = active;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
 #include <map>
 
 #include "VelocityPanel.h"
@@ -15,6 +16,54 @@ juce::Colour toColour (const neptune::core::theme::Palette& p, Token t)
 {
     const auto& c = p.color (t);
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
+}
+
+constexpr float keyWhiteWidth = 22.0f;   // largeur d'une touche blanche dans le canevas : élargir le clavier ajoute des touches
+
+bool keyIsBlack (int key) noexcept
+{
+    const int n = key % 12;
+    return n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
+}
+
+// Nombre de touches blanches sous chaque note : la position d'une touche est son rang x largeur.
+const std::array<int, 129>& whitesBelow()
+{
+    static const std::array<int, 129> table = []
+    {
+        std::array<int, 129> t {};
+        int n = 0;
+        for (int k = 0; k < 128; ++k)
+        {
+            t[static_cast<std::size_t> (k)] = n;
+            if (! keyIsBlack (k)) ++n;
+        }
+        t[128] = n;
+        return t;
+    }();
+    return table;
+}
+
+juce::Rectangle<float> keyRect (const neptune::core::facade::Widget& w, int key)
+{
+    int first = w.firstNote;
+    while (first > 0 && keyIsBlack (first)) --first;
+    const auto& below = whitesBelow();
+    const float origin = static_cast<float> (w.x) - keyWhiteWidth * static_cast<float> (below[static_cast<std::size_t> (first)]);
+    const float x = origin + keyWhiteWidth * static_cast<float> (below[static_cast<std::size_t> (key)]);
+    const float h = static_cast<float> (w.h);
+    if (! keyIsBlack (key)) return { x, static_cast<float> (w.y), keyWhiteWidth, h };
+    return { x - 0.3f * keyWhiteWidth, static_cast<float> (w.y), 0.6f * keyWhiteWidth, 0.6f * h };
+}
+
+// Touche sous le point (coordonnées du canevas), -1 si aucune ; les noires sont au-dessus des blanches.
+int keyAtPoint (const neptune::core::facade::Widget& w, juce::Point<float> p)
+{
+    if (! juce::Rectangle<float> (static_cast<float> (w.x), static_cast<float> (w.y), static_cast<float> (w.w), static_cast<float> (w.h)).contains (p)) return -1;
+    for (const bool black : { true, false })
+        for (int k = 0; k < 128; ++k)
+            if (keyIsBlack (k) == black && keyRect (w, k).contains (p)) return k;
+    return -1;
 }
 
 constexpr float curveTitleHeight = 24.0f;   // hauteur (dans le canevas) de la légende d'un widget Courbe
@@ -40,8 +89,27 @@ class FacadeView::Canvas : public juce::Component
 {
 public:
     explicit Canvas (FacadeView& owner) : owner_ (owner) { setWantsKeyboardFocus (true); }
+    ~Canvas() override { releaseKeys(); }
 
     bool dragging() const noexcept { return mode_ != Mode::None; }
+
+    // Relâche toutes les notes tenues par les claviers (changement de piste, sortie du mode Jeu, fermeture).
+    void releaseKeys()
+    {
+        auto& o = owner_;
+        if (o.track_ >= 0)
+        {
+            for (const auto& kv : pressed_)
+                if (const auto* w = o.facade_.find (kv.second.first)) noteOff (*w, kv.second.second);
+            for (const auto& [id, keys] : latched_)
+                if (const auto* w = o.facade_.find (id))
+                    for (const int k : keys) noteOff (*w, k);
+        }
+        pressed_.clear();
+        latched_.clear();
+        if (mode_ == Mode::Key) mode_ = Mode::None;
+        repaint();
+    }
 
     void resized() override { syncChildren(); }
 
@@ -156,6 +224,7 @@ public:
 
         const auto* w = widgetAt (p);
         if (w == nullptr) return;
+        if (w->type == fc::WidgetType::Keyboard) { if (! e.mods.isPopupMenu()) keyDown (e, *w); return; }
         if (w->type == fc::WidgetType::Action) { if (! e.mods.isPopupMenu()) runAction (*w); return; }
         if (w->param == 0 || o.processor_.parameters().indexOf (w->param) == neptune::core::ParameterSet::npos) return;
         if (e.mods.isPopupMenu())
@@ -186,6 +255,22 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override
     {
         auto& o = owner_;
+        if (mode_ == Mode::Key)
+        {
+            const auto it = pressed_.find (e.source.getIndex());
+            if (it == pressed_.end()) return;
+            const auto* w = o.facade_.find (it->second.first);
+            if (w == nullptr) return;
+            const int key = keyAtPoint (*w, toCanvas (e.position));
+            if (key >= 0 && key != it->second.second)   // glissando : la note change quand le doigt passe sur une autre touche
+            {
+                o.processor_.uiNoteOffTrack (o.track_, it->second.second, w->channel - 1);
+                it->second.second = key;
+                o.processor_.uiNoteOnTrack (o.track_, key, static_cast<float> (w->velocity) / 127.0f, w->channel - 1);
+                repaint();
+            }
+            return;
+        }
         if (mode_ == Mode::Turn)
         {
             const double range = e.mods.isShiftDown() ? 1000.0 : 200.0;
@@ -226,9 +311,21 @@ public:
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& e) override
     {
         auto& o = owner_;
+        if (mode_ == Mode::Key)
+        {
+            const auto it = pressed_.find (e.source.getIndex());
+            if (it != pressed_.end())
+            {
+                if (const auto* w = o.facade_.find (it->second.first)) o.processor_.uiNoteOffTrack (o.track_, it->second.second, w->channel - 1);
+                pressed_.erase (it);
+            }
+            if (pressed_.empty()) mode_ = Mode::None;
+            repaint();
+            return;
+        }
         const auto mode = mode_;
         mode_ = Mode::None;
         if (mode == Mode::Turn)
@@ -308,7 +405,41 @@ public:
     }
 
 private:
-    enum class Mode { None, Move, Resize, Turn, Band };
+    enum class Mode { None, Move, Resize, Turn, Band, Key };
+
+    void noteOn (const fc::Widget& w, int key)
+    {
+        owner_.processor_.uiNoteOnTrack (owner_.track_, key, static_cast<float> (w.velocity) / 127.0f, w.channel - 1);
+    }
+    void noteOff (const fc::Widget& w, int key) { owner_.processor_.uiNoteOffTrack (owner_.track_, key, w.channel - 1); }
+
+    // Touche cliquée : la note part sur le canal du clavier. Maintien (réglage ou Maj) : une touche reste enfoncée jusqu'au clic suivant.
+    void keyDown (const juce::MouseEvent& e, const fc::Widget& w)
+    {
+        const int key = keyAtPoint (w, toCanvas (e.position));
+        if (key < 0 || owner_.track_ < 0) return;
+        if (w.hold != 0 || e.mods.isShiftDown())
+        {
+            auto& keys = latched_[w.id];
+            if (keys.erase (key) != 0) noteOff (w, key);
+            else { keys.insert (key); noteOn (w, key); }
+        }
+        else
+        {
+            pressed_[e.source.getIndex()] = { w.id, key };
+            mode_ = Mode::Key;
+            noteOn (w, key);
+        }
+        repaint();
+    }
+
+    bool keyIsDown (int widgetId, int key) const
+    {
+        for (const auto& kv : pressed_)
+            if (kv.second.first == widgetId && kv.second.second == key) return true;
+        const auto it = latched_.find (widgetId);
+        return it != latched_.end() && it->second.count (key) != 0;
+    }
 
     float scale() const
     {
@@ -557,6 +688,40 @@ private:
                 g.drawFittedText (o.text ("facade.curve_title"), body.toNearestInt().reduced (12), juce::Justification::centred, 3);
                 break;
             }
+            case fc::WidgetType::Keyboard:
+            {
+                juce::Graphics::ScopedSaveState keep (g);
+                g.reduceClipRegion (b.toNearestInt());
+                g.setColour (o.colour (Token::BgApp));
+                g.fillRect (b);
+                std::uint64_t held[2] = { 0, 0 };
+                if (o.track_ >= 0)
+                {
+                    held[0] = o.processor_.heldChannelWord (o.track_, w.channel - 1, 0);
+                    held[1] = o.processor_.heldChannelWord (o.track_, w.channel - 1, 1);
+                }
+                for (const bool black : { false, true })
+                    for (int k = 0; k < 128; ++k)
+                    {
+                        if (keyIsBlack (k) != black) continue;
+                        const auto r = keyRect (w, k);
+                        if (r.getRight() < b.getX() || r.getX() > b.getRight()) continue;
+                        const bool down = keyIsDown (w.id, k), midi = ((held[k >> 6] >> (k & 63)) & 1u) != 0;
+                        g.setColour (down ? o.colour (Token::Accent) : midi ? o.colour (Token::Accent2) : black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xfff2f2f2));
+                        g.fillRect (r.reduced (0.5f));
+                        g.setColour (juce::Colour (0xff555555));
+                        g.drawRect (r, 1.0f);
+                        if (k % 12 == 0 && ! black)
+                        {
+                            g.setColour (down || midi ? juce::Colour (0xff000000) : juce::Colour (0xff666666));
+                            g.setFont (juce::FontOptions (11.0f));
+                            g.drawText ("C" + juce::String (k / 12 - 1), r.withTrimmedBottom (4.0f).toNearestInt(), juce::Justification::centredBottom);
+                        }
+                    }
+                g.setColour (o.colour (Token::Border));
+                g.drawRect (b, 1.0f);
+                break;
+            }
             case fc::WidgetType::Zone:
             {
                 const auto r = b.reduced (1.0f);
@@ -597,6 +762,8 @@ private:
     juce::Rectangle<int> startRect_;
     juce::Rectangle<float> band_;
     std::set<int> bandBase_;
+    std::map<int, std::pair<int, int>> pressed_;   // doigt ou souris -> (clavier, touche) tenu
+    std::map<int, std::set<int>> latched_;         // clavier -> touches en maintien
     std::set<int> moving_;   // widgets entraînés par un déplacement : la sélection et le contenu des zones sélectionnées
     neptune::core::ParamId playId_ = 0;
     double startNorm_ = 0.0;
@@ -936,6 +1103,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     editButton_.setClickingTogglesState (true);
     editButton_.onClick = [this]
     {
+        canvas_->releaseKeys();
         editMode_ = editButton_.getToggleState();
         if (! editMode_) selection_.clear();
         updateButtons();
@@ -955,6 +1123,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (curveButton_, "facade.add_curve", fc::WidgetType::Curve);
     setupAdd (labelButton_, "facade.add_label", fc::WidgetType::Label);
     setupAdd (zoneButton_, "facade.add_zone", fc::WidgetType::Zone);
+    setupAdd (keyboardButton_, "facade.add_keyboard", fc::WidgetType::Keyboard);
     imageButton_.setButtonText (text ("facade.image"));
     imageButton_.onClick = [this] { chooseImage(); };
     fitButton_.setButtonText (text ("facade.fit_fit"));
@@ -997,6 +1166,18 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     zoneGapButton_.setButtonText (text ("facade.zone_gap"));
     zoneGapButton_.setTooltip (text ("facade.tip_zone_gap"));
     zoneGapButton_.onClick = [this] { showZoneGapMenu(); };
+    kbChannelButton_.setButtonText (text ("facade.kb_channel"));
+    kbChannelButton_.setTooltip (text ("facade.tip_kb_channel"));
+    kbChannelButton_.onClick = [this] { showKeyboardMenu (0); };
+    kbFirstButton_.setButtonText (text ("facade.kb_first"));
+    kbFirstButton_.setTooltip (text ("facade.tip_kb_first"));
+    kbFirstButton_.onClick = [this] { showKeyboardMenu (1); };
+    kbVelocityButton_.setButtonText (text ("facade.kb_velocity"));
+    kbVelocityButton_.setTooltip (text ("facade.tip_kb_velocity"));
+    kbVelocityButton_.onClick = [this] { showKeyboardMenu (2); };
+    kbHoldButton_.setButtonText (text ("facade.kb_hold"));
+    kbHoldButton_.setTooltip (text ("facade.tip_kb_hold"));
+    kbHoldButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.hold = w.hold != 0 ? 0 : 1; }, "Facade: keyboard hold"); };
     helpButton_.setButtonText ("?");
     helpButton_.setTooltip (text ("facade.help_title"));
     helpButton_.onClick = [this] { openHelp(); };
@@ -1007,12 +1188,13 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     actionButton_.setTooltip (text ("facade.tip_action"));
     curveButton_.setTooltip (text ("facade.tip_curve"));
     zoneButton_.setTooltip (text ("facade.tip_zone"));
+    keyboardButton_.setTooltip (text ("facade.tip_keyboard"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
-    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_,
+                     &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -1033,7 +1215,7 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
     linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type));
@@ -1043,6 +1225,9 @@ void FacadeView::updateButtons()
     alignButton_.setVisible (editMode_ && selection_.size() >= 2);
     sameSizeButton_.setVisible (editMode_ && one != nullptr);
     const bool zone = editMode_ && one != nullptr && one->type == fc::WidgetType::Zone;
+    const bool keyboard = editMode_ && one != nullptr && one->type == fc::WidgetType::Keyboard;
+    for (auto* b : { &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_ }) b->setVisible (keyboard);
+    if (keyboard) kbHoldButton_.setToggleState (one->hold != 0, juce::dontSendNotification);
     layoutButton_.setVisible (zone);
     zoneAlignButton_.setVisible (zone);
     zoneGapButton_.setVisible (zone);
@@ -1078,9 +1263,9 @@ void FacadeView::resized()
     area.removeFromTop (gap);
     if (editMode_)
     {
-        layoutRow (area.removeFromTop (rowH), { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_ });
+        layoutRow (area.removeFromTop (rowH), { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_ });
         area.removeFromTop (gap);
-        layoutRow (area.removeFromTop (rowH), { &linkButton_, &textButton_, &captureButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        layoutRow (area.removeFromTop (rowH), { &linkButton_, &textButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
         area.removeFromTop (gap);
     }
     canvas_->setBounds (area);
@@ -1105,7 +1290,7 @@ void FacadeView::refresh()
     const auto rev = processor_.instrumentRevision();
     if (t == track_ && rev == revision_) return;
     if (canvas_->dragging()) return;
-    if (t != track_) selection_.clear();
+    if (t != track_) { canvas_->releaseKeys(); selection_.clear(); }
     track_ = t;
     revision_ = rev;
     facade_ = processor_.trackSettings (t).facade;
@@ -1134,6 +1319,42 @@ void FacadeView::commitArranged (fc::Facade f, std::set<int> touched, const char
 {
     fc::arrange (f, touched);
     commit (std::move (f), undoName);
+}
+
+void FacadeView::applySingle (const std::function<void (fc::Widget&)>& change, const char* undoName)
+{
+    auto f = facade_;
+    auto* w = f.find (single());
+    if (w == nullptr) return;
+    change (*w);
+    const int id = w->id;
+    commitArranged (std::move (f), { id }, undoName);
+}
+
+// 0 : canal MIDI, 1 : première note, 2 : vélocité
+void FacadeView::showKeyboardMenu (int what)
+{
+    const auto* k = facade_.find (single());
+    if (k == nullptr || k->type != fc::WidgetType::Keyboard) return;
+    juce::PopupMenu menu;
+    juce::TextButton* target = what == 0 ? &kbChannelButton_ : what == 1 ? &kbFirstButton_ : &kbVelocityButton_;
+    if (what == 0)
+        for (int c = 1; c <= 16; ++c) menu.addItem (c, text ("facade.kb_channel_item") + " " + juce::String (c), true, k->channel == c);
+    else if (what == 1)
+        for (int note = 12; note <= 96; note += 12) menu.addItem (note + 1, "C" + juce::String (note / 12 - 1) + "  (" + juce::String (note) + ")", true, k->firstNote == note);
+    else
+        for (const int v : { 32, 64, 80, 100, 127 }) menu.addItem (v + 1, juce::String (v), true, k->velocity == v);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target), [safe = juce::Component::SafePointer<FacadeView> (this), what] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applySingle ([what, choice] (fc::Widget& w)
+        {
+            if (what == 0) w.channel = choice;
+            else if (what == 1) w.firstNote = choice - 1;
+            else w.velocity = choice - 1;
+        }, "Facade: keyboard settings");
+    });
 }
 
 void FacadeView::applyZone (const std::function<void (fc::Widget&)>& change, const char* undoName)

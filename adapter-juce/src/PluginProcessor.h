@@ -261,6 +261,7 @@ public:
     void uiPanic() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::Panic, 0, 0, 0.0f, 0 }); }
     void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
     std::uint64_t heldKeyWord (int track, int word) const noexcept { return engine_.heldKeyWord (track, word); }
+    std::uint64_t heldChannelWord (int track, int channel, int word) const noexcept { return engine_.heldChannelWord (track, channel, word); }
     int totalActiveVoices() const noexcept { return engine_.totalActiveVoices(); } // toutes pistes ; lisible depuis l'interface
     // Enregistrement direct de l'entrée audio de l'hôte dans un fichier WAV (dossier de données de Neptune, Edited/Recordings) ; la zone est créée par l'éditeur.
     bool uiStartRecording (std::string& path, std::string* error = nullptr);
