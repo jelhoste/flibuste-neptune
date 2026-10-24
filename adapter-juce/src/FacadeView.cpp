@@ -1944,7 +1944,7 @@ private:
         {
             const auto& info = (*packs)[p].info;
             juce::PopupMenu sub;
-            for (std::size_t i = 0; i < info.styles.size(); ++i) sub.addItem (1000 + static_cast<int> (p) * 100 + static_cast<int> (i), utf8 (info.styles[i].name));
+            for (std::size_t i = 0; i < info.styles.size(); ++i) sub.addItem (1000 + static_cast<int> (p) * 100 + static_cast<int> (i), utf8 (info.styles[i].style.name));
             menu.addSubMenu (utf8 (info.name) + (info.author.empty() ? juce::String() : "  (" + utf8 (info.author) + ")"), sub, ! info.styles.empty());
         }
         if (packs->empty()) menu.addItem (-1, owner_.text ("facade.lib_empty"), false);
