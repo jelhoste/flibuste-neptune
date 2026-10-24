@@ -1,6 +1,7 @@
 #include "MixerView.h"
 #include <cmath>
 #include "neptune/core/ProbePool.h"
+#include "VelocityPanel.h"
 
 using namespace neptune::core;
 using neptune::core::theme::Token;
@@ -102,6 +103,38 @@ float dbOf (float lin) { return lin <= 1e-5f ? -100.0f : 20.0f * std::log10 (lin
 // ------------------------------------------------------------------------------------------------ fenêtre de routage
 
 // Routage d'une bande : sortie principale, sortie directe, mode de pan, 8 envois (bus, point de captation, niveau, pan, mute).
+// Courbe de vélocité d'une piste dans une bulle : les mêmes réglages que le widget Courbe de la Façade. Se remet à jour quand la
+// courbe change ailleurs (annulation, Façade).
+class TrackVelocityPanel : public VelocityPanel, private juce::Timer
+{
+public:
+    TrackVelocityPanel (NeptuneProcessor& p, const theme::Palette& palette, const i18n::Translator& tr, int track)
+        : VelocityPanel (palette, tr, 0, false, p.trackSettings (track).velocityCurve), proc_ (p), track_ (track)
+    {
+        setFadeControlsVisible (false);
+        setEnabledToggleVisible (true);
+        setSize (420, 450);
+        onGestureBegin = [this] { proc_.uiBeginGesture(); };
+        onGestureEnd = [this] { proc_.uiEndGesture(); };
+        onUndo = [this] { proc_.uiUndo(); };
+        onRedo = [this] { proc_.uiRedo(); };
+        onChange = [this] (int, bool, const VelocityCurve& curve)
+        {
+            auto strip = proc_.trackSettings (track_);
+            strip.velocityCurve = curve;
+            proc_.uiEditTrack (track_, std::move (strip), "Velocity curve", "velocity_curve");
+        };
+        startTimerHz (8);
+    }
+    ~TrackVelocityPanel() override { stopTimer(); }
+
+private:
+    void timerCallback() override { setValues (0, false, proc_.trackSettings (track_).velocityCurve); }
+
+    NeptuneProcessor& proc_;
+    int track_;
+};
+
 class RoutingPanel : public juce::Component
 {
 public:
@@ -513,6 +546,17 @@ public:
                 commit (s);
             };
             addAndMakeVisible (midi_);
+            // « V » : la courbe de vélocité de la piste, allumée quand elle agit
+            velocityButton_.setButtonText (u8 (std::string (owner.tr_.tr ("mix.velocity_short"))));
+            velocityButton_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.velocity_tip"))));
+            velocityButton_.setColour (juce::TextButton::buttonOnColourId, owner.colour (Token::Accent));
+            velocityButton_.onClick = [this]
+            {
+                auto& box = juce::CallOutBox::launchAsynchronously (std::make_unique<TrackVelocityPanel> (owner_.processor_, owner_.palette_, owner_.tr_, index_),
+                                                                    velocityButton_.getScreenBounds(), nullptr);
+                box.setLookAndFeel (&velocityButton_.getLookAndFeel());
+            };
+            addAndMakeVisible (velocityButton_);
         }
         routing_.setButtonText (juce::String::fromUTF8 (std::string (owner.tr_.tr ("mix.routing_short")).c_str()));
         routing_.onClick = [this]
@@ -593,7 +637,11 @@ public:
         const auto s = settings();
         const juce::String fallback = (isBus_ ? "Bus " : isPar_ ? "P" : "") + juce::String (index_ + 1);
         name_.setText (s.name.empty() ? fallback : u8 (s.name), juce::dontSendNotification);
-        if (! isBus_ && ! isPar_) midi_.setSelectedId (s.midiChannel + 1, juce::dontSendNotification);
+        if (! isBus_ && ! isPar_)
+        {
+            midi_.setSelectedId (s.midiChannel + 1, juce::dontSendNotification);
+            velocityButton_.setToggleState (s.velocityCurve.active(), juce::dontSendNotification);
+        }
         colourIndex_ = s.color;
         repaint();
     }
@@ -628,7 +676,13 @@ public:
             typeButton_.setBounds (head.reduced (0, 1));
         }
         if (isPar_) tapBox_.setBounds (r.removeFromTop (22).reduced (0, 1));
-        else if (! isBus_) midi_.setBounds (r.removeFromTop (22).reduced (0, 1));
+        else if (! isBus_)
+        {
+            auto row = r.removeFromTop (22).reduced (0, 1);
+            velocityButton_.setBounds (row.removeFromRight (28));
+            row.removeFromRight (2);
+            midi_.setBounds (row);
+        }
         routing_.setBounds (r.removeFromTop (22).reduced (0, 1));
         r.removeFromTop (2);
         inserts_.setBounds (r.removeFromTop (InsertList::heightNeeded() + 2).reduced (0, 1));
@@ -758,7 +812,7 @@ private:
     float peakL_ = 0.0f, peakR_ = 0.0f;
     juce::Label name_;
     juce::ComboBox midi_;
-    juce::TextButton typeButton_, removeButton_, foldButton_;
+    juce::TextButton typeButton_, removeButton_, foldButton_, velocityButton_;
     juce::ComboBox tapBox_;
     juce::TextButton routing_;
     BoundSlider pan_, fader_;

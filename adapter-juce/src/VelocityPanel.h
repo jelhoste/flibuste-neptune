@@ -25,6 +25,8 @@ public:
 
     // Masque les réglages de fondu entre couches (la Façade n'expose que la courbe de transfert de la vélocité reçue).
     void setFadeControlsVisible (bool);
+    // Case « courbe active » (la courbe d'entrée d'une piste peut être mise de côté sans perdre ses réglages).
+    void setEnabledToggleVisible (bool);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -54,7 +56,8 @@ private:
     juce::Label widthLabel_, shapeLabel_, readout_;
     juce::Slider widthSlider_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider shapeSlider_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::ToggleButton linearToggle_, smoothToggle_;
+    juce::ToggleButton linearToggle_, smoothToggle_, enabledToggle_;
+    bool enabledShown_ = false;
     bool fadeControls_ = true;
     int dragHandle_ = 0;
     juce::ComboBox presets_;

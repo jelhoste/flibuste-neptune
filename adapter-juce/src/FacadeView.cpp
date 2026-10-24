@@ -69,6 +69,7 @@ public:
             {
                 panel = std::make_unique<VelocityPanel> (o.palette_, o.tr_, 0, false, o.processor_.trackSettings (o.track_).velocityCurve);
                 auto* proc = &o.processor_;
+                panel->setEnabledToggleVisible (true);   // la courbe d'entrée peut être mise de côté sans perdre ses réglages
                 panel->setFadeControlsVisible (false);   // la Façade n'expose que la courbe de transfert ; le fondu reste dans l'éditeur Sampler
                 panel->onGestureBegin = [proc] { proc->uiBeginGesture(); };
                 panel->onGestureEnd = [proc] { proc->uiEndGesture(); };
@@ -362,6 +363,7 @@ private:
         const auto* w = widgetAt (p);
         if (w != nullptr)
         {
+            o.lastClicked_ = w->id;
             if (extend)
             {
                 if (o.selection_.count (w->id) != 0) o.selection_.erase (w->id); else o.selection_.insert (w->id);
@@ -1212,6 +1214,12 @@ void FacadeView::showAlignMenu()
     menu.addItem (7, text ("facade.distribute_h"), selection_.size() >= 3);
     menu.addItem (8, text ("facade.distribute_v"), selection_.size() >= 3);
     menu.addSubMenu (text ("facade.grid"), grid);
+    juce::PopupMenu circle;
+    circle.addItem (21, text ("facade.circle_left"));
+    circle.addItem (22, text ("facade.circle_top"));
+    circle.addItem (23, text ("facade.circle_right"));
+    circle.addItem (24, text ("facade.circle_bottom"));
+    menu.addSubMenu (text ("facade.circle"), circle, selection_.size() >= 3);
     menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&alignButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
     {
@@ -1220,6 +1228,8 @@ void FacadeView::showAlignMenu()
         const auto ids = safe->selection_;
         if (choice <= 6) fc::alignWidgets (f, ids, static_cast<fc::Align> (choice - 1));
         else if (choice == 7 || choice == 8) fc::distributeWidgets (f, ids, choice == 7);
+        else if (choice >= 21 && choice <= 24)
+            fc::arrangeCircle (f, ids, ids.count (safe->lastClicked_) != 0 ? safe->lastClicked_ : *ids.begin(), static_cast<fc::CircleStart> (choice - 21));
         else fc::arrangeGrid (f, ids, choice - 100);
         safe->commitArranged (std::move (f), ids, "Facade: arrange widgets");
     });
@@ -1234,6 +1244,10 @@ void FacadeView::showZoneLayoutMenu()
     menu.addItem (2, text ("facade.layout_row"), true, z->layout == 1);
     menu.addItem (3, text ("facade.layout_column"), true, z->layout == 2);
     for (int c = 2; c <= 8; ++c) menu.addItem (10 + c, text ("facade.layout_grid") + " " + juce::String (c), true, z->layout == 3 && z->columns == c);
+    menu.addItem (30, text ("facade.circle_left"), true, z->layout == 4 && z->justify == 0);
+    menu.addItem (31, text ("facade.circle_top"), true, z->layout == 4 && z->justify == 1);
+    menu.addItem (32, text ("facade.circle_right"), true, z->layout == 4 && z->justify == 2);
+    menu.addItem (33, text ("facade.circle_bottom"), true, z->layout == 4 && z->justify == 3);
     menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&layoutButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
     {
@@ -1241,6 +1255,7 @@ void FacadeView::showZoneLayoutMenu()
         safe->applyZone ([choice] (fc::Widget& w)
         {
             if (choice <= 3) w.layout = choice - 1;
+            else if (choice >= 30) { w.layout = 4; w.justify = choice - 30; }
             else { w.layout = 3; w.columns = choice - 10; }
         }, "Facade: zone layout");
     });

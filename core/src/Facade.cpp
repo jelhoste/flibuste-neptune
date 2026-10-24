@@ -236,6 +236,76 @@ void moveWidgets (Facade& f, const std::set<int>& ids, int dx, int dy)
         if (all.count (w.id) != 0) { w.x += dx; w.y += dy; }
 }
 
+namespace
+{
+constexpr double kPi = 3.14159265358979323846;
+
+// Angle d'écran (y vers le bas : le sens croissant est le sens horaire) de la place de départ.
+double startAngle (CircleStart s) noexcept
+{
+    switch (s)
+    {
+        case CircleStart::Top:    return -kPi / 2.0;
+        case CircleStart::Right:  return 0.0;
+        case CircleStart::Bottom: return kPi / 2.0;
+        default:                  return kPi;
+    }
+}
+
+// Écart horaire de `angle` depuis `from`, dans [0, 2π[ (les erreurs d'arrondi près de 2π comptent pour 0).
+double clockwiseFrom (double angle, double from) noexcept
+{
+    double d = std::fmod (angle - from, 2.0 * kPi);
+    if (d < 0.0) d += 2.0 * kPi;
+    return d > 2.0 * kPi - 0.02 ? 0.0 : d;
+}
+
+void centreOn (Facade& f, int id, double px, double py)
+{
+    const auto& w = *f.find (id);
+    const int nx = std::clamp (static_cast<int> (std::lround (px - w.w / 2.0)), 0, canvasWidth - w.w);
+    const int ny = std::clamp (static_cast<int> (std::lround (py - w.h / 2.0)), 0, canvasHeight - w.h);
+    moveWidgets (f, { id }, nx - w.x, ny - w.y);
+}
+
+// `order[0]` à l'angle `theta0`, les suivants à pas égaux dans le sens horaire.
+void spreadOnCircle (Facade& f, const std::vector<int>& order, double cx, double cy, double r, double theta0)
+{
+    const double step = 2.0 * kPi / static_cast<double> (order.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+    {
+        const double a = theta0 + step * static_cast<double> (i);
+        centreOn (f, order[i], cx + r * std::cos (a), cy + r * std::sin (a));
+    }
+}
+} // namespace
+
+void arrangeCircle (Facade& f, const std::set<int>& ids, int refId, CircleStart start)
+{
+    auto ws = pick (f, ids);
+    if (ws.size() < 3) return;
+    int lo = canvasWidth, hi = 0, top = canvasHeight, bottom = 0, maxW = 0, maxH = 0;
+    for (const auto* w : ws) { lo = std::min (lo, w->x); hi = std::max (hi, w->x + w->w); top = std::min (top, w->y); bottom = std::max (bottom, w->y + w->h); maxW = std::max (maxW, w->w); maxH = std::max (maxH, w->h); }
+    const double cx = (lo + hi) / 2.0, cy = (top + bottom) / 2.0;
+    const double n = static_cast<double> (ws.size());
+    double r = std::min (hi - lo - maxW, bottom - top - maxH) / 2.0;
+    r = std::max ({ r, 40.0, n * std::max (maxW, maxH) / (2.0 * kPi) });   // jamais trop serré pour que les widgets se chevauchent
+    const Widget* ref = ids.count (refId) != 0 ? f.find (refId) : ws.front();
+    const double refAngle = std::atan2 (ref->y + ref->h / 2.0 - cy, ref->x + ref->w / 2.0 - cx);
+    std::vector<int> others;
+    for (const auto* w : ws)
+        if (w->id != ref->id) others.push_back (w->id);
+    std::stable_sort (others.begin(), others.end(), [&] (int a, int b)
+    {
+        const auto &wa = *f.find (a), &wb = *f.find (b);
+        return clockwiseFrom (std::atan2 (wa.y + wa.h / 2.0 - cy, wa.x + wa.w / 2.0 - cx), refAngle)
+             < clockwiseFrom (std::atan2 (wb.y + wb.h / 2.0 - cy, wb.x + wb.w / 2.0 - cx), refAngle);
+    });
+    std::vector<int> order { ref->id };
+    order.insert (order.end(), others.begin(), others.end());
+    spreadOnCircle (f, order, cx, cy, r, startAngle (start));
+}
+
 void applyLayouts (Facade& f)
 {
     // zones les moins profondes d'abord : une zone rangée par sa parente emporte son contenu avant d'être rangée à son tour
@@ -261,9 +331,14 @@ void applyLayouts (Facade& f)
         const int cw = std::max (1, z.w - 2 * zonePad), ch = std::max (1, z.h - 2 * zonePad - (z.text.empty() ? 0 : zoneTitleHeight));
         const auto layout = static_cast<ZoneLayout> (z.layout);
         // ordre de rangement : par position (ligne : de gauche à droite ; colonne : de haut en bas ; matrice : ligne par ligne)
+        const double midX = cx + cw / 2.0, midY = cy + ch / 2.0;
+        const double theta0 = startAngle (static_cast<CircleStart> (z.justify));
         std::stable_sort (kids.begin(), kids.end(), [&] (int a, int b)
         {
             const auto &wa = *f.find (a), &wb = *f.find (b);
+            if (layout == ZoneLayout::Circle)
+                return clockwiseFrom (std::atan2 (wa.y + wa.h / 2.0 - midY, wa.x + wa.w / 2.0 - midX), theta0)
+                     < clockwiseFrom (std::atan2 (wb.y + wb.h / 2.0 - midY, wb.x + wb.w / 2.0 - midX), theta0);
             if (layout == ZoneLayout::Row) return wa.x < wb.x;
             if (layout == ZoneLayout::Column) return wa.y < wb.y;
             const int ra = (wa.y + wa.h / 2) / 40, rb = (wb.y + wb.h / 2) / 40;   // même rangée à 40 px près
@@ -294,7 +369,14 @@ void applyLayouts (Facade& f)
             }
         };
         const int n = static_cast<int> (kids.size());
-        if (layout == ZoneLayout::Row || layout == ZoneLayout::Column)
+        if (layout == ZoneLayout::Circle)
+        {
+            int maxW = 0, maxH = 0;
+            for (const int id : kids) { maxW = std::max (maxW, f.find (id)->w); maxH = std::max (maxH, f.find (id)->h); }
+            const double r = std::max (0.0, std::min (cw - maxW, ch - maxH) / 2.0);
+            spreadOnCircle (f, kids, midX, midY, r, theta0);
+        }
+        else if (layout == ZoneLayout::Row || layout == ZoneLayout::Column)
         {
             const bool row = layout == ZoneLayout::Row;
             int sum = 0;

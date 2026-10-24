@@ -30,8 +30,11 @@ constexpr int zoneTitleHeight = 24;  // bandeau du titre (quand la zone a un tit
 
 // Rangement du contenu d'une zone. `align` : sur l'axe transversal (ligne : haut / centre / bas ; colonne : gauche / centre / droite ;
 // matrice : dans la cellule, sur les deux axes). `justify` : sur l'axe principal (début / centre / fin / répartition égale).
-enum class ZoneLayout { Free = 0, Row = 1, Column = 2, Grid = 3 };
-constexpr int numZoneLayouts = 4;
+// Cercle : le contenu est réparti à angles égaux sur un cercle, dans le sens horaire ; `justify` donne la place du premier
+// (0 à gauche, 1 en haut, 2 à droite, 3 en bas).
+enum class ZoneLayout { Free = 0, Row = 1, Column = 2, Grid = 3, Circle = 4 };
+constexpr int numZoneLayouts = 5;
+enum class CircleStart { Left = 0, Top = 1, Right = 2, Bottom = 3 };
 enum class CrossAlign { Start = 0, Centre = 1, End = 2 };
 enum class Justify { Start = 0, Centre = 1, End = 2, Spread = 3 };
 constexpr int maxZoneGap = 64;
@@ -86,7 +89,10 @@ Widget defaultWidget (WidgetType type, int id, int x, int y);
 enum class Align { Left, Right, Top, Bottom, CentreH, CentreV };
 void alignWidgets (Facade&, const std::set<int>& ids, Align);
 void distributeWidgets (Facade&, const std::set<int>& ids, bool horizontal); // espaces égaux entre widgets (≥ 3)
-void arrangeGrid (Facade&, const std::set<int>& ids, int columns);           // matrice : pas régulier, dans l'ordre d'empilement
+void arrangeGrid (Facade&, const std::set<int>& ids, int columns);
+// Répartit les widgets à angles égaux sur un cercle (sens horaire) dont le centre et le rayon viennent de l'espace qu'ils occupent.
+// `refId` (un des widgets) va à la place `start` ; les autres suivent dans l'ordre où ils sont déjà autour du centre.
+void arrangeCircle (Facade&, const std::set<int>& ids, int refId, CircleStart start);           // matrice : pas régulier, dans l'ordre d'empilement
 
 // ---- Zones ----
 // Tous les widgets contenus (directement ou non) dans la zone `id`.

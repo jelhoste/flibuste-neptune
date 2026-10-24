@@ -13,6 +13,7 @@ constexpr float kHitRadius = 16.0f; // >= 32 px de diamètre (tactile)
 // Le préréglage se reconnaît à la forme seule : plancher, plafond et lissage sont des réglages à part.
 VelocityCurve shapeOnly (VelocityCurve c)
 {
+    c.enabled = true;
     c.floor = 0.0;
     c.ceiling = 1.0;
     c.smooth = true;
@@ -40,6 +41,20 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     linearToggle_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
     linearToggle_.onClick = [this] { fadeLinear_ = linearToggle_.getToggleState(); changed(); };
     addAndMakeVisible (linearToggle_);
+
+    enabledToggle_.setButtonText (text ("vel.enabled"));
+    enabledToggle_.setToggleState (curve_.enabled, juce::dontSendNotification);
+    enabledToggle_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+    enabledToggle_.setVisible (false);
+    enabledToggle_.onClick = [this]
+    {
+        if (updating_) return;
+        if (onGestureBegin) onGestureBegin();
+        curve_.enabled = enabledToggle_.getToggleState();
+        changed();
+        if (onGestureEnd) onGestureEnd();
+    };
+    addChildComponent (enabledToggle_);
 
     smoothToggle_.setButtonText (text ("vel.smooth"));
     smoothToggle_.setToggleState (curve_.smooth, juce::dontSendNotification);
@@ -81,7 +96,7 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
         if (onGestureBegin) onGestureBegin();
         const auto keep = curve_;
         curve_ = presetCurve (static_cast<VelocityPreset> (id - 1));
-        curve_.floor = keep.floor; curve_.ceiling = keep.ceiling; curve_.smooth = keep.smooth;
+        curve_.floor = keep.floor; curve_.ceiling = keep.ceiling; curve_.smooth = keep.smooth; curve_.enabled = keep.enabled;
         changed();
         if (onGestureEnd) onGestureEnd();
     };
@@ -93,6 +108,13 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     addAndMakeVisible (readout_);
     setWantsKeyboardFocus (true);
     setSize (400, 500);
+}
+
+void VelocityPanel::setEnabledToggleVisible (bool visible)
+{
+    enabledShown_ = visible;
+    enabledToggle_.setVisible (visible);
+    resized();
 }
 
 void VelocityPanel::setFadeControlsVisible (bool visible)
@@ -120,6 +142,7 @@ void VelocityPanel::changed()
     shapeSlider_.setEnabled (curve_.points.empty());
     smoothToggle_.setToggleState (curve_.smooth, juce::dontSendNotification);
     smoothToggle_.setEnabled (! curve_.points.empty());
+    enabledToggle_.setToggleState (curve_.enabled, juce::dontSendNotification);
     int match = 0;
     for (int i = 0; i < numVelocityPresets; ++i)
         if (shapeOnly (curve_) == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;
@@ -132,6 +155,7 @@ void VelocityPanel::changed()
 void VelocityPanel::resized()
 {
     auto r = getLocalBounds().reduced (12);
+    if (enabledShown_) enabledToggle_.setBounds (r.removeFromTop (28));
     if (fadeControls_)
     {
         widthLabel_.setBounds (r.removeFromTop (22));
@@ -346,6 +370,7 @@ void VelocityPanel::setValues (int fadeWidth, bool fadeLinear, const VelocityCur
     shapeSlider_.setEnabled (curve_.points.empty());
     smoothToggle_.setToggleState (curve_.smooth, juce::dontSendNotification);
     smoothToggle_.setEnabled (! curve_.points.empty());
+    enabledToggle_.setToggleState (curve_.enabled, juce::dontSendNotification);
     int match = 0;
     for (int i = 0; i < numVelocityPresets; ++i)
         if (shapeOnly (curve_) == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;

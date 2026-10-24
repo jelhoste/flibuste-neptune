@@ -89,7 +89,7 @@ json stripToJson (const mixer::StripSettings& s)
     }
     o["sends"] = std::move (sends);
     if (anyInsert (s.inserts)) o["inserts"] = insertsToJson (s.inserts);
-    if (! s.velocityCurve.isLinear()) o["velocity_curve"] = json::parse (toJson (s.velocityCurve));
+    if (! (s.velocityCurve == VelocityCurve())) o["velocity_curve"] = json::parse (toJson (s.velocityCurve));
     if (s.facade != facade::Facade()) o["facade"] = json::parse (facade::toJson (s.facade));
     return o;
 }

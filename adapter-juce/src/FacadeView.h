@@ -66,6 +66,7 @@ private:
     std::uint32_t revision_ = 0xFFFFFFFFu;
     neptune::core::facade::Facade facade_;       // copie de travail (celle de la piste, ou celle d'un glissement en cours)
     std::set<int> selection_;                    // widgets sélectionnés (mode Édition)
+    int lastClicked_ = 0;                        // dernier widget cliqué : la référence du rangement en cercle
     bool editMode_ = false;
 
     juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, imageButton_, fitButton_, clearImageButton_;

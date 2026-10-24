@@ -286,3 +286,58 @@ TEST_CASE ("track velocity curve reshapes incoming MIDI velocity for a synth tra
     CHECK (back->tracks[1].strip.velocityCurve == m->tracks[1].strip.velocityCurve);
     CHECK (back->tracks[2].strip.velocityCurve.isLinear());
 }
+
+TEST_CASE ("Facade: circle arrangement puts the reference where asked and keeps the order around the centre")
+{
+    facade::Facade f;
+    // quatre potards en carré, dans le sens horaire à partir du haut gauche : 1 (haut-gauche), 2 (haut-droite), 3 (bas-droite), 4 (bas-gauche)
+    const int pos[4][2] = { { 100, 100 }, { 500, 100 }, { 500, 400 }, { 100, 400 } };
+    for (int i = 0; i < 4; ++i) f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Knob, i + 1, pos[i][0], pos[i][1]));
+    const std::set<int> all { 1, 2, 3, 4 };
+
+    auto centreX = [] (const facade::Widget& w) { return w.x + w.w / 2.0; };
+    auto centreY = [] (const facade::Widget& w) { return w.y + w.h / 2.0; };
+
+    auto g = f;
+    facade::arrangeCircle (g, all, 1, facade::CircleStart::Top);
+    // 4 widgets : 1 en haut, puis 2 à droite, 3 en bas, 4 à gauche (sens horaire)
+    CHECK (centreY (*g.find (1)) < centreY (*g.find (2)));
+    CHECK (centreX (*g.find (2)) > centreX (*g.find (1)));
+    CHECK (centreY (*g.find (3)) > centreY (*g.find (2)));
+    CHECK (centreX (*g.find (4)) < centreX (*g.find (1)));
+    CHECK (std::abs (centreX (*g.find (1)) - centreX (*g.find (3))) <= 2.0);   // 1 et 3 sont diamétralement opposés
+
+    // le même ensemble, mais 3 en référence et placé à gauche : 3 à gauche, 4 en haut, 1 à droite, 2 en bas
+    g = f;
+    facade::arrangeCircle (g, all, 3, facade::CircleStart::Left);
+    CHECK (centreX (*g.find (3)) < centreX (*g.find (4)));
+    CHECK (centreY (*g.find (4)) < centreY (*g.find (3)));
+    CHECK (centreX (*g.find (1)) > centreX (*g.find (4)));
+    CHECK (centreY (*g.find (2)) > centreY (*g.find (1)));
+
+    // moins de trois widgets : sans effet
+    g = f;
+    facade::arrangeCircle (g, { 1, 2 }, 1, facade::CircleStart::Top);
+    CHECK (g == f);
+}
+
+TEST_CASE ("Facade zones: circle layout is stable once applied")
+{
+    facade::Facade f;
+    f.widgets.push_back (zoneAt (1, 100, 100, 500, 400, facade::ZoneLayout::Circle));
+    for (int i = 0; i < 5; ++i) f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Knob, 2 + i, 160 + i * 60, 200 + (i % 2) * 40));
+    f.find (1)->justify = static_cast<int> (facade::CircleStart::Top);
+    facade::arrange (f, { 1, 2, 3, 4, 5, 6 });
+    for (int i = 2; i <= 6; ++i) REQUIRE (f.find (i)->parent == 1);
+    const auto first = f;
+    facade::applyLayouts (f);
+    for (int i = 2; i <= 6; ++i)
+    {
+        CHECK (f.find (i)->x == first.find (i)->x);
+        CHECK (f.find (i)->y == first.find (i)->y);
+    }
+    // le premier (le plus proche de l'angle de départ) est en haut, au centre de la zone
+    int topmost = 2;
+    for (int i = 3; i <= 6; ++i) if (f.find (i)->y < f.find (topmost)->y) topmost = i;
+    CHECK (std::abs ((f.find (topmost)->x + f.find (topmost)->w / 2) - (100 + 500 / 2)) <= 2);
+}

@@ -203,7 +203,7 @@ void Engine::setTrackSettings (int track, const mixer::StripSettings& s)
     if (! (clean.velocityCurve == t.velocityDescription))
     {
         t.velocityDescription = clean.velocityCurve;
-        t.velocitySlot.publish (clean.velocityCurve.isLinear() ? std::shared_ptr<const VelocityLut>() : std::make_shared<const VelocityLut> (buildLut (clean.velocityCurve)));
+        t.velocitySlot.publish (! clean.velocityCurve.active() ? std::shared_ptr<const VelocityLut>() : std::make_shared<const VelocityLut> (buildLut (clean.velocityCurve)));
     }
 }
 

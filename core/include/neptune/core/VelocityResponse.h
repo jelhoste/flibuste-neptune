@@ -26,11 +26,14 @@ struct VelocityCurve
     double floor = 0.0;
     double ceiling = 1.0;
     bool smooth = true;
+    bool enabled = true;   // faux : la courbe est mise de côté (ses réglages restent) ; sert à la courbe d'entrée de la piste
 
+    // La courbe agit vraiment : activée et pas la droite d'origine.
+    bool active() const noexcept { return enabled && ! isLinear(); }
     bool isLinear() const noexcept { return points.empty() && shape == 0.0 && floor == 0.0 && ceiling == 1.0; }
     bool operator== (const VelocityCurve& o) const noexcept
     {
-        return shape == o.shape && points == o.points && floor == o.floor && ceiling == o.ceiling && smooth == o.smooth;
+        return shape == o.shape && points == o.points && floor == o.floor && ceiling == o.ceiling && smooth == o.smooth && enabled == o.enabled;
     }
     static constexpr double minSpan = 0.05; // écart minimal entre le plancher et le plafond
 

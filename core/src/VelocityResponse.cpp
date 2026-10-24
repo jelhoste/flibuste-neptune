@@ -107,6 +107,7 @@ std::string toJson (const VelocityCurve& c)
     if (c.floor != 0.0) o["floor"] = c.floor;
     if (c.ceiling != 1.0) o["ceiling"] = c.ceiling;
     if (! c.smooth) o["smooth"] = false;
+    if (! c.enabled) o["enabled"] = false;
     nlohmann::json pts = nlohmann::json::array();
     for (const auto& p : c.points) pts.push_back ({ p.first, p.second });
     o["points"] = std::move (pts);
@@ -127,6 +128,7 @@ VelocityCurve velocityCurveFromJson (std::string_view text)
     c.floor = num ("floor", 0.0);
     c.ceiling = num ("ceiling", 1.0);
     if (const auto it = o.find ("smooth"); it != o.end() && it->is_boolean()) c.smooth = it->get<bool>();
+    if (const auto it = o.find ("enabled"); it != o.end() && it->is_boolean()) c.enabled = it->get<bool>();
     if (const auto it = o.find ("points"); it != o.end() && it->is_array())
         for (const auto& p : *it)
             if (p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number() && c.points.size() < 64)
