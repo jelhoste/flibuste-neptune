@@ -313,6 +313,7 @@ const Entry kEntries[] = {
     { "facade.ex_slider_v", { "Example: vertical slider", "Exemple : curseur vertical" } },
     { "facade.ex_button", { "Example: button (off / on)", "Exemple : bouton (éteint / allumé)" } },
     { "facade.ex_knob", { "Example: knob (32-frame strip)", "Exemple : potard (bande de 32 images)" } },
+    { "facade.style_preview", { "Preview - click the button, drag the knob and the sliders to try the style", "Aperçu - cliquez le bouton, glissez le potard et les curseurs pour essayer le style" } },
     { "facade.add_zone", { "+ Zone", "+ Zone" } },
     { "facade.tip_zone", { "A container: widgets dropped inside follow it, and it can arrange them in a row, a column or a grid", "Un conteneur : les widgets posés dedans le suivent, et il peut les ranger en ligne, en colonne ou en matrice" } },
     { "facade.same_size", { "Same size for all", "Même taille pour tous" } },

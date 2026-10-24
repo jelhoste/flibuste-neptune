@@ -128,6 +128,9 @@ public:
 
     bool dragging() const noexcept { return mode_ != Mode::None; }
 
+    // Image du cache, pour l'aperçu de la fenêtre des styles.
+    juce::Image cachedPicture (const std::string& path, int maxSide = 1024) const { return picture (path, maxSide); }
+
     // Oublie les images chargées (un style a changé ou un fichier a été remplacé).
     void clearPictures() { pictures_.clear(); repaint(); }
 
@@ -1326,6 +1329,7 @@ public:
         hint_.setFont (juce::FontOptions (13.0f));
         hint_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
         addAndMakeVisible (hint_);
+        addAndMakeVisible (preview_);
 
         list_.updateContent();
         if (! owner_.facade_.styles.empty()) list_.selectRow (0);
@@ -1377,9 +1381,134 @@ public:
         frames_.setBounds (fl.removeFromLeft (80));
         fl.removeFromLeft (14);
         stripH_.setBounds (fl);
+        r.removeFromTop (10);
+        preview_.setBounds (r.removeFromTop (juce::jmin (170, r.getHeight())));
     }
 
 private:
+    // Aperçu du style sélectionné : un bouton à cliquer (éteint / allumé), un potard et deux curseurs à glisser, pour voir tous les états.
+    class Preview : public juce::Component
+    {
+    public:
+        explicit Preview (StylePanel& panel) : panel_ (panel) {}
+
+        void resized() override
+        {
+            auto r = getLocalBounds().toFloat().withTrimmedTop (18.0f).reduced (4.0f);
+            const float cw = r.getWidth() / 4.0f;
+            for (auto& c : cells_) { c = r.removeFromLeft (cw).reduced (6.0f); }
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto& o = panel_.owner_;
+            g.setColour (o.colour (Token::BgApp));
+            g.fillRoundedRectangle (getLocalBounds().toFloat(), 8.0f);
+            g.setColour (o.colour (Token::TextDim));
+            g.setFont (juce::FontOptions (13.0f));
+            g.drawText (o.text ("facade.style_preview"), getLocalBounds().removeFromTop (18).reduced (8, 0), juce::Justification::centredLeft);
+            const auto* st = panel_.current();
+            if (st == nullptr) return;
+            auto pic = [&o] (const std::string& path, int side = 1024) { return o.canvas_->cachedPicture (path, side); };
+
+            // 0 : bouton
+            {
+                const auto face = pic (on_ ? st->on : st->off);
+                if (face.isValid()) g.drawImage (face, cells_[0], juce::RectanglePlacement::centred);
+                else
+                {
+                    const auto r = cells_[0].withSizeKeepingCentre (cells_[0].getWidth(), 34.0f);
+                    g.setColour (on_ ? o.colour (Token::Accent) : o.colour (Token::Pb));
+                    g.fillRoundedRectangle (r, 8.0f);
+                    g.setColour (o.colour (Token::Border));
+                    g.drawRoundedRectangle (r, 8.0f, 1.5f);
+                }
+            }
+            // 1 : potard
+            {
+                const auto strip = st->frames > 1 ? pic (st->strip, 4096) : juce::Image();
+                if (strip.isValid())
+                {
+                    const int frames = st->frames, frame = juce::jlimit (0, frames - 1, juce::roundToInt (static_cast<float> (knob_) * static_cast<float> (frames - 1)));
+                    const int fw = st->stripHorizontal ? strip.getWidth() / frames : strip.getWidth();
+                    const int fh = st->stripHorizontal ? strip.getHeight() : strip.getHeight() / frames;
+                    if (fw > 0 && fh > 0)
+                    {
+                        const auto dest = juce::RectanglePlacement (juce::RectanglePlacement::centred).appliedTo (juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (fw), static_cast<float> (fh)), cells_[1]).toNearestInt();
+                        g.drawImage (strip, dest.getX(), dest.getY(), dest.getWidth(), dest.getHeight(),
+                                     st->stripHorizontal ? frame * fw : 0, st->stripHorizontal ? 0 : frame * fh, fw, fh);
+                    }
+                }
+                else paintNeptuneKnob (g, cells_[1], static_cast<float> (knob_), o.palette_, o.knobStyle_);
+            }
+            // 2 et 3 : curseurs horizontal et vertical
+            for (int i = 0; i < 2; ++i)
+            {
+                const bool vertical = i == 1;
+                auto area = cells_[static_cast<std::size_t> (2 + i)];
+                if (! vertical) area = area.withSizeKeepingCentre (area.getWidth(), std::min (area.getHeight(), 40.0f));
+                else area = area.withSizeKeepingCentre (std::min (area.getWidth(), 40.0f), area.getHeight());
+                const auto rail = pic (st->track), handle = pic (st->handle);
+                if (rail.isValid()) g.drawImage (rail, area, juce::RectanglePlacement::stretchToFit);
+                else
+                {
+                    g.setColour (o.colour (Token::Border));
+                    g.fillRoundedRectangle (vertical ? juce::Rectangle<float> (4.0f, area.getHeight()).withCentre (area.getCentre()) : juce::Rectangle<float> (area.getWidth(), 4.0f).withCentre (area.getCentre()), 2.0f);
+                }
+                fc::Widget fake;
+                fake.vertical = vertical ? 1 : 0;
+                fake.w = juce::roundToInt (area.getWidth());
+                fake.h = juce::roundToInt (area.getHeight());
+                const float len = sliderHandleLength (fake, handle);
+                const float travel = (vertical ? area.getHeight() : area.getWidth()) - len;
+                const float pos = static_cast<float> (i == 0 ? sliderH_ : sliderV_);
+                const auto hr = vertical ? juce::Rectangle<float> (area.getX(), area.getBottom() - len - pos * travel, area.getWidth(), len)
+                                         : juce::Rectangle<float> (area.getX() + pos * travel, area.getY(), len, area.getHeight());
+                if (handle.isValid()) g.drawImage (handle, hr, juce::RectanglePlacement::centred);
+                else
+                {
+                    g.setColour (o.colour (Token::Accent));
+                    g.fillRoundedRectangle (hr.reduced (1.0f), 4.0f);
+                }
+            }
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            active_ = -1;
+            for (int i = 0; i < 4; ++i)
+                if (cells_[static_cast<std::size_t> (i)].contains (e.position)) active_ = i;
+            if (active_ == 0) { on_ = ! on_; repaint(); }
+            startKnob_ = knob_;
+            update (e);
+        }
+        void mouseDrag (const juce::MouseEvent& e) override { update (e); }
+        void mouseUp (const juce::MouseEvent&) override { active_ = -1; }
+
+    private:
+        void update (const juce::MouseEvent& e)
+        {
+            if (active_ == 1) knob_ = juce::jlimit (0.0, 1.0, startKnob_ + (e.getMouseDownPosition().y - e.position.y) / 150.0);
+            else if (active_ == 2)
+            {
+                const auto& c = cells_[2];
+                sliderH_ = juce::jlimit (0.0, 1.0, static_cast<double> ((e.position.x - c.getX()) / std::max (1.0f, c.getWidth())));
+            }
+            else if (active_ == 3)
+            {
+                const auto& c = cells_[3];
+                sliderV_ = juce::jlimit (0.0, 1.0, 1.0 - static_cast<double> ((e.position.y - c.getY()) / std::max (1.0f, c.getHeight())));
+            }
+            repaint();
+        }
+
+        StylePanel& panel_;
+        std::array<juce::Rectangle<float>, 4> cells_;
+        bool on_ = false;
+        double knob_ = 0.5, sliderH_ = 0.5, sliderV_ = 0.5, startKnob_ = 0.5;
+        int active_ = -1;
+    };
+
     struct Row
     {
         std::string fc::ImageStyle::* member = nullptr;
@@ -1387,7 +1516,7 @@ private:
         juce::TextButton choose, clear;
     };
 
-    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (800, juce::jmin (560, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (800, juce::jmin (660, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
     const fc::ImageStyle* current() const
     {
@@ -1418,6 +1547,7 @@ private:
         name_.setText (has ? utf8 (st->name) : juce::String(), false);
         frames_.setText (has ? juce::String (st->frames) : juce::String(), false);
         stripH_.setToggleState (has && st->stripHorizontal, juce::dontSendNotification);
+        preview_.repaint();
         for (auto& r : rows_)
         {
             r.choose.setEnabled (has);
@@ -1559,6 +1689,7 @@ private:
     juce::TextEditor name_, frames_;
     juce::ToggleButton stripH_;
     std::array<Row, 5> rows_;
+    Preview preview_ { *this };
     std::unique_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StylePanel)
