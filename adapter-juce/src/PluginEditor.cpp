@@ -38,6 +38,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     oscButton_.setTooltip (text ("osc.title"));
     oscButton_.onClick = [this] { showOscMenu(); };
     addAndMakeVisible (oscButton_);
+    midiSendButton_.setButtonText (text ("midi.send_button"));
+    midiSendButton_.setTooltip (text ("midi.send_title"));
+    midiSendButton_.onClick = [this] { openMidiSend(); };
+    addAndMakeVisible (midiSendButton_);
     voiceCountButton_.setTooltip (text ("voices.global_limit"));
     voiceCountButton_.onClick = [this]
     {
@@ -159,6 +163,29 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
         }
         setSize (juce::jmax (420, w), juce::jmax (300, h));
     }
+}
+
+void NeptuneEditor::openMidiSend()
+{
+    if (midiSendPanel_ || modal_ || insertOverlay_ || midiFilterEditor_) return;
+    MidiMessagePanel::Settings initial;
+    initial.message.kind = neptune::core::midisend::Kind::ControlChange;
+    initial.message.data1 = 7;
+    initial.message.data2 = 100;
+    midiSendPanel_ = std::make_unique<MidiMessagePanel> (palette_, tr_, false, initial);
+    midiSendPanel_->onSend = [this] (const std::vector<std::uint8_t>& bytes, int targets) { return processor_.postMidi (bytes, targets); };
+    midiSendPanel_->onClose = [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe == nullptr) return;
+            safe->midiSendPanel_.reset();
+            safe->grabKeyboardFocus();
+        });
+    };
+    root_.addAndMakeVisible (*midiSendPanel_);
+    midiSendPanel_->setBounds (rootBounds());
+    midiSendPanel_->toFront (true);
 }
 
 void NeptuneEditor::openMidiFilter()
@@ -513,7 +540,7 @@ void NeptuneEditor::resized()
         const int voicesW = std::max (fit (voiceCountButton_, 60), 150);   // le texte change avec le nombre de voix : largeur stable
         voiceCountButton_.setBounds (left, barY, voicesW, barH);
         left += voicesW + gap;
-        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_ })
+        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_ })
         {
             const int w = fit (*b, 44);
             b->setBounds (left, barY, w, barH);
@@ -523,6 +550,7 @@ void NeptuneEditor::resized()
         facadeView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
+    if (midiSendPanel_) midiSendPanel_->setBounds (rootBounds());
     if (instrumentPanel_ != nullptr)
         instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 40 - 80 - (recoveryShown_ ? 40 : 0))));   // jusqu'à la rangée du bas (et au-dessus du bandeau de récupération)
     audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)) });

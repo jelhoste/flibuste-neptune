@@ -52,6 +52,26 @@ void remapTrack (Facade& f, int fromTrack, int toTrack)
     }
 }
 
+std::vector<ParamId> instrumentParamsOfTrack (const ParameterSet& set, int track)
+{
+    std::vector<ParamId> out;
+    if (track < 0 || track >= kTracks) return out;
+    const ParamId block = probe::trackParam (track, 0);
+    const ParamId organ = mixer::organParam (track, 0);
+    const ParamId slots = mixer::zoneSlotParam (track, 0);
+    const ParamId mods = mixer::modulatorParam (track, 0);
+    for (std::size_t i = 0; i < set.size(); ++i)
+    {
+        const auto& spec = set.spec (i);
+        if (spec.hidden) continue;
+        const ParamId id = spec.id;
+        const bool legacySampler = track == 0 && inRange (id, sampler::gain, kSamplerCount);
+        const bool blockInstrument = inRange (id, block, probe::trackStride) && id - block >= kSamplerFirst;   // les décalages 0..29 sont ceux de la bande
+        if (legacySampler || blockInstrument || inRange (id, organ, probe::trackStride) || inRange (id, slots, 16) || inRange (id, mods, 16)) out.push_back (id);
+    }
+    return out;
+}
+
 void forEachImagePath (Facade& f, const std::function<void (std::string&)>& visit)
 {
     if (! f.image.empty()) visit (f.image);

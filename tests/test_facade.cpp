@@ -2,6 +2,7 @@
 
 #include "neptune/core/Engine.h"
 #include "neptune/core/Facade.h"
+#include "neptune/core/MidiSend.h"
 #include "neptune/core/MixerState.h"
 
 using namespace neptune::core;
@@ -526,4 +527,21 @@ TEST_CASE ("Facade styles: layered knobs, key images, frames, states, text optio
     CHECK (clean.styles[0].textSize == 100);
     CHECK (clean.styles[0].textPosition == 4);
     CHECK (clean.widgets[0].source == 2);
+}
+
+TEST_CASE ("Facade MIDI widgets: message, target and fader round-trip within bounds")
+{
+    facade::Facade f;
+    auto m = facade::defaultWidget (facade::WidgetType::Midi, 1, 10, 10);
+    m.midi.kind = midisend::Kind::ControlChange; m.midi.channel = 4; m.midi.data1 = 74; m.midi.data2 = 99;
+    m.midiTarget = 3; m.midiFader = 1;
+    auto sx = facade::defaultWidget (facade::WidgetType::Midi, 2, 200, 10);
+    sx.midi.kind = midisend::Kind::SysEx; sx.midi.sysex = "F0 7E 7F 09 01 F7";
+    f.widgets = { m, sx };
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+    f.widgets[0].midi.channel = 77; f.widgets[0].midi.data1 = 9999; f.widgets[0].midiTarget = 9;
+    const auto clean = facade::sanitised (f);
+    CHECK (clean.widgets[0].midi.channel == 16);
+    CHECK (clean.widgets[0].midi.data1 == 127);
+    CHECK (clean.widgets[0].midiTarget == 3);
 }

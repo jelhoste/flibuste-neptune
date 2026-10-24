@@ -28,6 +28,7 @@ Format version: **2** (format 1 packs remain valid; format 2 adds knob layers, k
 | Widget | Images used | Notes |
 |---|---|---|
 | Button, Action | `off` and `on`; optional `off_hover`, `on_hover`, `disabled` | Off/closed and on/open; mouse over; widget not linked (in Play mode). |
+| Set, MIDI message | `off` and `on` | Like a button (Set: lit while armed; MIDI message: lit while pressed). |
 | Lamp | `off` and `on`; optional `disabled` | Lit by a parameter, by the notes of a channel or by the notes of the track. Not clickable. |
 | Slider (drawbar) | `track` (rail) and `handle` | Horizontal or vertical, chosen by the user. |
 | Knob | `strip_N` **or** `body` + `pointer` | A strip of N pictures, one per position; or a fixed body and a pointer that Neptune turns. |

@@ -37,6 +37,7 @@ Version du format : **2** (les packs du format 1 restent valides ; le format 2 a
 | Widget | Images utilisées | Remarques |
 |---|---|---|
 | Bouton, Action | `off` et `on` ; facultatifs `off_hover`, `on_hover`, `disabled` | Éteint/fermé et allumé/ouvert ; survol par la souris ; widget non lié (en mode Jeu). |
+| Set, Message MIDI | `off` et `on` | Comme un bouton (Set : allumé quand il est armé ; Message MIDI : allumé pendant l'appui). |
 | Voyant | `off` et `on` ; facultatif `disabled` | Allumé par un paramètre, les notes d'un canal ou les notes de la piste. Pas cliquable. |
 | Curseur (tirant) | `track` (rail) et `handle` (poignée) | Horizontal ou vertical, au choix de l'utilisateur. |
 | Potard | `strip_N` **ou** `body` + `pointer` | Une bande de N images, une par position ; ou un corps fixe et une aiguille que Neptune fait tourner. |
@@ -397,6 +398,7 @@ Format version: **2** (format 1 packs remain valid; format 2 adds knob layers, k
 | Widget | Images used | Notes |
 |---|---|---|
 | Button, Action | `off` and `on`; optional `off_hover`, `on_hover`, `disabled` | Off/closed and on/open; mouse over; widget not linked (in Play mode). |
+| Set, MIDI message | `off` and `on` | Like a button (Set: lit while armed; MIDI message: lit while pressed). |
 | Lamp | `off` and `on`; optional `disabled` | Lit by a parameter, by the notes of a channel or by the notes of the track. Not clickable. |
 | Slider (drawbar) | `track` (rail) and `handle` | Horizontal or vertical, chosen by the user. |
 | Knob | `strip_N` **or** `body` + `pointer` | A strip of N pictures, one per position; or a fixed body and a pointer that Neptune turns. |
@@ -473,10 +475,10 @@ If a role exists in several formats in the same folder (`off.svg` and `off.png`)
 }
 ```
 
-All fields are optional. Without `name`, the pack is named after its file. `licence` may also be written `license`. Always give the author and the licence if you share the pack.
-
 )FSPEC"
-        R"FSPEC(### 4.4 `style.json` (optional, in the style's folder)
+        R"FSPEC(All fields are optional. Without `name`, the pack is named after its file. `licence` may also be written `license`. Always give the author and the licence if you share the pack.
+
+### 4.4 `style.json` (optional, in the style's folder)
 
 ```json
 {
@@ -543,11 +545,11 @@ Neptune displays SVG with the **JUCE** engine, which only implements a **subset*
 - Filters (`<filter>`, blur, drop shadows), masks (`<mask>`), patterns (`<pattern>`), blend modes (`mix-blend-mode`).
 - CSS style sheets (`<style>`) and CSS variables: put colours directly in attributes.
 - Text (`<text>`): the font depends on the machine. **Convert text to outlines** before saving.
-- Embedded images (`<image>`), animations, scripts.
+)FSPEC"
+        R"FSPEC(- Embedded images (`<image>`), animations, scripts.
 - Huge files: aim for less than 500 KB per image.
 
-)FSPEC"
-        R"FSPEC(Tip: in Inkscape, save as "Plain SVG", after *Object → Object to Path* for texts and *Path → Stroke to Path* for complex shapes.
+Tip: in Inkscape, save as "Plain SVG", after *Object → Object to Path* for texts and *Path → Stroke to Path* for complex shapes.
 
 ## 8. PNG and JPG
 

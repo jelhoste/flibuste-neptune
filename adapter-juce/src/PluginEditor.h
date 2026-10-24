@@ -4,6 +4,7 @@
 #include "AudioInView.h"
 #include "MixerView.h"
 #include "FacadeView.h"
+#include "MidiMessagePanel.h"
 #include "MidiFilterEditor.h"
 #include "ScaledRoot.h"
 #include "InsertOverlay.h"
@@ -32,6 +33,9 @@ private:
     juce::TextButton midiFilterButton_; // filtre MIDI avancé de la piste sélectionnée
     juce::TextButton controlButton_;    // contrôleurs MIDI (CC) : interrupteur et assignations par défaut
     juce::TextButton oscButton_;        // serveur OSC : interrupteur, réseau local, port
+    juce::TextButton midiSendButton_;   // fenêtre d'envoi de messages MIDI à la main (CC, notes, SysEx...)
+    std::unique_ptr<MidiMessagePanel> midiSendPanel_;
+    void openMidiSend();
     void showControlMenu();
     void showOscMenu();
     void openMidiFilter();

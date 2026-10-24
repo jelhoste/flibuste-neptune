@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include "neptune/core/FacadeTransfer.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/ProbePool.h"
@@ -58,4 +59,35 @@ TEST_CASE ("facade transfer: widgets and snapshots are rebranched, image paths a
     CHECK (seen == std::vector<std::string> ({ "/a/fond.png", "pack:p!off.svg", "/b/poignee.svg" }));
     CHECK (f.image == "/a/fond.png!");
     CHECK (f.styles[0].on.empty());
+}
+
+TEST_CASE ("facade transfer: the instrument settings of a track exclude the strip settings")
+{
+    ParameterSet set;
+    std::string error;
+    REQUIRE (probe::buildPool (set, 3, &error));
+    REQUIRE (mixer::addOrganParams (set, 1, "Track 2 ", &error));
+    REQUIRE (mixer::addSynthParams (set, 1, "Track 2 ", &error));
+    const auto ids = facade::instrumentParamsOfTrack (set, 1);
+    CHECK (! ids.empty());
+    auto has = [&ids] (ParamId id) { return std::find (ids.begin(), ids.end(), id) != ids.end(); };
+    CHECK (has (mixer::organParam (1, mixer::kOrgLeslieSpeed)));
+    CHECK (has (mixer::synthParam (1, mixer::kLevelOsc1)));
+    CHECK (! has (probe::trackParam (1, probe::kVolume)));       // la bande n'en fait pas partie
+    CHECK (! has (probe::trackParam (1, probe::kSendLevel)));
+    CHECK (! has (mixer::synthParam (0, mixer::kLevelOsc1)));    // ni les réglages d'une autre piste
+    CHECK (facade::instrumentParamsOfTrack (set, 99).empty());
+}
+
+TEST_CASE ("facade: action modes and the Set key round-trip")
+{
+    facade::Facade f;
+    auto a = facade::defaultWidget (facade::WidgetType::Action, 1, 10, 10);
+    a.actionMode = 1;
+    a.snapshot = { { 9000, 8.0 } };
+    f.widgets.push_back (a);
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Set, 2, 200, 10));
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+    f.widgets[0].actionMode = 9;
+    CHECK (facade::sanitised (f).widgets[0].actionMode == 1);
 }

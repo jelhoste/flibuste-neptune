@@ -4,6 +4,7 @@ JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wno
 #include <clap-juce-extensions/clap-juce-extensions.h>
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <array>
+#include <vector>
 #include <atomic>
 #include <filesystem>
 #include <functional>
@@ -53,7 +54,7 @@ public:
 
     const juce::String getName() const override { return "Neptune"; }
     bool acceptsMidi() const override { return true; }
-    bool producesMidi() const override { return false; }
+    bool producesMidi() const override { return true; }   // messages MIDI envoyés à la main vers l'hôte (postMidi) ; le tampon MIDI est vidé après usage : aucun écho
     double getTailLengthSeconds() const override { return 0.0; }
 
     int getNumPrograms() override { return 1; }
@@ -302,6 +303,23 @@ public:
     void handleDirectEvent (const clap_event_header_t* event, int sampleOffset) override;
     bool supportsOutboundEvents() override { return true; }
     void addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer& midi, int sampleOffset) override;
+
+public:
+    // Message MIDI envoyé à la main (widget « Message MIDI » de la Façade, fenêtre d'envoi). `targets` : 1 Neptune (injecté comme s'il venait d'un
+    // clavier MIDI : routé aux pistes par canal), 2 sortie MIDI de l'hôte. Thread de message ; faux si la file est pleine ou le message vide.
+    bool postMidi (const std::vector<std::uint8_t>& bytes, int targets);
+
+private:
+    struct MidiPacket
+    {
+        std::uint16_t size = 0;
+        std::uint8_t targets = 0;
+        std::array<std::uint8_t, 1024> bytes {};
+    };
+    std::array<MidiPacket, 64> midiPackets_ {};       // file du thread de message vers le thread audio
+    juce::AbstractFifo midiFifo_ { 64 };
+    std::array<MidiPacket, 64> hostMidi_ {};          // thread audio : à envoyer à l'hôte à la fin du bloc
+    int numHostMidi_ = 0;
 
 private:
     std::vector<std::shared_ptr<const neptune::core::PreviewSample>> recentPreviews_;   // thread de message

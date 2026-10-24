@@ -82,7 +82,7 @@ bool needsParam (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc
 bool takesStyle (fc::WidgetType t)
 {
     return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Action || t == fc::WidgetType::Slider
-        || t == fc::WidgetType::Keyboard || t == fc::WidgetType::Zone || t == fc::WidgetType::Lamp;
+        || t == fc::WidgetType::Keyboard || t == fc::WidgetType::Zone || t == fc::WidgetType::Lamp || t == fc::WidgetType::Set || t == fc::WidgetType::Midi;
 }
 
 // Charge une image PNG, JPG ou SVG (le SVG est rastérisé, côté le plus long = maxSide), depuis un fichier ou un pack de styles
@@ -189,7 +189,7 @@ int menuCount (const neptune::core::ParamSpec& s)
 
 // ============================== Toile : dessin des widgets et gestes ==============================
 
-class FacadeView::Canvas : public juce::Component
+class FacadeView::Canvas : public juce::Component, private juce::Timer
 {
 public:
     explicit Canvas (FacadeView& owner) : owner_ (owner)
@@ -344,7 +344,30 @@ public:
         const auto* w = widgetAt (p);
         if (w == nullptr) return;
         if (w->type == fc::WidgetType::Keyboard) { if (! e.mods.isPopupMenu()) keyDown (e, *w); return; }
-        if (w->type == fc::WidgetType::Action) { if (! e.mods.isPopupMenu()) runAction (*w); return; }
+        if (w->type == fc::WidgetType::Midi)
+        {
+            if (e.mods.isPopupMenu()) return;
+            midiId_ = w->id;
+            midiLast_.erase (w->id);   // chaque geste commence par envoyer sa valeur
+            mode_ = Mode::Midi;
+            if (w->midiFader != 0) sendMidiFader (*w, toCanvas (e.position)); else { sendMidi (*w, false); repaint(); }
+            return;
+        }
+        if (w->type == fc::WidgetType::Set)
+        {
+            if (! e.mods.isPopupMenu()) { setArmed_ = ! setArmed_; repaint(); }
+            return;
+        }
+        if (w->type == fc::WidgetType::Action)
+        {
+            if (e.mods.isPopupMenu()) return;
+            if (setArmed_ && w->actionMode == 0) { storePiston (w->id); return; }   // « Set » armé : ce piston mémorise les valeurs courantes
+            // le rappel a lieu au relâchement ; un appui long (0,7 s) mémorise à la place, comme « Set » + piston
+            pistonId_ = w->id;
+            longPress_ = false;
+            startTimer (700);
+            return;
+        }
         if (w->param == 0 || o.processor_.parameters().indexOf (w->param) == neptune::core::ParameterSet::npos) return;
         if (e.mods.isPopupMenu())
         {
@@ -398,6 +421,11 @@ public:
             }
             return;
         }
+        if (mode_ == Mode::Midi)
+        {
+            if (const auto* w = o.facade_.find (midiId_); w != nullptr && w->midiFader != 0) sendMidiFader (*w, toCanvas (e.position));
+            return;
+        }
         if (mode_ == Mode::Slide)
         {
             if (const auto* w = o.facade_.find (slideId_)) slideTo (*w, toCanvas (e.position));
@@ -447,6 +475,16 @@ public:
     void mouseUp (const juce::MouseEvent& e) override
     {
         auto& o = owner_;
+        if (pistonId_ != 0)
+        {
+            stopTimer();
+            const int id = pistonId_;
+            pistonId_ = 0;
+            if (! longPress_)
+                if (const auto* w = o.facade_.find (id)) runAction (*w);
+            longPress_ = false;
+            return;
+        }
         if (mode_ == Mode::Key)
         {
             const auto it = pressed_.find (e.source.getIndex());
@@ -456,6 +494,14 @@ public:
                 pressed_.erase (it);
             }
             if (pressed_.empty()) mode_ = Mode::None;
+            repaint();
+            return;
+        }
+        if (mode_ == Mode::Midi)
+        {
+            if (const auto* w = o.facade_.find (midiId_); w != nullptr && w->midiFader == 0 && w->midi.kind == neptune::core::midisend::Kind::NoteOn) sendMidi (*w, true);
+            midiId_ = 0;
+            mode_ = Mode::None;
             repaint();
             return;
         }
@@ -493,7 +539,8 @@ public:
         if (w == nullptr) return;
         if (o.editMode_)
         {
-            if (w->type == fc::WidgetType::Action) o.openPicker (true);
+            if (w->type == fc::WidgetType::Midi) o.openMidiEditor();
+            else if (w->type == fc::WidgetType::Action) o.openPicker (true);
             else if (needsParam (w->type)) o.openPicker();
             return;
         }
@@ -551,7 +598,37 @@ public:
     }
 
 private:
-    enum class Mode { None, Move, Resize, Turn, Band, Key, Slide };
+    enum class Mode { None, Move, Resize, Turn, Band, Key, Slide, Midi };
+
+    // Message MIDI d'un widget « Message MIDI » vers Neptune et/ou l'hôte. `release` : le relâchement d'une note envoie la note coupée.
+    void sendMidi (const fc::Widget& w, bool release)
+    {
+        auto m = w.midi;
+        if (release) { m.kind = neptune::core::midisend::Kind::NoteOff; m.data2 = 0; }
+        const auto bytes = neptune::core::midisend::encode (m);
+        if (! bytes.empty()) owner_.processor_.postMidi (bytes, w.midiTarget);
+    }
+
+    // Curseur MIDI : la position du geste donne la valeur (0..127, ou 0..16383 pour un pitch bend) ; un message part à chaque changement.
+    void sendMidiFader (const fc::Widget& w, juce::Point<float> p)
+    {
+        using neptune::core::midisend::Kind;
+        const double t = std::clamp ((p.x - static_cast<float>(w.x)) / static_cast<float> (std::max (1, w.w)), 0.0f, 1.0f);
+        auto m = w.midi;
+        int value;
+        if (m.kind == Kind::PitchBend) { value = static_cast<int> (std::lround (t * 16383.0)); m.data1 = value; }
+        else
+        {
+            value = static_cast<int> (std::lround (t * 127.0));
+            if (m.kind == Kind::ProgramChange || m.kind == Kind::ChannelPressure) m.data1 = value; else m.data2 = value;
+        }
+        if (const auto it = midiLast_.find (w.id); it != midiLast_.end() && it->second == value) return;
+        midiLast_[w.id] = value;
+        midiFader_[w.id] = t;
+        const auto bytes = neptune::core::midisend::encode (m);
+        if (! bytes.empty()) owner_.processor_.postMidi (bytes, w.midiTarget);
+        repaint();
+    }
 
     // Position affichée (0..1, dans le sens de l'écran) d'un potard ou d'un curseur : celle du paramètre, ou celle de son cran le plus
     // proche si le widget a des crans personnalisés ; inversée si le widget est inversé.
@@ -766,8 +843,32 @@ private:
         if (w.snapshot.empty()) return;
         o.processor_.uiBeginEdit (w.snapshot.front().first);
         for (const auto& [id, value] : w.snapshot)
-            if (const auto* sp = ps.find (id)) o.processor_.uiSetNormalised (id, sp->toNormalized (sp->clamp (value)));
+            if (const auto* sp = ps.find (id)) o.processor_.uiSetNormalised (id, sp->toNormalized (sp->clamp (w.actionMode == 1 ? sp->defaultValue : value)));   // mode 1 : annulation générale
         o.processor_.uiEndEdit (w.snapshot.front().first);
+    }
+
+    // Piston : mémorise les valeurs courantes de sa liste de paramètres (un seul geste annulable), puis désarme « Set ».
+    void storePiston (int id)
+    {
+        auto& o = owner_;
+        auto f = o.facade_;
+        auto& ps = o.processor_.parameters();
+        if (auto* w = f.find (id))
+        {
+            for (auto& entry : w->snapshot)
+                if (ps.find (entry.first) != nullptr) entry.second = ps.get (entry.first);
+            o.commit (std::move (f), "Facade: store piston");
+        }
+        setArmed_ = false;
+        repaint();
+    }
+
+    void timerCallback() override
+    {
+        stopTimer();
+        if (pistonId_ == 0) return;
+        longPress_ = true;
+        storePiston (pistonId_);
     }
 
     bool actionIsLit (const fc::Widget& w) const
@@ -777,7 +878,7 @@ private:
         for (const auto& [id, value] : w.snapshot)
         {
             const auto* sp = ps.find (id);
-            if (sp == nullptr || std::abs (ps.get (id) - sp->clamp (value)) > 1.0e-6) return false;
+            if (sp == nullptr || std::abs (ps.get (id) - sp->clamp (w.actionMode == 1 ? sp->defaultValue : value)) > 1.0e-6) return false;
         }
         return true;
     }
@@ -807,7 +908,8 @@ private:
         const auto* spec = w.param != 0 ? ps.find (w.param) : nullptr;
         const bool linked = spec != nullptr;
         const juce::Rectangle<float> b (static_cast<float> (w.x), static_cast<float> (w.y), static_cast<float> (w.w), static_cast<float> (w.h));
-        const juce::String caption = w.text.empty() ? (linked ? utf8 (spec->name) : juce::String()) : utf8 (w.text);
+        const juce::String caption0 = w.text.empty() ? (linked ? utf8 (spec->name) : juce::String()) : utf8 (w.text);
+        const juce::String caption = w.type == fc::WidgetType::Set && w.text.empty() ? juce::String ("Set") : caption0;
         const float n = linked ? static_cast<float> (ps.getNormalized (w.param)) : 0.0f;
         const float pos = linked ? static_cast<float> (shownPosition (w)) : 0.0f;   // potard et curseur : crans et inversion compris
 
@@ -864,10 +966,12 @@ private:
             }
             case fc::WidgetType::Button:
             case fc::WidgetType::Action:
+            case fc::WidgetType::Set:
             {
                 const bool isAction = w.type == fc::WidgetType::Action;
-                const bool on = isAction ? actionIsLit (w) : linked && n >= 0.5f;
-                const bool empty = isAction ? w.snapshot.empty() : ! linked;
+                const bool isSet = w.type == fc::WidgetType::Set;
+                const bool on = isSet ? setArmed_ : isAction ? actionIsLit (w) : linked && n >= 0.5f;
+                const bool empty = isSet ? false : isAction ? w.snapshot.empty() : ! linked;
                 if (const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr)
                 {
                     const bool hover = hoverId_ == w.id && ! o.editMode_;
@@ -974,6 +1078,36 @@ private:
                     g.setFont (juce::FontOptions (12.0f));
                     g.drawFittedText (o.text ("facade.unlinked"), b.toNearestInt(), juce::Justification::centred, 1);
                 }
+                break;
+            }
+            case fc::WidgetType::Midi:
+            {
+                const bool pressed = midiId_ == w.id;
+                const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const juce::String label = w.text.empty() ? juce::String::fromUTF8 (neptune::core::midisend::describe (w.midi).c_str()) : utf8 (w.text);
+                const juce::Image face = style != nullptr && w.midiFader == 0 ? picture (pressed ? style->on : style->off) : juce::Image();
+                if (face.isValid())
+                {
+                    g.drawImage (face, b, juce::RectanglePlacement::centred);
+                    drawStyledText (g, style, utf8 (w.text), b, 0.3f, o.colour (Token::Text));
+                    break;
+                }
+                const auto r = b.reduced (1.0f);
+                g.setColour (o.colour (Token::Pb));
+                g.fillRoundedRectangle (r, 8.0f);
+                if (w.midiFader != 0)
+                {
+                    const auto it = midiFader_.find (w.id);
+                    const double t = it != midiFader_.end() ? it->second : 0.0;
+                    g.setColour (o.colour (Token::Accent).withAlpha (0.55f));
+                    g.fillRoundedRectangle (r.withWidth (static_cast<float> (r.getWidth() * t)), 8.0f);
+                }
+                else if (pressed) { g.setColour (o.colour (Token::Accent)); g.fillRoundedRectangle (r, 8.0f); }
+                g.setColour (o.colour (Token::Border));
+                g.drawRoundedRectangle (r, 8.0f, 1.5f);
+                g.setColour (pressed && w.midiFader == 0 ? o.colour (Token::BgApp) : o.colour (Token::Text));
+                g.setFont (juce::FontOptions (juce::jlimit (11.0f, 22.0f, b.getHeight() * 0.38f), juce::Font::bold));
+                g.drawFittedText (label, r.toNearestInt().reduced (6, 2), juce::Justification::centred, 2);
                 break;
             }
             case fc::WidgetType::Lamp:
@@ -1118,6 +1252,12 @@ private:
     mutable std::map<std::string, Picture> pictures_;   // chemin -> image (vide : introuvable)
     std::map<std::string, std::string> svgVars_;        // {{accent}}... : couleurs du thème pour les SVG
     int hoverId_ = 0;
+    int midiId_ = 0;                          // widget « Message MIDI » en cours d'appui
+    std::map<int, int> midiLast_;             // dernière valeur envoyée par chaque curseur MIDI
+    std::map<int, double> midiFader_;         // position affichée de chaque curseur MIDI (0..1)
+    bool setArmed_ = false;      // la touche « Set » est enfoncée : le prochain piston cliqué mémorise
+    int pistonId_ = 0;           // piston en cours d'appui (rappel au relâchement, mémorisation si l'appui est long)
+    bool longPress_ = false;
     std::map<int, std::unique_ptr<VelocityPanel>> panels_;
     std::uint32_t panelRevision_ = 0xFFFFFFFFu;
 
@@ -1163,6 +1303,14 @@ public:
         addAndMakeVisible (cancel_);
         if (capture)
         {
+            allButton_.setButtonText (owner.text ("facade.capture_all"));
+            allButton_.setTooltip (owner.text ("facade.tip_capture_all"));
+            allButton_.onClick = [this, track]
+            {
+                for (const auto id : neptune::core::facade::instrumentParamsOfTrack (owner_.processor_.parameters(), track)) chosen_.insert (id);
+                list_.repaint();
+            };
+            addAndMakeVisible (allButton_);
             ok_.setButtonText (owner.text ("facade.capture_ok"));
             ok_.onClick = [this] { confirm(); };
             addAndMakeVisible (ok_);
@@ -1201,6 +1349,7 @@ public:
         cancel_.setBounds (bottom.removeFromRight (120));
         bottom.removeFromRight (8);
         (capture_ ? ok_ : unlink_).setBounds (bottom.removeFromRight (140));
+        if (capture_) allButton_.setBounds (bottom.removeFromLeft (260));
     }
 
 private:
@@ -1284,7 +1433,7 @@ private:
     juce::Label title_, hint_;
     juce::TextEditor filter_;
     juce::ListBox list_;
-    juce::TextButton cancel_, unlink_, ok_;
+    juce::TextButton cancel_, unlink_, ok_, allButton_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Picker)
 };
@@ -2311,6 +2460,14 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (zoneButton_, "facade.add_zone", fc::WidgetType::Zone);
     setupAdd (keyboardButton_, "facade.add_keyboard", fc::WidgetType::Keyboard);
     setupAdd (lampButton_, "facade.add_lamp", fc::WidgetType::Lamp);
+    setupAdd (setKeyButton_, "facade.add_set", fc::WidgetType::Set);
+    setupAdd (midiButton_, "facade.add_midi", fc::WidgetType::Midi);
+    midiEditButton_.setButtonText (text ("facade.midi_edit"));
+    midiEditButton_.setTooltip (text ("facade.tip_midi_edit"));
+    midiEditButton_.onClick = [this] { openMidiEditor(); };
+    actionModeButton_.setButtonText (text ("facade.action_mode"));
+    actionModeButton_.setTooltip (text ("facade.tip_action_mode"));
+    actionModeButton_.onClick = [this] { showActionModeMenu(); };
     lampSourceButton_.setButtonText (text ("facade.lamp_source"));
     lampSourceButton_.setTooltip (text ("facade.tip_lamp_source"));
     lampSourceButton_.onClick = [this] { showLampSourceMenu(); };
@@ -2406,11 +2563,13 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     sliderButton_.setTooltip (text ("facade.tip_slider"));
     keyboardButton_.setTooltip (text ("facade.tip_keyboard"));
     lampButton_.setTooltip (text ("facade.tip_lamp"));
+    setKeyButton_.setTooltip (text ("facade.tip_set"));
+    midiButton_.setTooltip (text ("facade.tip_midi"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
-    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &imageButton_, &fitButton_, &clearImageButton_,
+    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &imageButton_, &fitButton_, &clearImageButton_,
                      &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
@@ -2432,13 +2591,15 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
     relocateButton_.setVisible (missing_ > 0);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
     linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type) && ! (one->type == fc::WidgetType::Lamp && one->source != 0));
     lampSourceButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Lamp);
     captureButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Action);
+    actionModeButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Action);
+    midiEditButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Midi);
     duplicateButton_.setVisible (any);
     deleteButton_.setVisible (any);
     alignButton_.setVisible (editMode_ && selection_.size() >= 2);
@@ -2510,8 +2671,8 @@ void FacadeView::resized()
     area.removeFromTop (gap);
     if (editMode_)
     {
-        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
@@ -2519,6 +2680,7 @@ void FacadeView::resized()
     if (help_ != nullptr) help_->setBounds (getLocalBounds());
     if (stylePanel_ != nullptr) stylePanel_->setBounds (getLocalBounds());
     if (notchPanel_ != nullptr) notchPanel_->setBounds (getLocalBounds());
+    if (midiPanel_ != nullptr) midiPanel_->setBounds (getLocalBounds());
 }
 
 void FacadeView::paint (juce::Graphics&) {}
@@ -2598,6 +2760,56 @@ void FacadeView::applySingle (const std::function<void (fc::Widget&)>& change, c
 }
 
 // 0 : canal MIDI, 1 : première note, 2 : vélocité
+void FacadeView::openMidiEditor()
+{
+    const auto* w = facade_.find (single());
+    if (midiPanel_ != nullptr || w == nullptr || w->type != fc::WidgetType::Midi) return;
+    MidiMessagePanel::Settings initial;
+    initial.message = w->midi;
+    initial.target = w->midiTarget;
+    initial.fader = w->midiFader != 0;
+    const int id = w->id;
+    midiPanel_ = std::make_unique<MidiMessagePanel> (palette_, tr_, true, initial);
+    midiPanel_->onSend = [this] (const std::vector<std::uint8_t>& bytes, int targets) { return processor_.postMidi (bytes, targets); };
+    midiPanel_->onApply = [safe = juce::Component::SafePointer<FacadeView> (this), id] (const MidiMessagePanel::Settings& s)
+    {
+        if (safe == nullptr) return;
+        auto f = safe->facade_;
+        if (auto* widget = f.find (id))
+        {
+            widget->midi = s.message;
+            widget->midiTarget = s.target;
+            widget->midiFader = s.fader ? 1 : 0;
+            safe->commit (std::move (f), "Facade: MIDI message");
+        }
+    };
+    midiPanel_->onClose = [safe = juce::Component::SafePointer<FacadeView> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr) { safe->midiPanel_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
+        });
+    };
+    addAndMakeVisible (*midiPanel_);
+    midiPanel_->setBounds (getLocalBounds());
+    midiPanel_->toFront (true);
+}
+
+void FacadeView::showActionModeMenu()
+{
+    const auto* a = facade_.find (single());
+    if (a == nullptr || a->type != fc::WidgetType::Action) return;
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("facade.mode_restore"), true, a->actionMode == 0);
+    menu.addItem (2, text ("facade.mode_reset"), true, a->actionMode == 1);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&actionModeButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applySingle ([choice] (fc::Widget& w) { w.actionMode = choice - 1; }, "Facade: action mode");
+    });
+}
+
 void FacadeView::showLampSourceMenu()
 {
     const auto* l = facade_.find (single());

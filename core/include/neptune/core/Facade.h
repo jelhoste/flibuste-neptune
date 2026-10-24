@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "neptune/core/MidiSend.h"
 #include "neptune/core/Parameter.h"
 
 namespace neptune::core::facade
@@ -25,9 +26,11 @@ constexpr std::size_t maxImagePath = 1024;
 // Zone : conteneur (cadre avec titre) qui possède les widgets posés dedans et, au choix, les range en ligne, en colonne ou en matrice.
 // Keyboard : clavier virtuel lié à un canal MIDI de la piste (un manuel d'orgue = un clavier) ; allume les notes jouées sur ce canal.
 // Slider : curseur (tirant) horizontal ou vertical lié à un paramètre ; crans automatiques sur un paramètre à pas.
+// Midi : envoie un message MIDI (bouton : à chaque clic ; ou curseur : la valeur suit le geste), vers Neptune comme un clavier et/ou vers l'hôte.
+// Set : touche « Set » d'une console : une fois armée, le prochain piston (bouton Action) cliqué mémorise les valeurs courantes de ses paramètres.
 // Lamp : voyant allumé selon un paramètre (source 0), les notes d'un canal (1) ou les notes de la piste (2).
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9 };
-constexpr int numWidgetTypes = 10;
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9, Set = 10, Midi = 11 };
+constexpr int numWidgetTypes = 12;
 constexpr int maxStyles = 64;
 constexpr int maxStripFrames = 512;
 constexpr std::size_t maxNotches = 128;
@@ -125,6 +128,10 @@ struct Widget
     int stepMode = 0;
     int invert = 0;                 // 1 : sens inversé
     std::vector<double> notches;    // valeurs réelles (celles du paramètre), triées, sans doublon
+    midisend::Message midi;         // Midi : le message (canal 1..16 dans `midi.channel`)
+    int midiTarget = 1;             // Midi : 1 Neptune (comme un clavier MIDI), 2 sortie MIDI de l'hôte, 3 les deux
+    int midiFader = 0;              // Midi : 1, curseur (la valeur change avec le geste) au lieu d'un bouton
+    int actionMode = 0;             // Action : 0 restaure l'instantané, 1 remet ses paramètres à leur valeur par défaut (annulation générale)
     int source = 0;                 // Voyant : 0 paramètre, 1 notes du canal `channel`, 2 notes de la piste
     int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
     int vertical = 0;               // Curseur : 1, vertical
@@ -134,7 +141,7 @@ struct Widget
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
-            && source == o.source && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && notches == o.notches;
+            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && notches == o.notches;
     }
 };
 

@@ -28,6 +28,7 @@ Version du format : **2** (les packs du format 1 restent valides ; le format 2 a
 | Widget | Images utilisées | Remarques |
 |---|---|---|
 | Bouton, Action | `off` et `on` ; facultatifs `off_hover`, `on_hover`, `disabled` | Éteint/fermé et allumé/ouvert ; survol par la souris ; widget non lié (en mode Jeu). |
+| Set, Message MIDI | `off` et `on` | Comme un bouton (Set : allumé quand il est armé ; Message MIDI : allumé pendant l'appui). |
 | Voyant | `off` et `on` ; facultatif `disabled` | Allumé par un paramètre, les notes d'un canal ou les notes de la piste. Pas cliquable. |
 | Curseur (tirant) | `track` (rail) et `handle` (poignée) | Horizontal ou vertical, au choix de l'utilisateur. |
 | Potard | `strip_N` **ou** `body` + `pointer` | Une bande de N images, une par position ; ou un corps fixe et une aiguille que Neptune fait tourner. |

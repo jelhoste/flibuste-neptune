@@ -1729,6 +1729,21 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             hostProbe_.hasTransport = false;
     }
 
+    // messages MIDI envoyés à la main : vers Neptune, ils rejoignent le tampon comme s'ils venaient d'un clavier ; vers l'hôte, ils attendent la fin du bloc
+    {
+        int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+        midiFifo_.prepareToRead (midiFifo_.getNumReady(), start1, size1, start2, size2);
+        auto handle = [this, &midi] (const MidiPacket& p)
+        {
+            if (p.size == 0) return;
+            if ((p.targets & 1) != 0) midi.addEvent (juce::MidiMessage (p.bytes.data(), static_cast<int> (p.size)), 0);
+            if ((p.targets & 2) != 0 && numHostMidi_ < static_cast<int> (hostMidi_.size())) hostMidi_[static_cast<std::size_t> (numHostMidi_++)] = p;
+        };
+        for (int i = 0; i < size1; ++i) handle (midiPackets_[static_cast<std::size_t> (start1 + i)]);
+        for (int i = 0; i < size2; ++i) handle (midiPackets_[static_cast<std::size_t> (start2 + i)]);
+        midiFifo_.finishedRead (size1 + size2);
+    }
+
     for (const auto metadata : midi)
     {
         const auto msg = metadata.getMessage();
@@ -1786,6 +1801,21 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     }
 
     engine_.process (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
+    midi.clear();   // Neptune n'a pas de sortie MIDI « de passage » : seuls les messages envoyés à la main partent vers l'hôte (addOutboundEventsToQueue)
+}
+
+bool NeptuneProcessor::postMidi (const std::vector<std::uint8_t>& bytes, int targets)
+{
+    if (bytes.empty() || bytes.size() > 1024 || (targets & 3) == 0) return false;
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    midiFifo_.prepareToWrite (1, start1, size1, start2, size2);
+    if (size1 + size2 < 1) return false;
+    auto& p = midiPackets_[static_cast<std::size_t> (size1 > 0 ? start1 : start2)];
+    p.size = static_cast<std::uint16_t> (bytes.size());
+    p.targets = static_cast<std::uint8_t> (targets & 3);
+    std::copy (bytes.begin(), bytes.end(), p.bytes.begin());
+    midiFifo_.finishedWrite (1);
+    return true;
 }
 
 void NeptuneProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -1871,6 +1901,38 @@ void NeptuneProcessor::handleDirectEvent (const clap_event_header_t* event, int)
 
 void NeptuneProcessor::addOutboundEventsToQueue (const clap_output_events* out, const juce::MidiBuffer&, int sampleOffset)
 {
+    // messages MIDI envoyés à la main vers l'hôte
+    for (int i = 0; i < numHostMidi_; ++i)
+    {
+        const auto& p = hostMidi_[static_cast<std::size_t> (i)];
+        if (p.bytes[0] == 0xF0)
+        {
+            clap_event_midi_sysex ev {};
+            ev.header.size = sizeof (clap_event_midi_sysex);
+            ev.header.time = static_cast<std::uint32_t> (sampleOffset);
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.type = CLAP_EVENT_MIDI_SYSEX;
+            ev.header.flags = 0;
+            ev.port_index = 0;
+            ev.buffer = p.bytes.data();
+            ev.size = p.size;
+            out->try_push (out, &ev.header);
+        }
+        else if (p.size >= 1 && p.size <= 3)
+        {
+            clap_event_midi ev {};
+            ev.header.size = sizeof (clap_event_midi);
+            ev.header.time = static_cast<std::uint32_t> (sampleOffset);
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.type = CLAP_EVENT_MIDI;
+            ev.header.flags = 0;
+            ev.port_index = 0;
+            for (int b = 0; b < 3; ++b) ev.data[b] = b < p.size ? p.bytes[static_cast<std::size_t> (b)] : 0;
+            out->try_push (out, &ev.header);
+        }
+    }
+    numHostMidi_ = 0;
+
     for (int i = 0; i < numPendingEnds_; ++i)
     {
         const auto& p = pendingEnds_[static_cast<size_t> (i)];

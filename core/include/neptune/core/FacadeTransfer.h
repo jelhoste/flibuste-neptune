@@ -5,6 +5,7 @@
 // Cœur portable, sans JUCE.
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "neptune/core/Facade.h"
 
@@ -17,6 +18,10 @@ ParamId remapParamTrack (ParamId id, int fromTrack, int toTrack) noexcept;
 
 // Rebranche sur `toTrack` les paramètres de tous les widgets (lien, instantané des boutons Action).
 void remapTrack (Facade&, int fromTrack, int toTrack);
+
+// Tous les réglages de l'instrument de la piste (hors volume, pan, mute, solo, inserts et envois, qui sont ceux de la bande) : réglages
+// du Sampler, du synthé, du FM, de l'orgue, emplacements et modulateurs. Pour cocher d'un coup « toute la registration » d'un piston.
+std::vector<ParamId> instrumentParamsOfTrack (const ParameterSet&, int track);
 
 // Appelle `visit` sur chaque chemin d'image non vide : le fond puis les images de chaque style.
 void forEachImagePath (Facade&, const std::function<void (std::string&)>& visit);

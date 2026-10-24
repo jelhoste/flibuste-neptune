@@ -103,6 +103,8 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Keyboard: w.w = 520; w.h = 110; break;
         case WidgetType::Slider: w.w = 260; w.h = 44; break;
         case WidgetType::Lamp:   w.w = 40;  w.h = 40;  break;
+        case WidgetType::Set:    w.w = 90;  w.h = 44;  break;
+        case WidgetType::Midi:   w.w = 150; w.h = 44;  break;
     }
     w.x = x;
     w.y = y;
@@ -177,6 +179,10 @@ Facade sanitised (Facade f)
         w.velocity = std::clamp (w.velocity, 1, 127);
         w.vertical = w.vertical != 0 ? 1 : 0;
         w.source = std::clamp (w.source, 0, 2);
+        w.actionMode = std::clamp (w.actionMode, 0, 1);
+        w.midi = midisend::sanitised (std::move (w.midi));
+        w.midiTarget = std::clamp (w.midiTarget, 1, 3);
+        w.midiFader = w.midiFader != 0 ? 1 : 0;
         w.invert = w.invert != 0 ? 1 : 0;
         w.stepMode = std::clamp (w.stepMode, 0, 2);
         w.notches.erase (std::remove_if (w.notches.begin(), w.notches.end(), [] (double v) { return ! std::isfinite (v); }), w.notches.end());
@@ -583,6 +589,19 @@ std::string toJson (const Facade& f)
         }
         if (w.type == WidgetType::Slider) e["vertical"] = w.vertical;
         if (w.type == WidgetType::Lamp) { e["source"] = w.source; e["ch"] = w.channel; }
+        if (w.type == WidgetType::Action && w.actionMode != 0) e["mode"] = w.actionMode;
+        if (w.type == WidgetType::Midi)
+        {
+            json m;
+            m["kind"] = static_cast<int> (w.midi.kind);
+            m["channel"] = w.midi.channel;
+            m["d1"] = w.midi.data1;
+            m["d2"] = w.midi.data2;
+            if (! w.midi.sysex.empty()) m["sysex"] = w.midi.sysex;
+            e["midi"] = std::move (m);
+            e["target"] = w.midiTarget;
+            e["fader"] = w.midiFader;
+        }
         if (w.type == WidgetType::Keyboard)
         {
             e["ch"] = w.channel;
@@ -707,6 +726,17 @@ Facade fromJson (std::string_view text)
                     if (v.is_number() && w.notches.size() < maxNotches) w.notches.push_back (v.get<double>());
             w.vertical = intOf (e, "vertical", 0);
             w.source = intOf (e, "source", 0);
+            w.actionMode = intOf (e, "mode", 0);
+            w.midiTarget = intOf (e, "target", 1);
+            w.midiFader = intOf (e, "fader", 0);
+            if (const auto m = e.find ("midi"); m != e.end() && m->is_object())
+            {
+                w.midi.kind = static_cast<midisend::Kind> (intOf (*m, "kind", 2));
+                w.midi.channel = intOf (*m, "channel", 1);
+                w.midi.data1 = intOf (*m, "d1", 0);
+                w.midi.data2 = intOf (*m, "d2", 0);
+                if (const auto sx = m->find ("sysex"); sx != m->end() && sx->is_string()) w.midi.sysex = sx->get<std::string>();
+            }
             w.channel = intOf (e, "ch", 1);
             w.firstNote = intOf (e, "first", 36);
             w.hold = intOf (e, "hold", 0);

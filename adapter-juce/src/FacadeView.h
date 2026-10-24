@@ -5,6 +5,7 @@
 #include <set>
 #include <vector>
 #include "PluginProcessor.h"
+#include "MidiMessagePanel.h"
 #include "NeptuneKnob.h"
 #include "neptune/core/Facade.h"
 #include "neptune/core/I18n.h"
@@ -54,6 +55,8 @@ private:
     void applySingle (const std::function<void (neptune::core::facade::Widget&)>&, const char* undoName);
     void showKeyboardMenu (int what);
     void showLampSourceMenu();
+    void showActionModeMenu();
+    void openMidiEditor();
     void applyZone (const std::function<void (neptune::core::facade::Widget&)>&, const char* undoName);
     int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
     void editText();
@@ -88,7 +91,7 @@ private:
     int missing_ = 0;                            // images de la Façade introuvables (fond, styles)
     int missingTick_ = 0;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
@@ -96,6 +99,7 @@ private:
     std::unique_ptr<HelpPanel> help_;
     std::unique_ptr<StylePanel> stylePanel_;
     std::unique_ptr<NotchPanel> notchPanel_;
+    std::unique_ptr<MidiMessagePanel> midiPanel_;
     std::unique_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FacadeView)
