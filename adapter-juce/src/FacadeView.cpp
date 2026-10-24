@@ -6,6 +6,8 @@
 #include <map>
 
 #include "FacadeExamples.h"
+#include "FacadeSpec.h"
+#include "StyleLibrary.h"
 #include "VelocityPanel.h"
 
 using neptune::core::theme::Token;
@@ -78,15 +80,15 @@ bool needsParam (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc
 // Les widgets qui peuvent prendre un style d'images.
 bool takesStyle (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Action || t == fc::WidgetType::Slider; }
 
-// Charge une image PNG, JPG ou SVG (le SVG est rastérisé, côté le plus long = maxSide). Image vide si le fichier est absent ou illisible.
+// Charge une image PNG, JPG ou SVG (le SVG est rastérisé, côté le plus long = maxSide), depuis un fichier ou un pack de styles
+// (référence « pack:... »). Image vide si introuvable ou illisible.
 juce::Image loadPicture (const std::string& path, int maxSide)
 {
-    if (path.empty()) return {};
-    const juce::File file (juce::String::fromUTF8 (path.c_str()));
-    if (! file.existsAsFile()) return {};
-    if (file.hasFileExtension ("svg"))
+    juce::MemoryBlock data;
+    if (! stylelib::readBytes (path, data) || data.getSize() == 0) return {};
+    if (juce::String::fromUTF8 (path.c_str()).endsWithIgnoreCase (".svg"))
     {
-        const std::unique_ptr<juce::Drawable> drawable (juce::Drawable::createFromImageFile (file));
+        const std::unique_ptr<juce::Drawable> drawable (juce::Drawable::createFromImageData (data.getData(), data.getSize()));
         if (drawable == nullptr) return {};
         const auto bounds = drawable->getDrawableBounds();
         if (bounds.isEmpty()) return {};
@@ -97,7 +99,7 @@ juce::Image loadPicture (const std::string& path, int maxSide)
         drawable->drawWithin (g, juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (w), static_cast<float> (h)), juce::RectanglePlacement::centred, 1.0f);
         return img;
     }
-    return juce::ImageFileFormat::loadFrom (file);
+    return juce::ImageFileFormat::loadFrom (data.getData(), data.getSize());
 }
 
 // Taille de la poignée d'un curseur le long de son axe : celle de son image, sinon un rectangle étroit.
@@ -1266,6 +1268,7 @@ private:
 // Fenêtre des styles : liste, nom, une image par usage (bouton éteint / allumé, rail et poignée de curseur, bande de potard).
 class FacadeView::StylePanel : public juce::Component, private juce::ListBoxModel
 {
+    friend class FacadeView;   // l'installation par glisser-déposer passe par setMessage et owner_message
 public:
     explicit StylePanel (FacadeView& owner) : owner_ (owner)
     {
@@ -1286,7 +1289,10 @@ public:
         examplesButton_.setButtonText (owner.text ("facade.examples"));
         examplesButton_.setTooltip (owner.text ("facade.tip_examples"));
         examplesButton_.onClick = [this] { createExamples(); };
-        for (auto* b : { &newButton_, &deleteButton_, &closeButton_, &examplesButton_ }) addAndMakeVisible (*b);
+        libraryButton_.setButtonText (owner.text ("facade.library"));
+        libraryButton_.setTooltip (owner.text ("facade.tip_library"));
+        libraryButton_.onClick = [this] { showLibraryMenu(); };
+        for (auto* b : { &newButton_, &deleteButton_, &closeButton_, &examplesButton_, &libraryButton_ }) addAndMakeVisible (*b);
 
         nameLabel_.setText (owner.text ("facade.style_name"), juce::dontSendNotification);
         nameLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
@@ -1352,6 +1358,8 @@ public:
         r.removeFromTop (6);
         auto bottom = r.removeFromBottom (40);
         closeButton_.setBounds (bottom.removeFromRight (140));
+        libraryButton_.setBounds (bottom.removeFromLeft (150));
+        bottom.removeFromLeft (8);
         examplesButton_.setBounds (bottom.removeFromLeft (200));
         bottom.removeFromLeft (10);
         hint_.setBounds (bottom);
@@ -1584,7 +1592,113 @@ private:
                                });
     }
 
-    // Écrit les modèles (SVG et LISEZMOI) dans un dossier au choix et crée les styles d'exemple qui les utilisent.
+    void setMessage (const juce::String& message) { hint_.setText (message, juce::dontSendNotification); }
+
+    // Ajoute à la Façade un style d'un pack de la bibliothèque (ses images restent dans le pack, désignées par des références).
+    int addPackStyles (const stylelib::Pack& pack, int onlyIndex = -1)
+    {
+        auto f = owner_.facade_;
+        int added = 0, selectRow = -1;
+        for (int i = 0; i < static_cast<int> (pack.info.styles.size()); ++i)
+        {
+            if (onlyIndex >= 0 && i != onlyIndex) continue;
+            const auto& ps = pack.info.styles[static_cast<std::size_t> (i)];
+            auto ref = [&pack] (const std::string& entry) { return entry.empty() ? std::string() : neptune::core::stylepack::makeReference (pack.info.id, entry); };
+            fc::ImageStyle st;
+            st.off = ref (ps.off); st.on = ref (ps.on); st.track = ref (ps.track); st.handle = ref (ps.handle); st.strip = ref (ps.strip);
+            st.frames = ps.frames;
+            st.stripHorizontal = ps.stripHorizontal;
+            const auto known = std::find_if (f.styles.begin(), f.styles.end(), [&st] (const fc::ImageStyle& o)
+                                             { return o.off == st.off && o.on == st.on && o.track == st.track && o.handle == st.handle && o.strip == st.strip; });
+            if (known != f.styles.end()) { selectRow = static_cast<int> (known - f.styles.begin()); continue; }
+            if (static_cast<int> (f.styles.size()) >= fc::maxStyles) break;
+            st.id = f.freeStyleId();
+            st.name = ps.name;
+            f.styles.push_back (std::move (st));
+            selectRow = static_cast<int> (f.styles.size()) - 1;
+            ++added;
+        }
+        if (added > 0) owner_.commit (std::move (f), "Facade: add styles from a pack");
+        owner_.canvas_->clearPictures();
+        list_.updateContent();
+        if (selectRow >= 0) list_.selectRow (selectRow);
+        syncFields();
+        return added;
+    }
+
+    // Menu de la bibliothèque : styles des packs installés, installation, dossier, export.
+    void showLibraryMenu()
+    {
+        auto packs = std::make_shared<std::vector<stylelib::Pack>> (stylelib::scan());
+        juce::PopupMenu menu;
+        for (std::size_t p = 0; p < packs->size(); ++p)
+        {
+            const auto& info = (*packs)[p].info;
+            juce::PopupMenu sub;
+            for (std::size_t i = 0; i < info.styles.size(); ++i) sub.addItem (1000 + static_cast<int> (p) * 100 + static_cast<int> (i), utf8 (info.styles[i].name));
+            menu.addSubMenu (utf8 (info.name) + (info.author.empty() ? juce::String() : "  (" + utf8 (info.author) + ")"), sub, ! info.styles.empty());
+        }
+        if (packs->empty()) menu.addItem (-1, owner_.text ("facade.lib_empty"), false);
+        menu.addSeparator();
+        menu.addItem (1, owner_.text ("facade.lib_install"));
+        menu.addItem (2, owner_.text ("facade.lib_open_folder"));
+        menu.addItem (3, owner_.text ("facade.lib_export"), current() != nullptr);
+        menu.setLookAndFeel (&getLookAndFeel());
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&libraryButton_), [safe = juce::Component::SafePointer<StylePanel> (this), packs] (int choice)
+        {
+            if (safe == nullptr || choice == 0) return;
+            if (choice >= 1000)
+            {
+                const auto p = static_cast<std::size_t> ((choice - 1000) / 100);
+                if (p < packs->size()) safe->addPackStyles ((*packs)[p], (choice - 1000) % 100);
+            }
+            else if (choice == 1) safe->chooseAndInstall();
+            else if (choice == 2) { stylelib::directory().createDirectory(); stylelib::directory().revealToUser(); }
+            else if (choice == 3) safe->exportCurrent();
+        });
+    }
+
+    void chooseAndInstall()
+    {
+        chooser_ = std::make_unique<juce::FileChooser> (owner_.text ("facade.lib_choose_pack"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.neptunestyle");
+        chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                               [safe = juce::Component::SafePointer<StylePanel> (this)] (const juce::FileChooser& c)
+                               {
+                                   if (safe == nullptr || ! c.getResult().existsAsFile()) return;
+                                   safe->setMessage (owner_message (safe->owner_, c.getResult()));
+                               });
+    }
+
+    // Installe un pack et rend le message à afficher.
+    static juce::String owner_message (FacadeView& owner, const juce::File& file)
+    {
+        juce::String error;
+        int count = 0;
+        const auto name = stylelib::install (file, error, &count);
+        if (name.isEmpty()) return juce::String::fromUTF8 (owner.tr_.format ("facade.lib_error", { error.toStdString() }).c_str());
+        return juce::String::fromUTF8 (owner.tr_.format ("facade.lib_installed", { name.toStdString(), std::to_string (count) }).c_str());
+    }
+
+    void exportCurrent()
+    {
+        const auto* st = current();
+        if (st == nullptr) return;
+        const auto style = *st;
+        chooser_ = std::make_unique<juce::FileChooser> (owner_.text ("facade.lib_save_pack"),
+                                                        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (utf8 (style.name) + ".neptunestyle"), "*.neptunestyle");
+        chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                               [safe = juce::Component::SafePointer<StylePanel> (this), style] (const juce::FileChooser& c)
+                               {
+                                   if (safe == nullptr || c.getResult() == juce::File()) return;
+                                   auto target = c.getResult();
+                                   if (! target.hasFileExtension ("neptunestyle")) target = target.withFileExtension ("neptunestyle");
+                                   const bool ok = stylelib::exportStyle (style, target);
+                                   safe->setMessage (juce::String::fromUTF8 (safe->owner_.tr_.format (ok ? "facade.lib_exported" : "facade.lib_export_failed", { target.getFullPathName().toStdString() }).c_str()));
+                               });
+    }
+
+    // Écrit les modèles (un dossier par style, pack.json, SPECIFICATION.md) dans un dossier au choix, en fait aussi un pack installé dans la
+    // bibliothèque, et ajoute ses styles à la Façade.
     void createExamples()
     {
         chooser_ = std::make_unique<juce::FileChooser> (owner_.text ("facade.examples_choose"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
@@ -1602,33 +1716,33 @@ private:
         if (! dir.createDirectory().wasOk()) return;
         const bool french = owner_.tr_.language() == "fr";
         int written = 0;
-        for (const auto& f : facade_examples::files (french))
+        auto files = facade_examples::files (french);
+        files.push_back ({ "SPECIFICATION.md", french ? facade_spec::french() : facade_spec::english() });
+        for (const auto& f : files)
         {
             const auto target = dir.getChildFile (f.name);
-            if (target.existsAsFile()) continue;   // un modèle déjà modifié par l'utilisateur n'est jamais écrasé
+            if (target.existsAsFile() && f.name != "SPECIFICATION.md") continue;   // un modèle déjà modifié n'est jamais écrasé
+            target.getParentDirectory().createDirectory();
             if (target.replaceWithText (f.content)) ++written;
         }
-        auto f = owner_.facade_;
+        // le même contenu, en archive installée dans la bibliothèque : de quoi essayer les styles tout de suite
+        const auto lib = stylelib::directory();
         int added = 0;
-        for (const auto& def : facade_examples::styles())
+        if (lib.createDirectory().wasOk())
         {
-            auto path = [&dir] (const juce::String& name) { return name.isEmpty() ? std::string() : dir.getChildFile (name).getFullPathName().toStdString(); };
-            fc::ImageStyle st;
-            st.off = path (def.off); st.on = path (def.on); st.track = path (def.track); st.handle = path (def.handle); st.strip = path (def.strip);
-            st.frames = def.frames;
-            const bool known = std::any_of (f.styles.begin(), f.styles.end(), [&st] (const fc::ImageStyle& o)
-                                            { return o.off == st.off && o.on == st.on && o.track == st.track && o.handle == st.handle && o.strip == st.strip; });
-            if (known || static_cast<int> (f.styles.size()) >= fc::maxStyles) continue;
-            st.id = f.freeStyleId();
-            st.name = owner_.text (def.nameKey).toStdString();
-            f.styles.push_back (std::move (st));
-            ++added;
+            juce::ZipFile::Builder builder;
+            for (const auto& f : facade_examples::files (french))
+                builder.addEntry (new juce::MemoryInputStream (f.content.toRawUTF8(), f.content.getNumBytesAsUTF8(), true), 9, f.name, juce::Time::getCurrentTime());
+            const auto archive = lib.getChildFile ("neptune-examples.neptunestyle");
+            archive.deleteFile();
+            juce::FileOutputStream out (archive);
+            if (out.openedOk() && builder.writeToStream (out, nullptr))
+            {
+                out.flush();
+                stylelib::Pack pack;
+                if (stylelib::analyseSource (archive, pack)) added = addPackStyles (pack);
+            }
         }
-        if (added > 0) owner_.commit (std::move (f), "Facade: example styles");
-        owner_.canvas_->clearPictures();
-        list_.updateContent();
-        if (list_.getSelectedRow() < 0 && ! owner_.facade_.styles.empty()) list_.selectRow (0);
-        syncFields();
         hint_.setText (juce::String::fromUTF8 (owner_.tr_.format ("facade.examples_done", { dir.getFullPathName().toStdString(), std::to_string (written), std::to_string (added) }).c_str()), juce::dontSendNotification);
     }
 
@@ -1685,7 +1799,7 @@ private:
     FacadeView& owner_;
     juce::Label title_, nameLabel_, framesLabel_, hint_;
     juce::ListBox list_;
-    juce::TextButton newButton_, deleteButton_, closeButton_, examplesButton_;
+    juce::TextButton newButton_, deleteButton_, closeButton_, examplesButton_, libraryButton_;
     juce::TextEditor name_, frames_;
     juce::ToggleButton stripH_;
     std::array<Row, 5> rows_;
@@ -1852,6 +1966,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
                         neptune::core::theme::KnobStyle style, NeptuneKnob::OpenModal openModal)
     : processor_ (p), palette_ (palette), tr_ (tr), knobStyle_ (style), openModal_ (std::move (openModal))
 {
+    stylelib::setDirectory (juce::File (processor_.settingsFilePath()).getParentDirectory().getChildFile ("styles"));
     canvas_ = std::make_unique<Canvas> (*this);
     addAndMakeVisible (*canvas_);
 
@@ -2075,6 +2190,23 @@ void FacadeView::resized()
 }
 
 void FacadeView::paint (juce::Graphics&) {}
+
+bool FacadeView::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("neptunestyle")) return true;
+    return false;
+}
+
+void FacadeView::filesDropped (const juce::StringArray& files, int, int)
+{
+    juce::StringArray messages;
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("neptunestyle")) messages.add (StylePanel::owner_message (*this, juce::File (f)));
+    if (messages.isEmpty()) return;
+    openStyles();
+    if (stylePanel_ != nullptr) stylePanel_->setMessage (messages.joinIntoString ("  "));
+}
 
 void FacadeView::timerCallback()
 {

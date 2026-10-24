@@ -14,7 +14,7 @@
 // étiquette) liés à des paramètres existants. Deux modes : Jeu (les widgets agissent sur leur paramètre) et Édition (on ajoute,
 // déplace, redimensionne, lie, supprime). Chaque modification de la mise en page est un seul geste annulable (réglages de bande
 // de la piste) ; le glissement travaille sur une copie locale et ne s'enregistre qu'au relâchement.
-class FacadeView : public juce::Component, private juce::Timer
+class FacadeView : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
     FacadeView (NeptuneProcessor&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&,
@@ -23,6 +23,10 @@ public:
 
     void resized() override;
     void paint (juce::Graphics&) override;
+
+    // Glisser-déposer d'un pack de styles (.neptunestyle) : il est installé dans la bibliothèque.
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
     // « Ajouter à la Façade » (fenêtre d'un potard) : pose un widget déjà lié au paramètre, sur la Façade de la piste sélectionnée.
     void addLinked (neptune::core::facade::WidgetType, neptune::core::ParamId);
