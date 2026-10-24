@@ -17,6 +17,8 @@ juce::Colour toColour (const neptune::core::theme::Palette& p, Token t)
     return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
 }
 
+constexpr float curveTitleHeight = 24.0f;   // hauteur (dans le canevas) de la légende d'un widget Courbe
+
 int snapped (int v) { return (v + 2) / 4 * 4; } // aimantation sur une grille de 4
 
 juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
@@ -68,6 +70,7 @@ public:
                 const auto d = o.processor_.instrumentDescription();
                 panel = std::make_unique<VelocityPanel> (o.palette_, o.tr_, d.velocityFadeWidth, d.velocityFadeLinear, d.velocityCurve);
                 auto* proc = &o.processor_;
+                panel->setFadeControlsVisible (false);   // la Façade n'expose que la courbe de transfert ; le fondu reste dans l'éditeur Sampler
                 panel->onGestureBegin = [proc] { proc->uiBeginGesture(); };
                 panel->onGestureEnd = [proc] { proc->uiEndGesture(); };
                 panel->onUndo = [proc] { proc->uiUndo(); };
@@ -89,7 +92,8 @@ public:
             }
             const auto area = canvasArea();
             const float s = scale();
-            panel->setBounds (juce::Rectangle<float> (area.getX() + w->x * s, area.getY() + w->y * s, w->w * s, w->h * s).toNearestInt());
+            const float title = w->text.empty() ? 0.0f : curveTitleHeight;   // la légende de la courbe est au-dessus du panneau
+            panel->setBounds (juce::Rectangle<float> (area.getX() + w->x * s, area.getY() + (w->y + title) * s, w->w * s, (w->h - title) * s).toNearestInt());
         }
     }
 
@@ -518,14 +522,21 @@ private:
             case fc::WidgetType::Curve:
             {
                 const bool sampler = o.track_ >= 0 && o.processor_.trackType (o.track_) == neptune::core::TrackType::Sampler;
+                auto body = b;
+                if (! w.text.empty())
+                {
+                    g.setColour (o.colour (Token::Text));
+                    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+                    g.drawFittedText (utf8 (w.text), body.removeFromTop (curveTitleHeight).toNearestInt(), juce::Justification::centredLeft, 1);
+                }
                 if (sampler && ! o.editMode_) break;   // le panneau réel est posé par-dessus
                 g.setColour (o.colour (Token::BgApp));
-                g.fillRoundedRectangle (b.reduced (1.0f), 8.0f);
+                g.fillRoundedRectangle (body.reduced (1.0f), 8.0f);
                 g.setColour (o.colour (Token::Border));
-                g.drawRoundedRectangle (b.reduced (1.0f), 8.0f, 1.5f);
+                g.drawRoundedRectangle (body.reduced (1.0f), 8.0f, 1.5f);
                 g.setColour (o.colour (Token::TextDim));
                 g.setFont (juce::FontOptions (16.0f));
-                g.drawFittedText (o.text (sampler ? "facade.curve_title" : "facade.curve_unavailable"), b.toNearestInt().reduced (12), juce::Justification::centred, 3);
+                g.drawFittedText (o.text (sampler ? "facade.curve_title" : "facade.curve_unavailable"), body.toNearestInt().reduced (12), juce::Justification::centred, 3);
                 break;
             }
             case fc::WidgetType::Label:
@@ -729,6 +740,155 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Picker)
 };
 
+// ============================== Saisie de texte et aide (calques de la vue) ==============================
+
+// Saisie d'un texte dans un calque de la vue (pas de fenêtre système : fiable dans un hôte), avec OK et Annuler bien visibles.
+class FacadeView::TextPrompt : public juce::Component
+{
+public:
+    TextPrompt (FacadeView& owner, const juce::String& title, const juce::String& initial, std::function<void (const juce::String&)> onDone)
+        : owner_ (owner), onDone_ (std::move (onDone))
+    {
+        title_.setText (title, juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (title_);
+        editor_.setText (initial, false);
+        editor_.setFont (juce::FontOptions (20.0f));
+        editor_.setSelectAllWhenFocused (true);
+        editor_.setInputRestrictions (static_cast<int> (fc::maxTextLength));
+        editor_.onReturnKey = [this] { accept(); };
+        editor_.onEscapeKey = [this] { close(); };
+        addAndMakeVisible (editor_);
+        ok_.setButtonText (owner.text ("facade.ok"));
+        ok_.onClick = [this] { accept(); };
+        cancel_.setButtonText (owner.text ("facade.picker_cancel"));
+        cancel_.onClick = [this] { close(); };
+        addAndMakeVisible (ok_);
+        addAndMakeVisible (cancel_);
+    }
+
+    void visibilityChanged() override { if (isVisible()) editor_.grabKeyboardFocus(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (owner_.colour (Token::PanelBg));
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (panel().toFloat(), 10.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto r = panel().reduced (18);
+        title_.setBounds (r.removeFromTop (32));
+        r.removeFromTop (8);
+        editor_.setBounds (r.removeFromTop (44));
+        r.removeFromTop (16);
+        auto row = r.removeFromTop (44);
+        cancel_.setBounds (row.removeFromRight (150));
+        row.removeFromRight (10);
+        ok_.setBounds (row.removeFromRight (150));
+    }
+
+private:
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (480, 190).withCentre (getLocalBounds().getCentre()); }
+
+    void accept()
+    {
+        const auto text = editor_.getText();
+        auto done = onDone_;
+        close();
+        if (done) done (text);
+    }
+
+    void close()
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (&owner_)]
+        {
+            if (safe != nullptr) { safe->prompt_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
+        });
+    }
+
+    FacadeView& owner_;
+    std::function<void (const juce::String&)> onDone_;
+    juce::Label title_;
+    juce::TextEditor editor_;
+    juce::TextButton ok_, cancel_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TextPrompt)
+};
+
+// Aide : ce que fait chaque élément de la Façade.
+class FacadeView::HelpPanel : public juce::Component
+{
+public:
+    explicit HelpPanel (FacadeView& owner) : owner_ (owner)
+    {
+        title_.setText (owner.text ("facade.help_title"), juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (title_);
+        body_.setMultiLine (true, true);
+        body_.setReadOnly (true);
+        body_.setCaretVisible (false);
+        body_.setFont (juce::FontOptions (16.0f));
+        body_.setColour (juce::TextEditor::backgroundColourId, owner.colour (Token::BgApp));
+        body_.setColour (juce::TextEditor::textColourId, owner.colour (Token::Text));
+        body_.setColour (juce::TextEditor::outlineColourId, owner.colour (Token::Border));
+        body_.setText (owner.text ("facade.help_body"), false);
+        addAndMakeVisible (body_);
+        close_.setButtonText (owner.text ("modal.close"));
+        close_.onClick = [this] { close(); };
+        addAndMakeVisible (close_);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (owner_.colour (Token::PanelBg));
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (panel().toFloat(), 10.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto r = panel().reduced (18);
+        title_.setBounds (r.removeFromTop (32));
+        r.removeFromTop (6);
+        auto bottom = r.removeFromBottom (44);
+        r.removeFromBottom (10);
+        body_.setBounds (r);
+        close_.setBounds (bottom.removeFromRight (150));
+    }
+
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (k == juce::KeyPress::escapeKey) { close(); return true; }
+        return false;
+    }
+
+private:
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (720, juce::jmin (640, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+
+    void close()
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (&owner_)]
+        {
+            if (safe != nullptr) { safe->help_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
+        });
+    }
+
+    FacadeView& owner_;
+    juce::Label title_;
+    juce::TextEditor body_;
+    juce::TextButton close_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpPanel)
+};
+
 // ============================== Vue ==============================
 
 FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
@@ -783,9 +943,21 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     deleteButton_.onClick = [this] { deleteSelected(); };
     alignButton_.setButtonText (text ("facade.align"));
     alignButton_.onClick = [this] { showAlignMenu(); };
+    helpButton_.setButtonText ("?");
+    helpButton_.setTooltip (text ("facade.help_title"));
+    helpButton_.onClick = [this] { openHelp(); };
+    editButton_.setTooltip (text ("facade.tip_edit"));
+    knobButton_.setTooltip (text ("facade.tip_knob"));
+    buttonButton_.setTooltip (text ("facade.tip_button"));
+    menuButton_.setTooltip (text ("facade.tip_menu"));
+    actionButton_.setTooltip (text ("facade.tip_action"));
+    curveButton_.setTooltip (text ("facade.tip_curve"));
+    labelButton_.setTooltip (text ("facade.tip_label"));
+    captureButton_.setTooltip (text ("facade.tip_capture"));
+    alignButton_.setTooltip (text ("facade.tip_align"));
 
     for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_ })
+                     &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -836,7 +1008,11 @@ void FacadeView::resized()
             row.removeFromLeft (gap);
         }
     };
-    layoutRow (area.removeFromTop (rowH), { &editButton_, &imageButton_, &fitButton_, &clearImageButton_ });
+    {
+        auto top = area.removeFromTop (rowH);
+        helpButton_.setBounds (top.removeFromRight (rowH + 8));   // « ? » à droite de la première rangée
+        layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_ });
+    }
     area.removeFromTop (gap);
     if (editMode_)
     {
@@ -847,6 +1023,8 @@ void FacadeView::resized()
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
+    if (prompt_ != nullptr) prompt_->setBounds (getLocalBounds());
+    if (help_ != nullptr) help_->setBounds (getLocalBounds());
 }
 
 void FacadeView::paint (juce::Graphics&) {}
@@ -1040,16 +1218,26 @@ void FacadeView::openPicker (bool capture)
 void FacadeView::editText()
 {
     const auto* current = facade_.find (single());
-    if (current == nullptr) return;
+    if (current == nullptr || prompt_ != nullptr) return;
     const int id = current->id;
-    auto* w = new juce::AlertWindow (text ("facade.text_title"), {}, juce::MessageBoxIconType::NoIcon);
-    w->addTextEditor ("t", utf8 (current->text), "");
-    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<FacadeView> (this), w, id] (int result)
-    {
-        if (safe == nullptr || result != 1) return;
-        auto f = safe->facade_;
-        if (auto* widget = f.find (id)) { widget->text = w->getTextEditorContents ("t").toStdString(); safe->commit (std::move (f), "Facade: widget text"); }
-    }), true);
+    prompt_ = std::make_unique<TextPrompt> (*this, text ("facade.text_title"), utf8 (current->text),
+        [safe = juce::Component::SafePointer<FacadeView> (this), id] (const juce::String& value)
+        {
+            if (safe == nullptr) return;
+            auto f = safe->facade_;
+            if (auto* widget = f.find (id)) { widget->text = value.toStdString(); safe->commit (std::move (f), "Facade: widget text"); }
+        });
+    addAndMakeVisible (*prompt_);
+    prompt_->setBounds (getLocalBounds());
+    prompt_->toFront (true);
+}
+
+void FacadeView::openHelp()
+{
+    if (help_ != nullptr) return;
+    help_ = std::make_unique<HelpPanel> (*this);
+    addAndMakeVisible (*help_);
+    help_->setBounds (getLocalBounds());
+    help_->toFront (true);
+    help_->grabKeyboardFocus();
 }

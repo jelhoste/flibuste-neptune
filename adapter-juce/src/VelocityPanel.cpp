@@ -10,6 +10,14 @@ namespace
 {
 constexpr float kPointRadius = 7.0f;
 constexpr float kHitRadius = 16.0f; // >= 32 px de diamètre (tactile)
+// Le préréglage se reconnaît à la forme seule : plancher, plafond et lissage sont des réglages à part.
+VelocityCurve shapeOnly (VelocityCurve c)
+{
+    c.floor = 0.0;
+    c.ceiling = 1.0;
+    c.smooth = true;
+    return c;
+}
 const char* const kPresetKeys[numVelocityPresets] = { "vel.preset_linear", "vel.preset_soft", "vel.preset_very_soft", "vel.preset_hard", "vel.preset_very_hard" };
 }
 
@@ -32,6 +40,19 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     linearToggle_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
     linearToggle_.onClick = [this] { fadeLinear_ = linearToggle_.getToggleState(); changed(); };
     addAndMakeVisible (linearToggle_);
+
+    smoothToggle_.setButtonText (text ("vel.smooth"));
+    smoothToggle_.setToggleState (curve_.smooth, juce::dontSendNotification);
+    smoothToggle_.setColour (juce::ToggleButton::textColourId, colour (Token::Text));
+    smoothToggle_.onClick = [this]
+    {
+        if (updating_) return;
+        if (onGestureBegin) onGestureBegin();
+        curve_.smooth = smoothToggle_.getToggleState();
+        changed();
+        if (onGestureEnd) onGestureEnd();
+    };
+    addAndMakeVisible (smoothToggle_);
 
     shapeLabel_.setText (text ("vel.shape"), juce::dontSendNotification);
     shapeLabel_.setColour (juce::Label::textColourId, colour (Token::Text));
@@ -58,7 +79,9 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
         const int id = presets_.getSelectedId();
         if (id < 1) return;
         if (onGestureBegin) onGestureBegin();
+        const auto keep = curve_;
         curve_ = presetCurve (static_cast<VelocityPreset> (id - 1));
+        curve_.floor = keep.floor; curve_.ceiling = keep.ceiling; curve_.smooth = keep.smooth;
         changed();
         if (onGestureEnd) onGestureEnd();
     };
@@ -70,6 +93,15 @@ VelocityPanel::VelocityPanel (const theme::Palette& palette, const i18n::Transla
     addAndMakeVisible (readout_);
     setWantsKeyboardFocus (true);
     setSize (400, 500);
+}
+
+void VelocityPanel::setFadeControlsVisible (bool visible)
+{
+    fadeControls_ = visible;
+    widthLabel_.setVisible (visible);
+    widthSlider_.setVisible (visible);
+    linearToggle_.setVisible (visible);
+    resized();
 }
 
 juce::Colour VelocityPanel::colour (Token t) const
@@ -86,9 +118,11 @@ void VelocityPanel::changed()
     updating_ = true;
     shapeSlider_.setValue (curve_.shape, juce::dontSendNotification);
     shapeSlider_.setEnabled (curve_.points.empty());
+    smoothToggle_.setToggleState (curve_.smooth, juce::dontSendNotification);
+    smoothToggle_.setEnabled (! curve_.points.empty());
     int match = 0;
     for (int i = 0; i < numVelocityPresets; ++i)
-        if (curve_ == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;
+        if (shapeOnly (curve_) == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;
     presets_.setSelectedId (match, juce::dontSendNotification);
     updating_ = false;
     repaint();
@@ -98,15 +132,19 @@ void VelocityPanel::changed()
 void VelocityPanel::resized()
 {
     auto r = getLocalBounds().reduced (12);
-    widthLabel_.setBounds (r.removeFromTop (22));
-    widthSlider_.setBounds (r.removeFromTop (30));
-    linearToggle_.setBounds (r.removeFromTop (28));
-    r.removeFromTop (8);
+    if (fadeControls_)
+    {
+        widthLabel_.setBounds (r.removeFromTop (22));
+        widthSlider_.setBounds (r.removeFromTop (30));
+        linearToggle_.setBounds (r.removeFromTop (28));
+        r.removeFromTop (8);
+    }
     auto row = r.removeFromTop (30);
     shapeLabel_.setBounds (row.removeFromLeft (110));
     presets_.setBounds (row.removeFromRight (140).reduced (2));
     shapeSlider_.setBounds (row);
-    readout_.setBounds (r.removeFromBottom (36));
+    smoothToggle_.setBounds (r.removeFromTop (26));
+    readout_.setBounds (r.removeFromBottom (52));
     r.removeFromBottom (4);
     graphArea_ = r.reduced (24, 6).toFloat();
 }
@@ -151,9 +189,29 @@ void VelocityPanel::paint (juce::Graphics& g)
     g.setColour (colour (Token::Accent));
     g.strokePath (p, juce::PathStrokeType (2.0f));
 
+    // plancher et plafond : repères en pointillés et poignées carrées sur les bords gauche et droit
+    {
+        const float dashes[] = { 4.0f, 4.0f };
+        g.setColour (colour (Token::TextDim2));
+        for (const double y : { curve_.floor, curve_.ceiling })
+        {
+            if (y <= 0.0 || y >= 1.0) continue;
+            const auto a = toScreen (0.0, y), b = toScreen (1.0, y);
+            g.drawDashedLine (juce::Line<float> (a, b), dashes, 2, 1.0f);
+        }
+        g.setColour (colour (Token::Handle));
+        for (const auto& hnd : { toScreen (0.0, curve_.floor), toScreen (1.0, curve_.ceiling) })
+        {
+            const juce::Rectangle<float> box (hnd.x - 7.0f, hnd.y - 7.0f, 14.0f, 14.0f);
+            g.fillRect (box);
+            g.setColour (colour (Token::Text));
+            g.drawRect (box, 1.5f);
+            g.setColour (colour (Token::Handle));
+        }
+    }
     for (const auto& pt : curve_.points)
     {
-        const auto s = toScreen (pt.first, pt.second);
+        const auto s = toScreen (pt.first, toOutput (pt.second));
         g.setColour (colour (Token::KnobHot));
         g.fillEllipse (s.x - kPointRadius, s.y - kPointRadius, kPointRadius * 2, kPointRadius * 2);
         g.setColour (colour (Token::Text));
@@ -164,13 +222,20 @@ void VelocityPanel::paint (juce::Graphics& g)
     g.drawText (text ("vel.axis_in"), gr.toNearestInt().translated (0, 4).withTop (static_cast<int> (gr.getBottom())).withHeight (14), juce::Justification::centred);
 }
 
+int VelocityPanel::handleAt (juce::Point<float> p) const
+{
+    const float d1 = toScreen (0.0, curve_.floor).getDistanceFrom (p), d2 = toScreen (1.0, curve_.ceiling).getDistanceFrom (p);
+    if (d1 <= kHitRadius && d1 <= d2) return 1;
+    return d2 <= kHitRadius ? 2 : 0;
+}
+
 int VelocityPanel::pointAt (juce::Point<float> p) const
 {
     int best = -1;
     float bestD = kHitRadius;
     for (std::size_t i = 0; i < curve_.points.size(); ++i)
     {
-        const float d = toScreen (curve_.points[i].first, curve_.points[i].second).getDistanceFrom (p);
+        const float d = toScreen (curve_.points[i].first, toOutput (curve_.points[i].second)).getDistanceFrom (p);
         if (d <= bestD) { best = static_cast<int> (i); bestD = d; }
     }
     return best;
@@ -180,7 +245,12 @@ void VelocityPanel::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
     dragPoint_ = pointAt (e.position);
-    if (dragPoint_ < 0) return;
+    if (dragPoint_ < 0)
+    {
+        dragHandle_ = handleAt (e.position);
+        if (dragHandle_ != 0 && onGestureBegin) onGestureBegin();
+        return;
+    }
     if (e.mods.isPopupMenu()) // clic droit : supprime le point
     {
         if (onGestureBegin) onGestureBegin();
@@ -195,11 +265,20 @@ void VelocityPanel::mouseDown (const juce::MouseEvent& e)
 
 void VelocityPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (dragHandle_ != 0)
+    {
+        const auto g = graph();
+        const double y = (g.getBottom() - e.position.y) / g.getHeight();
+        if (dragHandle_ == 1) curve_.floor = std::clamp (y, 0.0, curve_.ceiling - VelocityCurve::minSpan);
+        else curve_.ceiling = std::clamp (y, curve_.floor + VelocityCurve::minSpan, 1.0);
+        changed();
+        return;
+    }
     if (dragPoint_ < 0 || dragPoint_ >= static_cast<int> (curve_.points.size())) return;
     const auto g = graph();
     const double x = (e.position.x - g.getX()) / g.getWidth();
     const double y = (g.getBottom() - e.position.y) / g.getHeight();
-    curve_.points[static_cast<std::size_t> (dragPoint_)] = { std::clamp (x, 0.0, 1.0), std::clamp (y, 0.0, 1.0) };
+    curve_.points[static_cast<std::size_t> (dragPoint_)] = { std::clamp (x, 0.0, 1.0), fromOutput (y) };
     // garde l'ordre pendant le glissé : pas de croisement avec les voisins (la normalisation les espacerait de toute façon)
     auto& pts = curve_.points;
     const std::size_t i = static_cast<std::size_t> (dragPoint_);
@@ -211,8 +290,9 @@ void VelocityPanel::mouseDrag (const juce::MouseEvent& e)
 
 void VelocityPanel::mouseUp (const juce::MouseEvent&)
 {
-    if (dragPoint_ >= 0 && onGestureEnd) onGestureEnd();
+    if ((dragPoint_ >= 0 || dragHandle_ != 0) && onGestureEnd) onGestureEnd();
     dragPoint_ = -1;
+    dragHandle_ = 0;
 }
 
 void VelocityPanel::mouseDoubleClick (const juce::MouseEvent& e)
@@ -226,7 +306,7 @@ void VelocityPanel::mouseDoubleClick (const juce::MouseEvent& e)
     else if (curve_.points.size() < VelocityCurve::maxPoints)
     {
         const double x = (e.position.x - g.getX()) / g.getWidth();
-        const double y = evaluate (curve_, x); // le nouveau point part de la courbe actuelle : rien ne bouge d'un coup
+        const double y = fromOutput (evaluate (curve_, x)); // le nouveau point part de la courbe actuelle : rien ne bouge d'un coup
         curve_.points.push_back ({ x, y });
     }
     changed();
@@ -253,7 +333,7 @@ bool VelocityPanel::keyPressed (const juce::KeyPress& k)
 
 void VelocityPanel::setValues (int fadeWidth, bool fadeLinear, const VelocityCurve& curve)
 {
-    if (sliderDragging_ || dragPoint_ >= 0) return;
+    if (sliderDragging_ || dragPoint_ >= 0 || dragHandle_ != 0) return;
     const auto c = sanitised (curve);
     if (fadeWidth == fadeWidth_ && fadeLinear == fadeLinear_ && c == curve_) return;
     fadeWidth_ = fadeWidth;
@@ -264,9 +344,11 @@ void VelocityPanel::setValues (int fadeWidth, bool fadeLinear, const VelocityCur
     linearToggle_.setToggleState (fadeLinear_, juce::dontSendNotification);
     shapeSlider_.setValue (curve_.shape, juce::dontSendNotification);
     shapeSlider_.setEnabled (curve_.points.empty());
+    smoothToggle_.setToggleState (curve_.smooth, juce::dontSendNotification);
+    smoothToggle_.setEnabled (! curve_.points.empty());
     int match = 0;
     for (int i = 0; i < numVelocityPresets; ++i)
-        if (curve_ == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;
+        if (shapeOnly (curve_) == presetCurve (static_cast<VelocityPreset> (i))) match = i + 1;
     presets_.setSelectedId (match, juce::dontSendNotification);
     updating_ = false;
     repaint();

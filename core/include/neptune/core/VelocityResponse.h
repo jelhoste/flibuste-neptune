@@ -14,13 +14,23 @@
 
 namespace neptune::core
 {
+//    - `floor` et `ceiling` : la sortie de la courbe (0..1) est ramenée dans [floor, ceiling] (sortie = floor + (ceiling - floor)·courbe) ;
+//      avec floor = 0,2 la plus petite vélocité reçue donne déjà 0,2 et toute la dynamique est remappée entre 0,2 et ceiling.
+//    - `smooth` : faux, la courbe passe par les points en segments droits (angles nets) ; vrai, interpolation monotone lisse.
 struct VelocityCurve
 {
     double shape = 0.0;
     std::vector<std::pair<double, double>> points;
+    double floor = 0.0;
+    double ceiling = 1.0;
+    bool smooth = true;
 
-    bool isLinear() const noexcept { return points.empty() && shape == 0.0; }
-    bool operator== (const VelocityCurve& o) const noexcept { return shape == o.shape && points == o.points; }
+    bool isLinear() const noexcept { return points.empty() && shape == 0.0 && floor == 0.0 && ceiling == 1.0; }
+    bool operator== (const VelocityCurve& o) const noexcept
+    {
+        return shape == o.shape && points == o.points && floor == o.floor && ceiling == o.ceiling && smooth == o.smooth;
+    }
+    static constexpr double minSpan = 0.05; // écart minimal entre le plancher et le plafond
 
     static constexpr std::size_t maxPoints = 16;
     static constexpr double minPointGap = 0.02; // écart minimal entre deux points, et avec 0 / 1

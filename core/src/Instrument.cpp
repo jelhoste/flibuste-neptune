@@ -296,6 +296,9 @@ std::string toJson (const InstrumentDescription& d)
     {
         nlohmann::json c;
         c["shape"] = d.velocityCurve.shape;
+        if (d.velocityCurve.floor != 0.0) c["floor"] = d.velocityCurve.floor;
+        if (d.velocityCurve.ceiling != 1.0) c["ceiling"] = d.velocityCurve.ceiling;
+        if (! d.velocityCurve.smooth) c["smooth"] = false;
         nlohmann::json pts = nlohmann::json::array();
         for (const auto& p : d.velocityCurve.points) pts.push_back ({ p.first, p.second });
         c["points"] = std::move (pts);
@@ -522,6 +525,9 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("velocity_curve"); m != doc.end() && m->is_object())
     {
         d.velocityCurve.shape = readNum (*m, "shape", 0.0);
+        d.velocityCurve.floor = readNum (*m, "floor", 0.0);
+        d.velocityCurve.ceiling = readNum (*m, "ceiling", 1.0);
+        if (const auto sm = m->find ("smooth"); sm != m->end() && sm->is_boolean()) d.velocityCurve.smooth = sm->get<bool>();
         if (const auto pts = m->find ("points"); pts != m->end() && pts->is_array())
             for (const auto& p : *pts)
                 if (p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number() && d.velocityCurve.points.size() < 64)

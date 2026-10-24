@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <algorithm>
 #include <functional>
 #include "neptune/core/I18n.h"
 #include "neptune/core/Theme.h"
@@ -22,6 +23,9 @@ public:
     // Remet les réglages à jour après une annulation/un rétablissement venu d'ailleurs (sans notification) ; ignoré pendant un geste.
     void setValues (int fadeWidth, bool fadeLinear, const neptune::core::VelocityCurve&);
 
+    // Masque les réglages de fondu entre couches (la Façade n'expose que la courbe de transfert de la vélocité reçue).
+    void setFadeControlsVisible (bool);
+
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -36,6 +40,9 @@ private:
     juce::Rectangle<float> graph() const;
     juce::Point<float> toScreen (double x, double y) const;
     int pointAt (juce::Point<float>) const;
+    int handleAt (juce::Point<float>) const;   // 1 : plancher (bord gauche), 2 : plafond (bord droit), 0 : aucune
+    double toOutput (double shapeY) const noexcept { return curve_.floor + (curve_.ceiling - curve_.floor) * shapeY; }
+    double fromOutput (double outY) const noexcept { return std::clamp ((outY - curve_.floor) / (curve_.ceiling - curve_.floor), 0.0, 1.0); }
     void changed();
 
     neptune::core::theme::Palette palette_;
@@ -47,7 +54,9 @@ private:
     juce::Label widthLabel_, shapeLabel_, readout_;
     juce::Slider widthSlider_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider shapeSlider_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::ToggleButton linearToggle_;
+    juce::ToggleButton linearToggle_, smoothToggle_;
+    bool fadeControls_ = true;
+    int dragHandle_ = 0;
     juce::ComboBox presets_;
     bool updating_ = false;
     bool sliderDragging_ = false;

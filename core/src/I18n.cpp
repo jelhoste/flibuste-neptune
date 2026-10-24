@@ -131,14 +131,15 @@ const Entry kEntries[] = {
     { "vel.fade_width", { "Crossfade width between velocity layers (0 = hard switch)", "Largeur du fondu entre couches de vélocité (0 = commutation franche)" } },
     { "vel.fade_linear", { "Linear crossfade (otherwise constant power)", "Fondu linéaire (sinon : puissance constante)" } },
     { "vel.shape", { "Response", "Réponse" } },
+    { "vel.smooth", { "Smooth curve through the points (otherwise sharp angles)", "Courbe lissée entre les points (sinon : angles nets)" } },
     { "vel.presets", { "Preset", "Préréglage" } },
     { "vel.preset_linear", { "Linear", "Linéaire" } },
     { "vel.preset_soft", { "Soft", "Douce" } },
     { "vel.preset_very_soft", { "Very soft", "Très douce" } },
     { "vel.preset_hard", { "Hard", "Dure" } },
     { "vel.preset_very_hard", { "Very hard", "Très dure" } },
-    { "vel.hint", { "Double-click the graph: add a point - drag a point: move - right-click or double-click a point: remove",
-                    "Double-clic dans le graphe : ajoute un point - glisser un point : le déplace - clic droit ou double-clic sur un point : le supprime" } },
+    { "vel.hint", { "Double-click the graph: add a point - drag a point: move - right-click or double-click a point: remove - square handles on the left and right edges: raise the floor / lower the ceiling (the whole range is remapped)",
+                    "Double-clic dans le graphe : ajoute un point - glisser un point : le déplace - clic droit ou double-clic sur un point : le supprime - poignées carrées sur les bords gauche et droit : relever le plancher / baisser le plafond (toute la plage est remappée)" } },
     { "vel.axis_in", { "velocity received (horizontal) -> velocity used (vertical)", "vélocité reçue (horizontal) -> vélocité utilisée (vertical)" } },
     { "map.polyphony", { "Polyphony...", "Polyphonie..." } },
     { "poly.mode", { "Mode", "Mode" } },
@@ -244,6 +245,40 @@ const Entry kEntries[] = {
     { "facade.choose_image", { "Choose a background image (PNG, JPG)", "Choisir une image de fond (PNG, JPG)" } },
     { "facade.empty", { "Empty facade. Use \"Edit layout\" to add knobs, buttons and labels linked to this track's parameters.", "Façade vide. Utilisez « Modifier la mise en page » pour ajouter des potards, boutons et étiquettes liés aux paramètres de cette piste." } },
     { "facade.unlinked", { "not linked", "non lié" } },
+    { "facade.ok", { "OK", "OK" } },
+    { "facade.help_title", { "Facade: what each element does", "Façade : ce que fait chaque élément" } },
+    { "facade.tip_edit", { "Switch between Play mode (widgets act) and layout editing (you arrange them)", "Bascule entre le mode Jeu (les widgets agissent) et la modification de la mise en page" } },
+    { "facade.tip_knob", { "A knob linked to one parameter", "Un potard lié à un paramètre" } },
+    { "facade.tip_button", { "A button that switches one parameter on and off (or steps through its values)", "Un bouton qui active ou coupe un paramètre (ou passe à sa valeur suivante)" } },
+    { "facade.tip_menu", { "A drop-down list of the values of a parameter with choices or steps", "Une liste déroulante des valeurs d'un paramètre à choix ou à pas" } },
+    { "facade.tip_action", { "A button that sets several parameters at once to values you captured", "Un bouton qui règle plusieurs paramètres d'un coup sur des valeurs que vous avez capturées" } },
+    { "facade.tip_curve", { "The velocity transfer curve of a Sampler track (incoming MIDI velocity -> velocity used)", "La courbe de transfert de vélocité d'une piste Sampler (vélocité MIDI reçue -> vélocité utilisée)" } },
+    { "facade.tip_label", { "Free text", "Texte libre" } },
+    { "facade.tip_capture", { "Choose the parameters of the snapshot and store their current values", "Choisir les paramètres de l'instantané et mémoriser leurs valeurs actuelles" } },
+    { "facade.tip_align", { "Align, distribute or arrange the selected widgets in a grid", "Aligner, répartir ou disposer en matrice les widgets sélectionnés" } },
+    { "facade.help_body", {
+        "FACADE: your own control panel for the selected track.\n\n"
+        "EDIT LAYOUT switches between Play mode (the widgets act on the sound) and Edit mode (you arrange them). In Edit mode: click to select, Shift- or Cmd-click or drag a frame to select several, drag to move, drag the square at the bottom right to resize, arrow keys nudge (Shift: 10 steps), Delete removes, Ctrl+A selects all.\n\n"
+        "+ KNOB: a knob linked to one parameter. Drag up or down (Shift: fine), mouse wheel, double-click: default value, right-click: type a value.\n\n"
+        "+ BUTTON: switches a parameter on and off; on a parameter with several positions, each click goes to the next one.\n\n"
+        "+ MENU: a drop-down list of all the values of a parameter that has choices or steps (a mode, a waveform...). Click it and pick a value.\n\n"
+        "+ ACTION: a snapshot button. In Edit mode, Capture... lets you tick several parameters and stores their CURRENT values. In Play mode a click puts all of them back to those stored values at once (one Undo step). It lights up while they all match, so a row of Action buttons works like organ combinations.\n\n"
+        "+ VELOCITY CURVE (Sampler tracks): the transfer curve applied to the incoming MIDI velocity before it reaches the sound modules. Double-click the graph to add a point, drag a point to move it, right-click a point to remove it. The two square handles on the left and right edges raise the floor or lower the ceiling: the whole range is remapped between them. You can choose a smooth curve or sharp angles between points.\n\n"
+        "+ LABEL: free text. Text... changes the text of any widget (the caption of a knob, a button or a curve).\n\n"
+        "LINK... chooses the parameter of the selected widget (the list starts on this track's parameters; clear the filter to see all). ALIGN... aligns, distributes and arranges several widgets in a grid. BACKGROUND... puts an image (PNG or JPG) behind the widgets.\n\n"
+        "Shortcut: right-click any knob, then + Facade, to add it here already linked.\n\n"
+        "Every change can be undone with Undo / Redo.",
+        "FAÇADE : votre propre tableau de commande pour la piste sélectionnée.\n\n"
+        "MODIFIER LA MISE EN PAGE bascule entre le mode Jeu (les widgets agissent sur le son) et le mode Édition (vous les disposez). En mode Édition : clic pour sélectionner, Maj- ou Cmd-clic ou un cadre à la souris pour en sélectionner plusieurs, glisser pour déplacer, glisser le carré en bas à droite pour redimensionner, flèches pour décaler (Maj : 10 pas), Suppr pour supprimer, Ctrl+A pour tout sélectionner.\n\n"
+        "+ POTARD : un potard lié à un paramètre. Glisser vers le haut ou le bas (Maj : réglage fin), molette, double-clic : valeur par défaut, clic droit : saisir une valeur.\n\n"
+        "+ BOUTON : active ou coupe un paramètre ; sur un paramètre à plusieurs positions, chaque clic passe à la suivante.\n\n"
+        "+ MENU : une liste déroulante de toutes les valeurs d'un paramètre à choix ou à pas (un mode, une forme d'onde...). Cliquez dessus et choisissez une valeur.\n\n"
+        "+ ACTION : un bouton d'instantané. En mode Édition, Capturer... permet de cocher plusieurs paramètres et mémorise leurs valeurs ACTUELLES. En mode Jeu, un clic remet d'un coup tous ces paramètres à ces valeurs (une seule étape d'annulation). Il s'allume tant qu'elles correspondent toutes : une rangée de boutons Action fonctionne comme des combinaisons d'orgue.\n\n"
+        "+ COURBE DE VÉLOCITÉ (pistes Sampler) : la courbe de transfert appliquée à la vélocité MIDI reçue avant qu'elle n'atteigne les modules de son. Double-clic dans le graphe : ajoute un point, glisser un point : le déplace, clic droit sur un point : le supprime. Les deux poignées carrées des bords gauche et droit relèvent le plancher ou abaissent le plafond : toute la plage est remappée entre les deux. On choisit une courbe lissée ou des angles nets entre les points.\n\n"
+        "+ ÉTIQUETTE : du texte libre. Texte... change le texte de n'importe quel widget (la légende d'un potard, d'un bouton ou d'une courbe).\n\n"
+        "LIER... choisit le paramètre du widget sélectionné (la liste commence par les paramètres de cette piste ; effacez le filtre pour tout voir). ALIGNER... aligne, répartit et dispose en matrice plusieurs widgets. FOND... place une image (PNG ou JPG) derrière les widgets.\n\n"
+        "Raccourci : clic droit sur n'importe quel potard, puis + Façade, pour l'ajouter ici déjà lié.\n\n"
+        "Chaque modification s'annule avec Annuler / Rétablir." } },
     { "mix.tracks", { "Tracks", "Pistes" } },
     { "mix.buses", { "Buses", "Bus" } },
     { "mix.routing_short", { "Routing", "Routage" } },

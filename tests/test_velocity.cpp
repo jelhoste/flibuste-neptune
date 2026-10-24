@@ -343,3 +343,37 @@ TEST_CASE ("building an instrument carries the velocity settings")
     CHECK_FALSE (inst->velocityLinear);
     CHECK (inst->shapeVelocity (0.5f) < 0.5f);
 }
+
+TEST_CASE ("velocity curve floor and ceiling remap the whole dynamic range")
+{
+    VelocityCurve c;
+    c.floor = 0.2;
+    c.ceiling = 0.8;
+    CHECK_THAT (evaluate (c, 0.0), WithinAbs (0.2, 1e-12));
+    CHECK_THAT (evaluate (c, 1.0), WithinAbs (0.8, 1e-12));
+    CHECK_THAT (evaluate (c, 0.5), WithinAbs (0.5, 1e-12)); // courbe linéaire : milieu à mi-chemin
+    CHECK (! c.isLinear());
+    const auto lut = buildLut (c);
+    CHECK_THAT (lut[127], WithinAbs (0.8, 1e-6));
+    CHECK (lut[0] == 0.0f);
+
+    VelocityCurve bad;
+    bad.floor = 5.0;
+    bad.ceiling = -3.0;
+    bad = sanitised (bad);
+    CHECK (bad.floor <= 1.0 - VelocityCurve::minSpan + 1e-12);
+    CHECK (bad.ceiling >= bad.floor + VelocityCurve::minSpan - 1e-12);
+    CHECK (bad.ceiling <= 1.0);
+}
+
+TEST_CASE ("velocity curve without smoothing joins its points with straight segments")
+{
+    VelocityCurve c;
+    c.points = { { 0.5, 0.2 } };
+    c.smooth = false;
+    CHECK_THAT (evaluate (c, 0.25), WithinAbs (0.1, 1e-12));   // milieu du premier segment (0,0)-(0.5,0.2)
+    CHECK_THAT (evaluate (c, 0.75), WithinAbs (0.6, 1e-12));   // milieu du second segment (0.5,0.2)-(1,1)
+    c.smooth = true;
+    CHECK (std::abs (evaluate (c, 0.75) - 0.6) > 1e-6);          // lissée : autre forme, mais toujours monotone
+    CHECK (evaluate (c, 0.75) >= evaluate (c, 0.5));
+}

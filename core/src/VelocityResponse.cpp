@@ -44,6 +44,10 @@ VelocityCurve sanitised (VelocityCurve c)
 {
     if (! std::isfinite (c.shape)) c.shape = 0.0;
     c.shape = std::clamp (c.shape, -1.0, 1.0);
+    if (! std::isfinite (c.floor)) c.floor = 0.0;
+    if (! std::isfinite (c.ceiling)) c.ceiling = 1.0;
+    c.floor = std::clamp (c.floor, 0.0, 1.0 - VelocityCurve::minSpan);
+    c.ceiling = std::clamp (c.ceiling, c.floor + VelocityCurve::minSpan, 1.0);
     std::vector<std::pair<double, double>> in;
     for (const auto& p : c.points)
         if (std::isfinite (p.first) && std::isfinite (p.second)) in.push_back ({ std::clamp (p.first, 0.0, 1.0), std::clamp (p.second, 0.0, 1.0) });
@@ -68,20 +72,30 @@ double evaluate (const VelocityCurve& curveIn, double x) noexcept
     if (! std::isfinite (x)) return 0.0;
     x = std::clamp (x, 0.0, 1.0);
     const VelocityCurve c = sanitised (curveIn);
-    if (c.points.empty()) return std::clamp (std::pow (x, shapePower (c.shape)), 0.0, 1.0);
-
-    std::vector<double> xs { 0.0 }, ys { 0.0 };
-    for (const auto& p : c.points) { xs.push_back (p.first); ys.push_back (p.second); }
-    xs.push_back (1.0);
-    ys.push_back (1.0);
-    const auto m = pchipSlopes (xs, ys);
-    std::size_t i = 0;
-    while (i + 2 < xs.size() && x > xs[i + 1]) ++i;
-    const double h = xs[i + 1] - xs[i];
-    const double t = (x - xs[i]) / h;
-    const double t2 = t * t, t3 = t2 * t;
-    const double v = (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
-    return std::clamp (v, ys[i], ys[i + 1]); // monotone par construction ; la borne protège des arrondis
+    double base;
+    if (c.points.empty())
+        base = std::clamp (std::pow (x, shapePower (c.shape)), 0.0, 1.0);
+    else
+    {
+        std::vector<double> xs { 0.0 }, ys { 0.0 };
+        for (const auto& p : c.points) { xs.push_back (p.first); ys.push_back (p.second); }
+        xs.push_back (1.0);
+        ys.push_back (1.0);
+        std::size_t i = 0;
+        while (i + 2 < xs.size() && x > xs[i + 1]) ++i;
+        const double h = xs[i + 1] - xs[i];
+        const double t = (x - xs[i]) / h;
+        if (! c.smooth)
+            base = ys[i] + t * (ys[i + 1] - ys[i]);   // angles nets : segments droits
+        else
+        {
+            const auto m = pchipSlopes (xs, ys);
+            const double t2 = t * t, t3 = t2 * t;
+            const double v = (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+            base = std::clamp (v, ys[i], ys[i + 1]); // monotone par construction ; la borne protège des arrondis
+        }
+    }
+    return c.floor + (c.ceiling - c.floor) * base;
 }
 
 VelocityLut buildLut (const VelocityCurve& c)
@@ -90,7 +104,7 @@ VelocityLut buildLut (const VelocityCurve& c)
     const VelocityCurve s = sanitised (c);
     for (int k = 0; k < 128; ++k) lut[static_cast<std::size_t> (k)] = static_cast<float> (evaluate (s, static_cast<double> (k) / 127.0));
     lut[0] = 0.0f;
-    lut[127] = 1.0f;
+    lut[127] = static_cast<float> (s.ceiling);
     return lut;
 }
 
