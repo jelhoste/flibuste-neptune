@@ -89,6 +89,7 @@ json stripToJson (const mixer::StripSettings& s)
     }
     o["sends"] = std::move (sends);
     if (anyInsert (s.inserts)) o["inserts"] = insertsToJson (s.inserts);
+    if (! s.velocityCurve.isLinear()) o["velocity_curve"] = json::parse (toJson (s.velocityCurve));
     if (s.facade != facade::Facade()) o["facade"] = json::parse (facade::toJson (s.facade));
     return o;
 }
@@ -133,6 +134,7 @@ mixer::StripSettings stripFromJson (const json& o, mixer::StripSettings s, bool 
             x.mute = boolOf (e, "mute", x.mute);
         }
     insertsFromJson (o, s.inserts);
+    if (const auto vc = o.find ("velocity_curve"); vc != o.end() && vc->is_object()) s.velocityCurve = velocityCurveFromJson (vc->dump());
     if (const auto fa = o.find ("facade"); fa != o.end() && fa->is_object()) s.facade = facade::fromJson (fa->dump());
     return mixer::sanitisedStrip (std::move (s), isBus, index);
 }

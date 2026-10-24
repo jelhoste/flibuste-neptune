@@ -246,6 +246,29 @@ const Entry kEntries[] = {
     { "facade.empty", { "Empty facade. Use \"Edit layout\" to add knobs, buttons and labels linked to this track's parameters.", "Façade vide. Utilisez « Modifier la mise en page » pour ajouter des potards, boutons et étiquettes liés aux paramètres de cette piste." } },
     { "facade.unlinked", { "not linked", "non lié" } },
     { "facade.ok", { "OK", "OK" } },
+    { "facade.add_zone", { "+ Zone", "+ Zone" } },
+    { "facade.tip_zone", { "A container: widgets dropped inside follow it, and it can arrange them in a row, a column or a grid", "Un conteneur : les widgets posés dedans le suivent, et il peut les ranger en ligne, en colonne ou en matrice" } },
+    { "facade.same_size", { "Same size for all", "Même taille pour tous" } },
+    { "facade.tip_same_size", { "Give every widget of this type the size of the selected one", "Donne à tous les widgets de ce type la taille du widget sélectionné" } },
+    { "facade.zone_layout", { "Layout...", "Disposition..." } },
+    { "facade.tip_zone_layout", { "How the zone arranges its content: free, row, column or grid", "Comment la zone range son contenu : libre, ligne, colonne ou matrice" } },
+    { "facade.zone_align", { "Alignment...", "Alignement..." } },
+    { "facade.tip_zone_align", { "Alignment of the content inside the zone (across and along)", "Alignement du contenu dans la zone (en travers et dans le sens du rangement)" } },
+    { "facade.zone_gap", { "Spacing...", "Espacement..." } },
+    { "facade.tip_zone_gap", { "Space between the widgets of the zone", "Espace entre les widgets de la zone" } },
+    { "facade.layout_free", { "Free (no automatic layout)", "Libre (pas de rangement automatique)" } },
+    { "facade.layout_row", { "Row", "Ligne" } },
+    { "facade.layout_column", { "Column", "Colonne" } },
+    { "facade.layout_grid", { "Grid, columns:", "Matrice, colonnes :" } },
+    { "facade.align_cross", { "Across the arrangement", "En travers du rangement" } },
+    { "facade.align_main", { "Along the arrangement", "Dans le sens du rangement" } },
+    { "facade.align_start", { "Start (top / left)", "Début (haut / gauche)" } },
+    { "facade.align_centre", { "Centre", "Centre" } },
+    { "facade.align_end", { "End (bottom / right)", "Fin (bas / droite)" } },
+    { "facade.justify_start", { "Packed at the start", "Groupés au début" } },
+    { "facade.justify_centre", { "Packed in the centre", "Groupés au centre" } },
+    { "facade.justify_end", { "Packed at the end", "Groupés à la fin" } },
+    { "facade.justify_spread", { "Spread evenly", "Répartis régulièrement" } },
     { "facade.help_title", { "Facade: what each element does", "Façade : ce que fait chaque élément" } },
     { "facade.tip_edit", { "Switch between Play mode (widgets act) and layout editing (you arrange them)", "Bascule entre le mode Jeu (les widgets agissent) et la modification de la mise en page" } },
     { "facade.tip_knob", { "A knob linked to one parameter", "Un potard lié à un paramètre" } },
@@ -265,6 +288,8 @@ const Entry kEntries[] = {
         "+ ACTION: a snapshot button. In Edit mode, Capture... lets you tick several parameters and stores their CURRENT values. In Play mode a click puts all of them back to those stored values at once (one Undo step). It lights up while they all match, so a row of Action buttons works like organ combinations.\n\n"
         "+ VELOCITY CURVE (Sampler tracks): the transfer curve applied to the incoming MIDI velocity before it reaches the sound modules. Double-click the graph to add a point, drag a point to move it, right-click a point to remove it. The two square handles on the left and right edges raise the floor or lower the ceiling: the whole range is remapped between them. You can choose a smooth curve or sharp angles between points.\n\n"
         "+ LABEL: free text. Text... changes the text of any widget (the caption of a knob, a button or a curve).\n\n"
+        "+ ZONE: a container with a title. Widgets whose centre is inside it belong to it and follow it when you move it. Layout... makes it arrange its content as a row, a column or a grid (Alignment... centres or aligns it, Spacing... sets the gaps); the content is rearranged automatically when you add, remove, move or resize things, and dragging a widget inside the zone reorders it. Zones can contain zones.\n\n"
+        "SAME SIZE FOR ALL gives every widget of the selected one's type (all the knobs, for instance) its size.\n\n"
         "LINK... chooses the parameter of the selected widget (the list starts on this track's parameters; clear the filter to see all). ALIGN... aligns, distributes and arranges several widgets in a grid. BACKGROUND... puts an image (PNG or JPG) behind the widgets.\n\n"
         "Shortcut: right-click any knob, then + Facade, to add it here already linked.\n\n"
         "Every change can be undone with Undo / Redo.",
@@ -276,6 +301,8 @@ const Entry kEntries[] = {
         "+ ACTION : un bouton d'instantané. En mode Édition, Capturer... permet de cocher plusieurs paramètres et mémorise leurs valeurs ACTUELLES. En mode Jeu, un clic remet d'un coup tous ces paramètres à ces valeurs (une seule étape d'annulation). Il s'allume tant qu'elles correspondent toutes : une rangée de boutons Action fonctionne comme des combinaisons d'orgue.\n\n"
         "+ COURBE DE VÉLOCITÉ (pistes Sampler) : la courbe de transfert appliquée à la vélocité MIDI reçue avant qu'elle n'atteigne les modules de son. Double-clic dans le graphe : ajoute un point, glisser un point : le déplace, clic droit sur un point : le supprime. Les deux poignées carrées des bords gauche et droit relèvent le plancher ou abaissent le plafond : toute la plage est remappée entre les deux. On choisit une courbe lissée ou des angles nets entre les points.\n\n"
         "+ ÉTIQUETTE : du texte libre. Texte... change le texte de n'importe quel widget (la légende d'un potard, d'un bouton ou d'une courbe).\n\n"
+        "+ ZONE : un conteneur avec un titre. Les widgets dont le centre est dedans lui appartiennent et le suivent quand on le déplace. Disposition... lui fait ranger son contenu en ligne, en colonne ou en matrice (Alignement... le centre ou l'aligne, Espacement... règle les écarts) ; le contenu se réorganise tout seul quand on ajoute, retire, déplace ou redimensionne, et glisser un widget dans la zone le réordonne. Les zones peuvent contenir des zones.\n\n"
+        "MÊME TAILLE POUR TOUS donne à tous les widgets du même type que celui sélectionné (tous les potards, par exemple) sa taille.\n\n"
         "LIER... choisit le paramètre du widget sélectionné (la liste commence par les paramètres de cette piste ; effacez le filtre pour tout voir). ALIGNER... aligne, répartit et dispose en matrice plusieurs widgets. FOND... place une image (PNG ou JPG) derrière les widgets.\n\n"
         "Raccourci : clic droit sur n'importe quel potard, puis + Façade, pour l'ajouter ici déjà lié.\n\n"
         "Chaque modification s'annule avec Annuler / Rétablir." } },

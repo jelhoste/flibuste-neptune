@@ -22,8 +22,20 @@ constexpr std::size_t maxImagePath = 1024;
 
 // Menu : liste de valeurs d'un paramètre à choix ou à pas. Action : instantané de valeurs (plusieurs paramètres restaurés d'un coup).
 // Curve : courbe de transfert de vélocité de la piste (Sampler).
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5 };
-constexpr int numWidgetTypes = 6;
+// Zone : conteneur (cadre avec titre) qui possède les widgets posés dedans et, au choix, les range en ligne, en colonne ou en matrice.
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6 };
+constexpr int numWidgetTypes = 7;
+constexpr int zonePad = 10;          // marge intérieure d'une zone
+constexpr int zoneTitleHeight = 24;  // bandeau du titre (quand la zone a un titre)
+
+// Rangement du contenu d'une zone. `align` : sur l'axe transversal (ligne : haut / centre / bas ; colonne : gauche / centre / droite ;
+// matrice : dans la cellule, sur les deux axes). `justify` : sur l'axe principal (début / centre / fin / répartition égale).
+enum class ZoneLayout { Free = 0, Row = 1, Column = 2, Grid = 3 };
+constexpr int numZoneLayouts = 4;
+enum class CrossAlign { Start = 0, Centre = 1, End = 2 };
+enum class Justify { Start = 0, Centre = 1, End = 2, Spread = 3 };
+constexpr int maxZoneGap = 64;
+constexpr int maxZoneColumns = 12;
 constexpr std::size_t maxSnapshot = 64;
 
 // Ajustement de l'image de fond au canevas.
@@ -38,10 +50,16 @@ struct Widget
     ParamId param = 0;              // 0 : pas de paramètre (étiquette seule, ou widget non lié)
     std::string text;               // étiquette
     std::vector<std::pair<ParamId, double>> snapshot; // Action : valeurs réelles (non normalisées) à restaurer
+    int parent = 0;                 // identifiant de la zone qui contient ce widget, 0 : aucune
+    int layout = 0;                 // Zone : ZoneLayout
+    int align = 0, justify = 0;     // Zone : CrossAlign, Justify
+    int gap = 8;                    // Zone : espace entre les widgets rangés
+    int columns = 2;                // Zone en matrice : nombre de colonnes
 
     bool operator== (const Widget& o) const noexcept
     {
-        return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot;
+        return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
+            && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns;
     }
 };
 
@@ -69,6 +87,23 @@ enum class Align { Left, Right, Top, Bottom, CentreH, CentreV };
 void alignWidgets (Facade&, const std::set<int>& ids, Align);
 void distributeWidgets (Facade&, const std::set<int>& ids, bool horizontal); // espaces égaux entre widgets (≥ 3)
 void arrangeGrid (Facade&, const std::set<int>& ids, int columns);           // matrice : pas régulier, dans l'ordre d'empilement
+
+// ---- Zones ----
+// Tous les widgets contenus (directement ou non) dans la zone `id`.
+std::set<int> descendants (const Facade&, int id);
+// Rattache chaque widget de `touched` à la plus petite zone qui contient son centre (0 si aucune) ; si une zone a bougé ou changé de
+// taille, les widgets libres ou déjà à elle sont réexaminés. Les autres rattachements ne changent pas.
+void assignParents (Facade&, const std::set<int>& touched);
+// Range le contenu de chaque zone ayant une disposition (ligne, colonne, matrice) ; déplace les zones imbriquées avec leur contenu.
+void applyLayouts (Facade&);
+// assignParents puis applyLayouts : à appeler après toute modification de géométrie.
+void arrange (Facade&, const std::set<int>& touched);
+// Déplace le widget (et le contenu d'une zone) de dx, dy.
+void moveWidgets (Facade&, const std::set<int>& ids, int dx, int dy);
+// Copie les widgets (avec le contenu des zones) décalés de `offset` ; rend les nouveaux identifiants.
+std::set<int> duplicateWidgets (Facade&, const std::set<int>& ids, int offset);
+// Donne à tous les widgets du même type que `id` la taille de ce widget.
+void matchSize (Facade&, int id);
 
 // Bornes appliquées : widgets dans le canevas et pas trop petits, identifiants uniques, textes courts, nombre limité.
 Facade sanitised (Facade f);

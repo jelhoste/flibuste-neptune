@@ -210,6 +210,9 @@ private:
         HandoffSlot<midi::CompiledFilter> filterSlot;   // filtre MIDI avancé de la piste
         const midi::CompiledFilter* filter = nullptr;   // thread audio
         midi::FilterDescription filterDescription;      // thread de message : ce qui est publié
+        HandoffSlot<VelocityLut> velocitySlot;          // courbe de transfert de la vélocité reçue (aucune : vélocité telle quelle)
+        const VelocityLut* velocityLut = nullptr;       // thread audio
+        VelocityCurve velocityDescription;              // thread de message : ce qui est publié
         std::array<std::uint64_t, 32> acceptedNotes {}; // thread audio : notes dont le Note On a passé (16 canaux x 128)
         HandoffSlot<fm::FmDescription> fmSlot;         // module FM : description (patch DX7 et réglages de voix)
         fm::FmVoices fm;

@@ -5,6 +5,8 @@
 #include <map>
 #include <tuple>
 
+#include <nlohmann/json.hpp>
+
 namespace neptune::core
 {
 namespace
@@ -96,6 +98,40 @@ double evaluate (const VelocityCurve& curveIn, double x) noexcept
         }
     }
     return c.floor + (c.ceiling - c.floor) * base;
+}
+
+std::string toJson (const VelocityCurve& c)
+{
+    nlohmann::json o;
+    o["shape"] = c.shape;
+    if (c.floor != 0.0) o["floor"] = c.floor;
+    if (c.ceiling != 1.0) o["ceiling"] = c.ceiling;
+    if (! c.smooth) o["smooth"] = false;
+    nlohmann::json pts = nlohmann::json::array();
+    for (const auto& p : c.points) pts.push_back ({ p.first, p.second });
+    o["points"] = std::move (pts);
+    return o.dump();
+}
+
+VelocityCurve velocityCurveFromJson (std::string_view text)
+{
+    VelocityCurve c;
+    const auto o = nlohmann::json::parse (text.begin(), text.end(), nullptr, false);
+    if (! o.is_object()) return c;
+    auto num = [&o] (const char* key, double def)
+    {
+        const auto it = o.find (key);
+        return it != o.end() && it->is_number() ? it->get<double>() : def;
+    };
+    c.shape = num ("shape", 0.0);
+    c.floor = num ("floor", 0.0);
+    c.ceiling = num ("ceiling", 1.0);
+    if (const auto it = o.find ("smooth"); it != o.end() && it->is_boolean()) c.smooth = it->get<bool>();
+    if (const auto it = o.find ("points"); it != o.end() && it->is_array())
+        for (const auto& p : *it)
+            if (p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number() && c.points.size() < 64)
+                c.points.push_back ({ p[0].get<double>(), p[1].get<double>() });
+    return sanitised (std::move (c));
 }
 
 VelocityLut buildLut (const VelocityCurve& c)

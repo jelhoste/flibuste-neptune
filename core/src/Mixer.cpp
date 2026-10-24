@@ -180,6 +180,7 @@ StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
     // pas de cycle : un bus ne route que vers un bus d'indice supérieur (les bus sont numérotés 1..numBuses ici)
     if (isBus && s.routing.mainDest != 0 && s.routing.mainDest <= index + 1) s.routing.mainDest = 0;
     s.panMode = s.panMode == PanMode::True ? PanMode::True : PanMode::Balance;
+    s.velocityCurve = isBus ? VelocityCurve() : sanitised (std::move (s.velocityCurve));
     s.facade = isBus ? facade::Facade() : facade::sanitised (std::move (s.facade));
     for (auto& in : s.inserts)
         if (in.type.size() > 32) in = InsertState {};

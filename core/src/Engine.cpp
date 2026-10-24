@@ -165,6 +165,7 @@ void Engine::collectGarbage()
         t.organSlot.collect();
         t.organ.collect();
         t.filterSlot.collect();
+        t.velocitySlot.collect();
         t.previewSlot.collect();
         pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
@@ -198,6 +199,11 @@ void Engine::setTrackSettings (int track, const mixer::StripSettings& s)
     {
         t.filterDescription = clean.midiFilter;
         t.filterSlot.publish (std::make_shared<const midi::CompiledFilter> (clean.midiFilter));
+    }
+    if (! (clean.velocityCurve == t.velocityDescription))
+    {
+        t.velocityDescription = clean.velocityCurve;
+        t.velocitySlot.publish (clean.velocityCurve.isLinear() ? std::shared_ptr<const VelocityLut>() : std::make_shared<const VelocityLut> (buildLut (clean.velocityCurve)));
     }
 }
 
@@ -426,7 +432,7 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
         if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Sampler) && tr.voices.isKeyswitch (channel, key)) { keyswitch (t, channel, key, true); continue; }   // une touche de keyswitch bascule un modulateur sans jouer
         if (tr.filter != nullptr && ! tr.filter->passes (m)) continue;
         tr.acceptedNotes[bit >> 6] |= std::uint64_t (1) << (bit & 63);
-        noteOnTrack (t, channel, key, velocity);
+        noteOnTrack (t, channel, key, tr.velocityLut != nullptr ? std::clamp (lookup (*tr.velocityLut, velocity), 0.0f, 1.0f) : velocity);   // courbe d'entrée de la piste
     }
 }
 
@@ -541,6 +547,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         if (t.fmSlot.adoptPending()) t.fm.setDescription (t.fmSlot.current());
         if (t.organSlot.adoptPending()) t.organ.setDescription (t.organSlot.current());
         if (t.filterSlot.adoptPending()) t.filter = t.filterSlot.current();
+        if (t.velocitySlot.adoptPending()) t.velocityLut = t.velocitySlot.current();
         // changement de type ou désactivation : les voix de la piste s'arrêtent net (rien ne doit sonner sous l'ancien type)
         const int type = t.type.load (std::memory_order_relaxed), active = t.active.load (std::memory_order_relaxed);
         if (type != t.appliedType || (active == 0 && t.appliedActive != 0))

@@ -9,6 +9,8 @@
 // 2) Fondu entre couches : voir computeLayerFades.
 #include <array>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -38,6 +40,10 @@ struct VelocityCurve
 
 // Valeurs bornées : forme dans [-1,1], points triés, espacés, y croissants et dans [0,1] ; NaN rejetés.
 VelocityCurve sanitised (VelocityCurve c);
+
+// Texte JSON (lecture tolérante : champ invalide ou absent -> défaut ; bornes appliquées).
+std::string toJson (const VelocityCurve&);
+VelocityCurve velocityCurveFromJson (std::string_view);
 
 // Sortie de la courbe pour une entrée dans [0,1] (bornée à [0,1]).
 double evaluate (const VelocityCurve&, double x) noexcept;

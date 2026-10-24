@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <set>
 
 #include <nlohmann/json.hpp>
@@ -44,6 +45,7 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Menu:   w.w = 170; w.h = 56;  break;
         case WidgetType::Action: w.w = 130; w.h = 44;  break;
         case WidgetType::Curve:  w.w = 340; w.h = 260; break;
+        case WidgetType::Zone:   w.w = 320; w.h = 200; break;
     }
     w.x = x;
     w.y = y;
@@ -77,6 +79,11 @@ Facade sanitised (Facade f)
         w.text = clipped (std::move (w.text), maxTextLength);
         if (w.snapshot.size() > maxSnapshot) w.snapshot.resize (maxSnapshot);
         w.snapshot.erase (std::remove_if (w.snapshot.begin(), w.snapshot.end(), [] (const auto& e) { return e.first == 0 || ! std::isfinite (e.second); }), w.snapshot.end());
+        w.layout = std::clamp (w.layout, 0, numZoneLayouts - 1);
+        w.align = std::clamp (w.align, 0, 2);
+        w.justify = std::clamp (w.justify, 0, 3);
+        w.gap = std::clamp (w.gap, 0, maxZoneGap);
+        w.columns = std::clamp (w.columns, 1, maxZoneColumns);
         if (w.id <= 0 || used.count (w.id) != 0)
         {
             int id = 1;
@@ -84,6 +91,18 @@ Facade sanitised (Facade f)
             w.id = id;
         }
         used.insert (w.id);
+    }
+    // rattachements valides : la zone existe, n'est pas le widget lui-même, et la chaîne de parents ne boucle pas
+    for (auto& w : f.widgets)
+    {
+        const auto* z = w.parent != 0 && w.parent != w.id ? f.find (w.parent) : nullptr;
+        if (z == nullptr || z->type != WidgetType::Zone) w.parent = 0;
+    }
+    for (auto& w : f.widgets)
+    {
+        int steps = 0;
+        for (int p = w.parent; p != 0; p = f.find (p)->parent)
+            if (p == w.id || ++steps > 8) { w.parent = 0; break; }
     }
     return f;
 }
@@ -161,6 +180,198 @@ void arrangeGrid (Facade& f, const std::set<int>& ids, int columns)
     }
 }
 
+// ---- Zones ----
+
+std::set<int> descendants (const Facade& f, int id)
+{
+    std::set<int> out;
+    bool grew = true;
+    while (grew)
+    {
+        grew = false;
+        for (const auto& w : f.widgets)
+            if (w.parent != 0 && (w.parent == id || out.count (w.parent) != 0) && out.insert (w.id).second) grew = true;
+    }
+    return out;
+}
+
+namespace
+{
+void reassign (Facade& f, Widget& w)
+{
+    const auto below = descendants (f, w.id);
+    const Widget* best = nullptr;
+    const int cx = w.x + w.w / 2, cy = w.y + w.h / 2;
+    for (const auto& z : f.widgets)
+    {
+        if (z.type != WidgetType::Zone || z.id == w.id || below.count (z.id) != 0) continue;
+        if (cx < z.x || cx >= z.x + z.w || cy < z.y || cy >= z.y + z.h) continue;
+        if (z.w * z.h <= w.w * w.h && w.type == WidgetType::Zone) continue;   // une zone n'entre que dans une zone plus grande
+        if (best == nullptr || z.w * z.h < best->w * best->h) best = &z;
+    }
+    w.parent = best != nullptr ? best->id : 0;
+}
+} // namespace
+
+void assignParents (Facade& f, const std::set<int>& touched)
+{
+    std::set<int> zonesTouched;
+    for (auto& w : f.widgets)
+        if (touched.count (w.id) != 0)
+        {
+            reassign (f, w);
+            if (w.type == WidgetType::Zone) zonesTouched.insert (w.id);
+        }
+    // une zone qui a bougé ou grandi adopte les widgets libres qu'elle couvre maintenant, et lâche ceux qui sont sortis
+    for (const int zid : zonesTouched)
+        for (auto& w : f.widgets)
+            if (touched.count (w.id) == 0 && (w.parent == 0 || w.parent == zid)) reassign (f, w);
+}
+
+void moveWidgets (Facade& f, const std::set<int>& ids, int dx, int dy)
+{
+    std::set<int> all = ids;
+    for (const int id : ids) all.merge (descendants (f, id));
+    for (auto& w : f.widgets)
+        if (all.count (w.id) != 0) { w.x += dx; w.y += dy; }
+}
+
+void applyLayouts (Facade& f)
+{
+    // zones les moins profondes d'abord : une zone rangée par sa parente emporte son contenu avant d'être rangée à son tour
+    auto depth = [&f] (const Widget& w)
+    {
+        int d = 0;
+        for (int p = w.parent; p != 0 && d < 16; p = f.find (p)->parent) ++d;
+        return d;
+    };
+    std::vector<int> zones;
+    for (const auto& w : f.widgets)
+        if (w.type == WidgetType::Zone && w.layout != static_cast<int> (ZoneLayout::Free)) zones.push_back (w.id);
+    std::stable_sort (zones.begin(), zones.end(), [&] (int a, int b) { return depth (*f.find (a)) < depth (*f.find (b)); });
+
+    for (const int zid : zones)
+    {
+        const Widget z = *f.find (zid);
+        std::vector<int> kids;
+        for (const auto& w : f.widgets)
+            if (w.parent == zid) kids.push_back (w.id);
+        if (kids.empty()) continue;
+        const int cx = z.x + zonePad, cy = z.y + zonePad + (z.text.empty() ? 0 : zoneTitleHeight);
+        const int cw = std::max (1, z.w - 2 * zonePad), ch = std::max (1, z.h - 2 * zonePad - (z.text.empty() ? 0 : zoneTitleHeight));
+        const auto layout = static_cast<ZoneLayout> (z.layout);
+        // ordre de rangement : par position (ligne : de gauche à droite ; colonne : de haut en bas ; matrice : ligne par ligne)
+        std::stable_sort (kids.begin(), kids.end(), [&] (int a, int b)
+        {
+            const auto &wa = *f.find (a), &wb = *f.find (b);
+            if (layout == ZoneLayout::Row) return wa.x < wb.x;
+            if (layout == ZoneLayout::Column) return wa.y < wb.y;
+            const int ra = (wa.y + wa.h / 2) / 40, rb = (wb.y + wb.h / 2) / 40;   // même rangée à 40 px près
+            return ra != rb ? ra < rb : wa.x < wb.x;
+        });
+        auto place = [&] (int id, int x, int y)
+        {
+            auto& w = *f.find (id);
+            const int nx = std::clamp (x, 0, canvasWidth - w.w), ny = std::clamp (y, 0, canvasHeight - w.h);
+            moveWidgets (f, { id }, nx - w.x, ny - w.y);
+        };
+        auto cross = [&] (int start, int size, int itemSize)
+        {
+            switch (static_cast<CrossAlign> (z.align))
+            {
+                case CrossAlign::Centre: return start + (size - itemSize) / 2;
+                case CrossAlign::End:    return start + size - itemSize;
+                default:                 return start;
+            }
+        };
+        auto mainStart = [&] (int start, int size, int total)
+        {
+            switch (static_cast<Justify> (z.justify))
+            {
+                case Justify::Centre: return start + (size - total) / 2;
+                case Justify::End:    return start + size - total;
+                default:              return start;
+            }
+        };
+        const int n = static_cast<int> (kids.size());
+        if (layout == ZoneLayout::Row || layout == ZoneLayout::Column)
+        {
+            const bool row = layout == ZoneLayout::Row;
+            int sum = 0;
+            for (const int id : kids) sum += row ? f.find (id)->w : f.find (id)->h;
+            const int mainSize = row ? cw : ch;
+            int gap = z.gap;
+            if (z.justify == static_cast<int> (Justify::Spread) && n > 1) gap = std::max (0, (mainSize - sum) / (n - 1));
+            const int total = sum + gap * (n - 1);
+            int pos = z.justify == static_cast<int> (Justify::Spread) ? (row ? cx : cy) : mainStart (row ? cx : cy, mainSize, total);
+            for (const int id : kids)
+            {
+                const auto& w = *f.find (id);
+                if (row) { place (id, pos, cross (cy, ch, w.h)); pos += w.w + gap; }
+                else     { place (id, cross (cx, cw, w.w), pos); pos += w.h + gap; }
+            }
+        }
+        else
+        {
+            const int cols = std::min (std::max (1, z.columns), n), rows = (n + cols - 1) / cols;
+            int cellW = 0, cellH = 0;
+            for (const int id : kids) { cellW = std::max (cellW, f.find (id)->w); cellH = std::max (cellH, f.find (id)->h); }
+            const int totalW = cols * cellW + (cols - 1) * z.gap, totalH = rows * cellH + (rows - 1) * z.gap;
+            const int x0 = mainStart (cx, cw, totalW), y0 = mainStart (cy, ch, totalH);
+            for (int i = 0; i < n; ++i)
+            {
+                const auto& w = *f.find (kids[static_cast<std::size_t> (i)]);
+                const int c = i % cols, r = i / cols;
+                place (w.id, cross (x0 + c * (cellW + z.gap), cellW, w.w), cross (y0 + r * (cellH + z.gap), cellH, w.h));
+            }
+        }
+    }
+}
+
+void arrange (Facade& f, const std::set<int>& touched)
+{
+    assignParents (f, touched);
+    applyLayouts (f);
+}
+
+std::set<int> duplicateWidgets (Facade& f, const std::set<int>& ids, int offset)
+{
+    std::set<int> all = ids;
+    for (const int id : ids) all.merge (descendants (f, id));
+    std::map<int, int> remap;
+    const auto original = f.widgets;
+    for (const auto& src : original)
+    {
+        if (all.count (src.id) == 0 || static_cast<int> (f.widgets.size()) >= maxWidgets) continue;
+        auto copy = src;
+        copy.id = f.freeId();
+        copy.x += offset;
+        copy.y += offset;
+        remap[src.id] = copy.id;
+        f.widgets.push_back (std::move (copy));
+    }
+    std::set<int> fresh;
+    for (const auto& [from, to] : remap)
+    {
+        auto* w = f.find (to);
+        if (const auto it = remap.find (w->parent); it != remap.end()) w->parent = it->second;   // dans une zone copiée : suit la copie
+        if (ids.count (from) != 0) fresh.insert (to);
+    }
+    f = sanitised (std::move (f));
+    return fresh;
+}
+
+void matchSize (Facade& f, int id)
+{
+    const auto* ref = f.find (id);
+    if (ref == nullptr) return;
+    const int w = ref->w, h = ref->h;
+    const auto type = ref->type;
+    for (auto& o : f.widgets)
+        if (o.type == type) { o.w = w; o.h = h; }
+    f = sanitised (std::move (f));
+}
+
 std::string toJson (const Facade& f)
 {
     json o;
@@ -178,6 +389,15 @@ std::string toJson (const Facade& f)
         e["h"] = w.h;
         if (w.param != 0) e["param"] = w.param;
         if (! w.text.empty()) e["text"] = w.text;
+        if (w.parent != 0) e["parent"] = w.parent;
+        if (w.type == WidgetType::Zone)
+        {
+            e["layout"] = w.layout;
+            e["align"] = w.align;
+            e["justify"] = w.justify;
+            e["gap"] = w.gap;
+            e["cols"] = w.columns;
+        }
         if (! w.snapshot.empty())
         {
             json snap = json::array();
@@ -217,6 +437,12 @@ Facade fromJson (std::string_view text)
             w.y = intOf (e, "y", 0);
             w.w = intOf (e, "w", w.w);
             w.h = intOf (e, "h", w.h);
+            w.parent = intOf (e, "parent", 0);
+            w.layout = intOf (e, "layout", 0);
+            w.align = intOf (e, "align", 0);
+            w.justify = intOf (e, "justify", 0);
+            w.gap = intOf (e, "gap", 8);
+            w.columns = intOf (e, "cols", 2);
             if (const auto p = e.find ("param"); p != e.end() && p->is_number_integer())
             {
                 const auto v = p->get<long long>();

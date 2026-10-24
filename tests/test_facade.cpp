@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "neptune/core/Engine.h"
 #include "neptune/core/Facade.h"
 #include "neptune/core/MixerState.h"
 
@@ -124,4 +125,164 @@ TEST_CASE ("Facade: align, distribute and grid tools")
     g = f;
     facade::alignWidgets (g, { 1 }, facade::Align::Left); // un seul widget : sans effet
     CHECK (g == f);
+}
+
+namespace
+{
+facade::Widget zoneAt (int id, int x, int y, int w, int h, facade::ZoneLayout layout)
+{
+    auto z = facade::defaultWidget (facade::WidgetType::Zone, id, x, y);
+    z.w = w; z.h = h;
+    z.layout = static_cast<int> (layout);
+    return z;
+}
+}
+
+TEST_CASE ("Facade zones: widgets dropped inside are adopted, widgets outside are not")
+{
+    facade::Facade f;
+    f.widgets.push_back (zoneAt (1, 100, 100, 400, 200, facade::ZoneLayout::Free));
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Knob, 2, 150, 150));   // centre dans la zone
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Knob, 3, 700, 400));   // dehors
+    facade::arrange (f, { 1, 2, 3 });
+    CHECK (f.find (2)->parent == 1);
+    CHECK (f.find (3)->parent == 0);
+
+    // sortir de la zone la détache
+    f.find (2)->x = 800;
+    facade::arrange (f, { 2 });
+    CHECK (f.find (2)->parent == 0);
+
+    // la plus petite zone gagne
+    f.widgets.push_back (zoneAt (4, 120, 120, 150, 120, facade::ZoneLayout::Free));
+    f.find (2)->x = 150; f.find (2)->y = 150;
+    facade::arrange (f, { 4, 2 });
+    CHECK (f.find (2)->parent == 4);
+    CHECK (f.find (4)->parent == 1);
+    // une zone ne peut jamais devenir son propre ancêtre
+    CHECK (facade::descendants (f, 1).count (4) == 1);
+    CHECK (facade::descendants (f, 4).count (1) == 0);
+}
+
+TEST_CASE ("Facade zones: moving a zone carries its content")
+{
+    facade::Facade f;
+    f.widgets.push_back (zoneAt (1, 100, 100, 400, 200, facade::ZoneLayout::Free));
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Button, 2, 150, 150));
+    facade::arrange (f, { 1, 2 });
+    facade::moveWidgets (f, { 1 }, 30, 20);
+    CHECK (f.find (1)->x == 130);
+    CHECK (f.find (2)->x == 180);
+    CHECK (f.find (2)->y == 170);
+}
+
+TEST_CASE ("Facade zones: row, column and grid layouts")
+{
+    facade::Facade f;
+    f.widgets.push_back (zoneAt (1, 100, 100, 600, 300, facade::ZoneLayout::Row));
+    auto& z = f.widgets.back();
+    z.text = "";
+    z.gap = 10;
+    for (int i = 0; i < 3; ++i)
+    {
+        auto k = facade::defaultWidget (facade::WidgetType::Knob, 2 + i, 150 + i * 130, 150 + i * 20);   // 90 x 110
+        f.widgets.push_back (k);
+    }
+    facade::arrange (f, { 1, 2, 3, 4 });
+    REQUIRE (f.find (2)->parent == 1);
+    // ligne, alignement en haut : même y, espacés de gap
+    CHECK (f.find (2)->y == f.find (3)->y);
+    CHECK (f.find (3)->x - (f.find (2)->x + f.find (2)->w) == 10);
+    CHECK (f.find (2)->x == 110);
+
+    // alignement au centre : centrés verticalement dans la zone
+    f.find (1)->align = static_cast<int> (facade::CrossAlign::Centre);
+    facade::applyLayouts (f);
+    CHECK (f.find (2)->y == 100 + facade::zonePad + (300 - 2 * facade::zonePad - 110) / 2);
+
+    // répartition égale : premier au bord gauche, dernier au bord droit
+    f.find (1)->justify = static_cast<int> (facade::Justify::Spread);
+    facade::applyLayouts (f);
+    CHECK (f.find (2)->x == 110);
+    CHECK (f.find (4)->x + f.find (4)->w <= 100 + 600 - facade::zonePad);
+    CHECK (f.find (4)->x + f.find (4)->w >= 100 + 600 - facade::zonePad - 3);
+
+    // colonne : même x, ordre vertical conservé
+    f.find (1)->layout = static_cast<int> (facade::ZoneLayout::Column);
+    f.find (1)->align = static_cast<int> (facade::CrossAlign::Start);
+    f.find (1)->justify = 0;
+    facade::applyLayouts (f);
+    CHECK (f.find (2)->x == f.find (3)->x);
+    CHECK (f.find (3)->y > f.find (2)->y);
+
+    // matrice à 2 colonnes : 3 widgets -> 2 + 1
+    f.find (1)->layout = static_cast<int> (facade::ZoneLayout::Grid);
+    f.find (1)->columns = 2;
+    facade::applyLayouts (f);
+    CHECK (f.find (2)->y == f.find (3)->y);
+    CHECK (f.find (4)->x == f.find (2)->x);
+    CHECK (f.find (4)->y > f.find (2)->y);
+}
+
+TEST_CASE ("Facade zones: duplicate keeps the content together, same size for all")
+{
+    facade::Facade f;
+    f.widgets.push_back (zoneAt (1, 50, 50, 300, 200, facade::ZoneLayout::Free));
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Knob, 2, 80, 90));
+    f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Knob, 3, 500, 90));
+    facade::arrange (f, { 1, 2, 3 });
+    const auto fresh = facade::duplicateWidgets (f, { 1 }, 24);
+    REQUIRE (fresh.size() == 1);
+    const int copyZone = *fresh.begin();
+    CHECK (f.widgets.size() == 5);
+    int kids = 0;
+    for (const auto& w : f.widgets) if (w.parent == copyZone) ++kids;
+    CHECK (kids == 1);
+
+    f.find (2)->w = 40; f.find (2)->h = 50;
+    facade::matchSize (f, 2);
+    for (const auto& w : f.widgets)
+        if (w.type == facade::WidgetType::Knob) { CHECK (w.w == 40); CHECK (w.h == 50); }
+    CHECK (f.find (1)->w == 300);   // les zones ne sont pas touchées
+
+    // JSON : les champs de zone voyagent, et un parent invalide est écarté
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+    f.find (2)->parent = 999;
+    CHECK (facade::sanitised (f).find (2)->parent == 0);
+}
+
+TEST_CASE ("track velocity curve reshapes incoming MIDI velocity for a synth track and survives the state round trip")
+{
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    engine.setTrackActive (0, true);
+    engine.setTrackType (0, TrackType::Synth);
+    engine.publishSynth (0, std::make_shared<SynthPatch> (SynthDescription {}));
+    mixer::StripSettings strip;
+    strip.velocityCurve.ceiling = 0.5;
+    engine.setTrackSettings (0, strip);
+    std::vector<float> l (64, 0.0f), r (64, 0.0f);
+    float* out[2] = { l.data(), r.data() };
+    engine.process (out, 2, 64);   // le thread audio adopte la courbe
+
+    Engine::NoteTrace t;
+    engine.noteOn (0, 60, 1.0f);
+    REQUIRE (engine.popNoteTrace (t));
+    CHECK (t.velocity >= 63);
+    CHECK (t.velocity <= 65);
+
+    strip.velocityCurve = VelocityCurve {};
+    engine.setTrackSettings (0, strip);
+    engine.process (out, 2, 64);
+    engine.noteOn (0, 62, 1.0f);
+    REQUIRE (engine.popNoteTrace (t));
+    CHECK (t.velocity == 127);
+
+    auto m = std::make_unique<MixerState>();
+    m->tracks[1].strip.velocityCurve.floor = 0.2;
+    m->tracks[1].strip.velocityCurve.smooth = false;
+    m->tracks[1].strip.velocityCurve.points = { { 0.5, 0.3 } };
+    const auto back = std::make_unique<MixerState> (mixerFromJson (toJson (*m)));
+    CHECK (back->tracks[1].strip.velocityCurve == m->tracks[1].strip.velocityCurve);
+    CHECK (back->tracks[2].strip.velocityCurve.isLinear());
 }

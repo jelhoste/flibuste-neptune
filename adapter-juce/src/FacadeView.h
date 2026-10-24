@@ -35,11 +35,17 @@ private:
     void timerCallback() override;
     void refresh();                              // relit la Façade de la piste sélectionnée si elle a changé
     void commit (neptune::core::facade::Facade, const char* undoName);
+    // Comme commit, après avoir rattaché les widgets `touched` à leur zone et rangé le contenu des zones.
+    void commitArranged (neptune::core::facade::Facade, std::set<int> touched, const char* undoName);
     void addWidget (neptune::core::facade::WidgetType);
     void chooseImage();
     void showFitMenu();
     void openPicker (bool capture = false);
     void showAlignMenu();
+    void showZoneLayoutMenu();
+    void showZoneAlignMenu();
+    void showZoneGapMenu();
+    void applyZone (const std::function<void (neptune::core::facade::Widget&)>&, const char* undoName);
     int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
     void editText();
     void openHelp();
@@ -62,8 +68,8 @@ private:
     std::set<int> selection_;                    // widgets sélectionnés (mode Édition)
     bool editMode_ = false;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, imageButton_, fitButton_, clearImageButton_;
-    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
     std::unique_ptr<TextPrompt> prompt_;

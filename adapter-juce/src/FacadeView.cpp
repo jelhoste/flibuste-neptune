@@ -45,13 +45,13 @@ public:
 
     void resized() override { syncChildren(); }
 
-    // Courbes de vélocité : un panneau réel par widget « Courbe » (mode Jeu, piste Sampler), posé sur la toile.
+    // Courbes de vélocité : un panneau réel par widget « Courbe » (mode Jeu), posé sur la toile. C'est la courbe d'entrée de la piste
+    // (réglages de bande), valable pour tous les types de piste : elle remappe la vélocité MIDI avant n'importe quel moteur.
     void syncChildren()
     {
         auto& o = owner_;
-        const bool sampler = o.track_ >= 0 && o.processor_.trackType (o.track_) == neptune::core::TrackType::Sampler;
         std::set<int> wanted;
-        if (sampler && ! o.editMode_)
+        if (o.track_ >= 0 && ! o.editMode_)
             for (const auto& w : o.facade_.widgets)
                 if (w.type == fc::WidgetType::Curve) wanted.insert (w.id);
         for (auto it = panels_.begin(); it != panels_.end();)
@@ -67,28 +67,25 @@ public:
             auto& panel = panels_[id];
             if (panel == nullptr)
             {
-                const auto d = o.processor_.instrumentDescription();
-                panel = std::make_unique<VelocityPanel> (o.palette_, o.tr_, d.velocityFadeWidth, d.velocityFadeLinear, d.velocityCurve);
+                panel = std::make_unique<VelocityPanel> (o.palette_, o.tr_, 0, false, o.processor_.trackSettings (o.track_).velocityCurve);
                 auto* proc = &o.processor_;
                 panel->setFadeControlsVisible (false);   // la Façade n'expose que la courbe de transfert ; le fondu reste dans l'éditeur Sampler
                 panel->onGestureBegin = [proc] { proc->uiBeginGesture(); };
                 panel->onGestureEnd = [proc] { proc->uiEndGesture(); };
                 panel->onUndo = [proc] { proc->uiUndo(); };
                 panel->onRedo = [proc] { proc->uiRedo(); };
-                panel->onChange = [proc] (int width, bool linear, const neptune::core::VelocityCurve& curve)
+                panel->onChange = [proc] (int, bool, const neptune::core::VelocityCurve& curve)
                 {
-                    auto desc = proc->instrumentDescription();
-                    desc.velocityFadeWidth = width;
-                    desc.velocityFadeLinear = linear;
-                    desc.velocityCurve = curve;
-                    proc->uiEditInstrument (std::move (desc), "Velocity response", "velocity");
+                    const int track = proc->selectedTrack();
+                    auto strip = proc->trackSettings (track);
+                    strip.velocityCurve = curve;
+                    proc->uiEditTrack (track, std::move (strip), "Velocity curve", "velocity_curve");
                 };
                 addAndMakeVisible (*panel);
             }
             else if (refreshValues)
             {
-                const auto d = o.processor_.instrumentDescription();
-                panel->setValues (d.velocityFadeWidth, d.velocityFadeLinear, d.velocityCurve);
+                panel->setValues (0, false, o.processor_.trackSettings (o.track_).velocityCurve);
             }
             const auto area = canvasArea();
             const float s = scale();
@@ -122,7 +119,10 @@ public:
             }
 
             g.addTransform (juce::AffineTransform::scale (scale()).translated (area.getX(), area.getY()));
-            for (const auto& w : o.facade_.widgets) paintWidget (g, w);
+            for (const auto& w : o.facade_.widgets)
+                if (w.type == fc::WidgetType::Zone) paintWidget (g, w);   // les zones sont derrière leur contenu
+            for (const auto& w : o.facade_.widgets)
+                if (w.type != fc::WidgetType::Zone) paintWidget (g, w);
             if (o.editMode_)
             {
                 for (const auto& w : o.facade_.widgets) paintEditOverlay (g, w);
@@ -211,11 +211,11 @@ public:
             // le groupe se déplace d'un bloc et reste dans le canevas
             int minX = fc::canvasWidth, minY = fc::canvasHeight, maxR = 0, maxB = 0;
             for (const auto& w : before_.widgets)
-                if (o.selection_.count (w.id) != 0) { minX = std::min (minX, w.x); minY = std::min (minY, w.y); maxR = std::max (maxR, w.x + w.w); maxB = std::max (maxB, w.y + w.h); }
+                if (moving_.count (w.id) != 0) { minX = std::min (minX, w.x); minY = std::min (minY, w.y); maxR = std::max (maxR, w.x + w.w); maxB = std::max (maxB, w.y + w.h); }
             const int mx = std::clamp (snapped (dx), -minX, fc::canvasWidth - maxR);
             const int my = std::clamp (snapped (dy), -minY, fc::canvasHeight - maxB);
             for (auto& w : o.facade_.widgets)
-                if (const auto* b = before_.find (w.id); b != nullptr && o.selection_.count (w.id) != 0) { w.x = b->x + mx; w.y = b->y + my; }
+                if (const auto* b = before_.find (w.id); b != nullptr && moving_.count (w.id) != 0) { w.x = b->x + mx; w.y = b->y + my; }
         }
         else if (auto* w = o.facade_.find (o.single()))
         {
@@ -239,7 +239,11 @@ public:
             repaint();
         else if (mode == Mode::Move || mode == Mode::Resize)
         {
-            if (o.facade_ != before_) o.commit (o.facade_, mode == Mode::Move ? "Facade: move widgets" : "Facade: resize widget");
+            if (o.facade_ != before_)
+            {
+                auto f = o.facade_;
+                o.commitArranged (std::move (f), mode == Mode::Move ? o.selection_ : std::set<int> { o.single() }, mode == Mode::Move ? "Facade: move widgets" : "Facade: resize widget");
+            }
         }
     }
 
@@ -291,14 +295,14 @@ public:
         else if (k.getKeyCode() == juce::KeyPress::downKey) dy = step;
         else return false;
         auto f = o.facade_;
+        const auto ids = movingSet();
         int minX = fc::canvasWidth, minY = fc::canvasHeight, maxR = 0, maxB = 0;
         for (const auto& w : f.widgets)
-            if (o.selection_.count (w.id) != 0) { minX = std::min (minX, w.x); minY = std::min (minY, w.y); maxR = std::max (maxR, w.x + w.w); maxB = std::max (maxB, w.y + w.h); }
+            if (ids.count (w.id) != 0) { minX = std::min (minX, w.x); minY = std::min (minY, w.y); maxR = std::max (maxR, w.x + w.w); maxB = std::max (maxB, w.y + w.h); }
         dx = std::clamp (dx, -minX, fc::canvasWidth - maxR);
         dy = std::clamp (dy, -minY, fc::canvasHeight - maxB);
-        for (auto& w : f.widgets)
-            if (o.selection_.count (w.id) != 0) { w.x += dx; w.y += dy; }
-        o.commit (std::move (f), "Facade: move widgets");
+        fc::moveWidgets (f, o.selection_, dx, dy);
+        o.commitArranged (std::move (f), o.selection_, "Facade: move widgets");
         return true;
     }
 
@@ -324,10 +328,19 @@ private:
     const fc::Widget* widgetAt (juce::Point<float> p) const
     {
         const auto& ws = owner_.facade_.widgets;
-        for (auto it = ws.rbegin(); it != ws.rend(); ++it)
-            if (juce::Rectangle<float> (static_cast<float> (it->x), static_cast<float> (it->y), static_cast<float> (it->w), static_cast<float> (it->h)).contains (p))
-                return &*it;
+        for (const bool zones : { false, true })   // le contenu d'une zone prime sur la zone
+            for (auto it = ws.rbegin(); it != ws.rend(); ++it)
+                if ((it->type == fc::WidgetType::Zone) == zones
+                    && juce::Rectangle<float> (static_cast<float> (it->x), static_cast<float> (it->y), static_cast<float> (it->w), static_cast<float> (it->h)).contains (p))
+                    return &*it;
         return nullptr;
+    }
+
+    std::set<int> movingSet() const
+    {
+        auto ids = owner_.selection_;
+        for (const int id : owner_.selection_) ids.merge (fc::descendants (owner_.facade_, id));
+        return ids;
     }
 
     void editDown (juce::Point<float> p, const juce::ModifierKeys& mods)
@@ -355,7 +368,11 @@ private:
             }
             else if (o.selection_.count (w->id) == 0)
                 o.selection_ = { w->id };
-            if (o.selection_.count (w->id) != 0) mode_ = Mode::Move;
+            if (o.selection_.count (w->id) != 0)
+            {
+                mode_ = Mode::Move;
+                moving_ = movingSet();
+            }
         }
         else
         {
@@ -521,7 +538,6 @@ private:
             }
             case fc::WidgetType::Curve:
             {
-                const bool sampler = o.track_ >= 0 && o.processor_.trackType (o.track_) == neptune::core::TrackType::Sampler;
                 auto body = b;
                 if (! w.text.empty())
                 {
@@ -529,14 +545,29 @@ private:
                     g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
                     g.drawFittedText (utf8 (w.text), body.removeFromTop (curveTitleHeight).toNearestInt(), juce::Justification::centredLeft, 1);
                 }
-                if (sampler && ! o.editMode_) break;   // le panneau réel est posé par-dessus
+                if (! o.editMode_) break;   // le panneau réel est posé par-dessus
                 g.setColour (o.colour (Token::BgApp));
                 g.fillRoundedRectangle (body.reduced (1.0f), 8.0f);
                 g.setColour (o.colour (Token::Border));
                 g.drawRoundedRectangle (body.reduced (1.0f), 8.0f, 1.5f);
                 g.setColour (o.colour (Token::TextDim));
                 g.setFont (juce::FontOptions (16.0f));
-                g.drawFittedText (o.text (sampler ? "facade.curve_title" : "facade.curve_unavailable"), body.toNearestInt().reduced (12), juce::Justification::centred, 3);
+                g.drawFittedText (o.text ("facade.curve_title"), body.toNearestInt().reduced (12), juce::Justification::centred, 3);
+                break;
+            }
+            case fc::WidgetType::Zone:
+            {
+                const auto r = b.reduced (1.0f);
+                g.setColour (o.colour (Token::Pb).withAlpha (0.4f));
+                g.fillRoundedRectangle (r, 10.0f);
+                g.setColour (o.colour (Token::Border));
+                g.drawRoundedRectangle (r, 10.0f, 1.5f);
+                if (! w.text.empty())
+                {
+                    g.setColour (o.colour (Token::TextDim));
+                    g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+                    g.drawFittedText (utf8 (w.text), juce::Rectangle<int> (w.x + fc::zonePad, w.y + 4, w.w - 2 * fc::zonePad, fc::zoneTitleHeight - 4), juce::Justification::centredLeft, 1);
+                }
                 break;
             }
             case fc::WidgetType::Label:
@@ -564,6 +595,7 @@ private:
     juce::Rectangle<int> startRect_;
     juce::Rectangle<float> band_;
     std::set<int> bandBase_;
+    std::set<int> moving_;   // widgets entraînés par un déplacement : la sélection et le contenu des zones sélectionnées
     neptune::core::ParamId playId_ = 0;
     double startNorm_ = 0.0;
     float startY_ = 0.0f;
@@ -920,6 +952,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (actionButton_, "facade.add_action", fc::WidgetType::Action);
     setupAdd (curveButton_, "facade.add_curve", fc::WidgetType::Curve);
     setupAdd (labelButton_, "facade.add_label", fc::WidgetType::Label);
+    setupAdd (zoneButton_, "facade.add_zone", fc::WidgetType::Zone);
     imageButton_.setButtonText (text ("facade.image"));
     imageButton_.onClick = [this] { chooseImage(); };
     fitButton_.setButtonText (text ("facade.fit_fit"));
@@ -943,6 +976,25 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     deleteButton_.onClick = [this] { deleteSelected(); };
     alignButton_.setButtonText (text ("facade.align"));
     alignButton_.onClick = [this] { showAlignMenu(); };
+    sameSizeButton_.setButtonText (text ("facade.same_size"));
+    sameSizeButton_.setTooltip (text ("facade.tip_same_size"));
+    sameSizeButton_.onClick = [this]
+    {
+        auto f = facade_;
+        fc::matchSize (f, single());
+        std::set<int> all;
+        for (const auto& w : f.widgets) all.insert (w.id);
+        commitArranged (std::move (f), all, "Facade: same size");
+    };
+    layoutButton_.setButtonText (text ("facade.zone_layout"));
+    layoutButton_.setTooltip (text ("facade.tip_zone_layout"));
+    layoutButton_.onClick = [this] { showZoneLayoutMenu(); };
+    zoneAlignButton_.setButtonText (text ("facade.zone_align"));
+    zoneAlignButton_.setTooltip (text ("facade.tip_zone_align"));
+    zoneAlignButton_.onClick = [this] { showZoneAlignMenu(); };
+    zoneGapButton_.setButtonText (text ("facade.zone_gap"));
+    zoneGapButton_.setTooltip (text ("facade.tip_zone_gap"));
+    zoneGapButton_.onClick = [this] { showZoneGapMenu(); };
     helpButton_.setButtonText ("?");
     helpButton_.setTooltip (text ("facade.help_title"));
     helpButton_.onClick = [this] { openHelp(); };
@@ -952,12 +1004,13 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     menuButton_.setTooltip (text ("facade.tip_menu"));
     actionButton_.setTooltip (text ("facade.tip_action"));
     curveButton_.setTooltip (text ("facade.tip_curve"));
+    zoneButton_.setTooltip (text ("facade.tip_zone"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
-    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &imageButton_, &fitButton_, &clearImageButton_,
+                     &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -978,7 +1031,7 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &imageButton_, &fitButton_, &clearImageButton_ }) b->setVisible (editMode_);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
     linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type));
@@ -986,9 +1039,15 @@ void FacadeView::updateButtons()
     duplicateButton_.setVisible (any);
     deleteButton_.setVisible (any);
     alignButton_.setVisible (editMode_ && selection_.size() >= 2);
+    sameSizeButton_.setVisible (editMode_ && one != nullptr);
+    const bool zone = editMode_ && one != nullptr && one->type == fc::WidgetType::Zone;
+    layoutButton_.setVisible (zone);
+    zoneAlignButton_.setVisible (zone);
+    zoneGapButton_.setVisible (zone);
     clearImageButton_.setEnabled (! facade_.image.empty());
     fitButton_.setButtonText (text (facade_.fit == fc::ImageFit::Fit ? "facade.fit_fit" : facade_.fit == fc::ImageFit::Stretch ? "facade.fit_stretch" : "facade.fit_fill"));
     editButton_.setToggleState (editMode_, juce::dontSendNotification);
+    resized();   // les boutons visibles se partagent la rangée
 }
 
 void FacadeView::resized()
@@ -1003,6 +1062,7 @@ void FacadeView::resized()
     {
         for (auto* b : buttons)
         {
+            if (! b->isVisible()) continue;   // seuls les boutons visibles occupent la rangée
             const int w = fit (*b);
             b->setBounds (row.removeFromLeft (w));
             row.removeFromLeft (gap);
@@ -1016,9 +1076,9 @@ void FacadeView::resized()
     area.removeFromTop (gap);
     if (editMode_)
     {
-        layoutRow (area.removeFromTop (rowH), { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_ });
+        layoutRow (area.removeFromTop (rowH), { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_ });
         area.removeFromTop (gap);
-        layoutRow (area.removeFromTop (rowH), { &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        layoutRow (area.removeFromTop (rowH), { &linkButton_, &textButton_, &captureButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
         area.removeFromTop (gap);
     }
     canvas_->setBounds (area);
@@ -1068,6 +1128,22 @@ void FacadeView::commit (fc::Facade f, const char* undoName)
     canvas_->repaint();
 }
 
+void FacadeView::commitArranged (fc::Facade f, std::set<int> touched, const char* undoName)
+{
+    fc::arrange (f, touched);
+    commit (std::move (f), undoName);
+}
+
+void FacadeView::applyZone (const std::function<void (fc::Widget&)>& change, const char* undoName)
+{
+    auto f = facade_;
+    auto* z = f.find (single());
+    if (z == nullptr || z->type != fc::WidgetType::Zone) return;
+    change (*z);
+    const int id = z->id;
+    commitArranged (std::move (f), { id }, undoName);
+}
+
 void FacadeView::addWidget (fc::WidgetType type)
 {
     auto f = facade_;
@@ -1076,9 +1152,11 @@ void FacadeView::addWidget (fc::WidgetType type)
     const int n = static_cast<int> (f.widgets.size()) % 8;
     auto w = fc::defaultWidget (type, f.freeId(), fc::canvasWidth / 2 - 40 + 24 * n, fc::canvasHeight / 2 - 40 + 24 * n);
     if (type == fc::WidgetType::Label) w.text = "Label";
+    if (type == fc::WidgetType::Zone) w.text = "Zone";
     selection_ = { w.id };
+    const int newId = w.id;
     f.widgets.push_back (std::move (w));
-    commit (std::move (f), "Facade: add widget");
+    commitArranged (std::move (f), { newId }, "Facade: add widget");
 }
 
 void FacadeView::addLinked (fc::WidgetType type, neptune::core::ParamId param)
@@ -1090,38 +1168,33 @@ void FacadeView::addLinked (fc::WidgetType type, neptune::core::ParamId param)
     const int n = static_cast<int> (f.widgets.size()) % 8;
     auto w = fc::defaultWidget (type, f.freeId(), 60 + 24 * n, 60 + 24 * n);
     w.param = param;
+    const int newId = w.id;
     f.widgets.push_back (std::move (w));
-    commit (std::move (f), "Facade: add widget");
+    commitArranged (std::move (f), { newId }, "Facade: add widget");
 }
 
 void FacadeView::duplicateSelected()
 {
     auto f = facade_;
-    std::set<int> copies;
-    const auto original = f.widgets;
-    for (const auto& src : original)
-    {
-        if (selection_.count (src.id) == 0 || static_cast<int> (f.widgets.size()) >= fc::maxWidgets) continue;
-        auto copy = src;
-        copy.id = f.freeId();
-        copy.x += 24;
-        copy.y += 24;
-        copies.insert (copy.id);
-        f.widgets.push_back (std::move (copy));
-    }
+    const auto copies = fc::duplicateWidgets (f, selection_, 24);   // le contenu d'une zone est copié avec elle
     if (copies.empty()) return;
     selection_ = copies;
-    commit (std::move (f), "Facade: duplicate widgets");
+    commitArranged (std::move (f), copies, "Facade: duplicate widgets");
 }
 
 void FacadeView::deleteSelected()
 {
     auto f = facade_;
+    std::set<int> orphans;   // le contenu d'une zone supprimée est conservé et cherche une autre zone
+    for (const auto& w : f.widgets)
+        if (selection_.count (w.id) != 0 && w.type == fc::WidgetType::Zone)
+            for (const auto& k : f.widgets)
+                if (k.parent == w.id && selection_.count (k.id) == 0) orphans.insert (k.id);
     const auto before = f.widgets.size();
     f.widgets.erase (std::remove_if (f.widgets.begin(), f.widgets.end(), [this] (const fc::Widget& w) { return selection_.count (w.id) != 0; }), f.widgets.end());
     if (f.widgets.size() == before) return;
     selection_.clear();
-    commit (std::move (f), "Facade: delete widgets");
+    commitArranged (std::move (f), orphans, "Facade: delete widgets");
 }
 
 void FacadeView::showAlignMenu()
@@ -1144,11 +1217,72 @@ void FacadeView::showAlignMenu()
     {
         if (safe == nullptr || choice <= 0) return;
         auto f = safe->facade_;
-        const auto& ids = safe->selection_;
+        const auto ids = safe->selection_;
         if (choice <= 6) fc::alignWidgets (f, ids, static_cast<fc::Align> (choice - 1));
         else if (choice == 7 || choice == 8) fc::distributeWidgets (f, ids, choice == 7);
         else fc::arrangeGrid (f, ids, choice - 100);
-        safe->commit (std::move (f), "Facade: arrange widgets");
+        safe->commitArranged (std::move (f), ids, "Facade: arrange widgets");
+    });
+}
+
+void FacadeView::showZoneLayoutMenu()
+{
+    const auto* z = facade_.find (single());
+    if (z == nullptr || z->type != fc::WidgetType::Zone) return;
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("facade.layout_free"), true, z->layout == 0);
+    menu.addItem (2, text ("facade.layout_row"), true, z->layout == 1);
+    menu.addItem (3, text ("facade.layout_column"), true, z->layout == 2);
+    for (int c = 2; c <= 8; ++c) menu.addItem (10 + c, text ("facade.layout_grid") + " " + juce::String (c), true, z->layout == 3 && z->columns == c);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&layoutButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applyZone ([choice] (fc::Widget& w)
+        {
+            if (choice <= 3) w.layout = choice - 1;
+            else { w.layout = 3; w.columns = choice - 10; }
+        }, "Facade: zone layout");
+    });
+}
+
+void FacadeView::showZoneAlignMenu()
+{
+    const auto* z = facade_.find (single());
+    if (z == nullptr || z->type != fc::WidgetType::Zone) return;
+    juce::PopupMenu menu;
+    menu.addSectionHeader (text ("facade.align_cross"));
+    menu.addItem (1, text ("facade.align_start"), true, z->align == 0);
+    menu.addItem (2, text ("facade.align_centre"), true, z->align == 1);
+    menu.addItem (3, text ("facade.align_end"), true, z->align == 2);
+    menu.addSectionHeader (text ("facade.align_main"));
+    menu.addItem (11, text ("facade.justify_start"), true, z->justify == 0);
+    menu.addItem (12, text ("facade.justify_centre"), true, z->justify == 1);
+    menu.addItem (13, text ("facade.justify_end"), true, z->justify == 2);
+    menu.addItem (14, text ("facade.justify_spread"), true, z->justify == 3);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&zoneAlignButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applyZone ([choice] (fc::Widget& w)
+        {
+            if (choice <= 3) w.align = choice - 1;
+            else w.justify = choice - 11;
+        }, "Facade: zone alignment");
+    });
+}
+
+void FacadeView::showZoneGapMenu()
+{
+    const auto* z = facade_.find (single());
+    if (z == nullptr || z->type != fc::WidgetType::Zone) return;
+    juce::PopupMenu menu;
+    for (const int g : { 0, 4, 8, 12, 16, 24, 32, 48 }) menu.addItem (100 + g, juce::String (g) + " px", true, z->gap == g);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&zoneGapButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice < 100) return;
+        safe->applyZone ([choice] (fc::Widget& w) { w.gap = choice - 100; }, "Facade: zone spacing");
     });
 }
 
