@@ -705,7 +705,7 @@ private:
                     const int fh = style->stripHorizontal ? strip.getHeight() : strip.getHeight() / frames;
                     if (fw > 0 && fh > 0)
                     {
-                        const auto dest = juce::RectanglePlacement::centred.appliedTo (juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (fw), static_cast<float> (fh)), r).toNearestInt();
+                        const auto dest = juce::RectanglePlacement (juce::RectanglePlacement::centred).appliedTo (juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (fw), static_cast<float> (fh)), r).toNearestInt();
                         g.drawImage (strip, dest.getX(), dest.getY(), dest.getWidth(), dest.getHeight(),
                                      style->stripHorizontal ? frame * fw : 0, style->stripHorizontal ? 0 : frame * fh, fw, fh);
                     }
