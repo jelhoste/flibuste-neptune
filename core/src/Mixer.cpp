@@ -169,11 +169,46 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
     return ok;
 }
 
+unsigned midiChannelsOf (const StripSettings& s) noexcept
+{
+    if (s.midiChannelMask != 0) return s.midiChannelMask & 0xFFFFu;
+    return s.midiChannel <= 0 || s.midiChannel > 16 ? 0xFFFFu : 1u << (s.midiChannel - 1);
+}
+
+void setMidiChannels (StripSettings& s, unsigned mask) noexcept
+{
+    s.midiChannelMask = mask & 0xFFFFu;
+    s.midiChannel = 0;
+    if (s.midiChannelMask == 0 || s.midiChannelMask == 0xFFFFu) { s.midiChannelMask = 0; return; }
+    if ((s.midiChannelMask & (s.midiChannelMask - 1)) == 0)
+    {
+        int c = 0;
+        while (((s.midiChannelMask >> c) & 1u) == 0) ++c;
+        s.midiChannel = c + 1;
+        s.midiChannelMask = 0;
+    }
+}
+
 StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
 {
     if (s.name.size() > 64) s.name.resize (64);
     s.color = std::clamp (s.color, 0, 15);
     s.midiChannel = isBus ? 0 : std::clamp (s.midiChannel, 0, 16);
+    if (isBus) s.midiChannelMask = 0;
+    else if (s.midiChannelMask != 0)
+    {
+        // forme normalisée : « tous » = canal 0, un seul canal = ce canal, plusieurs = le masque
+        s.midiChannelMask &= 0xFFFFu;
+        if (s.midiChannelMask == 0 || s.midiChannelMask == 0xFFFFu) { s.midiChannelMask = 0; s.midiChannel = 0; }
+        else if ((s.midiChannelMask & (s.midiChannelMask - 1)) == 0)
+        {
+            int c = 0;
+            while (((s.midiChannelMask >> c) & 1u) == 0) ++c;
+            s.midiChannel = c + 1;
+            s.midiChannelMask = 0;
+        }
+        else s.midiChannel = 0;
+    }
     s.midiFilter = isBus ? midi::FilterDescription() : midi::sanitised (std::move (s.midiFilter));
     s.routing.directOut = std::clamp (s.routing.directOut, 0, numOutputs);
     s.routing.mainDest = std::clamp (s.routing.mainDest, 0, numBuses);

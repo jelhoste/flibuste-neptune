@@ -202,6 +202,7 @@ struct StripSettings
     std::string name;
     int color = 0;                       // indice de palette
     int midiChannel = 0;                 // pistes : 0 = tous, 1..16
+    unsigned midiChannelMask = 0;        // pistes : plusieurs canaux à la fois (bit c = canal c + 1) ; 0 = voir midiChannel (forme normalisée : jamais un seul canal ni tous)
     midi::FilterDescription midiFilter;  // pistes : filtre MIDI avancé (en plus du canal), éteint par défaut
     Routing routing;
     PanMode panMode = PanMode::Balance;
@@ -214,7 +215,7 @@ struct StripSettings
 
     bool operator== (const StripSettings& o) const noexcept
     {
-        return hostInput == o.hostInput && name == o.name && color == o.color && midiChannel == o.midiChannel && midiFilter == o.midiFilter && routing == o.routing
+        return hostInput == o.hostInput && name == o.name && color == o.color && midiChannel == o.midiChannel && midiChannelMask == o.midiChannelMask && midiFilter == o.midiFilter && routing == o.routing
             && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim && velocityCurve == o.velocityCurve && facade == o.facade;
     }
 };
@@ -254,6 +255,9 @@ struct MasterSettings
 
 // Bornes les réglages (indices, cycles interdits : un bus ne route que vers un bus d'indice supérieur).
 StripSettings sanitisedStrip (StripSettings s, bool isBus, int index);
+// Canaux MIDI écoutés par une piste, sur 16 bits (bit c = canal c + 1), et réglage de la piste à partir d'un tel masque (0 : tous).
+unsigned midiChannelsOf (const StripSettings&) noexcept;
+void setMidiChannels (StripSettings&, unsigned mask) noexcept;
 MasterSettings sanitised (MasterSettings m);
 
 // ---- traitement ----

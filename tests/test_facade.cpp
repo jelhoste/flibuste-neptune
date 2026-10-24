@@ -341,3 +341,53 @@ TEST_CASE ("Facade zones: circle layout is stable once applied")
     for (int i = 3; i <= 6; ++i) if (f.find (i)->y < f.find (topmost)->y) topmost = i;
     CHECK (std::abs ((f.find (topmost)->x + f.find (topmost)->w / 2) - (100 + 500 / 2)) <= 2);
 }
+
+TEST_CASE ("track MIDI channels can be a set: normal forms, state round trip and routing")
+{
+    mixer::StripSettings s;
+    CHECK (mixer::midiChannelsOf (s) == 0xFFFFu);                       // tous par défaut
+    mixer::setMidiChannels (s, (1u << 0) | (1u << 2));                  // canaux 1 et 3
+    CHECK (s.midiChannelMask == 5u);
+    CHECK (s.midiChannel == 0);
+    mixer::setMidiChannels (s, 1u << 6);                                // un seul : forme classique
+    CHECK (s.midiChannel == 7);
+    CHECK (s.midiChannelMask == 0u);
+    mixer::setMidiChannels (s, 0xFFFFu);
+    CHECK (s.midiChannel == 0);
+    CHECK (s.midiChannelMask == 0u);
+
+    mixer::StripSettings wild;
+    wild.midiChannelMask = 0x1FFFFu | 0x20000u;                         // hors plage : ramené à « tous »
+    CHECK (mixer::sanitisedStrip (wild, false, 0).midiChannelMask == 0u);
+    wild.midiChannelMask = 0x10u;                                       // un seul bit : canal 5
+    wild = mixer::sanitisedStrip (wild, false, 0);
+    CHECK (wild.midiChannel == 5);
+    CHECK (wild.midiChannelMask == 0u);
+
+    auto m = std::make_unique<MixerState>();
+    mixer::setMidiChannels (m->tracks[3].strip, (1u << 1) | (1u << 9) | (1u << 15));
+    const auto back = std::make_unique<MixerState> (mixerFromJson (toJson (*m)));
+    CHECK (back->tracks[3].strip.midiChannelMask == m->tracks[3].strip.midiChannelMask);
+    CHECK (mixer::midiChannelsOf (back->tracks[3].strip) == ((1u << 1) | (1u << 9) | (1u << 15)));
+
+    Engine engine;
+    engine.prepare (48000.0, 256);
+    engine.setTrackActive (0, true);
+    engine.setTrackType (0, TrackType::Synth);
+    engine.publishSynth (0, std::make_shared<SynthPatch> (SynthDescription {}));
+    mixer::StripSettings strip;
+    mixer::setMidiChannels (strip, (1u << 0) | (1u << 2));              // canaux 1 et 3 (indices 0 et 2)
+    engine.setTrackSettings (0, strip);
+    auto playedOnTrack0 = [&engine] (int channel, int key)
+    {
+        engine.noteOn (channel, key, 0.5f);
+        bool played = false;
+        Engine::NoteTrace t;
+        while (engine.popNoteTrace (t))
+            if (t.track == 0 && t.key == key) played = true;
+        return played;
+    };
+    CHECK_FALSE (playedOnTrack0 (1, 60));   // canal 2 : ignoré
+    CHECK (playedOnTrack0 (2, 61));         // canal 3 : joué
+    CHECK (playedOnTrack0 (0, 62));         // canal 1 : joué
+}

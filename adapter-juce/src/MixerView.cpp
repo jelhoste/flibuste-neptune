@@ -135,6 +135,91 @@ private:
     int track_;
 };
 
+// Canaux MIDI d'une piste : une grille de 16 cases, plusieurs canaux possibles à la fois. Sur « tous les canaux », un clic choisit ce canal
+// seul (on part de lui pour en ajouter) ; décocher le dernier canal revient à « tous ».
+class TrackChannelPanel : public juce::Component, private juce::Timer
+{
+public:
+    TrackChannelPanel (NeptuneProcessor& p, const i18n::Translator& tr, int track, juce::Colour accent) : proc_ (p), track_ (track)
+    {
+        for (int c = 0; c < 16; ++c)
+        {
+            auto& b = buttons_[static_cast<std::size_t> (c)];
+            b.setButtonText (juce::String (c + 1));
+            b.setColour (juce::TextButton::buttonOnColourId, accent);
+            b.onClick = [this, c] { toggle (c); };
+            addAndMakeVisible (b);
+        }
+        all_.setButtonText (juce::String::fromUTF8 (std::string (tr.tr ("mix.midi_all")).c_str()));
+        all_.setColour (juce::TextButton::buttonOnColourId, accent);
+        all_.onClick = [this] { apply (0xFFFFu); };
+        addAndMakeVisible (all_);
+        setSize (4 * 56 + 5 * 6, 5 * 42 + 6 * 6);
+        refresh();
+        startTimerHz (8);
+    }
+    ~TrackChannelPanel() override { stopTimer(); }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (6);
+        all_.setBounds (r.removeFromTop (42));
+        r.removeFromTop (6);
+        for (int row = 0; row < 4; ++row)
+        {
+            auto line = r.removeFromTop (42);
+            r.removeFromTop (6);
+            for (int col = 0; col < 4; ++col)
+            {
+                buttons_[static_cast<std::size_t> (row * 4 + col)].setBounds (line.removeFromLeft (56));
+                line.removeFromLeft (6);
+            }
+        }
+    }
+
+private:
+    void timerCallback() override { refresh(); }
+
+    void refresh()
+    {
+        const unsigned mask = mixer::midiChannelsOf (proc_.trackSettings (track_));
+        for (int c = 0; c < 16; ++c) buttons_[static_cast<std::size_t> (c)].setToggleState (((mask >> c) & 1u) != 0, juce::dontSendNotification);
+        all_.setToggleState (mask == 0xFFFFu, juce::dontSendNotification);
+    }
+
+    void apply (unsigned mask)
+    {
+        auto strip = proc_.trackSettings (track_);
+        mixer::setMidiChannels (strip, mask);
+        proc_.uiEditTrack (track_, std::move (strip), "MIDI channels", "midi_channels");
+        refresh();
+    }
+
+    void toggle (int c)
+    {
+        const unsigned mask = mixer::midiChannelsOf (proc_.trackSettings (track_));
+        unsigned next = mask == 0xFFFFu ? (1u << c) : (mask ^ (1u << c));
+        if (next == 0) next = 0xFFFFu;
+        apply (next);
+    }
+
+    NeptuneProcessor& proc_;
+    int track_;
+    std::array<juce::TextButton, 16> buttons_;
+    juce::TextButton all_;
+};
+
+// Texte court du bouton de canaux : A (tous), le numéro, « 1,3 » pour deux canaux, « 1+ » au-delà.
+static juce::String channelLabel (unsigned mask)
+{
+    if (mask == 0xFFFFu) return "A";
+    juce::StringArray list;
+    for (int c = 0; c < 16; ++c)
+        if (((mask >> c) & 1u) != 0) list.add (juce::String (c + 1));
+    if (list.size() <= 2) return list.joinIntoString (",");
+    return list[0] + "+";
+}
+
 class RoutingPanel : public juce::Component
 {
 public:
@@ -537,13 +622,13 @@ public:
             removeButton_.setTooltip (u8 (std::string (owner.tr_.tr ("mix.remove_tip"))));
             removeButton_.onClick = [this] { owner_.requestRemove (index_); };
             addAndMakeVisible (removeButton_);
-            for (const auto* item : { "All" }) midi_.addItem (item, 1);
-            for (int c = 1; c <= 16; ++c) midi_.addItem (juce::String (c), c + 1);
-            midi_.onChange = [this]
+            // canaux MIDI : « A » (tous), le numéro, ou plusieurs ; un clic ouvre la grille des 16 canaux
+            midi_.setColour (juce::TextButton::buttonOnColourId, owner.colour (Token::Accent));
+            midi_.onClick = [this]
             {
-                auto s = settings();
-                s.midiChannel = midi_.getSelectedId() - 1;
-                commit (s);
+                auto& box = juce::CallOutBox::launchAsynchronously (std::make_unique<TrackChannelPanel> (owner_.processor_, owner_.tr_, index_, owner_.colour (Token::Accent)),
+                                                                    midi_.getScreenBounds(), nullptr);
+                box.setLookAndFeel (&midi_.getLookAndFeel());
             };
             addAndMakeVisible (midi_);
             // « V » : la courbe de vélocité de la piste, allumée quand elle agit
@@ -639,7 +724,13 @@ public:
         name_.setText (s.name.empty() ? fallback : u8 (s.name), juce::dontSendNotification);
         if (! isBus_ && ! isPar_)
         {
-            midi_.setSelectedId (s.midiChannel + 1, juce::dontSendNotification);
+            const unsigned mask = mixer::midiChannelsOf (s);
+            midi_.setButtonText (channelLabel (mask));
+            midi_.setToggleState (mask != 0xFFFFu, juce::dontSendNotification);   // allumé quand la piste n'écoute pas tous les canaux
+            juce::StringArray names;
+            for (int c = 0; c < 16; ++c)
+                if (((mask >> c) & 1u) != 0) names.add (juce::String (c + 1));
+            midi_.setTooltip (u8 (std::string (owner_.tr_.tr ("mix.midi_tip"))) + "  " + (mask == 0xFFFFu ? u8 (std::string (owner_.tr_.tr ("mix.midi_all"))) : names.joinIntoString (", ")));
             velocityButton_.setToggleState (s.velocityCurve.active(), juce::dontSendNotification);
         }
         colourIndex_ = s.color;
@@ -811,7 +902,7 @@ private:
     int colourIndex_ = 0;
     float peakL_ = 0.0f, peakR_ = 0.0f;
     juce::Label name_;
-    juce::ComboBox midi_;
+    juce::TextButton midi_;
     juce::TextButton typeButton_, removeButton_, foldButton_, velocityButton_;
     juce::ComboBox tapBox_;
     juce::TextButton routing_;

@@ -9,6 +9,7 @@ namespace neptune::core
 void Engine::AtomicStrip::load (const mixer::StripSettings& s) noexcept
 {
     midiChannel.store (s.midiChannel, std::memory_order_relaxed);
+    midiMask.store (s.midiChannelMask, std::memory_order_relaxed);
     hostInput.store (s.hostInput ? 1 : 0, std::memory_order_relaxed);
     mainDest.store (s.routing.mainDest, std::memory_order_relaxed);
     mainEnabled.store (s.routing.mainEnabled ? 1 : 0, std::memory_order_relaxed);
@@ -188,6 +189,19 @@ void Engine::adoptInserts() noexcept
         for (auto& s : p.inserts) s.slot.adoptPending();
     for (auto& s : masterInserts_) s.slot.adoptPending();
 }
+
+namespace
+{
+// La piste écoute-t-elle ce canal (0..15) ? Un masque (plusieurs canaux) prime sur le canal unique ou « tous ».
+template <class Strip>
+bool listensTo (const Strip& c, int channel) noexcept
+{
+    const unsigned mask = c.midiMask.load (std::memory_order_relaxed);
+    if (mask != 0) return ((mask >> (channel & 15)) & 1u) != 0;
+    const int ch = c.midiChannel.load (std::memory_order_relaxed);
+    return ch == 0 || ch == channel + 1;
+}
+} // namespace
 
 void Engine::setTrackSettings (int track, const mixer::StripSettings& s)
 {
@@ -425,10 +439,9 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
     for (int t = 0; t < kTracks; ++t)
     {
         auto& tr = tracks_[static_cast<std::size_t> (t)];
-        const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
         // un orgue écoute les canaux de ses propres claviers (description) : tous les canaux lui sont présentés
         const bool organ = tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
-        if (! (organ || ch == 0 || ch == channel + 1)) continue;
+        if (! (organ || listensTo (tr.config, channel))) continue;
         if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Sampler) && tr.voices.isKeyswitch (channel, key)) { keyswitch (t, channel, key, true); continue; }   // une touche de keyswitch bascule un modulateur sans jouer
         if (tr.filter != nullptr && ! tr.filter->passes (m)) continue;
         tr.acceptedNotes[bit >> 6] |= std::uint64_t (1) << (bit & 63);
@@ -442,9 +455,8 @@ void Engine::noteOff (int channel, int key) noexcept
     for (int t = 0; t < kTracks; ++t)
     {
         auto& tr = tracks_[static_cast<std::size_t> (t)];
-        const int ch = tr.config.midiChannel.load (std::memory_order_relaxed);
         const bool organ = tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Organ);
-        if (! (organ || ch == 0 || ch == channel + 1)) continue;
+        if (! (organ || listensTo (tr.config, channel))) continue;
         if (tr.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::Sampler) && tr.voices.isKeyswitch (channel, key)) { keyswitch (t, channel, key, false); continue; }
         const std::uint64_t mask = std::uint64_t (1) << (bit & 63);
         const bool accepted = (tr.acceptedNotes[bit >> 6] & mask) != 0;

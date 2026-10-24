@@ -68,6 +68,7 @@ json stripToJson (const mixer::StripSettings& s)
     if (! s.name.empty()) o["name"] = s.name;
     if (s.color != 0) o["color"] = s.color;
     o["midi_channel"] = s.midiChannel;
+    if (s.midiChannelMask != 0) o["midi_channels"] = s.midiChannelMask;
     if (s.midiFilter != midi::FilterDescription()) o["midi_filter"] = json::parse (midi::toJson (s.midiFilter));
     json r;
     r["main_dest"] = s.routing.mainDest;
@@ -112,6 +113,7 @@ mixer::StripSettings stripFromJson (const json& o, mixer::StripSettings s, bool 
     if (const auto it = o.find ("name"); it != o.end() && it->is_string()) s.name = it->get<std::string>();
     s.color = intOf (o, "color", s.color);
     s.midiChannel = intOf (o, "midi_channel", s.midiChannel);
+    s.midiChannelMask = static_cast<unsigned> (std::clamp (intOf (o, "midi_channels", 0), 0, 0xFFFF));
     if (const auto mf = o.find ("midi_filter"); mf != o.end() && mf->is_object()) s.midiFilter = midi::filterFromJson (mf->dump());
     if (const auto r = o.find ("routing"); r != o.end() && r->is_object())
     {

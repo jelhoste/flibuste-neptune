@@ -247,6 +247,8 @@ const Entry kEntries[] = {
     { "facade.unlinked", { "not linked", "non lié" } },
     { "facade.ok", { "OK", "OK" } },
     { "vel.enabled", { "Curve active (switch off to bypass it and keep the settings)", "Courbe active (décochez pour la contourner en gardant les réglages)" } },
+    { "mix.midi_all", { "All", "Tous" } },
+    { "mix.midi_tip", { "MIDI channels this track listens to (click to choose one or several). Channels:", "Canaux MIDI écoutés par la piste (cliquez pour en choisir un ou plusieurs). Canaux :" } },
     { "mix.velocity_short", { "V", "V" } },
     { "mix.velocity_tip", { "Velocity curve of the track: reshapes the incoming MIDI velocity before the sound modules (lit when it is active)", "Courbe de vélocité de la piste : remappe la vélocité MIDI reçue avant les modules de son (allumé quand elle est active)" } },
     { "facade.circle", { "Spread on a circle", "Répartir en cercle" } },

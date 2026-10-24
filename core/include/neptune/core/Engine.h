@@ -174,7 +174,9 @@ private:
     };
     struct AtomicStrip
     {
-        std::atomic<int> midiChannel { 0 }, mainDest { 0 }, mainEnabled { 1 }, directOut { 0 }, panMode { 0 }, hostInput { 1 };
+        std::atomic<int> midiChannel { 0 };
+        std::atomic<unsigned> midiMask { 0 };   // plusieurs canaux (voir StripSettings::midiChannelMask) ; 0 : voir midiChannel
+        std::atomic<int> mainDest { 0 }, mainEnabled { 1 }, directOut { 0 }, panMode { 0 }, hostInput { 1 };
         std::array<AtomicSend, mixer::numSends> sends;
         void load (const mixer::StripSettings&) noexcept;
     };
