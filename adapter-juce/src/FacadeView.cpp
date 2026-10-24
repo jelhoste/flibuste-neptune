@@ -76,23 +76,33 @@ int snapped (int v) { return (v + 2) / 4 * 4; } // aimantation sur une grille de
 
 juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
-bool needsParam (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Menu || t == fc::WidgetType::Slider; }
+bool needsParam (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Menu || t == fc::WidgetType::Slider || t == fc::WidgetType::Lamp; }
 
 // Les widgets qui peuvent prendre un style d'images.
-bool takesStyle (fc::WidgetType t) { return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Action || t == fc::WidgetType::Slider; }
+bool takesStyle (fc::WidgetType t)
+{
+    return t == fc::WidgetType::Knob || t == fc::WidgetType::Button || t == fc::WidgetType::Action || t == fc::WidgetType::Slider
+        || t == fc::WidgetType::Keyboard || t == fc::WidgetType::Zone || t == fc::WidgetType::Lamp;
+}
 
 // Charge une image PNG, JPG ou SVG (le SVG est rastérisé, côté le plus long = maxSide), depuis un fichier ou un pack de styles
-// (référence « pack:... »). Image vide si introuvable ou illisible.
-juce::Image loadPicture (const std::string& path, int maxSide)
+// (référence « pack:... »). Image vide si introuvable ou illisible. `natural` reçoit la taille naturelle du dessin (SVG : sa taille
+// déclarée ; PNG et JPG : ses pixels). Dans un SVG, les repères {{accent}}, {{text}}... sont remplacés par les couleurs du thème (`vars`).
+juce::Image loadPicture (const std::string& path, int maxSide, const std::map<std::string, std::string>& vars, juce::Point<float>& natural)
 {
     juce::MemoryBlock data;
+    natural = {};
     if (! stylelib::readBytes (path, data) || data.getSize() == 0) return {};
     if (juce::String::fromUTF8 (path.c_str()).endsWithIgnoreCase (".svg"))
     {
-        const std::unique_ptr<juce::Drawable> drawable (juce::Drawable::createFromImageData (data.getData(), data.getSize()));
+        auto svg = juce::String::createStringFromData (data.getData(), static_cast<int> (data.getSize()));
+        if (svg.contains ("{{"))
+            for (const auto& [name, colour] : vars) svg = svg.replace ("{{" + juce::String (name) + "}}", juce::String (colour));
+        const std::unique_ptr<juce::Drawable> drawable (juce::Drawable::createFromImageData (svg.toRawUTF8(), svg.getNumBytesAsUTF8()));
         if (drawable == nullptr) return {};
         const auto bounds = drawable->getDrawableBounds();
         if (bounds.isEmpty()) return {};
+        natural = { bounds.getWidth(), bounds.getHeight() };
         const float k = static_cast<float> (maxSide) / std::max (bounds.getWidth(), bounds.getHeight());
         const int w = std::max (1, juce::roundToInt (bounds.getWidth() * k)), h = std::max (1, juce::roundToInt (bounds.getHeight() * k));
         juce::Image img (juce::Image::ARGB, w, h, true);
@@ -100,7 +110,63 @@ juce::Image loadPicture (const std::string& path, int maxSide)
         drawable->drawWithin (g, juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (w), static_cast<float> (h)), juce::RectanglePlacement::centred, 1.0f);
         return img;
     }
-    return juce::ImageFileFormat::loadFrom (data.getData(), data.getSize());
+    auto img = juce::ImageFileFormat::loadFrom (data.getData(), data.getSize());
+    if (img.isValid()) natural = { static_cast<float> (img.getWidth()), static_cast<float> (img.getHeight()) };
+    return img;
+}
+
+// « #rrggbb » ou « #aarrggbb » ; `fallback` si illisible.
+juce::Colour parseColour (const std::string& text, juce::Colour fallback)
+{
+    auto t = juce::String (text).trim().trimCharactersAtStart ("#");
+    if (t.length() == 6 && t.containsOnly ("0123456789abcdefABCDEF")) return juce::Colour (0xff000000u | static_cast<juce::uint32> (t.getHexValue32()));
+    if (t.length() == 8 && t.containsOnly ("0123456789abcdefABCDEF")) return juce::Colour (static_cast<juce::uint32> (t.getHexValue32()));
+    return fallback;
+}
+
+// Texte posé sur un widget, avec les réglages du style (couleur, taille, place, gras). `ratio` : taille par défaut, en part de la hauteur.
+void drawStyledText (juce::Graphics& g, const fc::ImageStyle* style, const juce::String& text, juce::Rectangle<float> area, float ratio, juce::Colour defaultColour,
+                     juce::Justification defaultPlace = juce::Justification::centred)
+{
+    if (text.isEmpty()) return;
+    if (style != nullptr && style->textSize > 0) ratio = static_cast<float> (style->textSize) / 100.0f;
+    const float size = juce::jlimit (9.0f, 80.0f, area.getHeight() * ratio);
+    g.setColour (style != nullptr ? parseColour (style->textColour, defaultColour) : defaultColour);
+    g.setFont (juce::FontOptions (size, style == nullptr || style->textBold ? juce::Font::bold : juce::Font::plain));
+    juce::Justification place = defaultPlace;
+    if (style != nullptr)
+        switch (style->textPosition)
+        {
+            case 1: place = juce::Justification::centredTop; break;
+            case 2: place = juce::Justification::centredBottom; break;
+            case 3: place = juce::Justification::centredLeft; break;
+            case 4: place = juce::Justification::centredRight; break;
+            default: break;
+        }
+    g.drawFittedText (text, area.toNearestInt().reduced (4), place, 2);
+}
+
+// Image découpée en neuf zones : les coins gardent leur taille, les bords et le centre s'étirent. Les marges de découpe sont des
+// pourcentages de l'image ; les coins s'affichent à leur taille naturelle (en unités du canevas) multipliée par `sliceScale`.
+void drawNineSlice (juce::Graphics& g, const juce::Image& img, juce::Point<float> natural, const fc::ImageStyle& st, juce::Rectangle<float> dest)
+{
+    if (! img.isValid() || natural.x <= 0.0f || natural.y <= 0.0f) return;
+    const float iw = static_cast<float> (img.getWidth()), ih = static_cast<float> (img.getHeight());
+    const float k = static_cast<float> (st.sliceScale) / 100.0f;
+    float dl = natural.x * static_cast<float> (st.sliceLeft) / 100.0f * k, dr = natural.x * static_cast<float> (st.sliceRight) / 100.0f * k;
+    float dt = natural.y * static_cast<float> (st.sliceTop) / 100.0f * k, db = natural.y * static_cast<float> (st.sliceBottom) / 100.0f * k;
+    if (dl + dr > dest.getWidth()) { const float f = dest.getWidth() / (dl + dr); dl *= f; dr *= f; }
+    if (dt + db > dest.getHeight()) { const float f = dest.getHeight() / (dt + db); dt *= f; db *= f; }
+    const int sx[4] = { 0, juce::roundToInt (iw * static_cast<float> (st.sliceLeft) / 100.0f), juce::roundToInt (iw * (1.0f - static_cast<float> (st.sliceRight) / 100.0f)), img.getWidth() };
+    const int sy[4] = { 0, juce::roundToInt (ih * static_cast<float> (st.sliceTop) / 100.0f), juce::roundToInt (ih * (1.0f - static_cast<float> (st.sliceBottom) / 100.0f)), img.getHeight() };
+    const int dx[4] = { juce::roundToInt (dest.getX()), juce::roundToInt (dest.getX() + dl), juce::roundToInt (dest.getRight() - dr), juce::roundToInt (dest.getRight()) };
+    const int dy[4] = { juce::roundToInt (dest.getY()), juce::roundToInt (dest.getY() + dt), juce::roundToInt (dest.getBottom() - db), juce::roundToInt (dest.getBottom()) };
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col)
+        {
+            const int sw = sx[col + 1] - sx[col], sh = sy[row + 1] - sy[row], dw = dx[col + 1] - dx[col], dh = dy[row + 1] - dy[row];
+            if (sw > 0 && sh > 0 && dw > 0 && dh > 0) g.drawImage (img, dx[col], dy[row], dw, dh, sx[col], sy[row], sw, sh);
+        }
 }
 
 // Taille de la poignée d'un curseur le long de son axe : celle de son image, sinon un rectangle étroit.
@@ -126,7 +192,16 @@ int menuCount (const neptune::core::ParamSpec& s)
 class FacadeView::Canvas : public juce::Component
 {
 public:
-    explicit Canvas (FacadeView& owner) : owner_ (owner) { setWantsKeyboardFocus (true); }
+    explicit Canvas (FacadeView& owner) : owner_ (owner)
+    {
+        setWantsKeyboardFocus (true);
+        auto hex = [&owner] (Token t) { return toColour (owner.palette_, t).toDisplayString (false).paddedLeft ('0', 6).toStdString(); };
+        static const std::pair<const char*, Token> table[] = { { "accent", Token::Accent }, { "accent2", Token::Accent2 }, { "text", Token::Text }, { "text_dim", Token::TextDim },
+                                                               { "bg", Token::BgApp }, { "card", Token::BgCard }, { "panel", Token::PanelBg }, { "border", Token::Border },
+                                                               { "hot", Token::KnobHot }, { "face", Token::KnobFace } };
+        for (const auto& [name, token] : table)
+            svgVars_[name] = "#" + hex (token);
+    }
     ~Canvas() override { releaseKeys(); }
 
     bool dragging() const noexcept { return mode_ != Mode::None; }
@@ -402,6 +477,14 @@ public:
             }
         }
     }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const auto* w = owner_.editMode_ ? nullptr : widgetAt (toCanvas (e.position));
+        const int id = w != nullptr ? w->id : 0;
+        if (id != hoverId_) { hoverId_ = id; repaint(); }
+    }
+    void mouseExit (const juce::MouseEvent&) override { if (hoverId_ != 0) { hoverId_ = 0; repaint(); } }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
@@ -704,8 +787,17 @@ private:
     {
         if (path.empty()) return {};
         const auto it = pictures_.find (path);
-        if (it != pictures_.end()) return it->second;
-        return pictures_[path] = loadPicture (path, maxSide);
+        if (it != pictures_.end()) return it->second.image;
+        auto& entry = pictures_[path];
+        entry.image = loadPicture (path, maxSide, svgVars_, entry.natural);
+        return entry.image;
+    }
+
+    juce::Point<float> naturalSize (const std::string& path) const
+    {
+        picture (path);
+        const auto it = pictures_.find (path);
+        return it != pictures_.end() ? it->second.natural : juce::Point<float>();
     }
 
     void paintWidget (juce::Graphics& g, const fc::Widget& w) const
@@ -727,8 +819,22 @@ private:
                 auto valueRow = r.removeFromBottom (15.0f);
                 auto captionRow = r.removeFromBottom (17.0f);
                 const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const juce::Image pointer = style != nullptr ? picture (style->pointer) : juce::Image();
                 const juce::Image strip = style != nullptr && style->frames > 1 ? picture (style->strip, 4096) : juce::Image();
-                if (strip.isValid())
+                if (pointer.isValid())
+                {
+                    // deux couches : un corps fixe et une aiguille que le code fait tourner
+                    const juce::Image body = picture (style->body);
+                    const auto& ref = body.isValid() ? body : pointer;
+                    const auto dest = juce::RectanglePlacement (juce::RectanglePlacement::centred).appliedTo (juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (ref.getWidth()), static_cast<float> (ref.getHeight())), r);
+                    if (body.isValid()) g.drawImage (body, dest, juce::RectanglePlacement::stretchToFit);
+                    const float degrees = static_cast<float> (style->angleMin) + pos * static_cast<float> (style->angleMax - style->angleMin);
+                    juce::Graphics::ScopedSaveState keep (g);
+                    g.addTransform (juce::AffineTransform::rotation (juce::degreesToRadians (degrees), dest.getX() + dest.getWidth() * static_cast<float> (style->pivotX) / 100.0f,
+                                                                      dest.getY() + dest.getHeight() * static_cast<float> (style->pivotY) / 100.0f));
+                    g.drawImage (pointer, dest, juce::RectanglePlacement::stretchToFit);
+                }
+                else if (strip.isValid())
                 {
                     // bande d'images : une image par position du potard
                     const int frames = style->frames, frame = juce::jlimit (0, frames - 1, juce::roundToInt (pos * static_cast<float> (frames - 1)));
@@ -743,9 +849,14 @@ private:
                 }
                 else
                     paintNeptuneKnob (g, r, pos, o.palette_, o.knobStyle_);
-                g.setColour (o.colour (Token::Text));
-                g.setFont (juce::FontOptions (14.0f));
-                g.drawFittedText (caption, captionRow.toNearestInt(), juce::Justification::centred, 1);
+                if (style != nullptr && (style->textSize > 0 || ! style->textColour.empty() || style->textPosition != 0 || ! style->textBold))
+                    drawStyledText (g, style, caption, captionRow, 0.8f, o.colour (Token::Text));
+                else
+                {
+                    g.setColour (o.colour (Token::Text));
+                    g.setFont (juce::FontOptions (14.0f));
+                    g.drawFittedText (caption, captionRow.toNearestInt(), juce::Justification::centred, 1);
+                }
                 g.setColour (o.colour (Token::Accent));
                 g.setFont (juce::FontOptions (13.0f));
                 g.drawFittedText (linked ? utf8 (ps.toText (w.param)) : (o.editMode_ ? o.text ("facade.unlinked") : juce::String()), valueRow.toNearestInt(), juce::Justification::centred, 1);
@@ -759,16 +870,15 @@ private:
                 const bool empty = isAction ? w.snapshot.empty() : ! linked;
                 if (const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr)
                 {
-                    const juce::Image face = picture (on ? style->on : style->off);
+                    const bool hover = hoverId_ == w.id && ! o.editMode_;
+                    const std::string* path = &(on ? style->on : style->off);
+                    if (hover && ! (on ? style->onHover : style->offHover).empty()) path = &(on ? style->onHover : style->offHover);
+                    if (empty && ! o.editMode_ && ! style->disabled.empty()) path = &style->disabled;   // widget non lié, en mode Jeu
+                    const juce::Image face = picture (*path);
                     if (face.isValid())
                     {
                         g.drawImage (face, b, juce::RectanglePlacement::centred);
-                        if (! w.text.empty())
-                        {
-                            g.setColour (o.colour (Token::Text));
-                            g.setFont (juce::FontOptions (juce::jlimit (11.0f, 24.0f, b.getHeight() * 0.3f), juce::Font::bold));
-                            g.drawFittedText (utf8 (w.text), b.toNearestInt().reduced (4), juce::Justification::centred, 2);
-                        }
+                        drawStyledText (g, style, utf8 (w.text), b, 0.3f, o.colour (Token::Text));
                         break;
                     }
                 }
@@ -850,9 +960,13 @@ private:
                 }
                 if (! w.text.empty())
                 {
-                    g.setColour (o.colour (Token::TextDim));
-                    g.setFont (juce::FontOptions (12.0f));
-                    g.drawFittedText (utf8 (w.text), b.toNearestInt(), vertical ? juce::Justification::centredBottom : juce::Justification::centredBottom, 1);
+                    if (style != nullptr) drawStyledText (g, style, utf8 (w.text), b, 0.3f, o.colour (Token::TextDim), juce::Justification::centredBottom);
+                    else
+                    {
+                        g.setColour (o.colour (Token::TextDim));
+                        g.setFont (juce::FontOptions (12.0f));
+                        g.drawFittedText (utf8 (w.text), b.toNearestInt(), juce::Justification::centredBottom, 1);
+                    }
                 }
                 else if (! linked && o.editMode_)
                 {
@@ -862,12 +976,44 @@ private:
                 }
                 break;
             }
+            case fc::WidgetType::Lamp:
+            {
+                bool on = false;
+                if (w.source == 0) on = linked && n >= 0.5f;
+                else if (o.track_ >= 0)
+                {
+                    if (w.source == 1) on = (o.processor_.heldChannelWord (o.track_, w.channel - 1, 0) | o.processor_.heldChannelWord (o.track_, w.channel - 1, 1)) != 0;
+                    else on = (o.processor_.heldKeyWord (o.track_, 0) | o.processor_.heldKeyWord (o.track_, 1)) != 0;
+                }
+                const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const bool unlinked = w.source == 0 && ! linked;
+                const std::string* path = style != nullptr ? &(on ? style->on : style->off) : nullptr;
+                if (style != nullptr && unlinked && ! o.editMode_ && ! style->disabled.empty()) path = &style->disabled;
+                const juce::Image face = path != nullptr ? picture (*path) : juce::Image();
+                if (face.isValid()) g.drawImage (face, b, juce::RectanglePlacement::centred);
+                else
+                {
+                    const auto c = b.reduced (3.0f).withSizeKeepingCentre (std::min (b.getWidth(), b.getHeight()) - 6.0f, std::min (b.getWidth(), b.getHeight()) - 6.0f);
+                    if (on) { g.setColour (o.colour (Token::Accent).withAlpha (0.25f)); g.fillEllipse (c.expanded (3.0f)); }
+                    g.setColour (on ? o.colour (Token::Accent) : o.colour (Token::BgApp));
+                    g.fillEllipse (c);
+                    g.setColour (o.colour (Token::Border));
+                    g.drawEllipse (c, 1.5f);
+                }
+                if (! w.text.empty()) drawStyledText (g, style, utf8 (w.text), b, 0.3f, o.colour (Token::Text), juce::Justification::centredBottom);
+                else if (unlinked && o.editMode_) { g.setColour (o.colour (Token::TextDim)); g.setFont (juce::FontOptions (11.0f)); g.drawFittedText (o.text ("facade.unlinked"), b.toNearestInt(), juce::Justification::centred, 1); }
+                break;
+            }
             case fc::WidgetType::Keyboard:
             {
                 juce::Graphics::ScopedSaveState keep (g);
                 g.reduceClipRegion (b.toNearestInt());
                 g.setColour (o.colour (Token::BgApp));
                 g.fillRect (b);
+                const auto* kstyle = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const juce::Image imgs[4] = { kstyle != nullptr ? picture (kstyle->keyWhite) : juce::Image(), kstyle != nullptr ? picture (kstyle->keyWhiteOn) : juce::Image(),
+                                              kstyle != nullptr ? picture (kstyle->keyBlack) : juce::Image(), kstyle != nullptr ? picture (kstyle->keyBlackOn) : juce::Image() };
+                const auto litColour = kstyle != nullptr && ! kstyle->keyLit.empty() ? parseColour (kstyle->keyLit, o.colour (Token::Accent)) : o.colour (Token::Accent);
                 std::uint64_t held[2] = { 0, 0 };
                 if (o.track_ >= 0)
                 {
@@ -881,10 +1027,23 @@ private:
                         const auto r = keyRect (w, k);
                         if (r.getRight() < b.getX() || r.getX() > b.getRight()) continue;
                         const bool down = keyIsDown (w.id, k), midi = ((held[k >> 6] >> (k & 63)) & 1u) != 0;
-                        g.setColour (down ? o.colour (Token::Accent) : midi ? o.colour (Token::Accent2) : black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xfff2f2f2));
-                        g.fillRect (r.reduced (0.5f));
-                        g.setColour (juce::Colour (0xff555555));
-                        g.drawRect (r, 1.0f);
+                        const bool lit = down || midi;   // l'image « enfoncée » sert aussi aux notes jouées de l'extérieur
+                        const auto& rest = imgs[black ? 2 : 0];
+                        const auto& pressed = imgs[black ? 3 : 1];
+                        if (lit && pressed.isValid())
+                            g.drawImage (pressed, r, juce::RectanglePlacement::stretchToFit);
+                        else if (rest.isValid())
+                        {
+                            g.drawImage (rest, r, juce::RectanglePlacement::stretchToFit);
+                            if (lit) { g.setColour (litColour.withAlpha (0.5f)); g.fillRect (r.reduced (0.5f)); }   // pas d'image « enfoncée » : teinte par-dessus
+                        }
+                        else
+                        {
+                            g.setColour (down ? litColour : midi ? litColour.withAlpha (0.7f) : black ? juce::Colour (0xff1a1a1a) : juce::Colour (0xfff2f2f2));
+                            g.fillRect (r.reduced (0.5f));
+                            g.setColour (juce::Colour (0xff555555));
+                            g.drawRect (r, 1.0f);
+                        }
                         if (k % 12 == 0 && ! black)
                         {
                             g.setColour (down || midi ? juce::Colour (0xff000000) : juce::Colour (0xff666666));
@@ -899,6 +1058,18 @@ private:
             case fc::WidgetType::Zone:
             {
                 const auto r = b.reduced (1.0f);
+                const auto* zstyle = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
+                const juce::Image frame = zstyle != nullptr ? picture (zstyle->frame) : juce::Image();
+                if (frame.isValid())
+                {
+                    drawNineSlice (g, frame, naturalSize (zstyle->frame), *zstyle, b);
+                    if (! w.text.empty())
+                    {
+                        const juce::Rectangle<float> titleArea (b.getX() + fc::zonePad, b.getY() + 4.0f, b.getWidth() - 2.0f * fc::zonePad, fc::zoneTitleHeight - 4.0f);
+                        drawStyledText (g, zstyle, utf8 (w.text), titleArea, 0.75f, o.colour (Token::TextDim), juce::Justification::centredLeft);
+                    }
+                    break;
+                }
                 g.setColour (o.colour (Token::Pb).withAlpha (0.4f));
                 g.fillRoundedRectangle (r, 10.0f);
                 g.setColour (o.colour (Token::Border));
@@ -943,7 +1114,10 @@ private:
     double startNorm_ = 0.0;
     float startY_ = 0.0f;
     int slideId_ = 0, turnId_ = 0;
-    mutable std::map<std::string, juce::Image> pictures_;   // chemin -> image (vide : introuvable)
+    struct Picture { juce::Image image; juce::Point<float> natural; };
+    mutable std::map<std::string, Picture> pictures_;   // chemin -> image (vide : introuvable)
+    std::map<std::string, std::string> svgVars_;        // {{accent}}... : couleurs du thème pour les SVG
+    int hoverId_ = 0;
     std::map<int, std::unique_ptr<VelocityPanel>> panels_;
     std::uint32_t panelRevision_ = 0xFFFFFFFFu;
 
@@ -1304,34 +1478,10 @@ public:
         name_.onFocusLost = [this] { commitName(); };
         addAndMakeVisible (name_);
 
-        static constexpr const char* keys[5] = { "facade.style_off", "facade.style_on", "facade.style_track", "facade.style_handle", "facade.style_strip" };
-        static constexpr std::string fc::ImageStyle::* members[5] = { &fc::ImageStyle::off, &fc::ImageStyle::on, &fc::ImageStyle::track, &fc::ImageStyle::handle, &fc::ImageStyle::strip };
-        for (int i = 0; i < 5; ++i)
-        {
-            auto& r = rows_[static_cast<std::size_t> (i)];
-            r.member = members[i];
-            r.label.setText (owner.text (keys[i]), juce::dontSendNotification);
-            r.label.setColour (juce::Label::textColourId, owner.colour (Token::Text));
-            r.path.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
-            r.path.setMinimumHorizontalScale (0.7f);
-            r.choose.setButtonText (owner.text ("facade.style_choose"));
-            r.choose.onClick = [this, i] { chooseImage (i); };
-            r.clear.setButtonText (owner.text ("facade.style_clear"));
-            r.clear.onClick = [this, i] { edit ([i] (fc::ImageStyle& st) { st.*(members[i]) = std::string(); }); };
-            for (auto* c : std::initializer_list<juce::Component*> { &r.label, &r.path, &r.choose, &r.clear }) addAndMakeVisible (*c);
-        }
-        framesLabel_.setText (owner.text ("facade.style_frames"), juce::dontSendNotification);
-        framesLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
-        addAndMakeVisible (framesLabel_);
-        frames_.setInputRestrictions (3, "0123456789");
-        frames_.setFont (juce::FontOptions (18.0f));
-        frames_.onReturnKey = [this] { commitFrames(); };
-        frames_.onFocusLost = [this] { commitFrames(); };
-        addAndMakeVisible (frames_);
-        stripH_.setButtonText (owner.text ("facade.style_strip_h"));
-        stripH_.setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
-        stripH_.onClick = [this] { edit ([this] (fc::ImageStyle& st) { st.stripHorizontal = stripH_.getToggleState(); }); };
-        addAndMakeVisible (stripH_);
+        addAndMakeVisible (view_);
+        view_.setViewedComponent (&content_, false);
+        view_.setScrollBarsShown (true, false);
+        buildRows();
         hint_.setText (owner.text ("facade.style_hint"), juce::dontSendNotification);
         hint_.setFont (juce::FontOptions (13.0f));
         hint_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
@@ -1376,22 +1526,12 @@ public:
         nameLabel_.setBounds (nameRow.removeFromLeft (110));
         name_.setBounds (nameRow);
         r.removeFromTop (10);
-        for (auto& row : rows_)
-        {
-            auto line = r.removeFromTop (34);
-            r.removeFromTop (6);
-            row.label.setBounds (line.removeFromLeft (110));
-            row.clear.setBounds (line.removeFromRight (80).reduced (2, 0));
-            row.choose.setBounds (line.removeFromRight (110).reduced (2, 0));
-            row.path.setBounds (line);
-        }
-        auto fl = r.removeFromTop (34);
-        framesLabel_.setBounds (fl.removeFromLeft (110));
-        frames_.setBounds (fl.removeFromLeft (80));
-        fl.removeFromLeft (14);
-        stripH_.setBounds (fl);
-        r.removeFromTop (10);
-        preview_.setBounds (r.removeFromTop (juce::jmin (170, r.getHeight())));
+        auto previewArea = r.removeFromBottom (juce::jmin (170, r.getHeight() / 2));
+        r.removeFromBottom (8);
+        view_.setBounds (r);
+        layoutContent();
+        preview_.setBounds (previewArea);
+
     }
 
 private:
@@ -1435,8 +1575,21 @@ private:
             }
             // 1 : potard
             {
+                const auto pointer = pic (st->pointer);
                 const auto strip = st->frames > 1 ? pic (st->strip, 4096) : juce::Image();
-                if (strip.isValid())
+                if (pointer.isValid())
+                {
+                    const auto body = pic (st->body);
+                    const auto& ref = body.isValid() ? body : pointer;
+                    const auto dest = juce::RectanglePlacement (juce::RectanglePlacement::centred).appliedTo (juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (ref.getWidth()), static_cast<float> (ref.getHeight())), cells_[1]);
+                    if (body.isValid()) g.drawImage (body, dest, juce::RectanglePlacement::stretchToFit);
+                    const float degrees = static_cast<float> (st->angleMin) + static_cast<float> (knob_) * static_cast<float> (st->angleMax - st->angleMin);
+                    juce::Graphics::ScopedSaveState keep (g);
+                    g.addTransform (juce::AffineTransform::rotation (juce::degreesToRadians (degrees), dest.getX() + dest.getWidth() * static_cast<float> (st->pivotX) / 100.0f,
+                                                                      dest.getY() + dest.getHeight() * static_cast<float> (st->pivotY) / 100.0f));
+                    g.drawImage (pointer, dest, juce::RectanglePlacement::stretchToFit);
+                }
+                else if (strip.isValid())
                 {
                     const int frames = st->frames, frame = juce::jlimit (0, frames - 1, juce::roundToInt (static_cast<float> (knob_) * static_cast<float> (frames - 1)));
                     const int fw = st->stripHorizontal ? strip.getWidth() / frames : strip.getWidth();
@@ -1518,12 +1671,161 @@ private:
         int active_ = -1;
     };
 
-    struct Row
+    struct ImageRow
     {
         std::string fc::ImageStyle::* member = nullptr;
         juce::Label label, path;
         juce::TextButton choose, clear;
     };
+    struct IntRow
+    {
+        int fc::ImageStyle::* member = nullptr;
+        juce::Label label;
+        juce::TextEditor field;
+    };
+    struct TextRow
+    {
+        std::string fc::ImageStyle::* member = nullptr;
+        juce::Label label;
+        juce::TextEditor field;
+    };
+
+    // Construit les lignes de réglage : une image par rôle, puis les options (nombre d'images, angles, découpe, texte...).
+    void buildRows()
+    {
+        auto caption = [this] (juce::Label& l, const char* key)
+        {
+            l.setText (owner_.text (key), juce::dontSendNotification);
+            l.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+            l.setColour (juce::Label::textColourId, owner_.colour (Token::Accent));
+            content_.addAndMakeVisible (l);
+        };
+        caption (imagesCaption_, "facade.style_images");
+        const auto& roles = fc::imageRoles();
+        for (std::size_t i = 0; i < roles.size(); ++i)
+        {
+            auto row = std::make_unique<ImageRow>();
+            row->member = roles[i].field;
+            row->label.setText (owner_.text (("facade.role_" + std::string (roles[i].name)).c_str()), juce::dontSendNotification);
+            row->label.setColour (juce::Label::textColourId, owner_.colour (Token::Text));
+            row->path.setColour (juce::Label::textColourId, owner_.colour (Token::TextDim));
+            row->path.setMinimumHorizontalScale (0.7f);
+            row->choose.setButtonText (owner_.text ("facade.style_choose"));
+            row->choose.onClick = [this, i] { chooseImage (i); };
+            row->clear.setButtonText (owner_.text ("facade.style_clear"));
+            row->clear.onClick = [this, i] { const auto field = fc::imageRoles()[i].field; edit ([field] (fc::ImageStyle& st) { st.*field = std::string(); }); };
+            for (auto* c : std::initializer_list<juce::Component*> { &row->label, &row->path, &row->choose, &row->clear }) content_.addAndMakeVisible (*c);
+            imageRows_.push_back (std::move (row));
+        }
+
+        caption (optionsCaption_, "facade.style_options");
+        struct IntOption { const char* key; int fc::ImageStyle::* member; };
+        static const IntOption ints[] = { { "facade.opt_frames", &fc::ImageStyle::frames }, { "facade.opt_angle_min", &fc::ImageStyle::angleMin }, { "facade.opt_angle_max", &fc::ImageStyle::angleMax },
+                                          { "facade.opt_pivot_x", &fc::ImageStyle::pivotX }, { "facade.opt_pivot_y", &fc::ImageStyle::pivotY },
+                                          { "facade.opt_slice_left", &fc::ImageStyle::sliceLeft }, { "facade.opt_slice_top", &fc::ImageStyle::sliceTop },
+                                          { "facade.opt_slice_right", &fc::ImageStyle::sliceRight }, { "facade.opt_slice_bottom", &fc::ImageStyle::sliceBottom },
+                                          { "facade.opt_slice_scale", &fc::ImageStyle::sliceScale }, { "facade.opt_text_size", &fc::ImageStyle::textSize } };
+        for (const auto& opt : ints)
+        {
+            auto row = std::make_unique<IntRow>();
+            row->member = opt.member;
+            row->label.setText (owner_.text (opt.key), juce::dontSendNotification);
+            row->label.setColour (juce::Label::textColourId, owner_.colour (Token::Text));
+            row->field.setInputRestrictions (5, "-0123456789");
+            row->field.setFont (juce::FontOptions (17.0f));
+            auto* field = row.get();
+            row->field.onReturnKey = [this, field] { commitInt (*field); };
+            row->field.onFocusLost = [this, field] { commitInt (*field); };
+            content_.addAndMakeVisible (row->label);
+            content_.addAndMakeVisible (row->field);
+            intRows_.push_back (std::move (row));
+        }
+        struct TextOption { const char* key; std::string fc::ImageStyle::* member; };
+        static const TextOption texts[] = { { "facade.opt_text_colour", &fc::ImageStyle::textColour }, { "facade.opt_key_lit", &fc::ImageStyle::keyLit } };
+        for (const auto& opt : texts)
+        {
+            auto row = std::make_unique<TextRow>();
+            row->member = opt.member;
+            row->label.setText (owner_.text (opt.key), juce::dontSendNotification);
+            row->label.setColour (juce::Label::textColourId, owner_.colour (Token::Text));
+            row->field.setInputRestrictions (9);
+            row->field.setFont (juce::FontOptions (17.0f));
+            auto* field = row.get();
+            row->field.onReturnKey = [this, field] { commitText (*field); };
+            row->field.onFocusLost = [this, field] { commitText (*field); };
+            content_.addAndMakeVisible (row->label);
+            content_.addAndMakeVisible (row->field);
+            textRows_.push_back (std::move (row));
+        }
+        positionLabel_.setText (owner_.text ("facade.opt_text_position"), juce::dontSendNotification);
+        positionLabel_.setColour (juce::Label::textColourId, owner_.colour (Token::Text));
+        content_.addAndMakeVisible (positionLabel_);
+        const char* places[5] = { "facade.pos_centre", "facade.pos_top", "facade.pos_bottom", "facade.pos_left", "facade.pos_right" };
+        for (int i = 0; i < 5; ++i) position_.addItem (owner_.text (places[i]), i + 1);
+        position_.onChange = [this] { if (! syncing_) edit ([this] (fc::ImageStyle& st) { st.textPosition = position_.getSelectedId() - 1; }); };
+        content_.addAndMakeVisible (position_);
+        for (auto* t : { &bold_, &stripH_ })
+        {
+            t->setColour (juce::ToggleButton::textColourId, owner_.colour (Token::Text));
+            content_.addAndMakeVisible (*t);
+        }
+        bold_.setButtonText (owner_.text ("facade.opt_text_bold"));
+        bold_.onClick = [this] { if (! syncing_) edit ([this] (fc::ImageStyle& st) { st.textBold = bold_.getToggleState(); }); };
+        stripH_.setButtonText (owner_.text ("facade.style_strip_h"));
+        stripH_.onClick = [this] { if (! syncing_) edit ([this] (fc::ImageStyle& st) { st.stripHorizontal = stripH_.getToggleState(); }); };
+    }
+
+    void layoutContent()
+    {
+        const int width = std::max (300, view_.getMaximumVisibleWidth());
+        int y = 0;
+        auto line = [&y, width] (int h = 34) { const juce::Rectangle<int> r (0, y, width - 6, h); y += h + 4; return r; };
+        imagesCaption_.setBounds (line (26));
+        for (auto& row : imageRows_)
+        {
+            auto l = line();
+            row->label.setBounds (l.removeFromLeft (190));
+            row->clear.setBounds (l.removeFromRight (80).reduced (2, 0));
+            row->choose.setBounds (l.removeFromRight (110).reduced (2, 0));
+            row->path.setBounds (l);
+        }
+        y += 6;
+        optionsCaption_.setBounds (line (26));
+        for (auto& row : intRows_)
+        {
+            auto l = line();
+            row->label.setBounds (l.removeFromLeft (260));
+            row->field.setBounds (l.removeFromLeft (90));
+        }
+        stripH_.setBounds (line());
+        for (auto& row : textRows_)
+        {
+            auto l = line();
+            row->label.setBounds (l.removeFromLeft (260));
+            row->field.setBounds (l.removeFromLeft (130));
+        }
+        auto p = line();
+        positionLabel_.setBounds (p.removeFromLeft (260));
+        position_.setBounds (p.removeFromLeft (180));
+        bold_.setBounds (line());
+        contentHeight_ = y;
+        content_.setSize (width, contentHeight_);
+    }
+
+    void commitInt (IntRow& row)
+    {
+        const int value = row.field.getText().getIntValue();
+        const auto member = row.member;
+        if (const auto* st = current(); st != nullptr && st->*member != value) edit ([member, value] (fc::ImageStyle& s) { s.*member = value; });
+        else syncFields();
+    }
+
+    void commitText (TextRow& row)
+    {
+        const std::string value = row.field.getText().toStdString();
+        const auto member = row.member;
+        if (const auto* st = current(); st != nullptr && st->*member != value) edit ([member, value] (fc::ImageStyle& s) { s.*member = value; });
+    }
 
     juce::Rectangle<int> panel() const { return juce::Rectangle<int> (800, juce::jmin (660, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
@@ -1552,20 +1854,29 @@ private:
     {
         const auto* st = current();
         const bool has = st != nullptr;
-        for (auto* c : std::initializer_list<juce::Component*> { &name_, &frames_, &stripH_, &deleteButton_ }) c->setEnabled (has);
+        syncing_ = true;
+        name_.setEnabled (has);
+        deleteButton_.setEnabled (has);
         name_.setText (has ? utf8 (st->name) : juce::String(), false);
-        frames_.setText (has ? juce::String (st->frames) : juce::String(), false);
-        stripH_.setToggleState (has && st->stripHorizontal, juce::dontSendNotification);
-        preview_.repaint();
-        for (auto& r : rows_)
+        for (auto& r : imageRows_)
         {
-            r.choose.setEnabled (has);
-            r.clear.setEnabled (has);
-            const std::string path = has ? st->*(r.member) : std::string();
+            r->choose.setEnabled (has);
+            r->clear.setEnabled (has);
+            const std::string path = has ? st->*(r->member) : std::string();
             const bool missing = ! path.empty() && ! stylelib::exists (path);
-            r.path.setText (path.empty() ? owner_.text ("facade.style_none") : juce::File (utf8 (path)).getFileName() + (missing ? "  (" + owner_.text ("facade.missing") + ")" : juce::String()), juce::dontSendNotification);
-            r.path.setColour (juce::Label::textColourId, owner_.colour (missing ? Token::KnobHot : Token::TextDim));
+            r->path.setText (path.empty() ? owner_.text ("facade.style_none") : juce::File (utf8 (path)).getFileName() + (missing ? "  (" + owner_.text ("facade.missing") + ")" : juce::String()), juce::dontSendNotification);
+            r->path.setColour (juce::Label::textColourId, owner_.colour (missing ? Token::KnobHot : Token::TextDim));
         }
+        for (auto& r : intRows_) { r->field.setEnabled (has); r->field.setText (has ? juce::String (st->*(r->member)) : juce::String(), false); }
+        for (auto& r : textRows_) { r->field.setEnabled (has); r->field.setText (has ? utf8 (st->*(r->member)) : juce::String(), false); }
+        position_.setEnabled (has);
+        position_.setSelectedId (has ? st->textPosition + 1 : 1, juce::dontSendNotification);
+        bold_.setEnabled (has);
+        bold_.setToggleState (has && st->textBold, juce::dontSendNotification);
+        stripH_.setEnabled (has);
+        stripH_.setToggleState (has && st->stripHorizontal, juce::dontSendNotification);
+        syncing_ = false;
+        preview_.repaint();
     }
 
     void commitName()
@@ -1574,13 +1885,7 @@ private:
         if (const auto* st = current(); st != nullptr && st->name != value) edit ([value] (fc::ImageStyle& s) { s.name = value; });
     }
 
-    void commitFrames()
-    {
-        const int value = frames_.getText().getIntValue();
-        if (const auto* st = current(); st != nullptr && st->frames != value) edit ([value] (fc::ImageStyle& s) { s.frames = value; });
-    }
-
-    void chooseImage (int index)
+    void chooseImage (std::size_t index)
     {
         chooser_ = std::make_unique<juce::FileChooser> (owner_.text ("facade.choose_image"), juce::File::getSpecialLocation (juce::File::userPicturesDirectory), "*.png;*.jpg;*.jpeg;*.svg");
         chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -1589,7 +1894,7 @@ private:
                                    if (safe == nullptr) return;
                                    const auto file = c.getResult();
                                    if (! file.existsAsFile()) return;
-                                   const auto member = safe->rows_[static_cast<std::size_t> (index)].member;
+                                   const auto member = fc::imageRoles()[index].field;
                                    const std::string path = file.getFullPathName().toStdString();
                                    safe->edit ([member, path] (fc::ImageStyle& st) { st.*member = path; });
                                });
@@ -1606,17 +1911,18 @@ private:
         {
             if (onlyIndex >= 0 && i != onlyIndex) continue;
             const auto& ps = pack.info.styles[static_cast<std::size_t> (i)];
-            auto ref = [&pack] (const std::string& entry) { return entry.empty() ? std::string() : neptune::core::stylepack::makeReference (pack.info.id, entry); };
-            fc::ImageStyle st;
-            st.off = ref (ps.off); st.on = ref (ps.on); st.track = ref (ps.track); st.handle = ref (ps.handle); st.strip = ref (ps.strip);
-            st.frames = ps.frames;
-            st.stripHorizontal = ps.stripHorizontal;
+            fc::ImageStyle st = ps.style;
+            st.id = 0;
+            for (const auto& role : fc::imageRoles())
+                if (! (st.*(role.field)).empty()) st.*(role.field) = neptune::core::stylepack::makeReference (pack.info.id, st.*(role.field));
             const auto known = std::find_if (f.styles.begin(), f.styles.end(), [&st] (const fc::ImageStyle& o)
-                                             { return o.off == st.off && o.on == st.on && o.track == st.track && o.handle == st.handle && o.strip == st.strip; });
+                                             {
+                                                 for (const auto& role : fc::imageRoles()) if (o.*(role.field) != st.*(role.field)) return false;
+                                                 return true;
+                                             });
             if (known != f.styles.end()) { selectRow = static_cast<int> (known - f.styles.begin()); continue; }
             if (static_cast<int> (f.styles.size()) >= fc::maxStyles) break;
             st.id = f.freeStyleId();
-            st.name = ps.name;
             f.styles.push_back (std::move (st));
             selectRow = static_cast<int> (f.styles.size()) - 1;
             ++added;
@@ -1780,7 +2086,6 @@ private:
     void close()
     {
         commitName();
-        commitFrames();
         juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (&owner_)]
         {
             if (safe != nullptr) { safe->stylePanel_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
@@ -1800,12 +2105,19 @@ private:
     void selectedRowsChanged (int) override { syncFields(); }
 
     FacadeView& owner_;
-    juce::Label title_, nameLabel_, framesLabel_, hint_;
+    juce::Label title_, nameLabel_, hint_, imagesCaption_, optionsCaption_, positionLabel_;
     juce::ListBox list_;
     juce::TextButton newButton_, deleteButton_, closeButton_, examplesButton_, libraryButton_;
-    juce::TextEditor name_, frames_;
-    juce::ToggleButton stripH_;
-    std::array<Row, 5> rows_;
+    juce::TextEditor name_;
+    juce::ToggleButton stripH_, bold_;
+    juce::ComboBox position_;
+    juce::Component content_;
+    juce::Viewport view_;
+    std::vector<std::unique_ptr<ImageRow>> imageRows_;
+    std::vector<std::unique_ptr<IntRow>> intRows_;
+    std::vector<std::unique_ptr<TextRow>> textRows_;
+    int contentHeight_ = 0;
+    bool syncing_ = false;
     Preview preview_ { *this };
     std::unique_ptr<juce::FileChooser> chooser_;
 
@@ -1998,6 +2310,10 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (labelButton_, "facade.add_label", fc::WidgetType::Label);
     setupAdd (zoneButton_, "facade.add_zone", fc::WidgetType::Zone);
     setupAdd (keyboardButton_, "facade.add_keyboard", fc::WidgetType::Keyboard);
+    setupAdd (lampButton_, "facade.add_lamp", fc::WidgetType::Lamp);
+    lampSourceButton_.setButtonText (text ("facade.lamp_source"));
+    lampSourceButton_.setTooltip (text ("facade.tip_lamp_source"));
+    lampSourceButton_.onClick = [this] { showLampSourceMenu(); };
     setupAdd (sliderButton_, "facade.add_slider", fc::WidgetType::Slider);
     notchesButton_.setButtonText (text ("facade.notches"));
     notchesButton_.setTooltip (text ("facade.tip_notches"));
@@ -2089,11 +2405,12 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     zoneButton_.setTooltip (text ("facade.tip_zone"));
     sliderButton_.setTooltip (text ("facade.tip_slider"));
     keyboardButton_.setTooltip (text ("facade.tip_keyboard"));
+    lampButton_.setTooltip (text ("facade.tip_lamp"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
-    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_,
+    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &imageButton_, &fitButton_, &clearImageButton_,
                      &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
@@ -2115,11 +2432,12 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
     relocateButton_.setVisible (missing_ > 0);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
-    linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type));
+    linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type) && ! (one->type == fc::WidgetType::Lamp && one->source != 0));
+    lampSourceButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Lamp);
     captureButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Action);
     duplicateButton_.setVisible (any);
     deleteButton_.setVisible (any);
@@ -2128,6 +2446,7 @@ void FacadeView::updateButtons()
     const bool zone = editMode_ && one != nullptr && one->type == fc::WidgetType::Zone;
     const bool keyboard = editMode_ && one != nullptr && one->type == fc::WidgetType::Keyboard;
     for (auto* b : { &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_ }) b->setVisible (keyboard);
+    kbChannelButton_.setVisible (keyboard || (editMode_ && one != nullptr && one->type == fc::WidgetType::Lamp && one->source == 1));   // un voyant de notes lit aussi un canal
     bool anyStylable = false;
     for (const auto& w : facade_.widgets)
         if (selection_.count (w.id) != 0 && takesStyle (w.type)) anyStylable = true;
@@ -2191,8 +2510,8 @@ void FacadeView::resized()
     area.removeFromTop (gap);
     if (editMode_)
     {
-        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
@@ -2279,10 +2598,26 @@ void FacadeView::applySingle (const std::function<void (fc::Widget&)>& change, c
 }
 
 // 0 : canal MIDI, 1 : première note, 2 : vélocité
+void FacadeView::showLampSourceMenu()
+{
+    const auto* l = facade_.find (single());
+    if (l == nullptr || l->type != fc::WidgetType::Lamp) return;
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("facade.lamp_param"), true, l->source == 0);
+    menu.addItem (2, text ("facade.lamp_channel"), true, l->source == 1);
+    menu.addItem (3, text ("facade.lamp_track"), true, l->source == 2);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&lampSourceButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applySingle ([choice] (fc::Widget& w) { w.source = choice - 1; }, "Facade: lamp source");
+    });
+}
+
 void FacadeView::showKeyboardMenu (int what)
 {
     const auto* k = facade_.find (single());
-    if (k == nullptr || k->type != fc::WidgetType::Keyboard) return;
+    if (k == nullptr || (k->type != fc::WidgetType::Keyboard && k->type != fc::WidgetType::Lamp)) return;
     juce::PopupMenu menu;
     juce::TextButton* target = what == 0 ? &kbChannelButton_ : what == 1 ? &kbFirstButton_ : &kbVelocityButton_;
     if (what == 0)

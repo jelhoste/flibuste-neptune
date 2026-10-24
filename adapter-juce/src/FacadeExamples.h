@@ -67,6 +67,52 @@ inline std::vector<File> files (bool french)
         + "  <rect x=\"2\" y=\"2\" width=\"92\" height=\"36\" rx=\"18\" fill=\"#e0a030\" stroke=\"#222222\" stroke-width=\"2\"/>\n"
           "  <circle cx=\"20\" cy=\"20\" r=\"7\" fill=\"#fff3c4\"/>\n</svg>\n" });
 
+    // Etats supplementaires du bouton : souris dessus et non lie.
+    out.push_back ({ "button/off_hover.svg", svgHead (96, 40, note ("TEMPLATE - button, off, mouse over. Same size as off.svg.", "MODELE - bouton, eteint, souris dessus. Meme taille que off.svg."))
+        + "  <rect x=\"2\" y=\"2\" width=\"92\" height=\"36\" rx=\"18\" fill=\"#5e5e5e\" stroke=\"#222222\" stroke-width=\"2\"/>\n"
+          "  <circle cx=\"20\" cy=\"20\" r=\"7\" fill=\"#3a3a3a\"/>\n</svg>\n" });
+    out.push_back ({ "button/on_hover.svg", svgHead (96, 40, note ("TEMPLATE - button, on, mouse over.", "MODELE - bouton, allume, souris dessus."))
+        + "  <rect x=\"2\" y=\"2\" width=\"92\" height=\"36\" rx=\"18\" fill=\"#f0b84a\" stroke=\"#222222\" stroke-width=\"2\"/>\n"
+          "  <circle cx=\"20\" cy=\"20\" r=\"7\" fill=\"#fff8dc\"/>\n</svg>\n" });
+    out.push_back ({ "button/disabled.svg", svgHead (96, 40, note ("TEMPLATE - button not linked to anything (shown in Play mode).", "MODELE - bouton lie a rien (affiche en mode Jeu)."))
+        + "  <rect x=\"2\" y=\"2\" width=\"92\" height=\"36\" rx=\"18\" fill=\"#2c2c2c\" stroke=\"#444444\" stroke-width=\"2\" stroke-dasharray=\"4 3\"/>\n</svg>\n" });
+    out.push_back ({ "button/style.json", "{\n  \"name\": \"Button with states\",\n  \"text\": { \"colour\": \"#ffffff\", \"size\": 45, \"position\": \"center\", \"bold\": true }\n}\n" });
+    out.push_back ({ "drawbar-tab/style.json", "{\n  \"name\": \"Drawbar tab\",\n  \"text\": { \"colour\": \"#2a2418\", \"size\": 42, \"position\": \"center\", \"bold\": true }\n}\n" });
+
+    // Potard en deux couches : un corps fixe et une aiguille que Neptune fait tourner.
+    out.push_back ({ "knob-layered/body.svg", svgHead (64, 64, note ("TEMPLATE - knob body (fixed layer), 64 x 64. Same size as pointer.svg. The colours {{accent}}, {{text}}, {{bg}}... follow the Neptune theme.",
+                                                                       "MODELE - corps du potard (couche fixe), 64 x 64. Meme taille que pointer.svg. Les couleurs {{accent}}, {{text}}, {{bg}}... suivent le theme de Neptune."))
+        + "  <circle cx=\"32\" cy=\"32\" r=\"28\" fill=\"#3a3a3a\" stroke=\"{{border}}\" stroke-width=\"2\"/>\n"
+          "  <circle cx=\"32\" cy=\"32\" r=\"20\" fill=\"#2a2a2a\"/>\n</svg>\n" });
+    out.push_back ({ "knob-layered/pointer.svg", svgHead (64, 64, note ("TEMPLATE - knob pointer (turned layer), 64 x 64, drawn pointing UP (0 degrees); Neptune turns it around its centre between -135 and +135 degrees.",
+                                                                          "MODELE - aiguille du potard (couche tournee), 64 x 64, dessinee vers le HAUT (0 degre) ; Neptune la tourne autour de son centre entre -135 et +135 degres."))
+        + "  <line x1=\"32\" y1=\"32\" x2=\"32\" y2=\"10\" stroke=\"{{accent}}\" stroke-width=\"4\" stroke-linecap=\"round\"/>\n</svg>\n" });
+    out.push_back ({ "knob-layered/style.json", "{\n  \"name\": \"Knob, two layers\",\n  \"pointer_angles\": [-135, 135],\n  \"pivot\": [50, 50]\n}\n" });
+
+    // Clavier : les touches (la forme du dessin donne la forme de la touche).
+    out.push_back ({ "keyboard/key_white.svg", svgHead (22, 110, note ("TEMPLATE - white key at rest, 22 x 110 (stretched to each key). Rounded lower corners.", "MODELE - touche blanche au repos, 22 x 110 (etiree sur chaque touche). Coins inferieurs arrondis."))
+        + "  <path d=\"M1 0 H21 V102 Q21 109 14 109 H8 Q1 109 1 102 Z\" fill=\"#f4f0e4\" stroke=\"#555555\" stroke-width=\"1.5\"/>\n</svg>\n" });
+    out.push_back ({ "keyboard/key_white_on.svg", svgHead (22, 110, note ("TEMPLATE - white key pressed or played.", "MODELE - touche blanche enfoncee ou jouee."))
+        + "  <path d=\"M1 0 H21 V104 Q21 109 16 109 H6 Q1 109 1 104 Z\" fill=\"#e0b04a\" stroke=\"#555555\" stroke-width=\"1.5\"/>\n</svg>\n" });
+    out.push_back ({ "keyboard/key_black.svg", svgHead (13, 66, note ("TEMPLATE - black key at rest, 13 x 66.", "MODELE - touche noire au repos, 13 x 66."))
+        + "  <path d=\"M0.5 0 H12.5 V60 Q12.5 65 8 65 H5 Q0.5 65 0.5 60 Z\" fill=\"#1a1a1a\" stroke=\"#000000\" stroke-width=\"1\"/>\n</svg>\n" });
+    out.push_back ({ "keyboard/key_black_on.svg", svgHead (13, 66, note ("TEMPLATE - black key pressed or played.", "MODELE - touche noire enfoncee ou jouee."))
+        + "  <path d=\"M0.5 0 H12.5 V62 Q12.5 65 9 65 H4 Q0.5 65 0.5 62 Z\" fill=\"#b8862b\" stroke=\"#000000\" stroke-width=\"1\"/>\n</svg>\n" });
+    out.push_back ({ "keyboard/style.json", "{\n  \"name\": \"Keyboard keys\",\n  \"key_lit_colour\": \"#f0b429\"\n}\n" });
+
+    // Cadre de zone decoupe en neuf zones : les coins gardent leur taille, le reste s'etire.
+    out.push_back ({ "panel/frame.svg", svgHead (120, 80, note ("TEMPLATE - zone frame, 120 x 80, cut in nine parts by style.json: slice = [20, 20, 20, 20] means 20 % of the width/height on each side. The four corners keep their size; the edges and the centre stretch.",
+                                                                  "MODELE - cadre de zone, 120 x 80, decoupe en neuf zones par style.json : slice = [20, 20, 20, 20] veut dire 20 % de la largeur/hauteur de chaque cote. Les quatre coins gardent leur taille ; les bords et le centre s'etirent."))
+        + "  <rect x=\"2\" y=\"2\" width=\"116\" height=\"76\" rx=\"14\" fill=\"#262626\" stroke=\"{{accent}}\" stroke-width=\"3\"/>\n</svg>\n" });
+    out.push_back ({ "panel/style.json", "{\n  \"name\": \"Zone frame\",\n  \"slice\": [20, 20, 20, 20],\n  \"slice_scale\": 100,\n  \"text\": { \"colour\": \"#cccccc\", \"position\": \"left\", \"bold\": true }\n}\n" });
+
+    // Voyant : eteint / allume (le vert suit la couleur d'accent du theme).
+    out.push_back ({ "lamp/off.svg", svgHead (40, 40, note ("TEMPLATE - lamp, off. 40 x 40.", "MODELE - voyant, eteint. 40 x 40."))
+        + "  <circle cx=\"20\" cy=\"20\" r=\"14\" fill=\"#1c1c1c\" stroke=\"#555555\" stroke-width=\"2\"/>\n</svg>\n" });
+    out.push_back ({ "lamp/on.svg", svgHead (40, 40, note ("TEMPLATE - lamp, on: {{accent}} follows the theme.", "MODELE - voyant, allume : {{accent}} suit le theme."))
+        + "  <circle cx=\"20\" cy=\"20\" r=\"18\" fill=\"{{accent}}\" fill-opacity=\"0.25\"/>\n"
+          "  <circle cx=\"20\" cy=\"20\" r=\"14\" fill=\"{{accent}}\" stroke=\"#555555\" stroke-width=\"2\"/>\n</svg>\n" });
+
     // Bande de potard : stripFrames images 64 x 64 empilees verticalement, de la position minimale (en haut) a la maximale (en bas).
     {
         const int total = stripFrames * stripFrameSize;

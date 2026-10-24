@@ -56,7 +56,7 @@ void forEachImagePath (Facade& f, const std::function<void (std::string&)>& visi
 {
     if (! f.image.empty()) visit (f.image);
     for (auto& s : f.styles)
-        for (auto* path : { &s.off, &s.on, &s.track, &s.handle, &s.strip })
-            if (! path->empty()) visit (*path);
+        for (const auto& role : imageRoles())
+            if (! (s.*(role.field)).empty()) visit (s.*(role.field));
 }
 } // namespace neptune::core::facade

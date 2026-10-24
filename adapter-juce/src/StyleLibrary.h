@@ -173,25 +173,61 @@ inline juce::String install (const juce::File& archive, juce::String& error, int
     return juce::String::fromUTF8 (pack.info.name.c_str());
 }
 
-// Écrit un style dans une archive .neptunestyle (à la racine : off, on, track, handle, strip_N) avec pack.json et style.json.
+// Le style.json d'un style : seulement ce qui s'écarte des valeurs par défaut.
+inline juce::String styleJson (const neptune::core::facade::ImageStyle& st)
+{
+    namespace fc = neptune::core::facade;
+    const fc::ImageStyle d;
+    juce::DynamicObject::Ptr o (new juce::DynamicObject());
+    o->setProperty ("name", juce::String::fromUTF8 (st.name.c_str()));
+    if (st.frames > 1) o->setProperty ("frames", st.frames);
+    if (st.stripHorizontal) o->setProperty ("strip_direction", "horizontal");
+    auto pair = [&o] (const char* key, int a, int b) { juce::Array<juce::var> v; v.add (a); v.add (b); o->setProperty (key, v); };
+    if (st.angleMin != d.angleMin || st.angleMax != d.angleMax) pair ("pointer_angles", st.angleMin, st.angleMax);
+    if (st.pivotX != d.pivotX || st.pivotY != d.pivotY) pair ("pivot", st.pivotX, st.pivotY);
+    if (st.sliceLeft != d.sliceLeft || st.sliceTop != d.sliceTop || st.sliceRight != d.sliceRight || st.sliceBottom != d.sliceBottom)
+    {
+        juce::Array<juce::var> v;
+        for (const int x : { st.sliceLeft, st.sliceTop, st.sliceRight, st.sliceBottom }) v.add (x);
+        o->setProperty ("slice", v);
+    }
+    if (st.sliceScale != d.sliceScale) o->setProperty ("slice_scale", st.sliceScale);
+    if (! st.keyLit.empty()) o->setProperty ("key_lit_colour", juce::String::fromUTF8 (st.keyLit.c_str()));
+    if (! st.textColour.empty() || st.textSize != 0 || st.textPosition != 0 || ! st.textBold)
+    {
+        juce::DynamicObject::Ptr t (new juce::DynamicObject());
+        if (! st.textColour.empty()) t->setProperty ("colour", juce::String::fromUTF8 (st.textColour.c_str()));
+        if (st.textSize != 0) t->setProperty ("size", st.textSize);
+        static const char* const positions[5] = { "center", "top", "bottom", "left", "right" };
+        if (st.textPosition != 0) t->setProperty ("position", positions[st.textPosition]);
+        if (! st.textBold) t->setProperty ("bold", false);
+        o->setProperty ("text", juce::var (t.get()));
+    }
+    return juce::JSON::toString (juce::var (o.get()));
+}
+
+// Écrit un style dans une archive .neptunestyle (à la racine, sous les noms canoniques, bande en strip_N) avec pack.json et style.json.
 inline bool exportStyle (const neptune::core::facade::ImageStyle& style, const juce::File& destination)
 {
+    namespace fc = neptune::core::facade;
     juce::ZipFile::Builder builder;
     int added = 0;
-    auto add = [&builder, &added] (const std::string& source, const juce::String& stem)
+    for (const auto& role : fc::imageRoles())
     {
-        if (source.empty()) return;
+        const std::string& source = style.*(role.field);
+        if (source.empty()) continue;
+        juce::String stem = role.name;
+        if (stem == "strip")
+        {
+            if (style.frames < 2) continue;
+            stem = "strip_" + juce::String (style.frames) + (style.stripHorizontal ? "_h" : "");
+        }
         juce::MemoryBlock bytes;
-        if (! readBytes (source, bytes) || bytes.getSize() == 0) return;
+        if (! readBytes (source, bytes) || bytes.getSize() == 0) continue;
         const auto ext = juce::File (juce::String::fromUTF8 (source.c_str())).getFileExtension().toLowerCase();   // « .svg », « .png »...
         builder.addEntry (new juce::MemoryInputStream (bytes, true), 9, stem + (ext.isEmpty() ? juce::String (".png") : ext), juce::Time::getCurrentTime());
         ++added;
-    };
-    add (style.off, "off");
-    add (style.on, "on");
-    add (style.track, "track");
-    add (style.handle, "handle");
-    if (style.frames > 1) add (style.strip, "strip_" + juce::String (style.frames) + (style.stripHorizontal ? "_h" : ""));
+    }
     if (added == 0) return false;
 
     auto text = [] (const juce::String& s) { return new juce::MemoryInputStream (s.toRawUTF8(), s.getNumBytesAsUTF8(), true); };
@@ -199,10 +235,7 @@ inline bool exportStyle (const neptune::core::facade::ImageStyle& style, const j
     pack->setProperty ("format", sp::formatVersion);
     pack->setProperty ("name", juce::String::fromUTF8 (style.name.c_str()));
     builder.addEntry (text (juce::JSON::toString (juce::var (pack.get()))), 9, "pack.json", juce::Time::getCurrentTime());
-    juce::DynamicObject::Ptr meta (new juce::DynamicObject());
-    meta->setProperty ("name", juce::String::fromUTF8 (style.name.c_str()));
-    if (style.frames > 1) meta->setProperty ("frames", style.frames);
-    builder.addEntry (text (juce::JSON::toString (juce::var (meta.get()))), 9, "style.json", juce::Time::getCurrentTime());
+    builder.addEntry (text (styleJson (style)), 9, "style.json", juce::Time::getCurrentTime());
 
     destination.deleteFile();
     juce::FileOutputStream out (destination);

@@ -25,31 +25,63 @@ constexpr std::size_t maxImagePath = 1024;
 // Zone : conteneur (cadre avec titre) qui possède les widgets posés dedans et, au choix, les range en ligne, en colonne ou en matrice.
 // Keyboard : clavier virtuel lié à un canal MIDI de la piste (un manuel d'orgue = un clavier) ; allume les notes jouées sur ce canal.
 // Slider : curseur (tirant) horizontal ou vertical lié à un paramètre ; crans automatiques sur un paramètre à pas.
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8 };
-constexpr int numWidgetTypes = 9;
+// Lamp : voyant allumé selon un paramètre (source 0), les notes d'un canal (1) ou les notes de la piste (2).
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9 };
+constexpr int numWidgetTypes = 10;
 constexpr int maxStyles = 64;
 constexpr int maxStripFrames = 512;
 constexpr std::size_t maxNotches = 128;
 
 // Style d'images (PNG, JPG ou SVG), réutilisable par plusieurs widgets. Chaque widget n'utilise que ce qui le concerne ; une image absente
 // laisse le dessin d'origine.
-//  - Bouton, Action : `off` et `on` (deux états, par exemple un tirant fermé et un tirant ouvert).
+//  - Bouton, Action, Voyant : `off` et `on` ; en plus `offHover` / `onHover` (souris dessus) et `disabled` (widget non lié).
 //  - Curseur : `track` (le rail) et `handle` (la poignée).
-//  - Potard : `strip`, une bande de `frames` images (empilées verticalement, ou côte à côte si `stripHorizontal`), une par position.
+//  - Potard : une bande `strip` de `frames` images (empilées verticalement, ou côte à côte si `stripHorizontal`), une par position ;
+//    ou deux couches `body` (fixe) et `pointer` (tournée par le code entre `angleMin` et `angleMax` degrés autour de `pivotX`, `pivotY`).
+//  - Clavier : `keyWhite`, `keyWhiteOn`, `keyBlack`, `keyBlackOn` (touche au repos / enfoncée ou jouée).
+//  - Zone : `frame`, découpé en neuf zones par `slice*` (pourcentages de l'image) pour s'étirer sans déformer les coins.
+//  - Texte posé sur l'image (boutons, actions, curseurs, potards, voyants, zones) : couleur, taille, place, gras.
 struct ImageStyle
 {
     int id = 0;
     std::string name;
-    std::string off, on, track, handle, strip;
+    std::string off, on, offHover, onHover, disabled;
+    std::string track, handle;
+    std::string strip, body, pointer;
+    std::string keyWhite, keyWhiteOn, keyBlack, keyBlackOn;
+    std::string frame;
     int frames = 0;
     bool stripHorizontal = false;
+    int angleMin = -135, angleMax = 135;   // degrés, 0 = l'aiguille dessinée vers le haut
+    int pivotX = 50, pivotY = 50;          // centre de rotation de `pointer`, en % de l'image
+    int sliceLeft = 25, sliceTop = 25, sliceRight = 25, sliceBottom = 25;   // % de la largeur / hauteur de `frame`
+    int sliceScale = 100;                  // % : taille d'affichage des coins par rapport à la taille naturelle du dessin
+    std::string textColour;                // "#rrggbb" ; vide : couleur du thème
+    int textSize = 0;                      // % de la hauteur du widget ; 0 : automatique
+    int textPosition = 0;                  // 0 centre, 1 haut, 2 bas, 3 gauche, 4 droite
+    bool textBold = true;
+    std::string keyLit;                    // "#rrggbb" : teinte d'une touche allumée quand le style n'a pas d'image pour elle ; vide : accent du thème
 
     bool operator== (const ImageStyle& o) const noexcept
     {
-        return id == o.id && name == o.name && off == o.off && on == o.on && track == o.track && handle == o.handle && strip == o.strip
-            && frames == o.frames && stripHorizontal == o.stripHorizontal;
+        return id == o.id && name == o.name && off == o.off && on == o.on && offHover == o.offHover && onHover == o.onHover && disabled == o.disabled
+            && track == o.track && handle == o.handle && strip == o.strip && body == o.body && pointer == o.pointer
+            && keyWhite == o.keyWhite && keyWhiteOn == o.keyWhiteOn && keyBlack == o.keyBlack && keyBlackOn == o.keyBlackOn && frame == o.frame
+            && frames == o.frames && stripHorizontal == o.stripHorizontal && angleMin == o.angleMin && angleMax == o.angleMax
+            && pivotX == o.pivotX && pivotY == o.pivotY && sliceLeft == o.sliceLeft && sliceTop == o.sliceTop && sliceRight == o.sliceRight
+            && sliceBottom == o.sliceBottom && sliceScale == o.sliceScale && textColour == o.textColour && textSize == o.textSize
+            && textPosition == o.textPosition && textBold == o.textBold && keyLit == o.keyLit;
     }
 };
+
+// Les champs d'image d'un style, avec leur nom canonique (celui du fichier dans un pack et de la clé JSON).
+struct ImageRole
+{
+    const char* name;
+    std::string ImageStyle::* field;
+};
+const std::vector<ImageRole>& imageRoles();
+
 constexpr int zonePad = 10;          // marge intérieure d'une zone
 constexpr int zoneTitleHeight = 24;  // bandeau du titre (quand la zone a un titre)
 
@@ -93,6 +125,7 @@ struct Widget
     int stepMode = 0;
     int invert = 0;                 // 1 : sens inversé
     std::vector<double> notches;    // valeurs réelles (celles du paramètre), triées, sans doublon
+    int source = 0;                 // Voyant : 0 paramètre, 1 notes du canal `channel`, 2 notes de la piste
     int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
     int vertical = 0;               // Curseur : 1, vertical
 
@@ -101,7 +134,7 @@ struct Widget
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
-            && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && notches == o.notches;
+            && source == o.source && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && notches == o.notches;
     }
 };
 

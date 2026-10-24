@@ -18,29 +18,43 @@ PackInfo run (const std::string& stem, const std::map<std::string, std::string>&
 
 TEST_CASE ("style pack: image file names are recognised")
 {
-    CHECK (parseImageName ("off.svg").role == Role::Off);
-    CHECK (parseImageName ("ON.PNG").role == Role::On);
-    CHECK (parseImageName ("closed.jpg").role == Role::Off);
-    CHECK (parseImageName ("open.jpeg").role == Role::On);
-    CHECK (parseImageName ("rail.svg").role == Role::Track);
-    CHECK (parseImageName ("thumb.png").role == Role::Handle);
-    CHECK (parseImageName ("off.gif").role == Role::None);
-    CHECK (parseImageName ("readme.txt").role == Role::None);
-    CHECK (parseImageName ("off").role == Role::None);
+    CHECK (parseImageName ("off.svg").role == "off");
+    CHECK (parseImageName ("ON.PNG").role == "on");
+    CHECK (parseImageName ("closed.jpg").role == "off");
+    CHECK (parseImageName ("open.jpeg").role == "on");
+    CHECK (parseImageName ("rail.svg").role == "track");
+    CHECK (parseImageName ("thumb.png").role == "handle");
+    CHECK (parseImageName ("hover.svg").role == "off_hover");
+    CHECK (parseImageName ("on_hover.svg").role == "on_hover");
+    CHECK (parseImageName ("inactive.svg").role == "disabled");
+    CHECK (parseImageName ("dial.svg").role == "body");
+    CHECK (parseImageName ("needle.svg").role == "pointer");
+    CHECK (parseImageName ("key_white.svg").role == "key_white");
+    CHECK (parseImageName ("black_key_on.png").role == "key_black_on");
+    CHECK (parseImageName ("panel.svg").role == "frame");
+    CHECK (parseImageName ("off.gif").role.empty());
+    CHECK (parseImageName ("readme.txt").role.empty());
+    CHECK (parseImageName ("off").role.empty());
 
     auto strip = parseImageName ("strip_32.svg");
-    CHECK (strip.role == Role::Strip);
+    CHECK (strip.role == "strip");
     CHECK (strip.frames == 32);
     CHECK (! strip.horizontal);
     strip = parseImageName ("Strip_64_h.png");
     CHECK (strip.frames == 64);
     CHECK (strip.horizontal);
-    CHECK (parseImageName ("strip.png").role == Role::Strip);
+    CHECK (parseImageName ("strip.png").role == "strip");
     CHECK (parseImageName ("strip.png").frames == 0);
-    CHECK (parseImageName ("strip_1.png").role == Role::None);       // moins de 2 images
-    CHECK (parseImageName ("strip_9999.png").role == Role::None);
-    CHECK (parseImageName ("strip_x.png").role == Role::None);
+    CHECK (parseImageName ("strip_1.png").role.empty());       // moins de 2 images
+    CHECK (parseImageName ("strip_9999.png").role.empty());
+    CHECK (parseImageName ("strip_x.png").role.empty());
     CHECK (parseImageName ("filmstrip_16.svg").frames == 16);
+}
+
+TEST_CASE ("style pack: every image role of a style has a recognised file name")
+{
+    for (const auto& role : neptune::core::facade::imageRoles())
+        CHECK (parseImageName (std::string (role.name) + ".svg").role == (std::string (role.name)));
 }
 
 TEST_CASE ("style pack: unsafe entry names are refused")
@@ -59,10 +73,10 @@ TEST_CASE ("style pack: a flat archive is one style named after the pack")
     const auto pack = run ("Organ-Classic", { { "off.svg", "" }, { "on.svg", "" }, { "notes.txt", "" } });
     CHECK (pack.id == "organ-classic");
     REQUIRE (pack.styles.size() == 1);
-    CHECK (pack.styles[0].name == "Organ-Classic");
-    CHECK (pack.styles[0].off == "off.svg");
-    CHECK (pack.styles[0].on == "on.svg");
-    CHECK (pack.styles[0].strip.empty());
+    CHECK (pack.styles[0].style.name == "Organ-Classic");
+    CHECK (pack.styles[0].style.off == "off.svg");
+    CHECK (pack.styles[0].style.on == "on.svg");
+    CHECK (pack.styles[0].style.strip.empty());
     CHECK (pack.warnings.empty());
 }
 
@@ -80,27 +94,27 @@ TEST_CASE ("style pack: folders are styles, manifests give names and frame count
     CHECK (pack.version == "2");
     REQUIRE (pack.styles.size() == 3);
     CHECK (pack.styles[0].folder == "drawbar");   // ordre alphabétique des dossiers
-    CHECK (pack.styles[0].name == "drawbar");
-    CHECK (pack.styles[1].name == "Big knob");
-    CHECK (pack.styles[1].frames == 48);
-    CHECK (pack.styles[1].stripHorizontal);
-    CHECK (pack.styles[2].track == "sliders/track.svg");
+    CHECK (pack.styles[0].style.name == "drawbar");
+    CHECK (pack.styles[1].style.name == "Big knob");
+    CHECK (pack.styles[1].style.frames == 48);
+    CHECK (pack.styles[1].style.stripHorizontal);
+    CHECK (pack.styles[2].style.track == "sliders/track.svg");
     CHECK (pack.warnings.empty());
 }
 
 TEST_CASE ("style pack: warnings for a strip without frames, duplicates, unsafe and empty packs")
 {
     auto pack = run ("p", { { "knob/strip.svg", "" } });
-    CHECK (pack.styles[0].strip.empty());
+    CHECK (pack.styles[0].style.strip.empty());
     CHECK (! pack.warnings.empty());
 
     pack = run ("p", { { "off.svg", "" }, { "off.png", "" } });
-    CHECK (pack.styles[0].off == "off.svg");     // le SVG est préféré
+    CHECK (pack.styles[0].style.off == "off.svg");     // le SVG est préféré
     CHECK (! pack.warnings.empty());
 
     pack = run ("p", { { "../off.svg", "" }, { "on.svg", "" } });
-    CHECK (pack.styles[0].off.empty());
-    CHECK (pack.styles[0].on == "on.svg");
+    CHECK (pack.styles[0].style.off.empty());
+    CHECK (pack.styles[0].style.on == "on.svg");
     CHECK (! pack.warnings.empty());
 
     pack = run ("p", { { "readme.txt", "" } });
@@ -122,4 +136,34 @@ TEST_CASE ("style pack: references round trip")
     CHECK (! parseReference ("C:/file.svg", id, entry));
     CHECK (! parseReference ("pack:organ!../x.svg", id, entry));
     CHECK (! parseReference ("pack:!x.svg", id, entry));
+}
+
+TEST_CASE ("style pack: style.json carries text, slicing, pointer angles and key colour")
+{
+    const auto pack = run ("p", {
+        { "dial/body.svg", "" }, { "dial/pointer.svg", "" },
+        { "dial/style.json", R"({"pointer_angles":[-150,150],"pivot":[50,60],"text":{"colour":"#ffffff","size":55,"position":"bottom","bold":false},"key_lit_colour":"#f0b429"})" },
+        { "panel/frame.svg", "" }, { "panel/style.json", R"({"slice":[10,12,14,16],"slice_scale":150})" },
+        { "keys/key_white.svg", "" }, { "keys/key_white_on.svg", "" }, { "keys/key_black.svg", "" }, { "keys/key_black_on.svg", "" } });
+    REQUIRE (pack.styles.size() == 3);
+    const auto& dial = pack.styles[0].style;   // dossiers triés : dial, keys, panel
+    CHECK (dial.body == "dial/body.svg");
+    CHECK (dial.pointer == "dial/pointer.svg");
+    CHECK (dial.angleMin == -150);
+    CHECK (dial.angleMax == 150);
+    CHECK (dial.pivotY == 60);
+    CHECK (dial.textColour == "#ffffff");
+    CHECK (dial.textSize == 55);
+    CHECK (dial.textPosition == 2);
+    CHECK (! dial.textBold);
+    CHECK (dial.keyLit == "#f0b429");
+    const auto& keys = pack.styles[1].style;
+    CHECK (keys.keyWhiteOn == "keys/key_white_on.svg");
+    CHECK (keys.keyBlack == "keys/key_black.svg");
+    const auto& panel = pack.styles[2].style;
+    CHECK (panel.frame == "panel/frame.svg");
+    CHECK (panel.sliceLeft == 10);
+    CHECK (panel.sliceBottom == 16);
+    CHECK (panel.sliceScale == 150);
+    CHECK (pack.warnings.empty());
 }

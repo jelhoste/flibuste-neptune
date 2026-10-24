@@ -18,6 +18,17 @@ int Facade::freeId() const noexcept
     return id;
 }
 
+const std::vector<ImageRole>& imageRoles()
+{
+    static const std::vector<ImageRole> roles = {
+        { "off", &ImageStyle::off }, { "on", &ImageStyle::on }, { "off_hover", &ImageStyle::offHover }, { "on_hover", &ImageStyle::onHover },
+        { "disabled", &ImageStyle::disabled }, { "track", &ImageStyle::track }, { "handle", &ImageStyle::handle }, { "strip", &ImageStyle::strip },
+        { "body", &ImageStyle::body }, { "pointer", &ImageStyle::pointer }, { "key_white", &ImageStyle::keyWhite },
+        { "key_white_on", &ImageStyle::keyWhiteOn }, { "key_black", &ImageStyle::keyBlack }, { "key_black_on", &ImageStyle::keyBlackOn },
+        { "frame", &ImageStyle::frame } };
+    return roles;
+}
+
 int Facade::freeStyleId() const noexcept
 {
     int id = 1;
@@ -91,6 +102,7 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Zone:   w.w = 320; w.h = 200; break;
         case WidgetType::Keyboard: w.w = 520; w.h = 110; break;
         case WidgetType::Slider: w.w = 260; w.h = 44; break;
+        case WidgetType::Lamp:   w.w = 40;  w.h = 40;  break;
     }
     w.x = x;
     w.y = y;
@@ -115,8 +127,21 @@ Facade sanitised (Facade f)
         for (auto& st : f.styles)
         {
             st.name = clipped (std::move (st.name), maxTextLength);
-            for (auto* path : { &st.off, &st.on, &st.track, &st.handle, &st.strip }) *path = clipped (std::move (*path), maxImagePath);
+            for (const auto& role : imageRoles()) st.*(role.field) = clipped (std::move (st.*(role.field)), maxImagePath);
             st.frames = std::clamp (st.frames, 0, maxStripFrames);
+            st.angleMin = std::clamp (st.angleMin, -360, 360);
+            st.angleMax = std::clamp (st.angleMax, -360, 360);
+            st.pivotX = std::clamp (st.pivotX, 0, 100);
+            st.pivotY = std::clamp (st.pivotY, 0, 100);
+            st.sliceLeft = std::clamp (st.sliceLeft, 0, 45);
+            st.sliceTop = std::clamp (st.sliceTop, 0, 45);
+            st.sliceRight = std::clamp (st.sliceRight, 0, 45);
+            st.sliceBottom = std::clamp (st.sliceBottom, 0, 45);
+            st.sliceScale = std::clamp (st.sliceScale, 25, 400);
+            st.textSize = std::clamp (st.textSize, 0, 100);
+            st.textPosition = std::clamp (st.textPosition, 0, 4);
+            st.textColour = clipped (std::move (st.textColour), 16);
+            st.keyLit = clipped (std::move (st.keyLit), 16);
             if (st.id <= 0 || usedStyles.count (st.id) != 0)
             {
                 int id = 1;
@@ -151,6 +176,7 @@ Facade sanitised (Facade f)
         w.hold = w.hold != 0 ? 1 : 0;
         w.velocity = std::clamp (w.velocity, 1, 127);
         w.vertical = w.vertical != 0 ? 1 : 0;
+        w.source = std::clamp (w.source, 0, 2);
         w.invert = w.invert != 0 ? 1 : 0;
         w.stepMode = std::clamp (w.stepMode, 0, 2);
         w.notches.erase (std::remove_if (w.notches.begin(), w.notches.end(), [] (double v) { return ! std::isfinite (v); }), w.notches.end());
@@ -556,6 +582,7 @@ std::string toJson (const Facade& f)
             if (! w.notches.empty()) e["notches"] = w.notches;
         }
         if (w.type == WidgetType::Slider) e["vertical"] = w.vertical;
+        if (w.type == WidgetType::Lamp) { e["source"] = w.source; e["ch"] = w.channel; }
         if (w.type == WidgetType::Keyboard)
         {
             e["ch"] = w.channel;
@@ -588,13 +615,19 @@ std::string toJson (const Facade& f)
             json e;
             e["id"] = s.id;
             e["name"] = s.name;
-            if (! s.off.empty()) e["off"] = s.off;
-            if (! s.on.empty()) e["on"] = s.on;
-            if (! s.track.empty()) e["track"] = s.track;
-            if (! s.handle.empty()) e["handle"] = s.handle;
-            if (! s.strip.empty()) e["strip"] = s.strip;
+            for (const auto& role : imageRoles())
+                if (! (s.*(role.field)).empty()) e[role.name] = s.*(role.field);
             if (s.frames != 0) e["frames"] = s.frames;
             if (s.stripHorizontal) e["strip_h"] = true;
+            if (s.angleMin != -135 || s.angleMax != 135) e["angles"] = json::array ({ s.angleMin, s.angleMax });
+            if (s.pivotX != 50 || s.pivotY != 50) e["pivot"] = json::array ({ s.pivotX, s.pivotY });
+            if (s.sliceLeft != 25 || s.sliceTop != 25 || s.sliceRight != 25 || s.sliceBottom != 25) e["slice"] = json::array ({ s.sliceLeft, s.sliceTop, s.sliceRight, s.sliceBottom });
+            if (s.sliceScale != 100) e["slice_scale"] = s.sliceScale;
+            if (! s.textColour.empty()) e["text_colour"] = s.textColour;
+            if (s.textSize != 0) e["text_size"] = s.textSize;
+            if (s.textPosition != 0) e["text_position"] = s.textPosition;
+            if (! s.textBold) e["text_bold"] = false;
+            if (! s.keyLit.empty()) e["key_lit"] = s.keyLit;
             st.push_back (std::move (e));
         }
         o["styles"] = std::move (st);
@@ -626,9 +659,27 @@ Facade fromJson (std::string_view text)
             s.id = intOf (e, "id", 0);
             auto str = [&e] (const char* key) { const auto v = e.find (key); return v != e.end() && v->is_string() ? v->get<std::string>() : std::string(); };
             s.name = str ("name");
-            s.off = str ("off"); s.on = str ("on"); s.track = str ("track"); s.handle = str ("handle"); s.strip = str ("strip");
+            for (const auto& role : imageRoles()) s.*(role.field) = str (role.name);
             s.frames = intOf (e, "frames", 0);
             if (const auto h = e.find ("strip_h"); h != e.end() && h->is_boolean()) s.stripHorizontal = h->get<bool>();
+            auto pair = [&e] (const char* key, int& a, int& b)
+            {
+                const auto it = e.find (key);
+                if (it != e.end() && it->is_array() && it->size() == 2 && (*it)[0].is_number_integer() && (*it)[1].is_number_integer()) { a = (*it)[0].get<int>(); b = (*it)[1].get<int>(); }
+            };
+            pair ("angles", s.angleMin, s.angleMax);
+            pair ("pivot", s.pivotX, s.pivotY);
+            if (const auto it = e.find ("slice"); it != e.end() && it->is_array() && it->size() == 4)
+            {
+                int* v[4] = { &s.sliceLeft, &s.sliceTop, &s.sliceRight, &s.sliceBottom };
+                for (std::size_t i = 0; i < 4; ++i) if ((*it)[i].is_number_integer()) *v[i] = (*it)[i].get<int>();
+            }
+            s.sliceScale = intOf (e, "slice_scale", 100);
+            s.textColour = str ("text_colour");
+            s.textSize = intOf (e, "text_size", 0);
+            s.textPosition = intOf (e, "text_position", 0);
+            if (const auto b = e.find ("text_bold"); b != e.end() && b->is_boolean()) s.textBold = b->get<bool>();
+            s.keyLit = str ("key_lit");
             f.styles.push_back (std::move (s));
         }
     if (const auto it = o.find ("widgets"); it != o.end() && it->is_array())
@@ -655,6 +706,7 @@ Facade fromJson (std::string_view text)
                 for (const auto& v : *n)
                     if (v.is_number() && w.notches.size() < maxNotches) w.notches.push_back (v.get<double>());
             w.vertical = intOf (e, "vertical", 0);
+            w.source = intOf (e, "source", 0);
             w.channel = intOf (e, "ch", 1);
             w.firstNote = intOf (e, "first", 36);
             w.hold = intOf (e, "hold", 0);

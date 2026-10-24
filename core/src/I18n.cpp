@@ -340,6 +340,50 @@ const Entry kEntries[] = {
     { "facade.tip_relocate", { "Some images of this Facade cannot be found: choose the new location of one (the others in the same folder follow)", "Des images de cette Façade sont introuvables : désignez le nouvel emplacement de l'une (les autres du même dossier suivent)" } },
     { "facade.relocate_choose", { "Where is {0} now?", "Où est maintenant {0} ?" } },
     { "facade.missing", { "not found", "introuvable" } },
+    { "facade.add_lamp", { "+ Lamp", "+ Voyant" } },
+    { "facade.tip_lamp", { "A lamp lit by a parameter, by the notes of a MIDI channel, or by any note of the track", "Un voyant allumé par un paramètre, par les notes d'un canal MIDI, ou par une note quelconque de la piste" } },
+    { "facade.lamp_source", { "Lit by...", "Allumé par..." } },
+    { "facade.tip_lamp_source", { "What lights the lamp: a parameter, the notes of a channel, or the notes of the track", "Ce qui allume le voyant : un paramètre, les notes d'un canal ou les notes de la piste" } },
+    { "facade.lamp_param", { "A parameter (Link...)", "Un paramètre (Lier...)" } },
+    { "facade.lamp_channel", { "The notes of a MIDI channel (Channel...)", "Les notes d'un canal MIDI (Canal...)" } },
+    { "facade.lamp_track", { "Any note of the track", "Une note quelconque de la piste" } },
+    { "facade.style_images", { "Images", "Images" } },
+    { "facade.style_options", { "Options", "Options" } },
+    { "facade.role_off", { "Off / closed", "Éteint / fermé" } },
+    { "facade.role_on", { "On / open", "Allumé / ouvert" } },
+    { "facade.role_off_hover", { "Off, mouse over", "Éteint, souris dessus" } },
+    { "facade.role_on_hover", { "On, mouse over", "Allumé, souris dessus" } },
+    { "facade.role_disabled", { "Not linked (disabled)", "Non lié (inactif)" } },
+    { "facade.role_track", { "Slider rail", "Rail du curseur" } },
+    { "facade.role_handle", { "Slider handle", "Poignée du curseur" } },
+    { "facade.role_strip", { "Knob strip", "Bande du potard" } },
+    { "facade.role_body", { "Knob body (fixed layer)", "Corps du potard (couche fixe)" } },
+    { "facade.role_pointer", { "Knob pointer (turned layer)", "Aiguille du potard (couche tournée)" } },
+    { "facade.role_key_white", { "White key", "Touche blanche" } },
+    { "facade.role_key_white_on", { "White key, pressed", "Touche blanche enfoncée" } },
+    { "facade.role_key_black", { "Black key", "Touche noire" } },
+    { "facade.role_key_black_on", { "Black key, pressed", "Touche noire enfoncée" } },
+    { "facade.role_frame", { "Zone frame (nine-slice)", "Cadre de zone (neuf zones)" } },
+    { "facade.opt_frames", { "Strip frames", "Images de la bande" } },
+    { "facade.opt_angle_min", { "Pointer angle at minimum (degrees)", "Angle de l'aiguille au minimum (degrés)" } },
+    { "facade.opt_angle_max", { "Pointer angle at maximum (degrees)", "Angle de l'aiguille au maximum (degrés)" } },
+    { "facade.opt_pivot_x", { "Pointer pivot X (% of the image)", "Pivot de l'aiguille X (% de l'image)" } },
+    { "facade.opt_pivot_y", { "Pointer pivot Y (% of the image)", "Pivot de l'aiguille Y (% de l'image)" } },
+    { "facade.opt_slice_left", { "Frame: left margin (%)", "Cadre : marge gauche (%)" } },
+    { "facade.opt_slice_top", { "Frame: top margin (%)", "Cadre : marge haute (%)" } },
+    { "facade.opt_slice_right", { "Frame: right margin (%)", "Cadre : marge droite (%)" } },
+    { "facade.opt_slice_bottom", { "Frame: bottom margin (%)", "Cadre : marge basse (%)" } },
+    { "facade.opt_slice_scale", { "Frame: corner scale (%)", "Cadre : échelle des coins (%)" } },
+    { "facade.opt_text_size", { "Text size (% of the height, 0 = automatic)", "Taille du texte (% de la hauteur, 0 = auto)" } },
+    { "facade.opt_text_colour", { "Text colour (#rrggbb, empty = theme)", "Couleur du texte (#rrggbb, vide = thème)" } },
+    { "facade.opt_key_lit", { "Lit key tint (#rrggbb, empty = theme)", "Teinte d'une touche allumée (#rrggbb, vide = thème)" } },
+    { "facade.opt_text_position", { "Text position", "Place du texte" } },
+    { "facade.opt_text_bold", { "Bold text", "Texte en gras" } },
+    { "facade.pos_centre", { "Centre", "Centre" } },
+    { "facade.pos_top", { "Top", "Haut" } },
+    { "facade.pos_bottom", { "Bottom", "Bas" } },
+    { "facade.pos_left", { "Left", "Gauche" } },
+    { "facade.pos_right", { "Right", "Droite" } },
     { "facade.add_zone", { "+ Zone", "+ Zone" } },
     { "facade.tip_zone", { "A container: widgets dropped inside follow it, and it can arrange them in a row, a column or a grid", "Un conteneur : les widgets posés dedans le suivent, et il peut les ranger en ligne, en colonne ou en matrice" } },
     { "facade.same_size", { "Same size for all", "Même taille pour tous" } },
@@ -384,7 +428,8 @@ const Entry kEntries[] = {
         "+ LABEL: free text. Text... changes the text of any widget (the caption of a knob, a button or a curve).\n\n"
         "+ ZONE: a container with a title. Widgets whose centre is inside it belong to it and follow it when you move it. Layout... makes it arrange its content as a row, a column or a grid (Alignment... centres or aligns it, Spacing... sets the gaps); the content is rearranged automatically when you add, remove, move or resize things, and dragging a widget inside the zone reorders it. Zones can contain zones. Align... > Spread on a circle puts three or more selected widgets at equal angles on a circle; the widget you clicked last goes to the side you choose and the others follow in their current order. A zone can also arrange its content on a circle (Layout...).\n\n"
         "+ SLIDER: a drawbar-style slider linked to a parameter, horizontal or vertical (Vertical swaps its shape). On a parameter with steps (a drawbar 0 to 8, a mode) the handle jumps from notch to notch. Drag it or click on the rail; double-click: default value. Notches... (also for knobs) chooses automatic, continuous, or custom notches: you give the number of notches and the value of each one, evenly spaced on the widget even if the values are not (an organ drawbar, a few chosen frequencies...). Invert reverses the direction.\n\n"
-        "STYLES...: the library of image styles. A style is a named set of images (PNG, JPG or SVG): off and on pictures for buttons and actions (a closed and an open drawbar tab), a rail and a handle for sliders, and a strip of frames for knobs (one picture per position). Library... lists the style packs (.neptunestyle files) and adds their styles, installs a pack (you can also drop the file onto the Facade), opens the packs folder and exports the selected style as a pack. Templates and examples... writes editable SVG templates, one folder per style, with the full SPECIFICATION.md (written to be read by you or handed to an AI that makes styles for you) and a README into a folder and creates ready-to-use example styles. Make a style once, then give it to any widgets with Style...; editing a style changes all the widgets that use it. A missing image keeps the default drawing.\n\n"
+        "STYLES...: the library of image styles. A style is a named set of images (PNG, JPG or SVG): off and on pictures for buttons and actions (a closed and an open drawbar tab), a rail and a handle for sliders, and a strip of frames for knobs (one picture per position). Library... lists the style packs (.neptunestyle files) and adds their styles, installs a pack (you can also drop the file onto the Facade), opens the packs folder and exports the selected style as a pack. A style can also dress keyboards (key images), lamps and zone frames (cut in nine parts), turn a knob pointer, show hover and disabled states, and style the text laid on the image; its image rows and options are all in the Styles window. Templates and examples... writes editable SVG templates, one folder per style, with the full SPECIFICATION.md (written to be read by you or handed to an AI that makes styles for you) and a README into a folder and creates ready-to-use example styles. Make a style once, then give it to any widgets with Style...; editing a style changes all the widgets that use it. A missing image keeps the default drawing.\n\n"
+        "+ LAMP: a lamp that lights up. Lit by... chooses what lights it: a parameter, the notes played on a MIDI channel (for example manual 2), or any note of the track.\n\n"
         "+ KEYBOARD: a virtual keyboard bound to one MIDI channel of this track (give each organ manual its own keyboard, channels 1, 2, 3 by default). Click or drag across keys to play; the keys of notes played from outside on that channel light up too. Channel..., First note..., Velocity... and Hold set it up; the width of the widget decides how many keys are shown.\n\n"
         "SAME SIZE FOR ALL gives every widget of the selected one's type (all the knobs, for instance) its size.\n\n"
         "LINK... chooses the parameter of the selected widget (the list starts on this track's parameters; clear the filter to see all). ALIGN... aligns, distributes and arranges several widgets in a grid. BACKGROUND... puts an image (PNG or JPG) behind the widgets.\n\n"
@@ -400,7 +445,8 @@ const Entry kEntries[] = {
         "+ ÉTIQUETTE : du texte libre. Texte... change le texte de n'importe quel widget (la légende d'un potard, d'un bouton ou d'une courbe).\n\n"
         "+ ZONE : un conteneur avec un titre. Les widgets dont le centre est dedans lui appartiennent et le suivent quand on le déplace. Disposition... lui fait ranger son contenu en ligne, en colonne ou en matrice (Alignement... le centre ou l'aligne, Espacement... règle les écarts) ; le contenu se réorganise tout seul quand on ajoute, retire, déplace ou redimensionne, et glisser un widget dans la zone le réordonne. Les zones peuvent contenir des zones. Aligner... > Répartir en cercle place trois widgets sélectionnés ou plus à angles égaux sur un cercle ; le dernier widget cliqué va du côté choisi et les autres suivent dans leur ordre actuel. Une zone peut aussi ranger son contenu en cercle (Disposition...).\n\n"
         "+ CURSEUR : un curseur façon tirant lié à un paramètre, horizontal ou vertical (Vertical échange sa forme). Sur un paramètre à pas (un tirant de 0 à 8, un mode) la poignée saute de cran en cran. Glissez-la ou cliquez sur le rail ; double-clic : valeur par défaut. Crans... (aussi pour les potards) choisit automatique, continu, ou des crans personnalisés : vous donnez le nombre de crans et la valeur de chacun, régulièrement espacés sur le widget même si les valeurs ne le sont pas (un tirant d'orgue, quelques fréquences choisies...). Inverser renverse le sens.\n\n"
-        "STYLES... : la bibliothèque de styles d'images. Un style est un jeu d'images nommé (PNG, JPG ou SVG) : images éteint et allumé pour les boutons et les actions (une plaquette de tirant fermée et ouverte), un rail et une poignée pour les curseurs, et une bande d'images pour les potards (une image par position). Bibliothèque... liste les packs de styles (fichiers .neptunestyle) et ajoute leurs styles, installe un pack (on peut aussi déposer le fichier sur la Façade), ouvre le dossier des packs et exporte le style sélectionné comme pack. Modèles et exemples... écrit dans un dossier des modèles SVG modifiables, un dossier par style, avec la SPECIFICATION.md complète (écrite pour être lue par vous ou donnée à une IA qui crée des styles pour vous) et un LISEZMOI, et crée des styles d'exemple prêts à l'emploi. On crée un style une fois, puis on le donne à des widgets avec Style... ; modifier un style change tous les widgets qui l'utilisent. Une image absente garde le dessin d'origine.\n\n"
+        "STYLES... : la bibliothèque de styles d'images. Un style est un jeu d'images nommé (PNG, JPG ou SVG) : images éteint et allumé pour les boutons et les actions (une plaquette de tirant fermée et ouverte), un rail et une poignée pour les curseurs, et une bande d'images pour les potards (une image par position). Bibliothèque... liste les packs de styles (fichiers .neptunestyle) et ajoute leurs styles, installe un pack (on peut aussi déposer le fichier sur la Façade), ouvre le dossier des packs et exporte le style sélectionné comme pack. Un style peut aussi habiller des claviers (images de touches), des voyants et des cadres de zone (découpés en neuf zones), faire tourner l'aiguille d'un potard, montrer les états survol et inactif, et régler le texte posé sur l'image ; toutes ses images et options sont dans la fenêtre Styles. Modèles et exemples... écrit dans un dossier des modèles SVG modifiables, un dossier par style, avec la SPECIFICATION.md complète (écrite pour être lue par vous ou donnée à une IA qui crée des styles pour vous) et un LISEZMOI, et crée des styles d'exemple prêts à l'emploi. On crée un style une fois, puis on le donne à des widgets avec Style... ; modifier un style change tous les widgets qui l'utilisent. Une image absente garde le dessin d'origine.\n\n"
+        "+ VOYANT : une lampe qui s'allume. Allumé par... choisit ce qui l'allume : un paramètre, les notes jouées sur un canal MIDI (par exemple le manuel 2), ou une note quelconque de la piste.\n\n"
         "+ CLAVIER : un clavier virtuel lié à un canal MIDI de cette piste (donnez à chaque manuel d'orgue son clavier, canaux 1, 2, 3 par défaut). Cliquez ou glissez sur les touches pour jouer ; les touches des notes jouées de l'extérieur sur ce canal s'allument aussi. Canal..., Première note..., Vélocité... et Maintien le règlent ; la largeur du widget décide du nombre de touches affichées.\n\n"
         "MÊME TAILLE POUR TOUS donne à tous les widgets du même type que celui sélectionné (tous les potards, par exemple) sa taille.\n\n"
         "LIER... choisit le paramètre du widget sélectionné (la liste commence par les paramètres de cette piste ; effacez le filtre pour tout voir). ALIGNER... aligne, répartit et dispose en matrice plusieurs widgets. FOND... place une image (PNG ou JPG) derrière les widgets.\n\n"

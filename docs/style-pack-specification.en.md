@@ -1,6 +1,6 @@
 # Facade image style specification (`.neptunestyle` format)
 
-Format version: **1**. This document is written to be read by a human **or handed as-is to an AI** (ChatGPT, Claude, etc.) so that it can create styles. Section 12 contains a ready-to-paste message.
+Format version: **2** (format 1 packs remain valid; format 2 adds knob layers, keyboard keys, zone frames, the lamp, hover/disabled states, text styling and theme colours in SVG). This document is written to be read by a human **or handed as-is to an AI** (ChatGPT, Claude, etc.) so that it can create styles. Section 12 contains a ready-to-paste message.
 
 ## 1. In ten lines
 
@@ -8,8 +8,8 @@ Format version: **1**. This document is written to be read by a human **or hande
 - A **style** is a set of images that changes a widget's *appearance*. It never changes its *function* (values, notches, direction: those are set on the widget).
 - A **pack** (a `.neptunestyle` file) is a **zip** archive holding one or several styles.
 - Image formats: **SVG** (recommended), **PNG**, **JPG**.
-- Each image has a **role**, given by its **file name**: `off`, `on`, `track`, `handle`, `strip_N`.
-- Buttons and actions: `off` + `on`. Sliders: `track` + `handle`. Knobs: `strip_N` (a strip of N pictures).
+- Each image has a **role**, given by its **file name**: `off`, `on`, `track`, `handle`, `strip_N`, `body`, `pointer`, `key_white`, `frame`...
+- Buttons, actions and lamps: `off` + `on` (+ `off_hover`, `on_hover`, `disabled`). Sliders: `track` + `handle`. Knobs: `strip_N` (a strip of N pictures) **or** `body` + `pointer` (two layers). Keyboards: `key_white`, `key_white_on`, `key_black`, `key_black_on`. Zones: `frame`.
 - A missing image = Neptune keeps its default drawing for that part.
 - No code is executed: a pack only holds images and JSON text.
 
@@ -27,10 +27,15 @@ Format version: **1**. This document is written to be read by a human **or hande
 
 | Widget | Images used | Notes |
 |---|---|---|
-| Button, Action | `off` and `on` | Two states only (off/closed, on/open). No hover or pressed image. |
+| Button, Action | `off` and `on`; optional `off_hover`, `on_hover`, `disabled` | Off/closed and on/open; mouse over; widget not linked (in Play mode). |
+| Lamp | `off` and `on`; optional `disabled` | Lit by a parameter, by the notes of a channel or by the notes of the track. Not clickable. |
 | Slider (drawbar) | `track` (rail) and `handle` | Horizontal or vertical, chosen by the user. |
-| Knob | `strip_N` | A strip of N pictures, one per position. |
-| Menu, Zone, Label, Keyboard, Curve | none | These widgets take no style. |
+| Knob | `strip_N` **or** `body` + `pointer` | A strip of N pictures, one per position; or a fixed body and a pointer that Neptune turns. |
+| Keyboard | `key_white`, `key_white_on`, `key_black`, `key_black_on` | The shape of the drawing gives the shape of the key. |
+| Zone | `frame` | Frame cut in nine parts (section 14). |
+| Menu, Label, Curve | none | These widgets take no style. |
+
+The **text** laid on widgets (a drawbar's name, a knob's caption) is drawn by Neptune over the image: its colour, size and position are set in the style (section 15).
 
 One style may hold every image: each widget only uses the ones that concern it.
 
@@ -72,7 +77,15 @@ Case is ignored. Extensions: `.svg`, `.png`, `.jpg`, `.jpeg`.
 | on / open | `on`, `open`, `pressed` | Button, Action |
 | rail | `track`, `rail`, `groove` | Slider |
 | handle | `handle`, `thumb` | Slider |
+| off, mouse over | `off_hover`, `hover` | Button, Action |
+| on, mouse over | `on_hover` | Button, Action |
+| not linked (disabled) | `disabled`, `inactive` | Button, Action, Lamp |
 | knob strip | `strip_N`, `strip_N_h`, `filmstrip_N`, `filmstrip_N_h` | Knob |
+| knob body (fixed) | `body`, `dial` | Knob |
+| knob pointer (turned) | `pointer`, `needle` | Knob |
+| white key, rest / pressed | `key_white`, `key_white_on` | Keyboard |
+| black key, rest / pressed | `key_black`, `key_black_on` | Keyboard |
+| zone frame | `frame`, `panel` | Zone |
 
 For the strip, **N is the number of pictures** (2 to 512): `strip_32.svg` = 32 pictures stacked **vertically**; `strip_32_h.svg` = 32 pictures **side by side**. If N is not in the name, give it in `style.json` (key `frames`), otherwise the strip is ignored with a warning.
 
@@ -106,6 +119,11 @@ All fields are optional. Without `name`, the pack is named after its file. `lice
 - `name`: displayed name of the style (otherwise the folder name).
 - `frames`: number of pictures of the strip (takes priority over the file name).
 - `strip_direction`: `"vertical"` (stacked, default) or `"horizontal"` (side by side). Takes priority over `_h`.
+- `pointer_angles`: `[-135, 135]`, the pointer's angles at minimum and maximum, in degrees (0 = the pointer drawn pointing up).
+- `pivot`: `[50, 50]`, the pointer's centre of rotation, in % of the image.
+- `slice`: `[25, 25, 25, 25]`, left, top, right, bottom margins of `frame`, in % of the image (section 14). `slice_scale`: display scale of the corners, in % (100 by default).
+- `text`: `{ "colour": "#ffffff", "size": 45, "position": "center", "bold": true }` (section 15).
+- `key_lit_colour`: `"#f0b429"`, tint of a played key when the style has no `_on` image for it.
 
 ## 5. Sizes and proportions
 
@@ -117,10 +135,16 @@ Neptune **fits** images to the widget's size; the values below are *reference pr
 | `track` | **Stretched** over the whole widget (width and height). | Horizontal slider: about 300 × 24 (wide and low). Vertical: 24 × 300. Draw the rail so a slight stretch does not distort it (simple rounded ends). |
 | `handle` | **Horizontal** slider: height = the slider's height, width from the image's proportions. **Vertical** slider: width = the slider's width, height from the proportions. Centred on its position. | Horizontal: tall narrow handle (e.g. 24 × 48). Vertical: wide low handle (e.g. 48 × 24). The handle never exceeds half the travel. |
 | `strip_N` | One picture of the strip is **centred** in the widget, proportions kept. | **Square** pictures for a round knob (e.g. 64 × 64). |
+| `body`, `pointer` | **Centred** in the widget, proportions kept, exactly on top of each other. | Same `viewBox` for both (e.g. 64 × 64). |
+| `off_hover`, `on_hover`, `disabled` | Like `off` / `on`. | Same size and proportions as `off` and `on`. |
+| `key_white`, `key_white_on` | **Stretched** over each white key (one key's width × the keyboard's height). | About 1:5 (e.g. 22 × 110). |
+| `key_black`, `key_black_on` | **Stretched** over each black key (60 % of the keyboard's height, 60 % of a white key's width). | About 1:5 (e.g. 13 × 66). |
+| `frame` | Cut in nine parts, see section 14. | A medium drawing (e.g. 120 × 80) with careful corners. |
+| `off`, `on` of a lamp | Centred, proportions kept. | Square (e.g. 40 × 40). |
 
 General advice: **transparent** background around the drawing; no large empty margins (they reduce the visible part); one or two percent of margin is enough for thick outlines.
 
-## 6. The knob strip
+## 6. The knob strip (and the two-layer knob)
 
 - The strip holds **N pictures of identical size**, from the knob's **minimum** to its **maximum** position.
 - Vertical (`strip_N`): picture 1 is **at the top**, picture N **at the bottom**. Total height = N × one picture's height; width = one picture's width.
@@ -130,6 +154,8 @@ General advice: **transparent** background around the drawing; no large empty ma
 - Pictures must *overlap exactly* (same centre of rotation) so the knob does not "wobble".
 - In SVG the total height is N × one picture's height: for example `viewBox="0 0 64 2048"` for 32 pictures of 64 × 64. Place each picture in **absolute** coordinates (avoid relying on nested `translate`).
 - It is **strongly advised to have a small script generate the strip** (see the example in section 11) rather than draw it by hand.
+
+**Two-layer knob (`body` + `pointer`).** Lighter and sharper than a strip: `body.svg` is the fixed body, `pointer.svg` the pointer. Both have **the same size** (same `viewBox`); the pointer is drawn **pointing up** (0°) and Neptune turns it around its centre (or `pivot`) between `pointer_angles`. If a style has a pointer, it is used instead of the strip. The strip remains the most robust solution (no rotation on Neptune's side, identical rendering everywhere): choose one or the other.
 
 ## 7. SVG: what works
 
@@ -263,7 +289,62 @@ open('strip_32.svg', 'w').write('\n'.join(out))
 
 ## 13. Known limits of format 1
 
-- Buttons: two states only. Sliders: the handle is a single image. Knobs: a strip of pictures (no two-layer knob yet).
-- No nine-slice: rails are stretched as they are.
+- Buttons: two states, plus hover and disabled. Sliders: the handle is a single image. No fonts in a pack: text uses Neptune's font (colour, size, position and bold are adjustable).
+- Slider rails are stretched as they are (nine-slice is for zone frames only).
 - Pack images are not yet copied into presets or into a Facade's portable ZIP; the project keeps the reference to the pack.
 - The pack's file name is its identifier: renaming it breaks references.
+
+## 14. The zone frame cut in nine parts
+
+A frame drawn once must fit a small or a large zone **without distorting its rounded corners**. So the image is cut into **nine rectangles** with two vertical and two horizontal lines:
+
+```
++-----+-------------+-----+
+|  1  |      2      |  3  |    1, 3, 7, 9 : the 4 corners -> keep their size
++-----+-------------+-----+    2, 8        : top/bottom edges -> stretch in width
+|  4  |      5      |  6  |    4, 6        : left/right edges -> stretch in height
++-----+-------------+-----+    5           : the centre -> stretches both ways
+|  7  |      8      |  9  |
++-----+-------------+-----+
+```
+
+In `style.json`, `"slice": [left, top, right, bottom]` gives the size of the corners **in % of the image**: `[20, 20, 20, 20]` = 20 % of the width on the left and right, 20 % of the height at the top and bottom. Corners are displayed at their natural size (the SVG's declared size, in canvas units) times `slice_scale` (100 % by default); if the zone is too small, they shrink together. Choose a cut that **encloses everything decorative** (rounded corners, thick borders, drawn shadows) in the corners and edges, and a **plain** centre: only plain areas can stretch without showing.
+
+## 15. Text laid on the image
+
+Names (of a drawbar, a button, the caption of a knob or a zone) are drawn by Neptune **over** the image, with the style's settings. One drawbar tab thus serves every stop of an organ, each with its own name. In `style.json`:
+
+```json
+{ "text": { "colour": "#2a2418", "size": 42, "position": "center", "bold": true } }
+```
+
+- `colour`: `#rrggbb` (or `#aarrggbb`). Absent: the theme's text colour.
+- `size`: size in **% of the widget's height** (0 or absent: automatic).
+- `position`: `center` (default), `top`, `bottom`, `left` or `right`.
+- `bold`: `true` (default) or `false`.
+
+The text itself is typed on the widget (**Text...** button). Fonts are not embedded: if the name needs a particular shape, draw it in the image.
+
+## 16. Extra states and lamps
+
+- `off_hover` / `on_hover`: the picture shown when the mouse is over a button or an action (in Play mode). Absent: the normal picture.
+- `disabled`: the picture of a button, action or lamp **not linked** to anything, in Play mode. Absent: the normal picture.
+- **Lamp**: a widget that does nothing but light up. Source of your choice: a parameter (lit at 50 % or more), the notes played on a MIDI channel (for example manual 2), or any note of the track. It uses `off` and `on`; without images, Neptune draws a round lamp.
+
+## 17. Keyboard keys
+
+A keyboard style replaces the keys with your images: `key_white` and `key_black` at rest, `key_white_on` and `key_black_on` for a key pressed **or played from outside** (MIDI keyboard, sequencer). Each image is **stretched** over its key: the shape of the drawing gives the shape of the key (rounded corners, bevel, ivory, ebony...). Without the `_on` images, Neptune lays a translucent tint on the resting key; the colour is set by `key_lit_colour`.
+
+## 18. Theme colours in SVG
+
+In an SVG, write a marker instead of a colour: Neptune replaces it with the theme's colour **before** reading the file. A single set of files then follows the light, dark or high-contrast theme.
+
+| Marker | Theme colour |
+|---|---|
+| `{{accent}}`, `{{accent2}}` | accent colours |
+| `{{text}}`, `{{text_dim}}` | text, dimmed text |
+| `{{bg}}`, `{{card}}`, `{{panel}}` | backgrounds of the application, cards, panels |
+| `{{border}}` | borders |
+| `{{hot}}`, `{{face}}` | knob highlight, knob face |
+
+Example: `<circle cx="20" cy="20" r="14" fill="{{accent}}"/>`. This only works in SVG (not PNG or JPG). An SVG containing a marker is no longer a valid SVG for a drawing editor: to keep it editable, first use a real colour, then swap in the marker at the end.

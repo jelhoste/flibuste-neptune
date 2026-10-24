@@ -497,3 +497,33 @@ TEST_CASE ("Facade notches: custom values, irregular spacing, invert and bounds"
     REQUIRE (pts.size() == 3);
     CHECK (std::abs (pts[1] - 632.4555) < 0.01);
 }
+
+TEST_CASE ("Facade styles: layered knobs, key images, frames, states, text options and lamps round-trip within bounds")
+{
+    facade::Facade f;
+    facade::ImageStyle st;
+    st.id = 1; st.name = "Complet";
+    st.off = "a.svg"; st.on = "b.svg"; st.offHover = "c.svg"; st.onHover = "d.svg"; st.disabled = "e.svg";
+    st.track = "t.svg"; st.handle = "h.svg"; st.strip = "s.svg"; st.body = "body.svg"; st.pointer = "ptr.svg";
+    st.keyWhite = "kw.svg"; st.keyWhiteOn = "kwo.svg"; st.keyBlack = "kb.svg"; st.keyBlackOn = "kbo.svg"; st.frame = "fr.svg";
+    st.frames = 32; st.stripHorizontal = true; st.angleMin = -120; st.angleMax = 100; st.pivotX = 40; st.pivotY = 60;
+    st.sliceLeft = 10; st.sliceTop = 12; st.sliceRight = 14; st.sliceBottom = 16; st.sliceScale = 150;
+    st.textColour = "#ffffff"; st.textSize = 60; st.textPosition = 2; st.textBold = false; st.keyLit = "#f0b429";
+    f.styles.push_back (st);
+    auto lamp = facade::defaultWidget (facade::WidgetType::Lamp, 1, 10, 10);
+    lamp.source = 1; lamp.channel = 3; lamp.style = 1;
+    f.widgets.push_back (lamp);
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+    CHECK (facade::imageRoles().size() == 15);
+
+    f.styles[0].angleMin = -9999; f.styles[0].pivotX = 500; f.styles[0].sliceLeft = 99; f.styles[0].sliceScale = 1; f.styles[0].textSize = 400; f.styles[0].textPosition = 9;
+    f.widgets[0].source = 7;
+    const auto clean = facade::sanitised (f);
+    CHECK (clean.styles[0].angleMin == -360);
+    CHECK (clean.styles[0].pivotX == 100);
+    CHECK (clean.styles[0].sliceLeft == 45);
+    CHECK (clean.styles[0].sliceScale == 25);
+    CHECK (clean.styles[0].textSize == 100);
+    CHECK (clean.styles[0].textPosition == 4);
+    CHECK (clean.widgets[0].source == 2);
+}

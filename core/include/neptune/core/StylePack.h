@@ -4,9 +4,8 @@
 // Convention de contenu (voir docs/specification-styles-facade.md) :
 //   pack.json            facultatif : nom, auteur, licence, version, description du pack
 //   <dossier>/           un dossier par style (les images à la racine forment un seul style)
-//     style.json         facultatif : nom, nombre d'images de la bande, sens
-//     off.svg on.svg     boutons et actions : éteint / fermé et allumé / ouvert
-//     track.svg handle.svg  curseurs : rail et poignée
+//     style.json         facultatif : nom, nombre d'images de la bande, texte, découpe en neuf zones, angles...
+//     off.svg on.svg ...   les images, reconnues par leur nom (rôles : voir facade::imageRoles)
 //     strip_32.svg       potards : bande de 32 images, empilées ; strip_32_h.svg : côte à côte
 // Les formats sont SVG, PNG et JPG. Aucun code n'est exécuté : ce module ne fait que reconnaître des noms de fichiers.
 // Aucune dépendance à JUCE ; la lecture de l'archive ou du dossier est faite par l'adaptateur, qui passe ici la liste des entrées.
@@ -15,19 +14,18 @@
 #include <string_view>
 #include <vector>
 
+#include "neptune/core/Facade.h"
+
 namespace neptune::core::stylepack
 {
-constexpr int formatVersion = 1;
+constexpr int formatVersion = 2;
 constexpr std::size_t maxStylesPerPack = 64;
 
-// Un style trouvé dans un pack. Les chemins sont ceux des entrées dans le pack (relatifs à sa racine, séparés par « / ») ; vide : absent.
+// Un style trouvé dans un pack : ses chemins d'image sont ceux des entrées dans le pack (relatifs à sa racine, séparés par « / »).
 struct PackStyle
 {
-    std::string folder;   // dossier du style dans le pack ("" : racine)
-    std::string name;
-    std::string off, on, track, handle, strip;
-    int frames = 0;
-    bool stripHorizontal = false;
+    std::string folder;              // dossier du style dans le pack ("" : racine)
+    facade::ImageStyle style;        // `style.name` : le nom ; `id` n'est pas renseigné
 };
 
 struct PackInfo
@@ -38,17 +36,16 @@ struct PackInfo
     std::vector<std::string> warnings;   // problèmes non bloquants, en anglais (pour le journal ou l'interface)
 };
 
-enum class Role { None, Off, On, Track, Handle, Strip };
-
 struct ImageName
 {
-    Role role = Role::None;
-    int frames = 0;              // Strip : nombre d'images lu dans le nom (strip_32), 0 si absent
-    bool horizontal = false;     // Strip : images côte à côte (strip_32_h)
+    std::string role;            // nom canonique du rôle (facade::imageRoles) ; vide : pas une image reconnue
+    int frames = 0;              // bande : nombre d'images lu dans le nom (strip_32), 0 si absent
+    bool horizontal = false;     // bande : images côte à côte (strip_32_h)
 };
 
 // Reconnaît le nom d'un fichier image (sans dossier) : rôle, bande. Extensions acceptées : svg, png, jpg, jpeg (casse ignorée).
-// Synonymes acceptés : closed / released -> off ; open / pressed -> on ; rail / groove -> track ; thumb -> handle ; filmstrip -> strip.
+// Synonymes : closed / released -> off ; open / pressed -> on ; hover -> off_hover ; inactive -> disabled ; rail / groove -> track ;
+// thumb -> handle ; filmstrip -> strip ; dial -> body ; needle -> pointer ; white_key... -> key_white... ; panel -> frame.
 ImageName parseImageName (std::string_view fileName);
 
 // Vrai si le chemin d'une entrée est sûr : relatif, sans « .. », sans barre inverse ni lettre de lecteur.

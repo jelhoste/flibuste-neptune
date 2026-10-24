@@ -70,11 +70,19 @@ ImageName parseImageName (std::string_view fileName)
     if (ext != "svg" && ext != "png" && ext != "jpg" && ext != "jpeg") return out;
     const std::string stem = name.substr (0, dot);
 
-    static const std::map<std::string, Role> words = {
-        { "off", Role::Off }, { "closed", Role::Off }, { "released", Role::Off },
-        { "on", Role::On }, { "open", Role::On }, { "pressed", Role::On },
-        { "track", Role::Track }, { "rail", Role::Track }, { "groove", Role::Track },
-        { "handle", Role::Handle }, { "thumb", Role::Handle } };
+    static const std::map<std::string, std::string> words = {
+        { "off", "off" }, { "closed", "off" }, { "released", "off" },
+        { "on", "on" }, { "open", "on" }, { "pressed", "on" },
+        { "off_hover", "off_hover" }, { "hover", "off_hover" }, { "closed_hover", "off_hover" }, { "released_hover", "off_hover" },
+        { "on_hover", "on_hover" }, { "open_hover", "on_hover" }, { "pressed_hover", "on_hover" },
+        { "disabled", "disabled" }, { "inactive", "disabled" },
+        { "track", "track" }, { "rail", "track" }, { "groove", "track" },
+        { "handle", "handle" }, { "thumb", "handle" },
+        { "body", "body" }, { "dial", "body" },
+        { "pointer", "pointer" }, { "needle", "pointer" },
+        { "key_white", "key_white" }, { "white_key", "key_white" }, { "key_white_on", "key_white_on" }, { "white_key_on", "key_white_on" },
+        { "key_black", "key_black" }, { "black_key", "key_black" }, { "key_black_on", "key_black_on" }, { "black_key_on", "key_black_on" },
+        { "frame", "frame" }, { "panel", "frame" } };
     if (const auto it = words.find (stem); it != words.end()) { out.role = it->second; return out; }
 
     // strip, strip_32, strip_32_h (aussi « filmstrip »)
@@ -82,7 +90,7 @@ ImageName parseImageName (std::string_view fileName)
     if (stem.rfind ("filmstrip", 0) == 0) rest = stem.substr (9);
     else if (stem.rfind ("strip", 0) == 0) rest = stem.substr (5);
     else return out;
-    out.role = Role::Strip;
+    out.role = "strip";
     if (rest.empty()) return out;
     if (rest.size() < 2 || rest[0] != '_') return ImageName {};
     rest = rest.substr (1);
@@ -142,41 +150,44 @@ PackInfo analyse (std::string_view fileStem, const std::vector<std::string>& ent
     for (const auto& e : entries)
     {
         const auto image = parseImageName (baseName (e));
-        if (image.role != Role::None) byFolder[dirName (e)].push_back ({ e, image });
+        if (! image.role.empty()) byFolder[dirName (e)].push_back ({ e, image });
     }
 
     for (auto& [folder, found] : byFolder)
     {
         if (pack.styles.size() >= maxStylesPerPack) { pack.warnings.push_back ("More than 64 styles in the pack: the others are ignored."); break; }
-        PackStyle st;
-        st.folder = folder;
+        PackStyle ps;
+        ps.folder = folder;
+        auto& st = ps.style;
         st.name = folder.empty() ? pack.name : baseName (folder);
         const auto sidecar = folder.empty() ? std::string ("style.json") : folder + "/style.json";
         const bool hasJson = std::find (entries.begin(), entries.end(), sidecar) != entries.end();
         const auto meta = hasJson ? parseJson (readText (sidecar)) : json::object();
         if (const auto n = text (meta, "name"); ! n.empty()) st.name = clipped (n, 64);
 
-        auto assign = [&] (Role role, std::string& slot, ImageName* kept)
-        {
-            for (const auto& f : found)
+        ImageName strip;
+        for (const auto& f : found)
+            for (const auto& role : facade::imageRoles())
             {
-                if (f.image.role != role) continue;
+                if (f.image.role != role.name) continue;
+                auto& slot = st.*(role.field);
                 if (! slot.empty())
                 {
-                    if (rank (f.entry) < rank (slot)) { slot = f.entry; if (kept) *kept = f.image; }
+                    if (rank (f.entry) < rank (slot)) { slot = f.entry; if (f.image.role == "strip") strip = f.image; }
                     pack.warnings.push_back ("Style \"" + st.name + "\": several files for the same image, one kept (SVG is preferred).");
                     continue;
                 }
                 slot = f.entry;
-                if (kept) *kept = f.image;
+                if (f.image.role == "strip") strip = f.image;
             }
+
+        auto intPair = [&meta] (const char* key, int& a, int& b)
+        {
+            const auto it = meta.find (key);
+            if (it != meta.end() && it->is_array() && it->size() == 2 && (*it)[0].is_number() && (*it)[1].is_number())
+            { a = static_cast<int> ((*it)[0].get<double>()); b = static_cast<int> ((*it)[1].get<double>()); }
         };
-        ImageName strip;
-        assign (Role::Off, st.off, nullptr);
-        assign (Role::On, st.on, nullptr);
-        assign (Role::Track, st.track, nullptr);
-        assign (Role::Handle, st.handle, nullptr);
-        assign (Role::Strip, st.strip, &strip);
+        auto intOf = [] (const json& o, const char* key, int& v) { const auto it = o.find (key); if (it != o.end() && it->is_number()) v = static_cast<int> (it->get<double>()); };
 
         if (! st.strip.empty())
         {
@@ -192,7 +203,28 @@ PackInfo analyse (std::string_view fileStem, const std::vector<std::string>& ent
                 st.stripHorizontal = false;
             }
         }
-        pack.styles.push_back (std::move (st));
+        intPair ("pointer_angles", st.angleMin, st.angleMax);
+        intPair ("pivot", st.pivotX, st.pivotY);
+        if (const auto it = meta.find ("slice"); it != meta.end() && it->is_array() && it->size() == 4)
+        {
+            int* v[4] = { &st.sliceLeft, &st.sliceTop, &st.sliceRight, &st.sliceBottom };
+            for (std::size_t i = 0; i < 4; ++i) if ((*it)[i].is_number()) *v[i] = static_cast<int> ((*it)[i].get<double>());
+        }
+        intOf (meta, "slice_scale", st.sliceScale);
+        st.keyLit = clipped (text (meta, "key_lit_colour"), 16);
+        if (const auto t = meta.find ("text"); t != meta.end() && t->is_object())
+        {
+            st.textColour = clipped (text (*t, "colour").empty() ? text (*t, "color") : text (*t, "colour"), 16);
+            intOf (*t, "size", st.textSize);
+            const auto position = lower (text (*t, "position"));
+            if (position == "top") st.textPosition = 1;
+            else if (position == "bottom") st.textPosition = 2;
+            else if (position == "left") st.textPosition = 3;
+            else if (position == "right") st.textPosition = 4;
+            if (const auto b = t->find ("bold"); b != t->end() && b->is_boolean()) st.textBold = b->get<bool>();
+        }
+        st = facade::sanitised ([&st] { facade::Facade f; f.styles.push_back (st); return f; }()).styles.front();   // mêmes bornes que dans la Façade
+        pack.styles.push_back (std::move (ps));
     }
     if (pack.styles.empty()) pack.warnings.push_back ("No style found: put off.svg / on.svg, track.svg / handle.svg or strip_32.svg in the pack (see the specification).");
     return pack;
