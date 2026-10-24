@@ -29,6 +29,7 @@ enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, C
 constexpr int numWidgetTypes = 9;
 constexpr int maxStyles = 64;
 constexpr int maxStripFrames = 512;
+constexpr std::size_t maxNotches = 128;
 
 // Style d'images (PNG, JPG ou SVG), réutilisable par plusieurs widgets. Chaque widget n'utilise que ce qui le concerne ; une image absente
 // laisse le dessin d'origine.
@@ -86,6 +87,12 @@ struct Widget
     int firstNote = 36;             // Clavier : première touche affichée à gauche (do) ; le nombre de touches suit la largeur
     int hold = 0;                   // Clavier : 1, une touche cliquée reste enfoncée jusqu'au clic suivant
     int velocity = 100;             // Clavier : vélocité envoyée, 1..127
+    // Potard et curseur : fonction, indépendante du style d'images.
+    //  stepMode 0 : automatique (le curseur saute de cran en cran sur un paramètre à pas, le potard est continu) ;
+    //  1 : toujours continu ; 2 : crans personnalisés, aux valeurs réelles de `notches` (une position par cran, à égale distance).
+    int stepMode = 0;
+    int invert = 0;                 // 1 : sens inversé
+    std::vector<double> notches;    // valeurs réelles (celles du paramètre), triées, sans doublon
     int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
     int vertical = 0;               // Curseur : 1, vertical
 
@@ -94,7 +101,7 @@ struct Widget
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
-            && style == o.style && vertical == o.vertical;
+            && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && notches == o.notches;
     }
 };
 
@@ -115,6 +122,13 @@ struct Facade
     const Widget* find (int id) const noexcept;
     Widget* find (int id) noexcept;
 };
+
+// Crans personnalisés. Les positions sont celles des crans, à égale distance l'un de l'autre sur [0, 1] ; la valeur d'un cran est
+// une valeur réelle du paramètre.
+double notchPosition (const std::vector<double>& notches, double plain) noexcept;     // position du cran le plus proche de `plain`
+double notchValueAt (const std::vector<double>& notches, double position) noexcept;   // valeur du cran le plus proche de `position`
+// `n` crans (2..maxNotches) répartis régulièrement sur la course du paramètre (en tenant compte de sa courbe), sans doublon.
+std::vector<double> evenNotches (const ParamSpec&, int n);
 
 // Dimensions par défaut d'un nouveau widget du type donné.
 Widget defaultWidget (WidgetType type, int id, int x, int y);

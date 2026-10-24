@@ -5,6 +5,7 @@
 #include <array>
 #include <map>
 
+#include "FacadeExamples.h"
 #include "VelocityPanel.h"
 
 using neptune::core::theme::Token;
@@ -291,7 +292,8 @@ public:
         {
             o.processor_.uiBeginEdit (w->param);
             mode_ = Mode::Turn;
-            startNorm_ = o.processor_.parameters().getNormalized (w->param);
+            startNorm_ = shownPosition (*w);
+            turnId_ = w->id;
             startY_ = e.position.y;
         }
     }
@@ -323,7 +325,8 @@ public:
         if (mode_ == Mode::Turn)
         {
             const double range = e.mods.isShiftDown() ? 1000.0 : 200.0;
-            o.processor_.uiSetNormalised (playId_, juce::jlimit (0.0, 1.0, startNorm_ + (startY_ - e.position.y) / range));
+            if (const auto* w = o.facade_.find (turnId_))
+                o.processor_.uiSetNormalised (playId_, normalisedFor (*w, juce::jlimit (0.0, 1.0, startNorm_ + (startY_ - e.position.y) / range), false));
             repaint();
             return;
         }
@@ -417,10 +420,12 @@ public:
         auto& ps = o.processor_.parameters();
         if (ps.indexOf (w->param) == neptune::core::ParameterSet::npos) return;
         const auto* spec = ps.find (w->param);
-        const bool stepped = spec != nullptr && spec->max > spec->min && (spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped);
-        const double delta = stepped ? (wheel.deltaY > 0 ? 1.0 : -1.0) / (spec->max - spec->min) : wheel.deltaY * 0.1;   // un cran par molette sur un paramètre à pas
+        const bool custom = w->stepMode == 2 && w->notches.size() >= 2;
+        const bool stepped = custom || (w->stepMode == 0 && spec != nullptr && spec->max > spec->min && (spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped));
+        const double cran = custom ? 1.0 / static_cast<double> (w->notches.size() - 1) : spec != nullptr && spec->max > spec->min ? 1.0 / (spec->max - spec->min) : 0.1;
+        const double delta = stepped ? (wheel.deltaY > 0 ? 1.0 : -1.0) * cran : wheel.deltaY * 0.1;   // un cran par molette quand le widget a des crans
         o.processor_.uiBeginEdit (w->param);
-        o.processor_.uiSetNormalised (w->param, juce::jlimit (0.0, 1.0, ps.getNormalized (w->param) + delta));
+        o.processor_.uiSetNormalised (w->param, normalisedFor (*w, juce::jlimit (0.0, 1.0, shownPosition (*w) + delta), w->type == fc::WidgetType::Slider));
         o.processor_.uiEndEdit (w->param);
     }
 
@@ -459,6 +464,30 @@ public:
 private:
     enum class Mode { None, Move, Resize, Turn, Band, Key, Slide };
 
+    // Position affichée (0..1, dans le sens de l'écran) d'un potard ou d'un curseur : celle du paramètre, ou celle de son cran le plus
+    // proche si le widget a des crans personnalisés ; inversée si le widget est inversé.
+    double shownPosition (const fc::Widget& w) const
+    {
+        auto& ps = owner_.processor_.parameters();
+        const auto* spec = w.param != 0 ? ps.find (w.param) : nullptr;
+        if (spec == nullptr) return 0.0;
+        const double t = w.stepMode == 2 && w.notches.size() >= 2 ? fc::notchPosition (w.notches, ps.get (w.param)) : ps.getNormalized (w.param);
+        return w.invert != 0 ? 1.0 - t : t;
+    }
+
+    // Valeur normalisée du paramètre pour une position d'écran (0..1) : crans personnalisés, crans automatiques d'un curseur sur un
+    // paramètre à pas, ou continue.
+    double normalisedFor (const fc::Widget& w, double t, bool slider) const
+    {
+        t = std::clamp (w.invert != 0 ? 1.0 - t : t, 0.0, 1.0);
+        const auto* spec = owner_.processor_.parameters().find (w.param);
+        if (spec == nullptr) return t;
+        if (w.stepMode == 2 && w.notches.size() >= 2) return spec->toNormalized (spec->clamp (fc::notchValueAt (w.notches, t)));
+        const bool discrete = spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped || spec->kind == neptune::core::Kind::Toggle;
+        if (w.stepMode == 0 && slider && discrete && spec->max > spec->min) return spec->toNormalized (spec->min + std::round (t * (spec->max - spec->min)));
+        return t;
+    }
+
     // Place la poignée du curseur sous le point (canevas) : crans automatiques sur un paramètre à pas ou à choix.
     void slideTo (const fc::Widget& w, juce::Point<float> p)
     {
@@ -472,13 +501,8 @@ private:
         const float travel = std::max (1.0f, static_cast<float> (vertical ? w.h : w.w) - len);
         double t = ((vertical ? p.y : p.x) - start) / travel;
         if (vertical) t = 1.0 - t;
-        t = std::clamp (t, 0.0, 1.0);
-        if (spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped || spec->kind == neptune::core::Kind::Toggle)
-        {
-            const double steps = spec->max - spec->min;
-            if (steps > 0.0) t = spec->toNormalized (spec->min + std::round (t * steps));
-        }
-        o.processor_.uiSetNormalised (w.param, t);
+        t = std::clamp (t, 0.0, 1.0);   // position d'écran ; normalisedFor applique l'inversion
+        o.processor_.uiSetNormalised (w.param, normalisedFor (w, t, true));
         repaint();
     }
 
@@ -687,6 +711,7 @@ private:
         const juce::Rectangle<float> b (static_cast<float> (w.x), static_cast<float> (w.y), static_cast<float> (w.w), static_cast<float> (w.h));
         const juce::String caption = w.text.empty() ? (linked ? utf8 (spec->name) : juce::String()) : utf8 (w.text);
         const float n = linked ? static_cast<float> (ps.getNormalized (w.param)) : 0.0f;
+        const float pos = linked ? static_cast<float> (shownPosition (w)) : 0.0f;   // potard et curseur : crans et inversion compris
 
         switch (w.type)
         {
@@ -700,7 +725,7 @@ private:
                 if (strip.isValid())
                 {
                     // bande d'images : une image par position du potard
-                    const int frames = style->frames, frame = juce::jlimit (0, frames - 1, juce::roundToInt (n * static_cast<float> (frames - 1)));
+                    const int frames = style->frames, frame = juce::jlimit (0, frames - 1, juce::roundToInt (pos * static_cast<float> (frames - 1)));
                     const int fw = style->stripHorizontal ? strip.getWidth() / frames : strip.getWidth();
                     const int fh = style->stripHorizontal ? strip.getHeight() : strip.getHeight() / frames;
                     if (fw > 0 && fh > 0)
@@ -711,7 +736,7 @@ private:
                     }
                 }
                 else
-                    paintNeptuneKnob (g, r, n, o.palette_, o.knobStyle_);
+                    paintNeptuneKnob (g, r, pos, o.palette_, o.knobStyle_);
                 g.setColour (o.colour (Token::Text));
                 g.setFont (juce::FontOptions (14.0f));
                 g.drawFittedText (caption, captionRow.toNearestInt(), juce::Justification::centred, 1);
@@ -807,7 +832,6 @@ private:
                 }
                 const float len = sliderHandleLength (w, handle);
                 const float travel = (vertical ? b.getHeight() : b.getWidth()) - len;
-                const float pos = linked ? n : 0.0f;
                 juce::Rectangle<float> hr = vertical ? juce::Rectangle<float> (b.getX(), b.getBottom() - len - pos * travel, b.getWidth(), len)
                                                      : juce::Rectangle<float> (b.getX() + pos * travel, b.getY(), len, b.getHeight());
                 if (handle.isValid()) g.drawImage (handle, hr, juce::RectanglePlacement::centred);
@@ -912,7 +936,7 @@ private:
     neptune::core::ParamId playId_ = 0;
     double startNorm_ = 0.0;
     float startY_ = 0.0f;
-    int slideId_ = 0;
+    int slideId_ = 0, turnId_ = 0;
     mutable std::map<std::string, juce::Image> pictures_;   // chemin -> image (vide : introuvable)
     std::map<int, std::unique_ptr<VelocityPanel>> panels_;
     std::uint32_t panelRevision_ = 0xFFFFFFFFu;
@@ -1256,7 +1280,10 @@ public:
         deleteButton_.onClick = [this] { deleteStyle(); };
         closeButton_.setButtonText (owner.text ("modal.close"));
         closeButton_.onClick = [this] { close(); };
-        for (auto* b : { &newButton_, &deleteButton_, &closeButton_ }) addAndMakeVisible (*b);
+        examplesButton_.setButtonText (owner.text ("facade.examples"));
+        examplesButton_.setTooltip (owner.text ("facade.tip_examples"));
+        examplesButton_.onClick = [this] { createExamples(); };
+        for (auto* b : { &newButton_, &deleteButton_, &closeButton_, &examplesButton_ }) addAndMakeVisible (*b);
 
         nameLabel_.setText (owner.text ("facade.style_name"), juce::dontSendNotification);
         nameLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
@@ -1321,6 +1348,8 @@ public:
         r.removeFromTop (6);
         auto bottom = r.removeFromBottom (40);
         closeButton_.setBounds (bottom.removeFromRight (140));
+        examplesButton_.setBounds (bottom.removeFromLeft (200));
+        bottom.removeFromLeft (10);
         hint_.setBounds (bottom);
         r.removeFromBottom (8);
         auto left = r.removeFromLeft (220);
@@ -1425,6 +1454,54 @@ private:
                                });
     }
 
+    // Écrit les modèles (SVG et LISEZMOI) dans un dossier au choix et crée les styles d'exemple qui les utilisent.
+    void createExamples()
+    {
+        chooser_ = std::make_unique<juce::FileChooser> (owner_.text ("facade.examples_choose"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
+        chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                               [safe = juce::Component::SafePointer<StylePanel> (this)] (const juce::FileChooser& c)
+                               {
+                                   if (safe == nullptr) return;
+                                   const auto dir = c.getResult();
+                                   if (dir.isDirectory()) safe->writeExamples (dir.getChildFile ("Neptune-styles"));
+                               });
+    }
+
+    void writeExamples (const juce::File& dir)
+    {
+        if (! dir.createDirectory().wasOk()) return;
+        const bool french = owner_.tr_.language() == "fr";
+        int written = 0;
+        for (const auto& f : facade_examples::files (french))
+        {
+            const auto target = dir.getChildFile (f.name);
+            if (target.existsAsFile()) continue;   // un modèle déjà modifié par l'utilisateur n'est jamais écrasé
+            if (target.replaceWithText (f.content)) ++written;
+        }
+        auto f = owner_.facade_;
+        int added = 0;
+        for (const auto& def : facade_examples::styles())
+        {
+            auto path = [&dir] (const juce::String& name) { return name.isEmpty() ? std::string() : dir.getChildFile (name).getFullPathName().toStdString(); };
+            fc::ImageStyle st;
+            st.off = path (def.off); st.on = path (def.on); st.track = path (def.track); st.handle = path (def.handle); st.strip = path (def.strip);
+            st.frames = def.frames;
+            const bool known = std::any_of (f.styles.begin(), f.styles.end(), [&st] (const fc::ImageStyle& o)
+                                            { return o.off == st.off && o.on == st.on && o.track == st.track && o.handle == st.handle && o.strip == st.strip; });
+            if (known || static_cast<int> (f.styles.size()) >= fc::maxStyles) continue;
+            st.id = f.freeStyleId();
+            st.name = owner_.text (def.nameKey).toStdString();
+            f.styles.push_back (std::move (st));
+            ++added;
+        }
+        if (added > 0) owner_.commit (std::move (f), "Facade: example styles");
+        owner_.canvas_->clearPictures();
+        list_.updateContent();
+        if (list_.getSelectedRow() < 0 && ! owner_.facade_.styles.empty()) list_.selectRow (0);
+        syncFields();
+        hint_.setText (juce::String::fromUTF8 (owner_.tr_.format ("facade.examples_done", { dir.getFullPathName().toStdString(), std::to_string (written), std::to_string (added) }).c_str()), juce::dontSendNotification);
+    }
+
     void createStyle()
     {
         auto f = owner_.facade_;
@@ -1478,13 +1555,164 @@ private:
     FacadeView& owner_;
     juce::Label title_, nameLabel_, framesLabel_, hint_;
     juce::ListBox list_;
-    juce::TextButton newButton_, deleteButton_, closeButton_;
+    juce::TextButton newButton_, deleteButton_, closeButton_, examplesButton_;
     juce::TextEditor name_, frames_;
     juce::ToggleButton stripH_;
     std::array<Row, 5> rows_;
     std::unique_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StylePanel)
+};
+
+// ============================== Crans d'un potard ou d'un curseur ==============================
+
+// Fonction d'un potard ou d'un curseur, indépendante de son style : automatique, continu, ou crans personnalisés (une valeur par ligne).
+class FacadeView::NotchPanel : public juce::Component
+{
+public:
+    NotchPanel (FacadeView& owner, int widgetId) : owner_ (owner), id_ (widgetId)
+    {
+        const auto* w = owner.facade_.find (widgetId);
+        auto& ps = owner.processor_.parameters();
+        spec_ = w != nullptr && w->param != 0 ? ps.find (w->param) : nullptr;
+        title_.setText (owner.text ("facade.notch_title"), juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (title_);
+        const char* keys[3] = { "facade.notch_auto", "facade.notch_continuous", "facade.notch_custom" };
+        for (int i = 0; i < 3; ++i)
+        {
+            modes_[static_cast<std::size_t> (i)].setButtonText (owner.text (keys[i]));
+            modes_[static_cast<std::size_t> (i)].setRadioGroupId (4242);
+            modes_[static_cast<std::size_t> (i)].setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
+            addAndMakeVisible (modes_[static_cast<std::size_t> (i)]);
+        }
+        modes_[static_cast<std::size_t> (w != nullptr ? juce::jlimit (0, 2, w->stepMode) : 0)].setToggleState (true, juce::dontSendNotification);
+        hint_.setText (owner.text (spec_ != nullptr ? "facade.notch_hint" : "facade.notch_unlinked"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (13.0f));
+        hint_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
+        addAndMakeVisible (hint_);
+        editor_.setMultiLine (true, false);
+        editor_.setReturnKeyStartsNewLine (true);
+        editor_.setFont (juce::FontOptions (17.0f));
+        if (w != nullptr && spec_ != nullptr)
+        {
+            juce::StringArray lines;
+            for (const double v : w->notches) lines.add (utf8 (ps.toText (*spec_, v)));
+            editor_.setText (lines.joinIntoString ("\n"), false);
+        }
+        editor_.setEnabled (spec_ != nullptr);
+        addAndMakeVisible (editor_);
+        countLabel_.setText (owner.text ("facade.notch_count"), juce::dontSendNotification);
+        countLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (countLabel_);
+        count_.setInputRestrictions (3, "0123456789");
+        count_.setFont (juce::FontOptions (17.0f));
+        count_.setText ("9", false);
+        addAndMakeVisible (count_);
+        spread_.setButtonText (owner.text ("facade.notch_spread"));
+        spread_.setEnabled (spec_ != nullptr);
+        spread_.onClick = [this]
+        {
+            if (spec_ == nullptr) return;
+            juce::StringArray lines;
+            for (const double v : fc::evenNotches (*spec_, count_.getText().getIntValue())) lines.add (utf8 (owner_.processor_.parameters().toText (*spec_, v)));
+            editor_.setText (lines.joinIntoString ("\n"), false);
+            modes_[2].setToggleState (true, juce::dontSendNotification);
+        };
+        addAndMakeVisible (spread_);
+        error_.setColour (juce::Label::textColourId, owner.colour (Token::KnobHot));
+        addAndMakeVisible (error_);
+        ok_.setButtonText (owner.text ("facade.ok"));
+        ok_.onClick = [this] { accept(); };
+        cancel_.setButtonText (owner.text ("facade.picker_cancel"));
+        cancel_.onClick = [this] { close(); };
+        addAndMakeVisible (ok_);
+        addAndMakeVisible (cancel_);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (owner_.colour (Token::PanelBg));
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (panel().toFloat(), 10.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto r = panel().reduced (18);
+        title_.setBounds (r.removeFromTop (32));
+        for (auto& m : modes_) m.setBounds (r.removeFromTop (28));
+        hint_.setBounds (r.removeFromTop (48));
+        auto bottom = r.removeFromBottom (44);
+        r.removeFromBottom (6);
+        error_.setBounds (r.removeFromBottom (24));
+        auto row = r.removeFromBottom (34);
+        r.removeFromBottom (6);
+        editor_.setBounds (r);
+        countLabel_.setBounds (row.removeFromLeft (110));
+        count_.setBounds (row.removeFromLeft (70));
+        row.removeFromLeft (10);
+        spread_.setBounds (row.removeFromLeft (260));
+        cancel_.setBounds (bottom.removeFromRight (150));
+        bottom.removeFromRight (10);
+        ok_.setBounds (bottom.removeFromRight (150));
+    }
+
+private:
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (600, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+
+    void accept()
+    {
+        int mode = 0;
+        for (int i = 0; i < 3; ++i) if (modes_[static_cast<std::size_t> (i)].getToggleState()) mode = i;
+        std::vector<double> notches;
+        if (mode == 2)
+        {
+            if (spec_ == nullptr) { error_.setText (owner_.text ("facade.notch_unlinked"), juce::dontSendNotification); return; }
+            const auto lines = juce::StringArray::fromLines (editor_.getText());
+            for (int i = 0; i < lines.size(); ++i)
+            {
+                if (lines[i].trim().isEmpty()) continue;
+                double plain = 0.0;
+                if (! owner_.processor_.parameters().fromText (spec_->id, lines[i].trim().toStdString(), plain))
+                {
+                    error_.setText (juce::String::fromUTF8 (owner_.tr_.format ("facade.notch_error_line", { std::to_string (i + 1) }).c_str()), juce::dontSendNotification);
+                    return;
+                }
+                notches.push_back (spec_->clamp (plain));
+            }
+            if (notches.size() < 2) { error_.setText (owner_.text ("facade.notch_error_few"), juce::dontSendNotification); return; }
+        }
+        auto f = owner_.facade_;
+        if (auto* w = f.find (id_))
+        {
+            w->stepMode = mode;
+            if (mode == 2) w->notches = notches;
+            owner_.commit (std::move (f), "Facade: notches");
+        }
+        close();
+    }
+
+    void close()
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (&owner_)]
+        {
+            if (safe != nullptr) { safe->notchPanel_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
+        });
+    }
+
+    FacadeView& owner_;
+    int id_;
+    const neptune::core::ParamSpec* spec_ = nullptr;
+    juce::Label title_, hint_, countLabel_, error_;
+    std::array<juce::ToggleButton, 3> modes_;
+    juce::TextEditor editor_, count_;
+    juce::TextButton spread_, ok_, cancel_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NotchPanel)
 };
 
 // ============================== Vue ==============================
@@ -1522,6 +1750,12 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (zoneButton_, "facade.add_zone", fc::WidgetType::Zone);
     setupAdd (keyboardButton_, "facade.add_keyboard", fc::WidgetType::Keyboard);
     setupAdd (sliderButton_, "facade.add_slider", fc::WidgetType::Slider);
+    notchesButton_.setButtonText (text ("facade.notches"));
+    notchesButton_.setTooltip (text ("facade.tip_notches"));
+    notchesButton_.onClick = [this] { openNotches(); };
+    invertButton_.setButtonText (text ("facade.invert"));
+    invertButton_.setTooltip (text ("facade.tip_invert"));
+    invertButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.invert = w.invert != 0 ? 0 : 1; }, "Facade: invert"); };
     stylesButton_.setButtonText (text ("facade.styles"));
     stylesButton_.setTooltip (text ("facade.tip_styles"));
     stylesButton_.onClick = [this] { openStyles(); };
@@ -1602,7 +1836,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     alignButton_.setTooltip (text ("facade.tip_align"));
 
     for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -1640,6 +1874,10 @@ void FacadeView::updateButtons()
         if (selection_.count (w.id) != 0 && takesStyle (w.type)) anyStylable = true;
     styleButton_.setVisible (editMode_ && anyStylable);
     orientButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Slider);
+    const bool dial = editMode_ && one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Knob);
+    notchesButton_.setVisible (dial);
+    invertButton_.setVisible (dial);
+    if (dial) invertButton_.setToggleState (one->invert != 0, juce::dontSendNotification);
     if (one != nullptr && one->type == fc::WidgetType::Slider) orientButton_.setToggleState (one->vertical != 0, juce::dontSendNotification);
     if (keyboard) kbHoldButton_.setToggleState (one->hold != 0, juce::dontSendNotification);
     layoutButton_.setVisible (zone);
@@ -1695,13 +1933,14 @@ void FacadeView::resized()
     if (editMode_)
     {
         flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &orientButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
     if (prompt_ != nullptr) prompt_->setBounds (getLocalBounds());
     if (help_ != nullptr) help_->setBounds (getLocalBounds());
     if (stylePanel_ != nullptr) stylePanel_->setBounds (getLocalBounds());
+    if (notchPanel_ != nullptr) notchPanel_->setBounds (getLocalBounds());
 }
 
 void FacadeView::paint (juce::Graphics&) {}
@@ -2030,6 +2269,16 @@ void FacadeView::editText()
     addAndMakeVisible (*prompt_);
     prompt_->setBounds (getLocalBounds());
     prompt_->toFront (true);
+}
+
+void FacadeView::openNotches()
+{
+    const auto* w = facade_.find (single());
+    if (notchPanel_ != nullptr || w == nullptr || (w->type != fc::WidgetType::Knob && w->type != fc::WidgetType::Slider)) return;
+    notchPanel_ = std::make_unique<NotchPanel> (*this, w->id);
+    addAndMakeVisible (*notchPanel_);
+    notchPanel_->setBounds (getLocalBounds());
+    notchPanel_->toFront (true);
 }
 
 void FacadeView::openStyles()

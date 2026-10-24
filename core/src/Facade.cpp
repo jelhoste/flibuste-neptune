@@ -46,6 +46,35 @@ Widget* Facade::find (int id) noexcept
     return nullptr;
 }
 
+double notchPosition (const std::vector<double>& notches, double plain) noexcept
+{
+    if (notches.size() < 2) return 0.0;
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < notches.size(); ++i)
+        if (std::abs (notches[i] - plain) < std::abs (notches[best] - plain)) best = i;
+    return static_cast<double> (best) / static_cast<double> (notches.size() - 1);
+}
+
+double notchValueAt (const std::vector<double>& notches, double position) noexcept
+{
+    if (notches.empty()) return 0.0;
+    if (notches.size() == 1) return notches.front();
+    const double t = std::clamp (std::isfinite (position) ? position : 0.0, 0.0, 1.0);
+    return notches[static_cast<std::size_t> (std::lround (t * static_cast<double> (notches.size() - 1)))];
+}
+
+std::vector<double> evenNotches (const ParamSpec& spec, int n)
+{
+    n = std::clamp (n, 2, static_cast<int> (maxNotches));
+    std::vector<double> out;
+    for (int i = 0; i < n; ++i)
+    {
+        const double v = spec.fromNormalized (static_cast<double> (i) / static_cast<double> (n - 1));
+        if (out.empty() || std::abs (v - out.back()) > 1.0e-9) out.push_back (v);   // un paramètre à pas peut avoir moins de valeurs que demandé
+    }
+    return out;
+}
+
 Widget defaultWidget (WidgetType type, int id, int x, int y)
 {
     Widget w;
@@ -122,6 +151,13 @@ Facade sanitised (Facade f)
         w.hold = w.hold != 0 ? 1 : 0;
         w.velocity = std::clamp (w.velocity, 1, 127);
         w.vertical = w.vertical != 0 ? 1 : 0;
+        w.invert = w.invert != 0 ? 1 : 0;
+        w.stepMode = std::clamp (w.stepMode, 0, 2);
+        w.notches.erase (std::remove_if (w.notches.begin(), w.notches.end(), [] (double v) { return ! std::isfinite (v); }), w.notches.end());
+        std::sort (w.notches.begin(), w.notches.end());
+        w.notches.erase (std::unique (w.notches.begin(), w.notches.end()), w.notches.end());
+        if (w.notches.size() > maxNotches) w.notches.resize (maxNotches);
+        if (w.stepMode == 2 && w.notches.size() < 2) w.stepMode = 0;   // il faut au moins deux crans
         if (w.id <= 0 || used.count (w.id) != 0)
         {
             int id = 1;
@@ -513,6 +549,12 @@ std::string toJson (const Facade& f)
         if (! w.text.empty()) e["text"] = w.text;
         if (w.parent != 0) e["parent"] = w.parent;
         if (w.style != 0) e["style"] = w.style;
+        if (w.type == WidgetType::Knob || w.type == WidgetType::Slider)
+        {
+            if (w.stepMode != 0) e["steps"] = w.stepMode;
+            if (w.invert != 0) e["invert"] = 1;
+            if (! w.notches.empty()) e["notches"] = w.notches;
+        }
         if (w.type == WidgetType::Slider) e["vertical"] = w.vertical;
         if (w.type == WidgetType::Keyboard)
         {
@@ -607,6 +649,11 @@ Facade fromJson (std::string_view text)
             w.gap = intOf (e, "gap", 8);
             w.columns = intOf (e, "cols", 2);
             w.style = intOf (e, "style", 0);
+            w.stepMode = intOf (e, "steps", 0);
+            w.invert = intOf (e, "invert", 0);
+            if (const auto n = e.find ("notches"); n != e.end() && n->is_array())
+                for (const auto& v : *n)
+                    if (v.is_number() && w.notches.size() < maxNotches) w.notches.push_back (v.get<double>());
             w.vertical = intOf (e, "vertical", 0);
             w.channel = intOf (e, "ch", 1);
             w.firstNote = intOf (e, "first", 36);

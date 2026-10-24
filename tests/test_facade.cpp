@@ -457,3 +457,43 @@ TEST_CASE ("Facade image styles and sliders: round trip, deleted styles are drop
     for (const auto& s : clean.styles) ids.insert (s.id);
     CHECK (ids.size() == clean.styles.size());         // identifiants uniques
 }
+
+TEST_CASE ("Facade notches: custom values, irregular spacing, invert and bounds")
+{
+    facade::Facade f;
+    auto s = facade::defaultWidget (facade::WidgetType::Slider, 1, 10, 10);
+    s.stepMode = 2; s.invert = 1; s.param = 7;
+    s.notches = { 20.0, 200.0, 440.0, 5000.0, 200.0 };   // doublon et désordre
+    auto k = facade::defaultWidget (facade::WidgetType::Knob, 2, 300, 10);
+    k.stepMode = 1;
+    f.widgets = { s, k };
+    const auto clean = facade::sanitised (f);
+    CHECK (clean.widgets[0].notches == std::vector<double> ({ 20.0, 200.0, 440.0, 5000.0 }));
+    CHECK (facade::fromJson (facade::toJson (clean)) == clean);
+
+    // trop peu de crans : retour au mode automatique
+    f.widgets[0].notches = { 3.0 };
+    CHECK (facade::sanitised (f).widgets[0].stepMode == 0);
+    // bornes
+    f.widgets[0].notches.assign (500, 0.0);
+    for (std::size_t i = 0; i < 500; ++i) f.widgets[0].notches[i] = static_cast<double> (i);
+    CHECK (facade::sanitised (f).widgets[0].notches.size() == facade::maxNotches);
+
+    // position et valeur : crans à égale distance même quand leurs valeurs ne le sont pas
+    const std::vector<double> n { 20.0, 200.0, 440.0, 5000.0 };
+    CHECK (facade::notchPosition (n, 20.0) == 0.0);
+    CHECK (facade::notchPosition (n, 5000.0) == 1.0);
+    CHECK (std::abs (facade::notchPosition (n, 430.0) - 2.0 / 3.0) < 1e-12);
+    CHECK (facade::notchValueAt (n, 0.0) == 20.0);
+    CHECK (facade::notchValueAt (n, 0.34) == 200.0);
+    CHECK (facade::notchValueAt (n, 5.0) == 5000.0);
+
+    // crans réguliers : suivent la courbe du paramètre, sans doublon sur un paramètre à pas
+    const auto stepped = ParamSpec::stepped (1, "drawbar", Unit::None, 0, 8, 0);
+    CHECK (facade::evenNotches (stepped, 9).size() == 9);
+    CHECK (facade::evenNotches (stepped, 20).size() == 9);
+    const auto hz = ParamSpec::continuous (2, "f", Unit::Hertz, 20.0, 20000.0, 1000.0, Curve::Exponential);
+    const auto pts = facade::evenNotches (hz, 3);
+    REQUIRE (pts.size() == 3);
+    CHECK (std::abs (pts[1] - 632.4555) < 0.01);
+}
