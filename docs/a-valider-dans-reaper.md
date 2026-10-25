@@ -1,0 +1,29 @@
+# À valider dans Reaper — travaux du 2026-10-23 au 25
+
+Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez voir. Un point qui ne se passe pas comme décrit est un défaut à signaler. Les anciens points « à valider » des paliers précédents restent dans `docs/passage-de-relais.md` (chaque section porte sa date).
+
+## Matrice de modulation (onglet MOD)
+- [ ] **Légendes** : au-dessus des LFO (forme, vitesse en Hz, phase en %) et des routes (source, n°, canal, quantité, plage, destination).
+- [ ] **Plage de la source** : le bouton à deux états « 0..1 / -1..+1 » ; grisé et fixé à -1..+1 pour un LFO ou le pitch bend ; une quantité négative inverse l'effet.
+- [ ] **Enveloppes** : boutons ENV 1 à 4, éditeur graphique (délai, attaque, maintien, decay, sustain, relâchement, courbes), étiquette « ENV n » en haut à droite ; l'enveloppe suit les notes de la piste.
+- [ ] **Anneau de modulation** sur les potards de Neptune et de la Façade : il bouge avec le LFO ou l'enveloppe, la valeur réglée ne bouge pas, et l'automation de l'hôte ne voit pas la modulation.
+- [ ] **Anneau dans les éditeurs d'effets** (insert en NOVA : compresseur, égaliseur, délai, chœur...) : une route vers un paramètre d'insert fait bouger l'anneau du potard. *(non vérifié visuellement)*
+- [ ] **Destinations** : volume/pan/envois de la bande ; réglages du Sampler ; paramètres continus du synthé, du FM et de l'orgue ; paramètres des inserts (la recherche de l'onglet MOD les propose).
+- [ ] **Filtres des listes** : menu de portée (piste, parallèle, bus, Master, global) et pastilles de familles, dans l'onglet MOD et dans le sélecteur de la Façade.
+- [ ] **Constat à trancher** : moduler `Track N Filter n Env Attack` ne bouge rien à l'écran de la page Filtres (elle dessine l'enveloppe de la description, pas le décalage) et n'agit qu'au Note On suivant. Fantôme de l'enveloppe modulée voulu ? *(décision à prendre)*
+- [ ] **Charge CPU** : avec une matrice et beaucoup de voix, pas de craquement (le bloc est découpé en morceaux de 64 échantillons ; mesure : environ 13 % de plus sur 32 voix).
+- [ ] **FM extrême** : « FM Op N Level » à -99 sur les six opérateurs (ou modulé) ne produit plus de crête énorme.
+
+## Façade
+- [ ] **Échelle et courbe libre** d'un lien (bouton « Échelle... » : échelle du paramètre / linéaire / logarithmique / exponentielle + courbe, avec OK / Annuler) : la position du potard suit la courbe choisie, l'anneau de modulation aussi ; seuls les paramètres continus sont concernés.
+- [ ] **Vumètre multi-sources** : piste, bus, piste parallèle ou Master au choix ; **réduction de gain** d'un compresseur inséré.
+- [ ] **Façade dans un preset** (validé par vous le 2026-10-25) : enregistrer, recharger sur une autre piste, annuler d'un coup.
+- [ ] **Banque `.flibank`** : exporter une banque dont un preset a une Façade avec images, l'importer sur une autre installation (ou après avoir vidé `facade-assets/`) : les images reviennent.
+- [ ] **`.flipreset` isolé** : la Façade se charge, images manquantes à relocaliser (« Relocaliser... »).
+
+## Export de piste `.neptunetrack`
+- [ ] **Exporter** depuis le bouton de type d'une piste (Sampler avec samples, insert de convolution avec IR, modulation, Façade) : le message annonce le nombre de fichiers, images et packs embarqués.
+- [ ] **Importer** : une nouvelle piste apparaît, sélectionnée, avec son instrument, ses inserts, sa modulation (routes vers sa propre piste) et sa Façade (liens rebranchés), son canal MIDI à elle.
+- [ ] **Sur une autre machine** (ou après déplacement des samples d'origine) : les samples viennent de `imported-tracks/`.
+- [ ] **16 pistes prises** : message « Les 16 pistes sont prises ».
+- [ ] **Annuler** après l'import : l'historique est vidé (comportement voulu).
