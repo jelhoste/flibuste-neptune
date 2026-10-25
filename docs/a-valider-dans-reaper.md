@@ -27,3 +27,11 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Sur une autre machine** (ou après déplacement des samples d'origine) : les samples viennent de `imported-tracks/`.
 - [ ] **16 pistes prises** : message « Les 16 pistes sont prises ».
 - [ ] **Annuler** après l'import : l'historique est vidé (comportement voulu).
+
+## Preset global (bouton « Preset global », rangée du bas)
+- [ ] **Placement** : le bouton à gauche de Annuler ne chevauche pas le texte du profil de performance ; sinon dites où le mettre.
+- [ ] **Enregistrer** : nom demandé, confirmation avant d'écraser, message avec le nombre d'images et de packs embarqués.
+- [ ] **Charger** dans un autre projet Neptune : confirmation, puis tout est remplacé (pistes, instruments, inserts, modulation, Façades avec leurs images, bus, Master, valeurs) ; Annuler est vidé ; les assignations CC / OSC et le verrou de profil de l'instance ne changent pas.
+- [ ] **Samples** : ils se rechargent depuis leurs chemins d'origine (non copiés dans le fichier).
+- [ ] **Supprimer** : le fichier va à la corbeille du système. **Ouvrir le dossier** : ouvre `GlobalPresets/`.
+- [ ] **Sauvegarde du projet Reaper** après un chargement : le projet se rouvre avec le même état.

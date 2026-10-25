@@ -28,7 +28,7 @@ struct SaveReport
 };
 
 // Ajoute à l'archive les images locales et les packs de styles d'une Façade, et réécrit ses chemins (« asset:assets/... »).
-inline void addEntries (juce::ZipFile::Builder& builder, fc::Facade& f, SaveReport& report)
+inline void addEntries (juce::ZipFile::Builder& builder, fc::Facade& f, SaveReport& report, std::set<std::string>* packsDone = nullptr)
 {
     std::set<std::string> packs;
     std::map<std::string, std::string> done;   // ancien chemin -> nouveau
@@ -53,6 +53,7 @@ inline void addEntries (juce::ZipFile::Builder& builder, fc::Facade& f, SaveRepo
     });
     for (const auto& id : packs)
     {
+        if (packsDone != nullptr && ! packsDone->insert (id).second) continue;   // plusieurs Façades dans la même archive : un pack une seule fois
         juce::MemoryBlock bytes;
         if (! stylelib::packArchiveBytes (id, bytes)) { ++report.missing; continue; }
         builder.addEntry (new juce::MemoryInputStream (bytes, true), 9, "packs/" + juce::String (id) + ".neptunestyle", juce::Time::getCurrentTime());

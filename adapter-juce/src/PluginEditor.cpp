@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "GlobalPresets.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/Mixer.h"
@@ -30,6 +31,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     midiFilterButton_.setTooltip (text ("midi.title"));
     midiFilterButton_.onClick = [this] { openMidiFilter(); };
     addAndMakeVisible (midiFilterButton_);
+    globalPresetButton_.setButtonText (text ("gpreset.button"));
+    globalPresetButton_.setTooltip (text ("gpreset.tip"));
+    globalPresetButton_.onClick = [this] { showGlobalPresetMenu(); };
+    addAndMakeVisible (globalPresetButton_);
     controlButton_.setButtonText (text ("control.button"));
     controlButton_.setTooltip (text ("control.title"));
     controlButton_.onClick = [this] { showControlMenu(); };
@@ -378,6 +383,93 @@ bool NeptuneEditor::keyPressed (const juce::KeyPress& k)
 }
 
 // Contrôleurs MIDI : désactivés par défaut. L'interrupteur et les assignations sont enregistrés avec le projet.
+// Presets globaux : le fichier .neptuneset contient tout le mixeur (voir GlobalPresets.h). Enregistrer écrase après confirmation ; charger
+// remplace tout (confirmation) ; supprimer envoie le fichier à la corbeille du système.
+void NeptuneEditor::showGlobalPresetMenu()
+{
+    const auto files = global_presets::list (settingsDir());
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("gpreset.save_as"));
+    menu.addSeparator();
+    if (files.isEmpty()) menu.addItem (2, text ("gpreset.none"), false);
+    for (int i = 0; i < files.size(); ++i) menu.addItem (100 + i, files[i].getFileNameWithoutExtension());
+    menu.addSeparator();
+    juce::PopupMenu del;
+    for (int i = 0; i < files.size(); ++i) del.addItem (1000 + i, files[i].getFileNameWithoutExtension());
+    menu.addSubMenu (text ("gpreset.delete"), del, ! files.isEmpty());
+    menu.addItem (3, text ("gpreset.open_folder"));
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&globalPresetButton_), [safe, files] (int choice)
+    {
+        if (safe == nullptr || choice == 0) return;
+        if (choice == 1)
+        {
+            auto* w = new juce::AlertWindow (safe->text ("gpreset.save_as"), safe->text ("gpreset.name_prompt"), juce::MessageBoxIconType::NoIcon);
+            w->addTextEditor ("name", {});
+            w->addButton (safe->text ("gpreset.save"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+            w->addButton (safe->text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int result)
+            {
+                if (safe == nullptr || result != 1) return;
+                safe->saveGlobalPreset (w->getTextEditorContents ("name"));
+            }), true);
+        }
+        else if (choice == 3) global_presets::folder (safe->settingsDir()).revealToUser();
+        else if (choice >= 100 && choice < 1000 && choice - 100 < files.size()) safe->loadGlobalPreset (files[choice - 100]);
+        else if (choice >= 1000 && choice - 1000 < files.size())
+        {
+            const auto file = files[choice - 1000];
+            juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, safe->text ("gpreset.delete"),
+                                                                                         safe->text ("gpreset.delete_confirm") + "\n" + file.getFileNameWithoutExtension(),
+                                                                                         safe->text ("gpreset.delete"), safe->text ("mix.cancel"), safe.getComponent()),
+                                          [file] (int result) { if (result == 1) juce::ignoreUnused (file.moveToTrash()); });
+        }
+    });
+}
+
+void NeptuneEditor::saveGlobalPreset (const juce::String& rawName)
+{
+    const auto name = global_presets::safeName (rawName);
+    if (name.isEmpty()) return;
+    const auto file = global_presets::fileFor (settingsDir(), name);
+    auto write = [safe = juce::Component::SafePointer<NeptuneEditor> (this), file]
+    {
+        if (safe == nullptr) return;
+        const auto report = global_presets::save (safe->processor_.globalStateText(), file);
+        const auto message = report.ok
+            ? juce::String::fromUTF8 (safe->tr_.format ("gpreset.saved", { file.getFileNameWithoutExtension().toStdString(), std::to_string (report.images), std::to_string (report.packs), std::to_string (report.missing) }).c_str())
+            : juce::String::fromUTF8 (safe->tr_.format ("gpreset.save_failed", { file.getFullPathName().toStdString() }).c_str());
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, safe->text ("gpreset.save_as"), message);
+    };
+    if (! file.existsAsFile()) { write(); return; }
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("gpreset.save_as"),
+                                                                                 text ("gpreset.overwrite") + "\n" + name, text ("gpreset.save"), text ("mix.cancel"), this),
+                                  [write] (int result) { if (result == 1) write(); });
+}
+
+void NeptuneEditor::loadGlobalPreset (const juce::File& file)
+{
+    auto apply = [safe = juce::Component::SafePointer<NeptuneEditor> (this), file]
+    {
+        if (safe == nullptr) return;
+        juce::String error;
+        const auto stateText = global_presets::load (file, safe->settingsDir().getChildFile ("facade-assets"), error);
+        std::string reason = error.toStdString();
+        if (! stateText.empty() && safe->processor_.uiLoadGlobalState (stateText, &reason))
+        {
+            safe->updateTrackBox();
+            return;
+        }
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("gpreset.load"),
+                                                juce::String::fromUTF8 (safe->tr_.format ("gpreset.load_failed", { reason }).c_str()));
+    };
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("gpreset.load"),
+                                                                                 text ("gpreset.load_confirm") + "\n" + file.getFileNameWithoutExtension(),
+                                                                                 text ("gpreset.load"), text ("mix.cancel"), this),
+                                  [apply] (int result) { if (result == 1) apply(); });
+}
+
 void NeptuneEditor::showControlMenu()
 {
     const bool on = processor_.ccEnabled();
@@ -570,7 +662,8 @@ void NeptuneEditor::resized()
         const int rowY = lh_ - 30, rowH = 22;
         redoButton_.setBounds (lw_ - 32 - 64, rowY, 64, rowH);
         undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, rowY, 64, rowH);
-        auto row = juce::Rectangle<int> (32, rowY, lw_ - 64 - 64 - 4 - 64 - 12, rowH);
+        globalPresetButton_.setBounds (lw_ - 32 - 64 - 4 - 64 - 12 - 130, rowY, 130, rowH);
+        auto row = juce::Rectangle<int> (32, rowY, lw_ - 64 - 64 - 4 - 64 - 12 - 130 - 8, rowH);
         latencyLabel_.setBounds (row.removeFromLeft (230));
         profileSwitchButton_.setBounds (row.removeFromLeft (190).reduced (2, 0));
         profileLockButton_.setBounds (row.removeFromLeft (190).reduced (2, 0));

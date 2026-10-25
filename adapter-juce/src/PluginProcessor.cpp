@@ -1,6 +1,7 @@
 #include <algorithm>
 #include "PluginProcessor.h"
 #include "FacadeBundle.h"
+#include "neptune/core/GlobalPreset.h"
 #include "neptune/core/CompressorModule.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
@@ -1969,6 +1970,29 @@ void NeptuneProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     const std::string text = currentStateText();
     dest.append (text.data(), text.size());
+}
+
+std::string NeptuneProcessor::globalStateText() const
+{
+    return neptune::core::globalpreset::withoutInstanceData (currentStateText());
+}
+
+bool NeptuneProcessor::uiLoadGlobalState (const std::string& stateText, std::string* error)
+{
+    const auto result = neptune::core::state::load (params_, stateText);
+    if (! result.ok())
+    {
+        if (error != nullptr) *error = result.message;   // refusé en bloc : rien n'a changé
+        return false;
+    }
+    undo_.clear();
+    macroResync_.store (true);
+    notifyHostOnSeed_ = false;
+    adoptMixerFromState (result.mixer);
+    notifyHostOnSeed_ = true;
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+    notifyStateChanged();
+    return true;
 }
 
 void NeptuneProcessor::setStateInformation (const void* data, int sizeInBytes)

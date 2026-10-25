@@ -32,12 +32,17 @@ private:
     void timerCallback() override;
     std::unique_ptr<MidiFilterEditor> midiFilterEditor_;
     juce::TextButton midiFilterButton_; // filtre MIDI avancé de la piste sélectionnée
+    juce::TextButton globalPresetButton_;   // presets globaux (tout le mixeur)
     juce::TextButton controlButton_;    // contrôleurs MIDI (CC) : interrupteur et assignations par défaut
     juce::TextButton oscButton_;        // serveur OSC : interrupteur, réseau local, port
     juce::TextButton midiSendButton_;   // fenêtre d'envoi de messages MIDI à la main (CC, notes, SysEx...)
     std::unique_ptr<MidiMessagePanel> midiSendPanel_;
     void openMidiSend();
     void showControlMenu();
+    void showGlobalPresetMenu();                       // presets globaux : enregistrer, charger, supprimer
+    void saveGlobalPreset (const juce::String& name);
+    void loadGlobalPreset (const juce::File&);
+    juce::File settingsDir() const { return juce::File (processor_.settingsFilePath()).getParentDirectory(); }
     void showOscMenu();
     void openMidiFilter();
     juce::Rectangle<int> rootBounds() const noexcept { return { 0, 0, lw_, lh_ }; } // taille logique (avant mise à l'échelle)
