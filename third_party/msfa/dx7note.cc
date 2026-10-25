@@ -15,6 +15,7 @@
  */
 
 #ifdef VERBOSE
+#include <algorithm>
 #include <iostream>
 #endif
 #include <math.h>
@@ -216,6 +217,9 @@ void Dx7Note::compute(int32_t *buf, int32_t lfo_val, int32_t lfo_delay,
     if (ampmodsens_[op] != 0 && amd != 0) {
       level -= (int32_t)(((int64_t)att_full * ams_gain[ampmodsens_[op]]) >> 8);
     }
+    // Neptune : Exp2::lookup décale de (6 - x >> 24) ; hors de -14..+6 doublements ce décalage sort de 0..31 (comportement indéfini : gain énorme
+    // avec un décalage de niveau très négatif, par exemple). Le niveau reste donc entre 0 et 16 doublements (au plus +12 dB au-dessus du niveau normal d'un opérateur).
+    level = std::clamp(level, 0, (16 << 24) - 1);
     int32_t gain = Exp2::lookup(level - (14 * (1 << 24)));
     if (((opmask_ >> op) & 1) == 0) gain = 0;
     int32_t offset = detune_offset_ + (fixed_[op] ? 0 : glide_offset_);

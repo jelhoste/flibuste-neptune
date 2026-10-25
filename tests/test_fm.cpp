@@ -409,7 +409,10 @@ TEST_CASE ("fm calibration: peak levels of a single carrier and of six carriers"
 }
 
 #include "neptune/core/Engine.h"
+#include "neptune/core/Mixer.h"
 #include "neptune/core/MixerState.h"
+#include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
 
 TEST_CASE ("fm track in the engine: plays, obeys the master voice limit, state round trip", "[fm][engine]")
 {
@@ -654,4 +657,39 @@ TEST_CASE ("fm state saved, reloaded and saved again is identical", "[fm][engine
     REQUIRE (stateFromJson (first, f.params(), d, id));
     f.setDescription (d);
     CHECK (stateToJson (f.params(), f.description(), "") == first);
+}
+
+TEST_CASE ("fm track in the engine: extreme operator level offsets stay silent or bounded (no shift overflow in the exponential table)", "[fm][engine]")
+{
+    auto peakAt = [] (double level)
+    {
+        ParameterSet params;
+        REQUIRE (sampler::addParams (params));
+        REQUIRE (probe::buildPool (params, mixer::numTracks));
+        REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+        Engine e;
+        e.attachParameters (&params);
+        e.prepare (kRate, 256);
+        std::vector<float> l (256), r (256);
+        float* out[2] = { l.data(), r.data() };
+        e.setTrackActive (0, true);
+        e.setTrackType (0, TrackType::Fm);
+        e.publishFm (0, std::make_shared<FmDescription>());
+        for (int op = 0; op < kOperators; ++op) params.set (mixer::fmParam (0, static_cast<mixer::FmKind> (mixer::kFmLevelOp1 + op)), level);
+        e.process (out, 2, 256);
+        e.noteOnTrack (0, 0, 60, 0.8f);
+        float peak = 0.0f;
+        for (int i = 0; i < 40; ++i)
+        {
+            e.process (out, 2, 256);
+            peak = 0.0f;
+            for (float v : l) peak = std::max (peak, std::fabs (v));
+        }
+        return peak;
+    };
+    CHECK (peakAt (-99.0) < 0.001f);   // tous les niveaux au plus bas : le silence (avant : une crête de 3, décalage indéfini)
+    CHECK (peakAt (-50.0) < peakAt (0.0));
+    const float high = peakAt (99.0);
+    CHECK (std::isfinite (high));
+    CHECK (high < 16.0f);
 }
