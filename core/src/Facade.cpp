@@ -105,6 +105,7 @@ Widget defaultWidget (WidgetType type, int id, int x, int y)
         case WidgetType::Lamp:   w.w = 40;  w.h = 40;  break;
         case WidgetType::Set:    w.w = 90;  w.h = 44;  break;
         case WidgetType::Midi:   w.w = 150; w.h = 44;  break;
+        case WidgetType::Meter:  w.w = 44;  w.h = 180; w.vertical = 1; break;
     }
     w.x = x;
     w.y = y;
@@ -587,8 +588,9 @@ std::string toJson (const Facade& f)
             if (w.invert != 0) e["invert"] = 1;
             if (! w.notches.empty()) e["notches"] = w.notches;
         }
-        if (w.type == WidgetType::Slider) e["vertical"] = w.vertical;
+        if (w.type == WidgetType::Slider || w.type == WidgetType::Meter) e["vertical"] = w.vertical;
         if (w.type == WidgetType::Lamp) { e["source"] = w.source; e["ch"] = w.channel; }
+        if (w.type == WidgetType::Meter) e["source"] = w.source;
         if (w.type == WidgetType::Action && w.actionMode != 0) e["mode"] = w.actionMode;
         if (w.type == WidgetType::Midi)
         {

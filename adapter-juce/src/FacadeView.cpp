@@ -209,6 +209,28 @@ public:
     // Image du cache, pour l'aperçu de la fenêtre des styles.
     juce::Image cachedPicture (const std::string& path, int maxSide = 1024) const { return picture (path, maxSide); }
 
+    // Vumètres : lit les niveaux de la piste ou du Master et les lisse (descente de 1,5 dB par image, maintien de crête puis chute).
+    void tickMeters()
+    {
+        auto& o = owner_;
+        auto toDb = [] (float v) { return v > 1.0e-5f ? 20.0f * std::log10 (v) : -100.0f; };
+        for (const auto& w : o.facade_.widgets)
+        {
+            if (w.type != fc::WidgetType::Meter) continue;
+            neptune::core::Engine::Meter m;
+            if (w.source == 1) m = o.processor_.masterMeter();
+            else if (o.track_ >= 0) m = o.processor_.trackMeter (o.track_);
+            const float now[2] = { toDb (m.peakL), toDb (m.peakR) };
+            auto& s = meters_[w.id];
+            for (int i = 0; i < 2; ++i)
+            {
+                s.level[i] = std::max (now[i], s.level[i] - 1.5f);
+                if (now[i] >= s.hold[i]) { s.hold[i] = now[i]; s.age[i] = 0; }
+                else if (++s.age[i] > 20) s.hold[i] = std::max (now[i], s.hold[i] - 0.8f);
+            }
+        }
+    }
+
     // Oublie les images chargées (un style a changé ou un fichier a été remplacé).
     void clearPictures() { pictures_.clear(); repaint(); }
 
@@ -1080,6 +1102,56 @@ private:
                 }
                 break;
             }
+            case fc::WidgetType::Meter:
+            {
+                const bool vertical = w.vertical != 0;
+                const auto it = meters_.find (w.id);
+                const MeterState state = it != meters_.end() ? it->second : MeterState { { -100.0f, -100.0f }, { -100.0f, -100.0f }, {}, };
+                auto area = b.reduced (2.0f);
+                g.setColour (o.colour (Token::BgApp));
+                g.fillRoundedRectangle (b, 4.0f);
+                const float gap = 3.0f;
+                auto place = [&] (int channel) -> juce::Rectangle<float>
+                {
+                    const float half = ((vertical ? area.getWidth() : area.getHeight()) - gap) / 2.0f;
+                    return vertical ? juce::Rectangle<float> (area.getX() + channel * (half + gap), area.getY(), half, area.getHeight())
+                                    : juce::Rectangle<float> (area.getX(), area.getY() + channel * (half + gap), area.getWidth(), half);
+                };
+                auto fraction = [] (float db) { return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f); };   // -60 dB .. 0 dB
+                for (int i = 0; i < 2; ++i)
+                {
+                    const auto bar = place (i);
+                    g.setColour (o.colour (Token::Pb));
+                    g.fillRect (bar);
+                    // le niveau : de l'accent au rouge au-dessus de -6 dB
+                    for (const bool hot : { false, true })
+                    {
+                        const float lo = hot ? fraction (-6.0f) : 0.0f, hi = std::min (fraction (state.level[i]), hot ? 1.0f : fraction (-6.0f));
+                        if (hi <= lo) continue;
+                        g.setColour (hot ? o.colour (Token::KnobHot) : o.colour (Token::Accent));
+                        if (vertical) g.fillRect (juce::Rectangle<float> (bar.getX(), bar.getBottom() - hi * bar.getHeight(), bar.getWidth(), (hi - lo) * bar.getHeight()));
+                        else g.fillRect (juce::Rectangle<float> (bar.getX() + lo * bar.getWidth(), bar.getY(), (hi - lo) * bar.getWidth(), bar.getHeight()));
+                    }
+                    // la crête maintenue
+                    g.setColour (o.colour (Token::Text));
+                    const float hp = fraction (state.hold[i]);
+                    if (hp > 0.0f)
+                    {
+                        if (vertical) g.fillRect (bar.getX(), bar.getBottom() - hp * bar.getHeight(), bar.getWidth(), 2.0f);
+                        else g.fillRect (bar.getX() + hp * bar.getWidth() - 2.0f, bar.getY(), 2.0f, bar.getHeight());
+                    }
+                }
+                // graduations tous les 12 dB
+                g.setColour (o.colour (Token::TextDim2));
+                for (const float db : { 0.0f, -12.0f, -24.0f, -36.0f, -48.0f })
+                {
+                    const float f = fraction (db);
+                    if (vertical) g.drawHorizontalLine (juce::roundToInt (area.getBottom() - f * area.getHeight()), area.getX(), area.getRight());
+                    else g.drawVerticalLine (juce::roundToInt (area.getX() + f * area.getWidth()), area.getY(), area.getBottom());
+                }
+                if (! w.text.empty()) drawStyledText (g, nullptr, utf8 (w.text), b, 0.12f, o.colour (Token::TextDim), juce::Justification::centredTop);
+                break;
+            }
             case fc::WidgetType::Midi:
             {
                 const bool pressed = midiId_ == w.id;
@@ -1252,6 +1324,8 @@ private:
     mutable std::map<std::string, Picture> pictures_;   // chemin -> image (vide : introuvable)
     std::map<std::string, std::string> svgVars_;        // {{accent}}... : couleurs du thème pour les SVG
     int hoverId_ = 0;
+    struct MeterState { float level[2] {}, hold[2] {}; int age[2] {}; };   // dB affichés, crêtes maintenues, âge du maintien (images)
+    std::map<int, MeterState> meters_;
     int midiId_ = 0;                          // widget « Message MIDI » en cours d'appui
     std::map<int, int> midiLast_;             // dernière valeur envoyée par chaque curseur MIDI
     std::map<int, double> midiFader_;         // position affichée de chaque curseur MIDI (0..1)
@@ -1308,9 +1382,17 @@ public:
             allButton_.onClick = [this, track]
             {
                 for (const auto id : neptune::core::facade::instrumentParamsOfTrack (owner_.processor_.parameters(), track)) chosen_.insert (id);
-                list_.repaint();
+                checkedOnly_.setToggleState (true, juce::dontSendNotification);   // la liste montre alors ce qui est coché : le geste est visible
+                refilter();
+                updateCount();
             };
             addAndMakeVisible (allButton_);
+            checkedOnly_.setButtonText (owner.text ("facade.capture_checked_only"));
+            checkedOnly_.setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
+            checkedOnly_.onClick = [this] { refilter(); };
+            addAndMakeVisible (checkedOnly_);
+            count_.setColour (juce::Label::textColourId, owner.colour (Token::Accent));
+            addAndMakeVisible (count_);
             ok_.setButtonText (owner.text ("facade.capture_ok"));
             ok_.onClick = [this] { confirm(); };
             addAndMakeVisible (ok_);
@@ -1322,6 +1404,7 @@ public:
             addAndMakeVisible (unlink_);
         }
         refilter();
+        updateCount();
         setWantsKeyboardFocus (true);
     }
 
@@ -1342,7 +1425,14 @@ public:
         title_.setBounds (r.removeFromTop (30));
         hint_.setBounds (r.removeFromTop (36));
         filter_.setBounds (r.removeFromTop (32));
-        r.removeFromTop (8);
+        r.removeFromTop (6);
+        if (capture_)
+        {
+            auto info = r.removeFromTop (26);
+            count_.setBounds (info.removeFromLeft (250));
+            checkedOnly_.setBounds (info);
+            r.removeFromTop (4);
+        }
         auto bottom = r.removeFromBottom (32);
         r.removeFromBottom (8);
         list_.setBounds (r);
@@ -1357,9 +1447,23 @@ private:
 
     juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (620, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
+    void updateCount()
+    {
+        if (capture_) count_.setText (juce::String::fromUTF8 (owner_.tr_.format ("facade.capture_count", { std::to_string (chosen_.size()) }).c_str()), juce::dontSendNotification);
+    }
+
     void refilter()
     {
         shown_.clear();
+        if (capture_ && checkedOnly_.getToggleState())
+        {
+            for (std::size_t i = 0; i < entries_.size(); ++i)
+                if (chosen_.count (entries_[i].id) != 0) shown_.push_back (i);
+            list_.updateContent();
+            list_.selectRow (-1);
+            list_.repaint();
+            return;
+        }
         const auto words = juce::StringArray::fromTokens (filter_.getText().trim(), " ", "");
         for (std::size_t i = 0; i < entries_.size(); ++i)
         {
@@ -1419,7 +1523,8 @@ private:
         if (! capture_ || row < 0 || row >= static_cast<int> (shown_.size())) return;
         const auto id = entries_[shown_[static_cast<std::size_t> (row)]].id;
         if (chosen_.count (id) != 0) chosen_.erase (id); else chosen_.insert (id);
-        list_.repaint();
+        updateCount();
+        if (checkedOnly_.getToggleState()) refilter(); else list_.repaint();
     }
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override { if (! capture_) choose (row); }
 
@@ -1434,6 +1539,8 @@ private:
     juce::TextEditor filter_;
     juce::ListBox list_;
     juce::TextButton cancel_, unlink_, ok_, allButton_;
+    juce::ToggleButton checkedOnly_;
+    juce::Label count_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Picker)
 };
@@ -2462,6 +2569,10 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     setupAdd (lampButton_, "facade.add_lamp", fc::WidgetType::Lamp);
     setupAdd (setKeyButton_, "facade.add_set", fc::WidgetType::Set);
     setupAdd (midiButton_, "facade.add_midi", fc::WidgetType::Midi);
+    setupAdd (meterButton_, "facade.add_meter", fc::WidgetType::Meter);
+    meterSourceButton_.setButtonText (text ("facade.meter_source"));
+    meterSourceButton_.setTooltip (text ("facade.tip_meter_source"));
+    meterSourceButton_.onClick = [this] { showMeterSourceMenu(); };
     midiEditButton_.setButtonText (text ("facade.midi_edit"));
     midiEditButton_.setTooltip (text ("facade.tip_midi_edit"));
     midiEditButton_.onClick = [this] { openMidiEditor(); };
@@ -2565,11 +2676,12 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     lampButton_.setTooltip (text ("facade.tip_lamp"));
     setKeyButton_.setTooltip (text ("facade.tip_set"));
     midiButton_.setTooltip (text ("facade.tip_midi"));
+    meterButton_.setTooltip (text ("facade.tip_meter"));
     labelButton_.setTooltip (text ("facade.tip_label"));
     captureButton_.setTooltip (text ("facade.tip_capture"));
     alignButton_.setTooltip (text ("facade.tip_align"));
 
-    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &imageButton_, &fitButton_, &clearImageButton_,
+    for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &meterButton_, &meterSourceButton_, &imageButton_, &fitButton_, &clearImageButton_,
                      &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
@@ -2591,7 +2703,7 @@ void FacadeView::updateButtons()
 {
     pruneSelection();
     const auto* one = facade_.find (single());
-    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
+    for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
     relocateButton_.setVisible (missing_ > 0);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
@@ -2600,6 +2712,7 @@ void FacadeView::updateButtons()
     captureButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Action);
     actionModeButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Action);
     midiEditButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Midi);
+    meterSourceButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Meter);
     duplicateButton_.setVisible (any);
     deleteButton_.setVisible (any);
     alignButton_.setVisible (editMode_ && selection_.size() >= 2);
@@ -2612,12 +2725,12 @@ void FacadeView::updateButtons()
     for (const auto& w : facade_.widgets)
         if (selection_.count (w.id) != 0 && takesStyle (w.type)) anyStylable = true;
     styleButton_.setVisible (editMode_ && anyStylable);
-    orientButton_.setVisible (editMode_ && one != nullptr && one->type == fc::WidgetType::Slider);
+    orientButton_.setVisible (editMode_ && one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Meter));
     const bool dial = editMode_ && one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Knob);
     notchesButton_.setVisible (dial);
     invertButton_.setVisible (dial);
     if (dial) invertButton_.setToggleState (one->invert != 0, juce::dontSendNotification);
-    if (one != nullptr && one->type == fc::WidgetType::Slider) orientButton_.setToggleState (one->vertical != 0, juce::dontSendNotification);
+    if (one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Meter)) orientButton_.setToggleState (one->vertical != 0, juce::dontSendNotification);
     if (keyboard) kbHoldButton_.setToggleState (one->hold != 0, juce::dontSendNotification);
     layoutButton_.setVisible (zone);
     zoneAlignButton_.setVisible (zone);
@@ -2671,8 +2784,8 @@ void FacadeView::resized()
     area.removeFromTop (gap);
     if (editMode_)
     {
-        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
@@ -2706,6 +2819,7 @@ void FacadeView::timerCallback()
 {
     if (! isShowing()) return;
     refresh();
+    canvas_->tickMeters();
     if (++missingTick_ >= 30) { missingTick_ = 0; refreshMissing(); }   // les fichiers peuvent apparaître ou disparaître : on regarde toutes les deux secondes
     canvas_->syncChildren();
     canvas_->repaint();   // les valeurs peuvent changer (automation, autre vue)
@@ -2793,6 +2907,21 @@ void FacadeView::openMidiEditor()
     addAndMakeVisible (*midiPanel_);
     midiPanel_->setBounds (getLocalBounds());
     midiPanel_->toFront (true);
+}
+
+void FacadeView::showMeterSourceMenu()
+{
+    const auto* m = facade_.find (single());
+    if (m == nullptr || m->type != fc::WidgetType::Meter) return;
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("facade.meter_track"), true, m->source == 0);
+    menu.addItem (2, text ("facade.meter_master"), true, m->source == 1);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&meterSourceButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice <= 0) return;
+        safe->applySingle ([choice] (fc::Widget& w) { w.source = choice - 1; }, "Facade: meter source");
+    });
 }
 
 void FacadeView::showActionModeMenu()

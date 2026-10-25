@@ -56,6 +56,7 @@ private:
     void showKeyboardMenu (int what);
     void showLampSourceMenu();
     void showActionModeMenu();
+    void showMeterSourceMenu();
     void openMidiEditor();
     void applyZone (const std::function<void (neptune::core::facade::Widget&)>&, const char* undoName);
     int single() const noexcept { return selection_.size() == 1 ? *selection_.begin() : 0; }   // le widget sélectionné s'il n'y en a qu'un
@@ -91,7 +92,7 @@ private:
     int missing_ = 0;                            // images de la Façade introuvables (fond, styles)
     int missingTick_ = 0;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;

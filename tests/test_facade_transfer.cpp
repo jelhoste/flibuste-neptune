@@ -91,3 +91,29 @@ TEST_CASE ("facade: action modes and the Set key round-trip")
     f.widgets[0].actionMode = 9;
     CHECK (facade::sanitised (f).widgets[0].actionMode == 1);
 }
+
+TEST_CASE ("facade transfer: with Neptune's real parameter set, every track type finds its instrument settings")
+{
+    ParameterSet set;
+    std::string error;
+    const int tracks = 16;
+    REQUIRE (sampler::addParams (set, &error));
+    REQUIRE (probe::buildPool (set, tracks, &error));
+    REQUIRE (mixer::addParams (set, tracks, mixer::numBuses, &error));
+    for (const int track : { 0, 1, 7, 15 })
+    {
+        const auto ids = facade::instrumentParamsOfTrack (set, track);
+        auto has = [&ids] (ParamId id) { return std::find (ids.begin(), ids.end(), id) != ids.end(); };
+        CHECK (ids.size() > 80);                                                  // Sampler + synthé + FM + orgue + emplacements + modulateurs
+        CHECK (has (mixer::organParam (track, mixer::kOrgUpper0)));               // les tirants de l'orgue
+        CHECK (has (mixer::organParam (track, mixer::kOrgLeslieSpeed)));
+        CHECK (has (mixer::synthParam (track, mixer::kLevelOsc1)));
+        CHECK (has (mixer::fmParam (track, mixer::kFmBrightness)));
+        CHECK (has (mixer::samplerParam (track, mixer::kGain)));
+        CHECK (has (mixer::zoneSlotParam (track, 0)));
+        CHECK (has (mixer::modulatorParam (track, 0)));
+        CHECK (! has (probe::trackParam (track, probe::kVolume)));
+        CHECK (! has (probe::trackParam (track, probe::kSendLevel)));
+        CHECK (! has (probe::trackParam ((track + 1) % tracks, probe::kPan)));
+    }
+}

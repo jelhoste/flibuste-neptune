@@ -26,11 +26,12 @@ constexpr std::size_t maxImagePath = 1024;
 // Zone : conteneur (cadre avec titre) qui possède les widgets posés dedans et, au choix, les range en ligne, en colonne ou en matrice.
 // Keyboard : clavier virtuel lié à un canal MIDI de la piste (un manuel d'orgue = un clavier) ; allume les notes jouées sur ce canal.
 // Slider : curseur (tirant) horizontal ou vertical lié à un paramètre ; crans automatiques sur un paramètre à pas.
+// Meter : vumètre stéréo (crête et maintien de crête) de la piste (source 0) ou du Master (source 1), vertical ou horizontal.
 // Midi : envoie un message MIDI (bouton : à chaque clic ; ou curseur : la valeur suit le geste), vers Neptune comme un clavier et/ou vers l'hôte.
 // Set : touche « Set » d'une console : une fois armée, le prochain piston (bouton Action) cliqué mémorise les valeurs courantes de ses paramètres.
 // Lamp : voyant allumé selon un paramètre (source 0), les notes d'un canal (1) ou les notes de la piste (2).
-enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9, Set = 10, Midi = 11 };
-constexpr int numWidgetTypes = 12;
+enum class WidgetType { Knob = 0, Button = 1, Label = 2, Menu = 3, Action = 4, Curve = 5, Zone = 6, Keyboard = 7, Slider = 8, Lamp = 9, Set = 10, Midi = 11, Meter = 12 };
+constexpr int numWidgetTypes = 13;
 constexpr int maxStyles = 64;
 constexpr int maxStripFrames = 512;
 constexpr std::size_t maxNotches = 128;

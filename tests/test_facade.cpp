@@ -545,3 +545,16 @@ TEST_CASE ("Facade MIDI widgets: message, target and fader round-trip within bou
     CHECK (clean.widgets[0].midi.data1 == 127);
     CHECK (clean.widgets[0].midiTarget == 3);
 }
+
+TEST_CASE ("Facade meters: source and orientation round-trip")
+{
+    facade::Facade f;
+    auto m = facade::defaultWidget (facade::WidgetType::Meter, 1, 10, 10);
+    CHECK (m.vertical == 1);
+    m.source = 1;
+    f.widgets.push_back (m);
+    auto h = facade::defaultWidget (facade::WidgetType::Meter, 2, 100, 10);
+    h.vertical = 0;
+    f.widgets.push_back (h);
+    CHECK (facade::fromJson (facade::toJson (f)) == f);
+}
