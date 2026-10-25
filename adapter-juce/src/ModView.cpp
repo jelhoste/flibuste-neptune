@@ -174,25 +174,27 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
         row.rate.onReturnKey = row.rate.onFocusLost = [this, i] { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].rateHz = lfoRows_[static_cast<std::size_t> (i)].rate.getText().getDoubleValue(); commit(); } };
         row.phase.onReturnKey = row.phase.onFocusLost = [this, i] { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].phase = lfoRows_[static_cast<std::size_t> (i)].phase.getText().getDoubleValue() / 100.0; commit(); } };
     }
+    envEditor_ = std::make_unique<EnvelopeEditor> (palette_, tr_);
+    envEditor_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
+    envEditor_->onGestureEnd = [this] { processor_.uiEndGesture(); };
+    envEditor_->onChange = [this] (const neptune::core::EnvelopeDescription& e)
+    {
+        if (updating_) return;
+        matrix_.envelopes[static_cast<std::size_t> (envSel_)].env = e;
+        commit();
+    };
+    addAndMakeVisible (*envEditor_);
     for (int i = 0; i < mod::kEnvelopes; ++i)
     {
-        auto& row = envRows_[static_cast<std::size_t> (i)];
-        row.label.setText ("ENV " + juce::String (i + 1), juce::dontSendNotification);
-        row.label.setColour (juce::Label::textColourId, colour (Token::Text));
-        addAndMakeVisible (row.label);
-        field (row.a, "mod.tip_attack");
-        field (row.d, "mod.tip_decay");
-        field (row.s, "mod.tip_sustain");
-        field (row.r, "mod.tip_release");
-        auto bind = [this, i] (juce::TextEditor& e, double mod::EnvDesc::* member, double scale)
-        {
-            e.onReturnKey = e.onFocusLost = [this, i, &e, member, scale] { if (! updating_) { matrix_.envelopes[static_cast<std::size_t> (i)].*member = e.getText().getDoubleValue() / scale; commit(); } };
-        };
-        bind (row.a, &mod::EnvDesc::attackMs, 1.0);
-        bind (row.d, &mod::EnvDesc::decayMs, 1.0);
-        bind (row.s, &mod::EnvDesc::sustain, 100.0);
-        bind (row.r, &mod::EnvDesc::releaseMs, 1.0);
+        auto& b = envButtons_[static_cast<std::size_t> (i)];
+        b.setButtonText ("ENV " + juce::String (i + 1));
+        b.setClickingTogglesState (true);
+        b.setRadioGroupId (4812);
+        b.setColour (juce::TextButton::buttonOnColourId, colour (Token::Accent));
+        b.onClick = [this, i] { if (envButtons_[static_cast<std::size_t> (i)].getToggleState()) selectEnvelope (i); };
+        addAndMakeVisible (b);
     }
+    envButtons_[0].setToggleState (true, juce::dontSendNotification);
     addButton_.setButtonText (text ("mod.add_route"));
     addButton_.onClick = [this] { addRoute(); };
     addAndMakeVisible (addButton_);
@@ -214,7 +216,7 @@ juce::Colour ModView::colour (Token t) const
 void ModView::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (6 + 26 + 4 * 34 + 6);
+    auto top = r.removeFromTop (6 + 26 + 250 + 6);
     top.removeFromTop (6);
     auto left = top.removeFromLeft (top.getWidth() / 2 - 10);
     top.removeFromLeft (20);
@@ -231,13 +233,9 @@ void ModView::resized()
         row.removeFromLeft (8);
         l.phase.setBounds (row.removeFromLeft (70).reduced (0, 2));
     }
-    for (int i = 0; i < mod::kEnvelopes; ++i)
-    {
-        auto row = top.removeFromTop (34);
-        auto& e = envRows_[static_cast<std::size_t> (i)];
-        e.label.setBounds (row.removeFromLeft (60));
-        for (auto* f : { &e.a, &e.d, &e.s, &e.r }) { f->setBounds (row.removeFromLeft (80).reduced (0, 2)); row.removeFromLeft (8); }
-    }
+    auto selector = top.removeFromTop (30);
+    for (auto& b : envButtons_) { b.setBounds (selector.removeFromLeft (80).reduced (2)); }
+    envEditor_->setBounds (top);
     r.removeFromTop (6);
     auto head = r.removeFromTop (30);
     routesCaption_.setBounds (head.removeFromLeft (200));
@@ -271,15 +269,7 @@ void ModView::reload()
         row.rate.setText (num (d.rateHz, 2), false);
         row.phase.setText (num (d.phase * 100.0, 0), false);
     }
-    for (int i = 0; i < mod::kEnvelopes; ++i)
-    {
-        const auto& d = matrix_.envelopes[static_cast<std::size_t> (i)];
-        auto& row = envRows_[static_cast<std::size_t> (i)];
-        row.a.setText (num (d.attackMs, 0), false);
-        row.d.setText (num (d.decayMs, 0), false);
-        row.s.setText (num (d.sustain * 100.0, 0), false);
-        row.r.setText (num (d.releaseMs, 0), false);
-    }
+    envEditor_->setEnvelope (matrix_.envelopes[static_cast<std::size_t> (envSel_)].env);
     updating_ = false;
     rebuildRoutes();
 }
@@ -294,6 +284,14 @@ void ModView::rebuildRoutes()
     }
     addButton_.setEnabled (matrix_.routes.size() < mod::kMaxRoutes);
     layoutRoutes();
+}
+
+void ModView::selectEnvelope (int index)
+{
+    envSel_ = std::clamp (index, 0, mod::kEnvelopes - 1);
+    updating_ = true;
+    envEditor_->setEnvelope (matrix_.envelopes[static_cast<std::size_t> (envSel_)].env);
+    updating_ = false;
 }
 
 void ModView::commit()

@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include "EnvelopeEditor.h"
 #include "ParamSearchPanel.h"
 #include "PluginProcessor.h"
 #include "neptune/core/I18n.h"
@@ -24,12 +25,12 @@ public:
 private:
     class RouteRow;
     struct LfoRow { juce::Label label; juce::ComboBox shape; juce::TextEditor rate, phase; };
-    struct EnvRow { juce::Label label; juce::TextEditor a, d, s, r; };
 
     void timerCallback() override;
     void reload();                // relit la matrice de la piste sélectionnée
     void commit();                // enregistre la matrice (un geste annulable)
     void rebuildRoutes();
+    void selectEnvelope (int index);
     void layoutRoutes();
     void addRoute();
     void removeRoute (std::size_t index);
@@ -46,7 +47,9 @@ private:
     bool updating_ = false;
 
     std::array<LfoRow, neptune::core::modulation::kLfos> lfoRows_;
-    std::array<EnvRow, neptune::core::modulation::kEnvelopes> envRows_;
+    std::array<juce::TextButton, neptune::core::modulation::kEnvelopes> envButtons_;   // choix de l'enveloppe montrée
+    std::unique_ptr<EnvelopeEditor> envEditor_;
+    int envSel_ = 0;
     juce::Label lfoCaption_, envCaption_, routesCaption_, hint_;
     juce::TextButton addButton_;
     juce::Viewport view_;

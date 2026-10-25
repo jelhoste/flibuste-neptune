@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include "neptune/core/Control.h"
+#include "neptune/core/DescriptionJson.h"
 
 namespace neptune::core::modulation
 {
@@ -26,13 +27,7 @@ Matrix sanitised (Matrix m)
         l.rateHz = clampD (l.rateHz, 0.01, 50.0);
         l.phase = clampD (l.phase, 0.0, 1.0);
     }
-    for (auto& e : m.envelopes)
-    {
-        e.attackMs = clampD (e.attackMs, 0.0, 10000.0);
-        e.decayMs = clampD (e.decayMs, 0.0, 10000.0);
-        e.sustain = clampD (e.sustain, 0.0, 1.0);
-        e.releaseMs = clampD (e.releaseMs, 0.0, 10000.0);
-    }
+    for (auto& e : m.envelopes) e.env = neptune::core::sanitised (e.env);
     std::vector<Route> kept;
     for (auto r : m.routes)
     {
@@ -62,7 +57,7 @@ std::string toJson (const Matrix& m)
     for (const auto& l : m.lfos) lfos.push_back ({ { "shape", static_cast<int> (l.shape) }, { "rate", l.rateHz }, { "phase", l.phase } });
     o["lfos"] = std::move (lfos);
     json envs = json::array();
-    for (const auto& e : m.envelopes) envs.push_back ({ { "a", e.attackMs }, { "d", e.decayMs }, { "s", e.sustain }, { "r", e.releaseMs } });
+    for (const auto& e : m.envelopes) envs.push_back ({ { "envelope", detail::envelopeJson (e.env) } });
     o["envelopes"] = std::move (envs);
     json routes = json::array();
     for (const auto& r : m.routes)
@@ -100,10 +95,13 @@ Matrix fromJson (std::string_view text)
         {
             const auto& j = (*it)[i];
             if (! j.is_object()) continue;
-            m.envelopes[i].attackMs = num (j, "a", 10.0);
-            m.envelopes[i].decayMs = num (j, "d", 200.0);
-            m.envelopes[i].sustain = num (j, "s", 0.7);
-            m.envelopes[i].releaseMs = num (j, "r", 300.0);
+            if (j.contains ("envelope")) { m.envelopes[i].env = detail::envelopeFrom (j); continue; }
+            // premier format (attaque, decay, sustain, relâchement seuls)
+            auto& e = m.envelopes[i].env;
+            e.attack.ms = num (j, "a", 10.0);
+            e.decay.ms = num (j, "d", 200.0);
+            e.sustain = num (j, "s", 0.7);
+            e.release.ms = num (j, "r", 300.0);
         }
     if (const auto it = o.find ("routes"); it != o.end() && it->is_array())
         for (const auto& j : *it)
@@ -127,7 +125,7 @@ std::shared_ptr<const Compiled> compile (const Matrix& in, const ParameterSet& s
     const Matrix m = sanitised (in);
     auto c = std::make_shared<Compiled>();
     c->lfos = m.lfos;
-    c->envelopes = m.envelopes;
+    for (std::size_t i = 0; i < m.envelopes.size(); ++i) c->envelopes[i] = EnvelopeRuntime (m.envelopes[i].env);
     for (const auto& r : m.routes)
     {
         CompiledRoute cr;
@@ -160,7 +158,7 @@ void Modulator::reset() noexcept
 {
     lfoPhase_.fill (0.0);
     lfoHeld_.fill (0.0);
-    env_.fill (EnvState {});
+    env_.fill (EnvelopeRunner {});
     lastGate_ = false;
 }
 
@@ -203,32 +201,16 @@ void Modulator::process (int frames, bool gate, const midi::State& midi, const P
         lfo[static_cast<std::size_t> (i)] = lfoValue (d.shape, std::fmod (ph + d.phase, 1.0), lfoHeld_[static_cast<std::size_t> (i)]);
     }
 
-    // enveloppes : le front montant de `gate` lance l'attaque, le front descendant le relâchement
+    // enveloppes : le front montant de `gate` lance l'enveloppe, le front descendant son relâchement
     std::array<double, kEnvelopes> env {};
     for (int i = 0; i < kEnvelopes; ++i)
     {
         const auto& d = c.envelopes[static_cast<std::size_t> (i)];
-        auto& s = env_[static_cast<std::size_t> (i)];
-        if (gate && ! lastGate_) s.stage = EnvState::Stage::Attack;
-        if (! gate && lastGate_ && s.stage != EnvState::Stage::Idle) { s.stage = EnvState::Stage::Release; s.releaseFrom = s.level; }
-        switch (s.stage)
-        {
-            case EnvState::Stage::Attack:
-                s.level = d.attackMs <= 0.0 ? 1.0 : s.level + dt * 1000.0 / d.attackMs;
-                if (s.level >= 1.0) { s.level = 1.0; s.stage = EnvState::Stage::Decay; }
-                break;
-            case EnvState::Stage::Decay:
-                s.level = d.decayMs <= 0.0 ? d.sustain : s.level - (1.0 - d.sustain) * dt * 1000.0 / d.decayMs;
-                if (s.level <= d.sustain) { s.level = d.sustain; s.stage = EnvState::Stage::Sustain; }
-                break;
-            case EnvState::Stage::Sustain: s.level = d.sustain; break;
-            case EnvState::Stage::Release:
-                s.level = d.releaseMs <= 0.0 ? 0.0 : s.level - s.releaseFrom * dt * 1000.0 / d.releaseMs;
-                if (s.level <= 0.0) { s.level = 0.0; s.stage = EnvState::Stage::Idle; }
-                break;
-            case EnvState::Stage::Idle: s.level = 0.0; break;
-        }
-        env[static_cast<std::size_t> (i)] = s.level;
+        auto& r = env_[static_cast<std::size_t> (i)];
+        if (gate && ! lastGate_) r.begin (d, sampleRate_);
+        if (! gate && lastGate_ && ! r.finished()) r.noteOff (d, sampleRate_);
+        if (! r.finished()) r.advance (d, sampleRate_, frames);
+        env[static_cast<std::size_t> (i)] = r.finished() ? 0.0 : static_cast<double> (r.value());
     }
     lastGate_ = gate;
 

@@ -30,7 +30,7 @@ TEST_CASE ("modulation: matrix JSON round trip and bounds")
 {
     Matrix m;
     m.lfos[1].shape = LfoShape::Square; m.lfos[1].rateHz = 4.5; m.lfos[1].phase = 0.25;
-    m.envelopes[2].attackMs = 40; m.envelopes[2].sustain = 0.3;
+    m.envelopes[2].env.attack.ms = 40; m.envelopes[2].env.sustain = 0.3; m.envelopes[2].env.delay.on = true; m.envelopes[2].env.delay.ms = 15; m.envelopes[2].env.decay.curve.shape = 0.4;
     Route r;
     r.source = { SourceKind::ControlChange, 74, 3 };
     r.dest = kDest; r.amount = -0.4; r.centred = true;
@@ -39,7 +39,7 @@ TEST_CASE ("modulation: matrix JSON round trip and bounds")
 
     Matrix wild;
     wild.lfos[0].rateHz = 9999.0; wild.lfos[0].phase = -3.0;
-    wild.envelopes[0].sustain = 5.0;
+    wild.envelopes[0].env.sustain = 5.0;
     Route bad1; bad1.source = { SourceKind::None, 0, 0 }; bad1.dest = kDest;   // sans source
     Route bad2; bad2.source = { SourceKind::Lfo, 99, 0 }; bad2.dest = 0;         // sans destination
     Route ok; ok.source = { SourceKind::Lfo, 99, 7 }; ok.dest = kDest; ok.amount = 9.0;
@@ -47,7 +47,7 @@ TEST_CASE ("modulation: matrix JSON round trip and bounds")
     const auto clean = sanitised (wild);
     CHECK (clean.lfos[0].rateHz == 50.0);
     CHECK (clean.lfos[0].phase == 0.0);
-    CHECK (clean.envelopes[0].sustain == 1.0);
+    CHECK (clean.envelopes[0].env.sustain == 1.0);
     REQUIRE (clean.routes.size() == 1);
     CHECK (clean.routes[0].source.index == kLfos - 1);
     CHECK (clean.routes[0].source.channel == 0);     // un LFO n'a pas de canal
@@ -126,7 +126,7 @@ TEST_CASE ("modulation: an envelope follows the gate (attack, sustain, release)"
 {
     auto set = makeSet();
     Matrix m;
-    m.envelopes[0].attackMs = 20; m.envelopes[0].decayMs = 20; m.envelopes[0].sustain = 0.5; m.envelopes[0].releaseMs = 100;
+    m.envelopes[0].env.attack.ms = 20; m.envelopes[0].env.decay.ms = 20; m.envelopes[0].env.sustain = 0.5; m.envelopes[0].env.release.ms = 100;
     Route r; r.source = { SourceKind::Envelope, 0, 0 }; r.dest = kDest; r.amount = 1.0;
     m.routes = { r };
     const auto compiled = compile (m, set);
@@ -154,6 +154,45 @@ TEST_CASE ("modulation: an envelope follows the gate (attack, sustain, release)"
     CHECK (r1 > 0.0f);
     for (int i = 0; i < 20; ++i) run (false);
     CHECK (run (false) == Approx (0.0f).margin (0.001f));
+}
+
+TEST_CASE ("modulation: the first envelope format (attack, decay, sustain, release) is still read")
+{
+    const auto m = fromJson (R"({"envelopes":[{"a":30,"d":120,"s":0.4,"r":250}],"routes":[]})");
+    CHECK (m.envelopes[0].env.attack.ms == 30.0);
+    CHECK (m.envelopes[0].env.decay.ms == 120.0);
+    CHECK (m.envelopes[0].env.sustain == 0.4);
+    CHECK (m.envelopes[0].env.release.ms == 250.0);
+    CHECK (! m.envelopes[0].env.delay.on);
+    CHECK (! m.envelopes[0].env.hold.on);
+}
+
+TEST_CASE ("modulation: an envelope delay holds the output at zero before the attack")
+{
+    auto set = makeSet();
+    Matrix m;
+    auto& e = m.envelopes[0].env;
+    e.delay.on = true; e.delay.ms = 50; e.attack.ms = 1; e.decay.on = false; e.sustain = 1.0;
+    Route r; r.source = { SourceKind::Envelope, 0, 0 }; r.dest = kDest; r.amount = 1.0;
+    m.routes = { r };
+    const auto compiled = compile (m, set);
+    Modulator mod;
+    mod.prepare (48000.0);
+    mod.setCompiled (compiled.get());
+    const auto idx = set.indexOf (kDest);
+    midi::State midi;
+    std::vector<std::size_t> touched;
+    touched.reserve (64);
+    auto run = [&]
+    {
+        for (const auto t : touched) set.setModOffsetAt (t, 0.0f);
+        touched.clear();
+        mod.process (480, true, midi, set, touched);
+        return set.modOffsetAt (idx);
+    };
+    CHECK (run() == Approx (0.0f).margin (0.001f));   // 10 ms : encore dans le délai
+    for (int i = 0; i < 8; ++i) run();                // 90 ms : passé le délai et l'attaque
+    CHECK (run() == Approx (1.0f).margin (0.01f));
 }
 
 TEST_CASE ("modulation: MIDI sources read the controller state, bipolar and centred modes")

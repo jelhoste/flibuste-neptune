@@ -1,9 +1,12 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
+#include "ParamFilterBar.h"
 #include "neptune/core/I18n.h"
+#include "neptune/core/ParamGroups.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Theme.h"
 
@@ -21,7 +24,7 @@ public:
             const auto& s = set.spec (i);
             if (s.hidden) continue;
             if (continuousOnly && (s.kind != neptune::core::Kind::Continuous || ! s.modulatable)) continue;
-            entries_.push_back ({ s.id, juce::String::fromUTF8 (s.name.c_str()) });
+            entries_.push_back ({ s.id, juce::String::fromUTF8 (s.name.c_str()), neptune::core::paramgroups::classify (s.name) });
         }
         title_.setText (text ("modsearch.title"), juce::dontSendNotification);
         title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
@@ -31,7 +34,12 @@ public:
         hint_.setFont (juce::FontOptions (13.0f));
         hint_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::TextDim));
         addAndMakeVisible (hint_);
-        filter_.setText ("Track " + juce::String (track + 1) + " ", false);
+        {
+            std::vector<neptune::core::paramgroups::Group> groups;
+            for (const auto& e : entries_) groups.push_back (e.group);
+            bar_ = std::make_unique<ParamFilterBar> (groups, palette_, tr_, track, [this] { refilter(); });
+            addAndMakeVisible (*bar_);
+        }
         filter_.setFont (juce::FontOptions (18.0f));
         filter_.onTextChange = [this] { refilter(); };
         filter_.onReturnKey = [this] { choose (list_.getSelectedRow()); };
@@ -64,6 +72,8 @@ public:
         title_.setBounds (r.removeFromTop (30));
         hint_.setBounds (r.removeFromTop (36));
         filter_.setBounds (r.removeFromTop (32));
+        r.removeFromTop (6);
+        bar_->setBounds (r.removeFromTop (bar_->preferredHeight (r.getWidth())));
         r.removeFromTop (8);
         auto bottom = r.removeFromBottom (32);
         r.removeFromBottom (8);
@@ -72,7 +82,7 @@ public:
     }
 
 private:
-    struct Entry { neptune::core::ParamId id; juce::String name; };
+    struct Entry { neptune::core::ParamId id; juce::String name; neptune::core::paramgroups::Group group; };
 
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token t) const
@@ -80,7 +90,7 @@ private:
         const auto& c = palette_.color (t);
         return juce::Colour (c.r, c.g, c.b, static_cast<float> (c.a));
     }
-    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (620, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (700, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
     void refilter()
     {
@@ -88,7 +98,7 @@ private:
         const auto words = juce::StringArray::fromTokens (filter_.getText().trim(), " ", "");
         for (std::size_t i = 0; i < entries_.size(); ++i)
         {
-            bool ok = true;
+            bool ok = bar_ == nullptr || bar_->accepts (entries_[i].group);
             for (const auto& w : words)
                 if (w.isNotEmpty() && ! entries_[i].name.containsIgnoreCase (w)) { ok = false; break; }
             if (ok) shown_.push_back (i);
@@ -124,6 +134,7 @@ private:
     std::vector<std::size_t> shown_;
     juce::Label title_, hint_;
     juce::TextEditor filter_;
+    std::unique_ptr<ParamFilterBar> bar_;
     juce::ListBox list_;
     juce::TextButton cancel_;
 

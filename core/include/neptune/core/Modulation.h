@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "neptune/core/Envelope.h"
 #include "neptune/core/MidiFilter.h"
 #include "neptune/core/Parameter.h"
 
@@ -44,11 +45,23 @@ struct LfoDesc
     bool operator== (const LfoDesc& o) const noexcept { return shape == o.shape && rateHz == o.rateHz && phase == o.phase; }
 };
 
-// Enveloppe ADSR déclenchée par les notes de la piste : monte quand une touche est tenue, redescend au relâchement de la dernière.
+// Enveloppe déclenchée par les notes de la piste : monte quand une touche est tenue, redescend au relâchement de la dernière. C'est la même
+// enveloppe que celle des zones (délai, attaque, maintien, decay, sustain, relâchement, courbes), avec un départ 10 ms / 200 ms / 70 % / 300 ms.
 struct EnvDesc
 {
-    double attackMs = 10.0, decayMs = 200.0, sustain = 0.7, releaseMs = 300.0;   // 0..10000 ms, sustain 0..1
-    bool operator== (const EnvDesc& o) const noexcept { return attackMs == o.attackMs && decayMs == o.decayMs && sustain == o.sustain && releaseMs == o.releaseMs; }
+    EnvelopeDescription env = defaultEnvelope();
+    static EnvelopeDescription defaultEnvelope()
+    {
+        EnvelopeDescription e;
+        e.delay.on = false;
+        e.hold.on = false;
+        e.attack.ms = 10.0;
+        e.decay.ms = 200.0;
+        e.sustain = 0.7;
+        e.release.ms = 300.0;
+        return e;
+    }
+    bool operator== (const EnvDesc& o) const noexcept { return env == o.env; }
 };
 
 struct Route
@@ -88,7 +101,7 @@ struct CompiledRoute
 struct Compiled
 {
     std::array<LfoDesc, kLfos> lfos;
-    std::array<EnvDesc, kEnvelopes> envelopes;
+    std::array<EnvelopeRuntime, kEnvelopes> envelopes;   // tables de courbe précalculées (construites hors temps réel)
     std::vector<CompiledRoute> routes;
 };
 std::shared_ptr<const Compiled> compile (const Matrix&, const ParameterSet&);
@@ -104,12 +117,11 @@ public:
     void process (int frames, bool gate, const midi::State& midi, const ParameterSet& set, std::vector<std::size_t>& touched) noexcept;
 
 private:
-    struct EnvState { enum class Stage { Idle, Attack, Decay, Sustain, Release } stage = Stage::Idle; double level = 0.0, releaseFrom = 0.0; };
     double sampleRate_ = 48000.0;
     const Compiled* compiled_ = nullptr;
     std::array<double, kLfos> lfoPhase_ {};
     std::array<double, kLfos> lfoHeld_ {};
-    std::array<EnvState, kEnvelopes> env_ {};
+    std::array<EnvelopeRunner, kEnvelopes> env_ {};
     std::uint32_t rng_ = 12345u;
     bool lastGate_ = false;
 };

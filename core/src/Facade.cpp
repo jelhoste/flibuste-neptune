@@ -121,6 +121,49 @@ std::string clipped (std::string s, std::size_t maxLength)
 }
 } // namespace
 
+namespace
+{
+constexpr int kMeterTracks = 16, kMeterBuses = 16, kMeterParallels = 32;   // = mixer::numTracks / numBuses / numParallels (Facade n'inclut pas Mixer.h)
+}
+
+MeterSource decodeMeterSource (int source) noexcept
+{
+    MeterSource m;
+    if (source == 1) { m.kind = MeterSource::Kind::Master; m.index = 0; return m; }
+    if (source == 2) { m.reduction = true; return m; }
+    const int family = source / 100, i = source % 100;
+    switch (family)
+    {
+        case 1: m.kind = MeterSource::Kind::Track; m.index = i; break;
+        case 2: m.kind = MeterSource::Kind::Bus; m.index = i; break;
+        case 3: m.kind = MeterSource::Kind::Parallel; m.index = i; break;
+        case 4: m.kind = MeterSource::Kind::Track; m.index = i; m.reduction = true; break;
+        case 5: m.kind = MeterSource::Kind::Bus; m.index = i; m.reduction = true; break;
+        case 6: m.kind = MeterSource::Kind::Parallel; m.index = i; m.reduction = true; break;
+        case 7: m.kind = MeterSource::Kind::Master; m.index = 0; m.reduction = true; break;
+        default: break;
+    }
+    return m;
+}
+
+int encodeMeterSource (const MeterSource& m) noexcept
+{
+    if (m.kind == MeterSource::Kind::Master) return m.reduction ? 700 : 1;
+    if (m.index < 0) return m.reduction ? 2 : 0;
+    const int base = m.kind == MeterSource::Kind::Track ? 100 : m.kind == MeterSource::Kind::Bus ? 200 : 300;
+    return base + (m.reduction ? 300 : 0) + m.index;
+}
+
+int sanitisedMeterSource (int source) noexcept
+{
+    if (source >= 0 && source <= 2) return source;
+    const auto m = decodeMeterSource (source);
+    const int limit = m.kind == MeterSource::Kind::Track ? kMeterTracks : m.kind == MeterSource::Kind::Bus ? kMeterBuses : kMeterParallels;
+    if (m.kind == MeterSource::Kind::Master) return source == 700 ? 700 : 0;
+    if (m.index < 0 || m.index >= limit) return 0;
+    return encodeMeterSource (m) == source ? source : 0;
+}
+
 Facade sanitised (Facade f)
 {
     f.image = clipped (std::move (f.image), maxImagePath);
@@ -179,7 +222,7 @@ Facade sanitised (Facade f)
         w.hold = w.hold != 0 ? 1 : 0;
         w.velocity = std::clamp (w.velocity, 1, 127);
         w.vertical = w.vertical != 0 ? 1 : 0;
-        w.source = std::clamp (w.source, 0, 2);
+        w.source = w.type == WidgetType::Meter ? sanitisedMeterSource (w.source) : std::clamp (w.source, 0, 2);
         w.actionMode = std::clamp (w.actionMode, 0, 1);
         w.midi = midisend::sanitised (std::move (w.midi));
         w.midiTarget = std::clamp (w.midiTarget, 1, 3);

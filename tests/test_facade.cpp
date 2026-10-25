@@ -558,3 +558,31 @@ TEST_CASE ("Facade meters: source and orientation round-trip")
     f.widgets.push_back (h);
     CHECK (facade::fromJson (facade::toJson (f)) == f);
 }
+
+TEST_CASE ("facade: meter sources round trip and unknown ones fall back to the track")
+{
+    using namespace neptune::core::facade;
+    for (const int source : { 0, 1, 2, 100, 115, 200, 215, 300, 331, 400, 415, 500, 515, 600, 631, 700 })
+    {
+        CHECK (sanitisedMeterSource (source) == source);
+        CHECK (encodeMeterSource (decodeMeterSource (source)) == source);
+    }
+    for (const int source : { -1, 3, 99, 116, 216, 332, 416, 516, 632, 701, 800, 99999 })
+        CHECK (sanitisedMeterSource (source) == 0);
+
+    const auto reduction = decodeMeterSource (503);
+    CHECK (reduction.kind == MeterSource::Kind::Bus);
+    CHECK (reduction.index == 3);
+    CHECK (reduction.reduction);
+    CHECK (decodeMeterSource (2).reduction);
+    CHECK (decodeMeterSource (2).index == -1);
+
+    Facade f;
+    Widget w;
+    w.type = WidgetType::Meter;
+    w.source = 612;
+    f.widgets.push_back (w);
+    CHECK (fromJson (toJson (sanitised (f))).widgets.at (0).source == 612);
+    f.widgets[0].source = 12345;
+    CHECK (sanitised (f).widgets.at (0).source == 0);
+}

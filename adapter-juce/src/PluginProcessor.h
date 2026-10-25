@@ -206,6 +206,8 @@ public:
         std::unique_ptr<ParamHost> host;                          // édition annulable des paramètres du module
     };
     InsertHandle openInsert (StripKind, int index, int slot); // instance nulle si l'emplacement est vide
+    // Réduction de gain (dB, >= 0) des compresseurs insérés sur une bande (le plus fort de ceux qui ne sont pas en bypass), par canal.
+    std::pair<float, float> compressorReduction (StripKind, int index) const;
 
     // Pistes parallèles (spec §1) : jusqu'à 32, en arbre. `parent` : 0..15 = piste, 16..47 = piste parallèle (16 + indice).
     bool parallelActive (int p) const;

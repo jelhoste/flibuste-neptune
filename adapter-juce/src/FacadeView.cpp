@@ -6,6 +6,7 @@
 #include <map>
 
 #include "FacadeBundle.h"
+#include "ParamFilterBar.h"
 #include "FacadeExamples.h"
 #include "FacadeSpec.h"
 #include "StyleLibrary.h"
@@ -217,10 +218,32 @@ public:
         for (const auto& w : o.facade_.widgets)
         {
             if (w.type != fc::WidgetType::Meter) continue;
-            neptune::core::Engine::Meter m;
-            if (w.source == 1) m = o.processor_.masterMeter();
-            else if (o.track_ >= 0) m = o.processor_.trackMeter (o.track_);
-            const float now[2] = { toDb (m.peakL), toDb (m.peakR) };
+            const auto src = fc::decodeMeterSource (w.source);
+            const int index = src.index < 0 ? o.track_ : src.index;
+            float now[2] = { -100.0f, -100.0f };
+            if (src.reduction)
+            {
+                // réduction de gain (dB) -> position sur l'échelle -60..0 de la barre : 2 dB de barre par dB de réduction (0..30 dB)
+                using Kind = fc::MeterSource::Kind;
+                const auto kind = src.kind == Kind::Master ? NeptuneProcessor::StripKind::Master : src.kind == Kind::Bus ? NeptuneProcessor::StripKind::Bus
+                                : src.kind == Kind::Parallel ? NeptuneProcessor::StripKind::Parallel : NeptuneProcessor::StripKind::Track;
+                if (index >= 0 || src.kind == Kind::Master)
+                {
+                    const auto gr = o.processor_.compressorReduction (kind, std::max (0, index));
+                    now[0] = -60.0f + 2.0f * gr.first;
+                    now[1] = -60.0f + 2.0f * gr.second;
+                }
+            }
+            else
+            {
+                neptune::core::Engine::Meter m;
+                if (src.kind == fc::MeterSource::Kind::Master) m = o.processor_.masterMeter();
+                else if (src.kind == fc::MeterSource::Kind::Bus) m = o.processor_.busMeter (index);
+                else if (src.kind == fc::MeterSource::Kind::Parallel) m = o.processor_.parallelMeter (index);
+                else if (index >= 0) m = o.processor_.trackMeter (index);
+                now[0] = toDb (m.peakL);
+                now[1] = toDb (m.peakR);
+            }
             auto& s = meters_[w.id];
             for (int i = 0; i < 2; ++i)
             {
@@ -1110,6 +1133,7 @@ private:
                 const bool vertical = w.vertical != 0;
                 const auto it = meters_.find (w.id);
                 const MeterState state = it != meters_.end() ? it->second : MeterState { { -100.0f, -100.0f }, { -100.0f, -100.0f }, {}, };
+                const bool reduction = fc::decodeMeterSource (w.source).reduction;
                 auto area = b.reduced (2.0f);
                 g.setColour (o.colour (Token::BgApp));
                 g.fillRoundedRectangle (b, 4.0f);
@@ -1129,7 +1153,8 @@ private:
                     // le niveau : de l'accent au rouge au-dessus de -6 dB
                     for (const bool hot : { false, true })
                     {
-                        const float lo = hot ? fraction (-6.0f) : 0.0f, hi = std::min (fraction (state.level[i]), hot ? 1.0f : fraction (-6.0f));
+                        const float lo = hot ? fraction (-6.0f) : 0.0f, hi = std::min (fraction (state.level[i]), hot || reduction ? 1.0f : fraction (-6.0f));
+                        if (reduction && hot) continue;   // la réduction de gain garde la couleur d'accent
                         if (hi <= lo) continue;
                         g.setColour (hot ? o.colour (Token::KnobHot) : o.colour (Token::Accent));
                         if (vertical) g.fillRect (juce::Rectangle<float> (bar.getX(), bar.getBottom() - hi * bar.getHeight(), bar.getWidth(), (hi - lo) * bar.getHeight()));
@@ -1146,9 +1171,10 @@ private:
                 }
                 // graduations tous les 12 dB
                 g.setColour (o.colour (Token::TextDim2));
-                for (const float db : { 0.0f, -12.0f, -24.0f, -36.0f, -48.0f })
+                const float marks[5] = { 0.0f, -12.0f, -24.0f, -36.0f, -48.0f };   // niveau : tous les 12 dB ; réduction : les mêmes traits valent 6 dB de gain
+                for (const float mark : marks)
                 {
-                    const float f = fraction (db);
+                    const float f = fraction (mark);
                     if (vertical) g.drawHorizontalLine (juce::roundToInt (area.getBottom() - f * area.getHeight()), area.getX(), area.getRight());
                     else g.drawVerticalLine (juce::roundToInt (area.getX() + f * area.getWidth()), area.getY(), area.getBottom());
                 }
@@ -1355,7 +1381,7 @@ public:
         for (std::size_t i = 0; i < ps.size(); ++i)
         {
             const auto& s = ps.spec (i);
-            if (! s.hidden) entries_.push_back ({ s.id, utf8 (s.name) });
+            if (! s.hidden) entries_.push_back ({ s.id, utf8 (s.name), neptune::core::paramgroups::classify (s.name) });
         }
         title_.setText (owner.text (capture ? "facade.capture_title" : "facade.picker_title"), juce::dontSendNotification);
         title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
@@ -1365,7 +1391,12 @@ public:
         hint_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
         addAndMakeVisible (title_);
         addAndMakeVisible (hint_);
-        filter_.setText ("Track " + juce::String (track + 1) + " ", false);
+        {
+            std::vector<neptune::core::paramgroups::Group> groups;
+            for (const auto& e : entries_) groups.push_back (e.group);
+            bar_ = std::make_unique<ParamFilterBar> (groups, owner.palette_, owner.tr_, track, [this] { refilter(); });
+            addAndMakeVisible (*bar_);
+        }
         filter_.setFont (juce::FontOptions (18.0f));
         filter_.onTextChange = [this] { refilter(); };
         filter_.onReturnKey = [this] { if (capture_) confirm(); else choose (list_.getSelectedRow()); };
@@ -1429,6 +1460,8 @@ public:
         hint_.setBounds (r.removeFromTop (36));
         filter_.setBounds (r.removeFromTop (32));
         r.removeFromTop (6);
+        bar_->setBounds (r.removeFromTop (bar_->preferredHeight (r.getWidth())));
+        r.removeFromTop (6);
         if (capture_)
         {
             auto info = r.removeFromTop (26);
@@ -1446,9 +1479,9 @@ public:
     }
 
 private:
-    struct Entry { neptune::core::ParamId id; juce::String name; };
+    struct Entry { neptune::core::ParamId id; juce::String name; neptune::core::paramgroups::Group group; };
 
-    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (620, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (700, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
     void updateCount()
     {
@@ -1470,7 +1503,7 @@ private:
         const auto words = juce::StringArray::fromTokens (filter_.getText().trim(), " ", "");
         for (std::size_t i = 0; i < entries_.size(); ++i)
         {
-            bool ok = true;
+            bool ok = bar_ == nullptr || bar_->accepts (entries_[i].group);
             for (const auto& w : words)
                 if (w.isNotEmpty() && ! entries_[i].name.containsIgnoreCase (w)) { ok = false; break; }
             if (ok) shown_.push_back (i);
@@ -1540,6 +1573,7 @@ private:
     std::vector<std::size_t> shown_;
     juce::Label title_, hint_;
     juce::TextEditor filter_;
+    std::unique_ptr<ParamFilterBar> bar_;
     juce::ListBox list_;
     juce::TextButton cancel_, unlink_, ok_, allButton_;
     juce::ToggleButton checkedOnly_;
@@ -2916,9 +2950,29 @@ void FacadeView::showMeterSourceMenu()
 {
     const auto* m = facade_.find (single());
     if (m == nullptr || m->type != fc::WidgetType::Meter) return;
+    const int current = m->source;
     juce::PopupMenu menu;
-    menu.addItem (1, text ("facade.meter_track"), true, m->source == 0);
-    menu.addItem (2, text ("facade.meter_master"), true, m->source == 1);
+    // Un identifiant de menu = la source + 1 (0 est « rien choisi »).
+    auto add = [&] (juce::PopupMenu& to, const juce::String& label, int source) { to.addItem (source + 1, label, true, source == current); };
+    auto numbered = [&] (const char* key, int count, int base, const std::function<bool (int)>& available)
+    {
+        juce::PopupMenu sub;
+        for (int i = 0; i < count; ++i)
+            if (available (i)) add (sub, text (key) + " " + juce::String (i + 1), base + i);
+        return sub;
+    };
+    auto always = [] (int) { return true; };
+    auto activeParallel = [this] (int p) { return processor_.parallelActive (p); };
+    namespace mx = neptune::core::mixer;
+    for (const bool reduction : { false, true })
+    {
+        if (reduction) { menu.addSeparator(); menu.addSectionHeader (text ("facade.meter_reduction")); }
+        add (menu, text (reduction ? "facade.meter_track_reduction" : "facade.meter_track"), reduction ? 2 : 0);
+        add (menu, text (reduction ? "facade.meter_master_reduction" : "facade.meter_master"), reduction ? 700 : 1);
+        menu.addSubMenu (text ("facade.meter_other_track"), numbered ("facade.meter_track_n", mx::numTracks, reduction ? 400 : 100, always));
+        menu.addSubMenu (text ("facade.meter_bus"), numbered ("facade.meter_bus_n", mx::numBuses, reduction ? 500 : 200, always));
+        menu.addSubMenu (text ("facade.meter_parallel"), numbered ("facade.meter_parallel_n", mx::numParallels, reduction ? 600 : 300, activeParallel));
+    }
     menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&meterSourceButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
     {

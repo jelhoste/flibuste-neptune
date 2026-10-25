@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "PluginProcessor.h"
+#include "neptune/core/CompressorModule.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
 #include "neptune/core/FmPreset.h"
@@ -760,6 +761,26 @@ NeptuneProcessor::InsertHandle NeptuneProcessor::openInsert (StripKind kind, int
     }
     if (h.instance != nullptr) h.host = std::make_unique<InsertHost> (*this, h.instance);
     return h;
+}
+
+std::pair<float, float> NeptuneProcessor::compressorReduction (StripKind kind, int index) const
+{
+    namespace cm = neptune::core::compressor;
+    float left = 0.0f, right = 0.0f;
+    for (int slot = 0; slot < neptune::core::mixer::numInserts; ++slot)
+    {
+        std::shared_ptr<neptune::core::InsertInstance> inst;
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            inst = insertInstances_[static_cast<std::size_t> (insertFlatIndex (kind, index))][static_cast<std::size_t> (slot)];
+        }
+        if (inst == nullptr || inst->type != "compressor" || insertBypassed (kind, index, slot)) continue;
+        const auto& module = inst->runner.module();
+        if (module.numMeters() <= cm::kReductionR) continue;
+        left = std::max (left, -module.meter (cm::kReductionL));
+        right = std::max (right, -module.meter (cm::kReductionR));
+    }
+    return { std::max (0.0f, left), std::max (0.0f, right) };
 }
 
 neptune::core::mixer::StripSettings NeptuneProcessor::trackSettings (int track) const
