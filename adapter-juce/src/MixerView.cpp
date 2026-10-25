@@ -1,6 +1,7 @@
 #include "MixerView.h"
 #include <cmath>
 #include "neptune/core/ProbePool.h"
+#include "TrackBundle.h"
 #include "VelocityPanel.h"
 
 using namespace neptune::core;
@@ -864,11 +865,16 @@ private:
         menu.addItem (3, u8 (std::string (owner_.tr_.tr ("mix.type_fm"))), true, current == TrackType::Fm);
         menu.addItem (5, u8 (std::string (owner_.tr_.tr ("mix.type_organ"))), true, current == TrackType::Organ);
         menu.addItem (4, u8 (std::string (owner_.tr_.tr ("mix.type_audio"))), true, current == TrackType::AudioIn);
+        menu.addSeparator();
+        menu.addItem (10, u8 (std::string (owner_.tr_.tr ("track.export_menu"))));
+        menu.addItem (11, u8 (std::string (owner_.tr_.tr ("track.import_menu"))));
         menu.setLookAndFeel (&typeButton_.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&typeButton_).withMinimumWidth (220),
                             [safe = juce::Component::SafePointer<Strip> (this)] (int choice)
                             {
                                 if (safe == nullptr || choice == 0) return;
+                                if (choice == 10) { safe->owner_.requestExportTrack (safe->index_); return; }
+                                if (choice == 11) { safe->owner_.requestImportTrack(); return; }
                                 safe->owner_.requestTypeChange (safe->index_, choice == 4 ? TrackType::AudioIn : choice == 5 ? TrackType::Organ : choice == 3 ? TrackType::Fm : choice == 2 ? TrackType::Synth : TrackType::Sampler);
                             });
     }
@@ -1328,6 +1334,61 @@ void MixerView::requestTypeChange (int track, TrackType type)
     juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, text ("mix.confirm_title"),
                                                                                 text ("mix.confirm_type"), text ("mix.continue"), text ("mix.cancel"), this),
                                   [apply] (int result) { if (result == 1) apply(); }); // 1 : premier bouton
+}
+
+void MixerView::requestExportTrack (int track)
+{
+    const auto name = juce::String::fromUTF8 (processor_.trackSettings (track).name.c_str());
+    const auto title = u8 (std::string (tr_.tr ("track.export_title")));
+    chooser_ = std::make_unique<juce::FileChooser> (title, juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                               .getChildFile ((name.isEmpty() ? juce::String ("Track") : name) + ".neptunetrack"), "*.neptunetrack");
+    chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                           [safe = juce::Component::SafePointer<MixerView> (this), track, title] (const juce::FileChooser& c)
+                           {
+                               if (safe == nullptr || c.getResult() == juce::File()) return;
+                               auto target = c.getResult();
+                               if (! target.hasFileExtension ("neptunetrack")) target = target.withFileExtension ("neptunetrack");
+                               const auto report = track_bundle::save (safe->processor_.exportTrackBundle (track), target);
+                               const auto path = target.getFullPathName().toStdString();
+                               const auto message = report.ok
+                                   ? u8 (safe->tr_.format ("track.exported", { path, std::to_string (report.samples), std::to_string (report.images), std::to_string (report.packs), std::to_string (report.missing) }))
+                                   : u8 (safe->tr_.format ("track.export_failed", { path }));
+                               juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, title, message);
+                           });
+}
+
+void MixerView::requestImportTrack()
+{
+    const auto title = u8 (std::string (tr_.tr ("track.import_title")));
+    if (processor_.activeTrackCount() >= neptune::core::mixer::numTracks)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, title, u8 (std::string (tr_.tr ("track.import_full"))));
+        return;
+    }
+    chooser_ = std::make_unique<juce::FileChooser> (title, juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.neptunetrack");
+    chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                           [safe = juce::Component::SafePointer<MixerView> (this), title] (const juce::FileChooser& c)
+                           {
+                               if (safe == nullptr || ! c.getResult().existsAsFile()) return;
+                               neptune::core::trackexport::Bundle bundle;
+                               const auto assets = stylelib::directory().getParentDirectory().getChildFile ("imported-tracks");
+                               const auto report = track_bundle::load (c.getResult(), assets, bundle);
+                               if (! report.ok)
+                               {
+                                   juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, title,
+                                                                           u8 (safe->tr_.format ("track.import_failed", { report.error.toStdString() })));
+                                   return;
+                               }
+                               const int index = safe->processor_.uiImportTrack (std::move (bundle));
+                               if (index < 0)
+                               {
+                                   juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, title, u8 (std::string (safe->tr_.tr ("track.import_full"))));
+                                   return;
+                               }
+                               safe->refresh();
+                               juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, title,
+                                                                       u8 (safe->tr_.format ("track.imported", { std::to_string (index + 1), std::to_string (report.files), std::to_string (report.packsInstalled) })));
+                           });
 }
 
 void MixerView::requestRemove (int track)

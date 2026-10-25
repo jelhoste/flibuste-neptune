@@ -449,6 +449,71 @@ int NeptuneProcessor::uiAddTrack()
     return index;
 }
 
+neptune::core::trackexport::Bundle NeptuneProcessor::exportTrackBundle (int track) const
+{
+    using namespace neptune::core;
+    track = juce::jlimit (0, mixer::numTracks - 1, track);
+    trackexport::Bundle b;
+    b.track = track;
+    b.state = mixerState().tracks[static_cast<std::size_t> (track)];
+    for (const auto id : trackexport::ownedParams (params_, track))
+    {
+        const auto index = params_.indexOf (id);
+        if (index != ParameterSet::npos && params_.getAt (index) != params_.spec (index).defaultValue) b.params[id] = params_.getAt (index);
+    }
+    return b;
+}
+
+int NeptuneProcessor::uiImportTrack (neptune::core::trackexport::Bundle b)
+{
+    using namespace neptune::core;
+    namespace mx = neptune::core::mixer;
+    const int index = uiAddTrack();   // piste neuve, sélectionnée, tous ses réglages à leur défaut
+    if (index < 0) return -1;
+    trackexport::remapTo (b, index);
+    auto track = b.state;
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        auto& fresh = mixer_.tracks[static_cast<std::size_t> (index)];
+        track.strip.midiChannel = fresh.strip.midiChannel;
+        track.strip.midiChannelMask = fresh.strip.midiChannelMask;
+        track.strip = mx::sanitisedStrip (std::move (track.strip), false, index);
+        track.active = true;
+        fresh = track;
+    }
+    engine_.setTrackType (index, track.type);
+    engine_.setTrackSettings (index, track.strip);
+    publishSynthPatch (index, track.synth);
+    publishFmDescription (index, track.fm);
+    publishOrganDescription (index, track.organ);
+    for (int s = 0; s < mx::numInserts; ++s)
+    {
+        std::shared_ptr<InsertInstance> inst;
+        const auto& st = track.strip.inserts[static_cast<std::size_t> (s)];
+        if (! st.empty())
+        {
+            inst = createInsert (st.type, engine_.sampleRate(), engine_.maxBlockSize());
+            if (inst != nullptr)
+            {
+                for (const auto& [id, v] : st.values) inst->runner.params().set (id, v);
+                if (! st.text.empty() && inst->runner.module().hasStateString()) inst->runner.module().setStateString (st.text);
+            }
+        }
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            insertInstances_[static_cast<std::size_t> (index)][static_cast<std::size_t> (s)] = inst;
+        }
+        engine_.setInsert (StripKind::Track, index, s, inst);
+    }
+    loader_->request (index, track.instrument, false);
+    std::vector<std::pair<ParamId, double>> values (b.params.begin(), b.params.end());
+    seedHostParameters (values);
+    undo_.clear();
+    ++revision_;
+    notifyStateChanged();
+    return index;
+}
+
 bool NeptuneProcessor::uiRemoveTrack (int track)
 {
     using namespace neptune::core;
@@ -1296,6 +1361,7 @@ NeptuneProcessor::NeptuneProcessor()
         addParameter (new NeptuneParameter (params_, i, hostProbe_)); // l'AudioProcessor en prend la propriété
     }
     loader_ = std::make_unique<InstrumentLoader> (*this);
+    stylelib::setDirectory (juce::File (settingsFilePath()).getParentDirectory().getChildFile ("styles"));   // packs de styles : aussi sans éditeur ouvert (presets, export de piste)
     {
         // Presets de synthé : la même bibliothèque qu'AnalogSynth (dossier choisi dans les réglages, sinon <config>/AnalogSynth).
         auto root = settings_.presetsDir.empty() ? configDir / "AnalogSynth" : std::filesystem::u8path (settings_.presetsDir);

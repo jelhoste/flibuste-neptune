@@ -27,6 +27,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/Instrument.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/StockModule.h"
+#include "neptune/core/TrackExport.h"
 #include "neptune/core/MixerState.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Profile.h"
@@ -190,6 +191,10 @@ public:
     void uiSetTrackType (int track, neptune::core::TrackType);
     // Active la première piste libre (un synthé par défaut) et la sélectionne ; rend son indice, ou -1 si les 16 sont actives.
     int uiAddTrack();
+    // Export d'une piste complète (état de la piste + valeurs de ses réglages) et import dans une NOUVELLE piste (rend son indice, -1 si
+    // les 16 pistes sont prises). L'import vide l'historique d'annulation ; le canal MIDI de la nouvelle piste est conservé.
+    neptune::core::trackexport::Bundle exportTrackBundle (int track) const;
+    int uiImportTrack (neptune::core::trackexport::Bundle);
     // Retire une piste (remise à l'état d'origine). Faux s'il n'en reste qu'une. Vide l'historique d'annulation.
     bool uiRemoveTrack (int track);
 

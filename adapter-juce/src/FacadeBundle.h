@@ -27,10 +27,9 @@ struct SaveReport
     int images = 0, packs = 0, missing = 0;
 };
 
-inline SaveReport save (fc::Facade f, int sourceTrack, const juce::File& destination)
+// Ajoute à l'archive les images locales et les packs de styles d'une Façade, et réécrit ses chemins (« asset:assets/... »).
+inline void addEntries (juce::ZipFile::Builder& builder, fc::Facade& f, SaveReport& report)
 {
-    SaveReport report;
-    juce::ZipFile::Builder builder;
     std::set<std::string> packs;
     std::map<std::string, std::string> done;   // ancien chemin -> nouveau
     fc::forEachImagePath (f, [&] (std::string& path)
@@ -59,6 +58,13 @@ inline SaveReport save (fc::Facade f, int sourceTrack, const juce::File& destina
         builder.addEntry (new juce::MemoryInputStream (bytes, true), 9, "packs/" + juce::String (id) + ".neptunestyle", juce::Time::getCurrentTime());
         ++report.packs;
     }
+}
+
+inline SaveReport save (fc::Facade f, int sourceTrack, const juce::File& destination)
+{
+    SaveReport report;
+    juce::ZipFile::Builder builder;
+    addEntries (builder, f, report);
     const juce::String json = "{\"format\":1,\"track\":" + juce::String (sourceTrack) + ",\"facade\":" + juce::String::fromUTF8 (fc::toJson (f).c_str()) + "}";
     builder.addEntry (new juce::MemoryInputStream (json.toRawUTF8(), json.getNumBytesAsUTF8(), true), 9, "facade.json", juce::Time::getCurrentTime());
 
@@ -74,6 +80,49 @@ struct LoadReport
     juce::String error;
     int images = 0, packsInstalled = 0;
 };
+
+// Extrait les entrées d'une archive : « assets/ » (et « samples/ » si demandé) sous `dir` ; les packs « packs/*.neptunestyle » absents de la
+// bibliothèque sont installés (un pack déjà installé n'est jamais écrasé). Les entrées dangereuses sont ignorées.
+inline void extractEntries (juce::ZipFile& zip, const juce::File& dir, int& files, int& packsInstalled, bool withSamples)
+{
+    for (int i = 0; i < zip.getNumEntries(); ++i)
+    {
+        const auto name = zip.getEntry (i)->filename.toStdString();
+        if (name.empty() || ! sp::isSafeEntryName (name)) continue;
+        if ((name.rfind ("assets/", 0) == 0 || (withSamples && name.rfind ("samples/", 0) == 0)) && name.back() != '/')
+        {
+            const auto target = dir.getChildFile (juce::String::fromUTF8 (name.c_str()));
+            if (! target.existsAsFile())
+            {
+                target.getParentDirectory().createDirectory();
+                const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i));
+                if (stream != nullptr)
+                {
+                    juce::FileOutputStream o (target);
+                    if (o.openedOk()) { o.writeFromInputStream (*stream, -1); ++files; }
+                }
+            }
+        }
+        else if (name.rfind ("packs/", 0) == 0 && juce::String (name).endsWithIgnoreCase (".neptunestyle"))
+        {
+            const auto id = juce::File (juce::String::fromUTF8 (name.c_str())).getFileNameWithoutExtension().toLowerCase().toStdString();
+            if (stylelib::findSource (id) != juce::File() || ! stylelib::directory().createDirectory().wasOk()) continue;   // déjà installé : on garde le sien
+            const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i));
+            if (stream == nullptr) continue;
+            juce::FileOutputStream o (stylelib::directory().getChildFile (juce::String (id) + ".neptunestyle"));
+            if (o.openedOk() && o.writeFromInputStream (*stream, -1) > 0) ++packsInstalled;
+        }
+    }
+}
+
+// « asset:assets/... » -> chemin absolu sous `dir`.
+inline void resolveAssets (fc::Facade& f, const juce::File& dir)
+{
+    fc::forEachImagePath (f, [&dir] (std::string& path)
+    {
+        if (path.rfind ("asset:", 0) == 0) path = dir.getChildFile (juce::String::fromUTF8 (path.c_str() + 6)).getFullPathName().toStdString();
+    });
+}
 
 // Lit un fichier Façade pour la piste `targetTrack` : les widgets sont rebranchés sur cette piste, les images embarquées sont extraites sous
 // `assetsRoot` (un sous-dossier par contenu), les packs absents de la bibliothèque sont installés (un pack déjà installé n'est jamais écrasé).
@@ -101,41 +150,12 @@ inline LoadReport load (const juce::File& file, int targetTrack, const juce::Fil
     // images embarquées : extraites dans un dossier propre à ce contenu, puis chemins réécrits
     const auto hash = juce::String::toHexString (static_cast<juce::int64> (juce::String (full).hashCode64()));
     const auto dir = assetsRoot.getChildFile ("facade-" + hash);
-    for (int i = 0; i < zip.getNumEntries(); ++i)
-    {
-        const auto name = zip.getEntry (i)->filename.toStdString();
-        if (! sp::isSafeEntryName (name)) continue;
-        if (name.rfind ("assets/", 0) == 0 && name.back() != '/')
-        {
-            const auto target = dir.getChildFile (juce::String::fromUTF8 (name.c_str()));
-            if (! target.existsAsFile())
-            {
-                target.getParentDirectory().createDirectory();
-                const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i));
-                if (stream != nullptr)
-                {
-                    juce::FileOutputStream o (target);
-                    if (o.openedOk()) { o.writeFromInputStream (*stream, -1); ++report.images; }
-                }
-            }
-        }
-        else if (name.rfind ("packs/", 0) == 0 && juce::String (name).endsWithIgnoreCase (".neptunestyle"))
-        {
-            const auto id = juce::File (juce::String::fromUTF8 (name.c_str())).getFileNameWithoutExtension().toLowerCase().toStdString();
-            if (stylelib::findSource (id) != juce::File() || ! stylelib::directory().createDirectory().wasOk()) continue;   // déjà installé : on garde le sien
-            const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (i));
-            if (stream == nullptr) continue;
-            juce::FileOutputStream o (stylelib::directory().getChildFile (juce::String (id) + ".neptunestyle"));
-            if (o.openedOk() && o.writeFromInputStream (*stream, -1) > 0) ++report.packsInstalled;
-        }
-    }
-    fc::forEachImagePath (out, [&dir] (std::string& path)
-    {
-        if (path.rfind ("asset:", 0) == 0) path = dir.getChildFile (juce::String::fromUTF8 (path.c_str() + 6)).getFullPathName().toStdString();
-    });
+    extractEntries (zip, dir, report.images, report.packsInstalled, false);
+    resolveAssets (out, dir);
     report.ok = true;
     return report;
 }
+
 // ---- Façade dans un preset de la bibliothèque ----
 // Le preset (`Preset::facade`) garde {"track":n,"facade":{...}} ; ses images sont des fichiers à contenu nommé (« <empreinte>_<nom> ») dans
 // <bibliothèque>/facade-assets, désignés par « asset:<nom> », et ses packs de styles sont copiés dans facade-assets/packs/<id>.neptunestyle.

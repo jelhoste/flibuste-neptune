@@ -43,6 +43,8 @@ private:
     void exclusiveSolo (int kind, int index); // kind : 0 piste, 1 bus, 2 piste parallèle (pistes et parallèles forment un domaine)
     void requestTypeChange (int track, neptune::core::TrackType); // confirmation si la piste a du contenu
     void requestRemove (int track);
+    void requestExportTrack (int track); // piste complète -> fichier .neptunetrack
+    void requestImportTrack();           // fichier .neptunetrack -> nouvelle piste
     void requestAddParallel (int parentId); // 0..15 piste, 16.. piste parallèle
     void requestRemoveParallel (int p);
     void toggleFold (int p);
@@ -64,6 +66,7 @@ private:
     std::unique_ptr<MasterStrip> master_;
     juce::Label tracksTitle_, busesTitle_;
     juce::TextButton addTrack_, zoomOut_, zoomIn_;
+    std::unique_ptr<juce::FileChooser> chooser_;
     juce::Label zoomLabel_;
     float zoom_ = 1.0f;
     juce::Rectangle<int> lastArea_;
