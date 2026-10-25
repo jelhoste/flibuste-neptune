@@ -95,6 +95,7 @@ void NeptuneKnob::timerCallback()
 {
     interaction_.tick (nowMs());
     if (index_ == neptune::core::ParameterSet::npos) return;
+    if (const float off = processor_.parameters().modOffsetAt (index_); std::abs (off - lastMod_) > 0.002f) { lastMod_ = off; repaint(); }   // la modulation bouge sans changer la valeur
     // Valeur changée ailleurs (hôte, annulation, modale) : on suit, sauf pendant notre propre geste.
     const auto& set = processor_.parameters();
     const auto v = set.versionAt (index_);
@@ -257,6 +258,17 @@ void paintNeptuneKnob (juce::Graphics& g, juce::Rectangle<float> b, float n, con
     }
 }
 
+void paintModulationRing (juce::Graphics& g, juce::Rectangle<float> b, float base, float modulated, const neptune::core::theme::Palette& palette, float k)
+{
+    const auto& c = palette.color (Token::Accent2);
+    const float S = std::min (b.getWidth(), b.getHeight());
+    const float cx = b.getCentreX(), cy = b.getCentreY(), r = S * 0.46f;
+    const float a0 = kA0 + juce::jlimit (0.0f, 1.0f, base) * (kA1 - kA0), a1 = kA0 + juce::jlimit (0.0f, 1.0f, modulated) * (kA1 - kA0);
+    g.setColour (juce::Colour (c.r, c.g, c.b, 1.0f));
+    strokeArc (g, cx, cy, r, std::min (a0, a1), std::max (a0, a1), 3.0f * k, true);
+    g.fillEllipse (cx + std::cos (a1) * r - 3.0f * k, cy + std::sin (a1) * r - 3.0f * k, 6.0f * k, 6.0f * k);
+}
+
 void NeptuneSliderLook::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float pos, float, float, juce::Slider& s)
 {
     const auto area = juce::Rectangle<float> (static_cast<float> (x), static_cast<float> (y), static_cast<float> (width), static_cast<float> (height));
@@ -273,6 +285,9 @@ void NeptuneKnob::paint (juce::Graphics& g)
     const auto b = getLocalBounds().toFloat();
     const float n = index_ == neptune::core::ParameterSet::npos ? 0.0f : static_cast<float> (shownNormalised());
     paintNeptuneKnob (g, b, n, palette_, style_, scale_);
+    if (index_ != neptune::core::ParameterSet::npos)
+        if (const float off = processor_.parameters().modOffsetAt (index_); off != 0.0f)
+            paintModulationRing (g, b, n, n + off, palette_, scale_);
 
     if (hasKeyboardFocus (false))
     {

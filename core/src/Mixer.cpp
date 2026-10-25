@@ -216,6 +216,7 @@ StripSettings sanitisedStrip (StripSettings s, bool isBus, int index)
     if (isBus && s.routing.mainDest != 0 && s.routing.mainDest <= index + 1) s.routing.mainDest = 0;
     s.panMode = s.panMode == PanMode::True ? PanMode::True : PanMode::Balance;
     s.velocityCurve = isBus ? VelocityCurve() : sanitised (std::move (s.velocityCurve));
+    s.modulation = isBus ? modulation::Matrix() : modulation::sanitised (std::move (s.modulation));
     s.facade = isBus ? facade::Facade() : facade::sanitised (std::move (s.facade));
     for (auto& in : s.inserts)
         if (in.type.size() > 32) in = InsertState {};

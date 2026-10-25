@@ -19,6 +19,7 @@
 
 #include "neptune/core/Facade.h"
 #include "neptune/core/MidiFilter.h"
+#include "neptune/core/Modulation.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/VelocityResponse.h"
 #include "neptune/core/ProbePool.h"
@@ -211,12 +212,13 @@ struct StripSettings
     bool slim = false;
     bool hostInput = true;               // piste « Entrée audio » : l'entrée audio du plugin (hôte) alimente la piste
     VelocityCurve velocityCurve;         // pistes : courbe de transfert de la vélocité MIDI reçue, avant tout moteur (Sampler, synthé, FM, orgue)
+    modulation::Matrix modulation;       // pistes : matrice de modulation (LFO, enveloppes, routes vers des paramètres)
     facade::Facade facade;               // pistes : la Façade (interface personnalisée), vide par défaut
 
     bool operator== (const StripSettings& o) const noexcept
     {
         return hostInput == o.hostInput && name == o.name && color == o.color && midiChannel == o.midiChannel && midiChannelMask == o.midiChannelMask && midiFilter == o.midiFilter && routing == o.routing
-            && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim && velocityCurve == o.velocityCurve && facade == o.facade;
+            && panMode == o.panMode && sends == o.sends && inserts == o.inserts && slim == o.slim && velocityCurve == o.velocityCurve && modulation == o.modulation && facade == o.facade;
     }
 };
 

@@ -62,6 +62,7 @@ public:
 
     // Paramètres lus à chaque bloc (SamplerParams.h, ProbePool.h, Mixer.h). Appelé hors temps réel, avant l'audio.
     void attachParameters (const ParameterSet* parameters) noexcept;
+    void publishModulation (int track);   // thread de message : résout la matrice de la piste sur le jeu de paramètres
 
     // Instrument d'une piste : thread de message. L'audio l'adopte au début du bloc suivant ; les voix en cours s'arrêtent.
     // Démarre le thread disque (et ses tampons) la première fois qu'un instrument en streaming est publié.
@@ -218,6 +219,9 @@ private:
         HandoffSlot<midi::CompiledFilter> filterSlot;   // filtre MIDI avancé de la piste
         const midi::CompiledFilter* filter = nullptr;   // thread audio
         midi::FilterDescription filterDescription;      // thread de message : ce qui est publié
+        HandoffSlot<modulation::Compiled> modSlot;      // matrice de modulation résolue (indices de paramètres)
+        modulation::Matrix modDescription;              // thread de message : ce qui est publié
+        modulation::Modulator modulator;                // thread audio : LFO, enveloppes, sources MIDI
         HandoffSlot<VelocityLut> velocitySlot;          // courbe de transfert de la vélocité reçue (aucune : vélocité telle quelle)
         const VelocityLut* velocityLut = nullptr;       // thread audio
         VelocityCurve velocityDescription;              // thread de message : ce qui est publié
@@ -285,7 +289,7 @@ private:
     void publishVoices() noexcept;
     double param (std::size_t index, double fallback) const noexcept
     {
-        return params_ != nullptr && index != ParameterSet::npos ? params_->getAt (index) : fallback;
+        return params_ != nullptr && index != ParameterSet::npos ? params_->effectiveAt (index) : fallback;   // avec la modulation
     }
 
     double sampleRate_ = 0.0;
@@ -314,6 +318,7 @@ private:
     std::vector<float> loudL_, loudR_; // le signal du Master tel qu'envoyé (après trim, inserts, fader, pan, mono)
     std::atomic<int> globalMaxVoices_ { mixer::MasterSettings::defaultMaxVoices };
     const ParameterSet* params_ = nullptr;
+    std::vector<std::size_t> modTouched_;   // paramètres dont le décalage de modulation est non nul (remis à zéro au bloc suivant)
     std::size_t masterVolume_ = ParameterSet::npos, masterPan_ = ParameterSet::npos, masterMute_ = ParameterSet::npos,
                 masterTrim_ = ParameterSet::npos, masterMono_ = ParameterSet::npos;
     Inserts masterInserts_;

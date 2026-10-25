@@ -2,6 +2,7 @@
 // Couche Paramètre générique (palier 0).
 // Une seule définition de « paramètre » sert de base à l'automation hôte, au MIDI/OSC, à l'undo/redo et à la modulation.
 // Aucune dépendance à JUCE ni à CLAP : la traduction se fait dans les adaptateurs.
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -88,6 +89,26 @@ public:
     bool setNormalizedAt (std::size_t index, double n) noexcept;
     std::uint32_t versionAt (std::size_t index) const noexcept { return slots_[index].version.load (std::memory_order_relaxed); }
 
+    // Modulation (matrice de modulation) : un décalage VIVANT, en unités normalisées (-1..1), qui s'ajoute à la valeur réglée sans la
+    // changer. Écrit par le thread audio (un seul écrivain), lu par le moteur (valeur effective) et par l'interface (anneau de modulation).
+    // La valeur de base, l'automation de l'hôte et les presets ne voient jamais la modulation.
+    float modOffsetAt (std::size_t index) const noexcept { return slots_[index].offset.load (std::memory_order_relaxed); }
+    void setModOffsetAt (std::size_t index, float offset) const noexcept { slots_[index].offset.store (offset, std::memory_order_relaxed); }   // const : la modulation n'est pas l'état du jeu de paramètres
+    void addModOffsetAt (std::size_t index, float delta) const noexcept { slots_[index].offset.store (slots_[index].offset.load (std::memory_order_relaxed) + delta, std::memory_order_relaxed); }
+    // Valeur réelle avec la modulation : la valeur de base si le décalage est nul (chemin habituel, sans calcul), sinon bornée à la plage.
+    double effectiveAt (std::size_t index) const noexcept
+    {
+        const float off = slots_[index].offset.load (std::memory_order_relaxed);
+        const double base = slots_[index].value.load (std::memory_order_relaxed);
+        if (off == 0.0f) return base;
+        const auto& spec = slots_[index].spec;
+        return spec.fromNormalized (std::clamp (spec.toNormalized (base) + static_cast<double> (off), 0.0, 1.0));
+    }
+    double effectiveNormalizedAt (std::size_t index) const noexcept
+    {
+        return std::clamp (slots_[index].spec.toNormalized (slots_[index].value.load (std::memory_order_relaxed)) + static_cast<double> (slots_[index].offset.load (std::memory_order_relaxed)), 0.0, 1.0);
+    }
+
     // Accès par id (id inconnu : get -> 0.0, set -> false).
     double get (ParamId id) const noexcept;
     double getNormalized (ParamId id) const noexcept;
@@ -109,6 +130,7 @@ private:
         ParamSpec spec;
         std::atomic<double> value;
         std::atomic<std::uint32_t> version { 0 };
+        mutable std::atomic<float> offset { 0.0f };   // décalage de modulation (voir modOffsetAt)
     };
 
     static_assert (std::atomic<double>::is_always_lock_free, "std::atomic<double> doit être sans verrou");

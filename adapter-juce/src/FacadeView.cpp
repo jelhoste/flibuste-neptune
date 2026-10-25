@@ -973,6 +973,9 @@ private:
                 }
                 else
                     paintNeptuneKnob (g, r, pos, o.palette_, o.knobStyle_);
+                if (linked)
+                    if (const float off = ps.modOffsetAt (ps.indexOf (w.param)); off != 0.0f)
+                        paintModulationRing (g, r, pos, pos + (w.invert != 0 ? -off : off), o.palette_);
                 if (style != nullptr && (style->textSize > 0 || ! style->textColour.empty() || style->textPosition != 0 || ! style->textBold))
                     drawStyledText (g, style, caption, captionRow, 0.8f, o.colour (Token::Text));
                 else

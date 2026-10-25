@@ -37,12 +37,15 @@ Engine::Engine() noexcept
 
 void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
 {
+    modTouched_.clear();
+    modTouched_.reserve (kTracks * modulation::kMaxRoutes + 64);
     fm::initTables (sampleRate); // tables globales de msfa (module FM)
     sampleRate_ = sampleRate;
     maxBlockSize_ = std::max (1, maxBlockSize);
     activeNotes_ = 0;
     for (auto& t : tracks_)
     {
+        t.modulator.prepare (sampleRate);
         t.voices.prepare (sampleRate);
         t.synth.prepare (sampleRate);
         t.fm.prepare (sampleRate);
@@ -167,6 +170,7 @@ void Engine::collectGarbage()
         t.organ.collect();
         t.filterSlot.collect();
         t.velocitySlot.collect();
+        t.modSlot.collect();
         t.previewSlot.collect();
         pruneSynthKeeper (t);
         for (auto& s : t.inserts) s.slot.collect();
@@ -214,11 +218,24 @@ void Engine::setTrackSettings (int track, const mixer::StripSettings& s)
         t.filterDescription = clean.midiFilter;
         t.filterSlot.publish (std::make_shared<const midi::CompiledFilter> (clean.midiFilter));
     }
+    if (clean.modulation != t.modDescription)
+    {
+        t.modDescription = clean.modulation;
+        publishModulation (track);
+    }
     if (! (clean.velocityCurve == t.velocityDescription))
     {
         t.velocityDescription = clean.velocityCurve;
         t.velocitySlot.publish (! clean.velocityCurve.active() ? std::shared_ptr<const VelocityLut>() : std::make_shared<const VelocityLut> (buildLut (clean.velocityCurve)));
     }
+}
+
+void Engine::publishModulation (int track)
+{
+    if (track < 0 || track >= kTracks) return;
+    auto& t = tracks_[static_cast<std::size_t> (track)];
+    if (params_ == nullptr) return;   // la matrice est résolue quand les paramètres sont rattachés
+    t.modSlot.publish (modulation::compile (t.modDescription, *params_));
 }
 
 void Engine::setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter> filter)
@@ -260,6 +277,8 @@ void Engine::setMasterSettings (const mixer::MasterSettings& m) noexcept
 void Engine::attachParameters (const ParameterSet* parameters) noexcept
 {
     params_ = parameters;
+    if (parameters != nullptr)
+        for (int t = 0; t < kTracks; ++t) publishModulation (t);
     if (parameters == nullptr) return;
     auto idx = [parameters] (ParamId id) { return parameters->indexOf (id); };
     for (int t = 0; t < kTracks; ++t)
@@ -578,6 +597,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
         if (t.organSlot.adoptPending()) t.organ.setDescription (t.organSlot.current());
         if (t.filterSlot.adoptPending()) t.filter = t.filterSlot.current();
         if (t.velocitySlot.adoptPending()) t.velocityLut = t.velocitySlot.current();
+        if (t.modSlot.adoptPending()) t.modulator.setCompiled (t.modSlot.current());
         // changement de type ou désactivation : les voix de la piste s'arrêtent net (rien ne doit sonner sous l'ancien type)
         const int type = t.type.load (std::memory_order_relaxed), active = t.active.load (std::memory_order_relaxed);
         if (type != t.appliedType || (active == 0 && t.appliedActive != 0))
@@ -838,6 +858,15 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     chunkOut_ = out;
     chunkChannels_ = numChannels;
     chunkN_ = n;
+    // Modulation : les décalages du bloc précédent sont remis à zéro, puis chaque piste active évalue ses sources (LFO, enveloppes, MIDI, macros)
+    if (params_ != nullptr)
+    {
+        for (const auto i : modTouched_) params_->setModOffsetAt (i, 0.0f);
+        modTouched_.clear();
+        for (auto& t : tracks_)
+            if (t.active.load (std::memory_order_relaxed) != 0)
+                t.modulator.process (n, (t.held[0].load (std::memory_order_relaxed) | t.held[1].load (std::memory_order_relaxed)) != 0, midiState_, *params_, modTouched_);
+    }
     auto zero = [n] (Stereo& s) { std::fill (s.l.begin(), s.l.begin() + n, 0.0f); std::fill (s.r.begin(), s.r.begin() + n, 0.0f); };
     zero (master_);
     for (auto& b : busIn_) zero (b);
@@ -929,13 +958,13 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         if (params_ != nullptr)
         {
             const auto& s = t.idx.sampler;
-            if (s[kGain] != ParameterSet::npos) gain = static_cast<float> (sampler::dbToGain (params_->getAt (s[kGain])));
-            if (s[kTuneSemitones] != ParameterSet::npos) cents += params_->getAt (s[kTuneSemitones]) * 100.0;
-            if (s[kTuneCents] != ParameterSet::npos) cents += params_->getAt (s[kTuneCents]);
-            if (s[kFilter1Cutoff] != ParameterSet::npos) fp.cutoffHz[0] = params_->getAt (s[kFilter1Cutoff]);
-            if (s[kFilter1Resonance] != ParameterSet::npos) fp.resonance[0] = params_->getAt (s[kFilter1Resonance]) / 100.0;
-            if (s[kFilter2Cutoff] != ParameterSet::npos) fp.cutoffHz[1] = params_->getAt (s[kFilter2Cutoff]);
-            if (s[kFilter2Resonance] != ParameterSet::npos) fp.resonance[1] = params_->getAt (s[kFilter2Resonance]) / 100.0;
+            if (s[kGain] != ParameterSet::npos) gain = static_cast<float> (sampler::dbToGain (params_->effectiveAt (s[kGain])));
+            if (s[kTuneSemitones] != ParameterSet::npos) cents += params_->effectiveAt (s[kTuneSemitones]) * 100.0;
+            if (s[kTuneCents] != ParameterSet::npos) cents += params_->effectiveAt (s[kTuneCents]);
+            if (s[kFilter1Cutoff] != ParameterSet::npos) fp.cutoffHz[0] = params_->effectiveAt (s[kFilter1Cutoff]);
+            if (s[kFilter1Resonance] != ParameterSet::npos) fp.resonance[0] = params_->effectiveAt (s[kFilter1Resonance]) / 100.0;
+            if (s[kFilter2Cutoff] != ParameterSet::npos) fp.cutoffHz[1] = params_->effectiveAt (s[kFilter2Cutoff]);
+            if (s[kFilter2Resonance] != ParameterSet::npos) fp.resonance[1] = params_->effectiveAt (s[kFilter2Resonance]) / 100.0;
         }
         if (audioInTrack)
         {

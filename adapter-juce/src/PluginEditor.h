@@ -5,6 +5,7 @@
 #include "MixerView.h"
 #include "FacadeView.h"
 #include "MidiMessagePanel.h"
+#include "ModView.h"
 #include "MidiFilterEditor.h"
 #include "ScaledRoot.h"
 #include "InsertOverlay.h"
@@ -67,9 +68,11 @@ private:
     bool showProbe_ = false;
     bool showMixer_ = true; // on arrive sur le Mixeur
     bool showFacade_ = false;
+    bool showMod_ = false;
     // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
-    juce::TextButton mixerButton_, mappingButton_, facadeButton_;
+    juce::TextButton mixerButton_, mappingButton_, facadeButton_, modButton_;
     std::unique_ptr<MixerView> mixerView_;
+    std::unique_ptr<ModView> modView_;          // la matrice de modulation de la piste sélectionnée
     std::unique_ptr<FacadeView> facadeView_;   // la Façade de la piste sélectionnée
     // Vue Synthé : remplace la vue Mapping quand la piste sélectionnée est un synthé.
     std::unique_ptr<InsertOverlay> insertOverlay_;
@@ -89,7 +92,7 @@ private:
     juce::ComboBox trackBox_;   // piste sélectionnée
     int knobTrack_ = -1;        // piste sur laquelle les potards d'instrument sont branchés
     std::uint32_t trackBoxRevision_ = 0xFFFFFFFFu;
-    void setView (bool mixer, bool probe, bool facade = false);
+    void setView (bool mixer, bool probe, bool facade = false, bool mod = false);
     void rebindKnobs();
     void updateTrackBox();
     void updateViewVisibility();

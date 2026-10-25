@@ -11,6 +11,9 @@
 void paintNeptuneKnob (juce::Graphics&, juce::Rectangle<float> bounds, float normalised, const neptune::core::theme::Palette&,
                        neptune::core::theme::KnobStyle, float scale = 1.0f);   // scale : épaisseurs de trait et repères (1 = taille de la maquette)
 
+// Anneau de modulation autour d'un potard : de la position réglée (`base`) à la position modulée (`modulated`), en 0..1.
+void paintModulationRing (juce::Graphics&, juce::Rectangle<float> bounds, float base, float modulated, const neptune::core::theme::Palette&, float scale = 1.0f);
+
 // Look des juce::Slider rotatifs : même image que NeptuneKnob.
 class NeptuneSliderLook : public juce::LookAndFeel_V4
 {
@@ -71,6 +74,7 @@ private:
     std::uint32_t lastVersion_ = 0;
     bool lastWasTouch_ = false;
     float scale_ = 1.0f;
+    float lastMod_ = 0.0f;   // dernier décalage de modulation dessiné (repeint quand il change)
     bool hasRange_ = false;
     double rangeLo_ = 0.0, rangeHi_ = 1.0, rangeExp_ = 1.0;
 
