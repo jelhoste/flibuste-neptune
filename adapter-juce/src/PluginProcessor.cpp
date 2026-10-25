@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "PluginProcessor.h"
+#include "FacadeBundle.h"
 #include "neptune/core/CompressorModule.h"
 #include "NeptuneParameter.h"
 #include "PluginEditor.h"
@@ -994,6 +995,16 @@ bool NeptuneProcessor::loadPreset (const std::string& id)
             hp->endChangeGesture();
         }
     }
+    if (! p->facade.empty()) // un preset sans Façade laisse celle de la piste ; avec une Façade, elle la remplace (même entrée d'annulation)
+    {
+        facade::Facade loaded;
+        if (facade_bundle::restoreFromFolder (p->facade, track, facade_bundle::presetAssetsFolder (presetLibrary_->root()), loaded))
+        {
+            auto strip = trackSettings (track);
+            strip.facade = std::move (loaded);
+            uiEditTrack (track, std::move (strip), "Preset");
+        }
+    }
     undo_.endTransaction();
     control_.resetPickup(); // les assignations « reprise » attendent de nouveau le passage de la source
     setTrackPresetId (track, id);
@@ -1038,9 +1049,20 @@ bool NeptuneProcessor::overwritePreset (const std::string& id, std::string* erro
         : trackType (track) == TrackType::Fm
         ? fm::capturePreset (params_, fmDescription (track), presetLibrary_->config(), base->name, base->type, base, track)
         : analogsynth::capturePreset (params_, synthDescription (track), presetLibrary_->config(), base->name, base->type, base, track);
+    attachFacade (p, track);
     const bool ok = presetLibrary_->save (std::move (p), error);
     if (ok) ++presetRevision_;
     return ok;
+}
+
+// La Façade de la piste entre dans le preset (images copiées dans la bibliothèque) ; une piste sans Façade n'en met pas.
+void NeptuneProcessor::attachFacade (neptune::core::preset::Preset& p, int track) const
+{
+    const auto f = trackSettings (track).facade;
+    if (f == neptune::core::facade::Facade()) { p.facade.clear(); return; }
+    facade_bundle::SaveReport report;
+    p.facade = facade_bundle::storeInFolder (f, track, facade_bundle::presetAssetsFolder (presetLibrary_->root()), report);
+    p = neptune::core::preset::sanitised (std::move (p));
 }
 
 bool NeptuneProcessor::saveCurrent (std::string* error)
@@ -1073,6 +1095,7 @@ bool NeptuneProcessor::saveCurrentAs (const std::string& name, const std::string
         p.derivedFrom = cur->factory ? cur->id : cur->derivedFrom;
         p = capture (&p, name, p.type);
     }
+    attachFacade (p, track);
     preset::Preset stored;
     if (! presetLibrary_->importPreset (std::move (p), &stored, error)) return false;
     setTrackPresetId (track, stored.id);

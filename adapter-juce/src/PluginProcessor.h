@@ -172,6 +172,7 @@ public:
     bool isModified() const override;
     bool canSaveCurrent() const override;
     bool saveCurrent (std::string* error = nullptr) override;
+    void attachFacade (neptune::core::preset::Preset&, int track) const;
     bool overwritePreset (const std::string& id, std::string* error = nullptr) override;
     bool saveCurrentAs (const std::string& name, const std::string& type, neptune::core::preset::Preset* out = nullptr,
                         std::string* error = nullptr) override;

@@ -40,6 +40,7 @@ Preset sample (const std::string& name)
     p.captureOverrides["output.volume"] = Capture::Captured;
     p.module = "analogsynth";
     p.state = R"({"a":1})";
+    p.facade = R"({"facade":{"widgets":[]},"track":2})";
     return p;
 }
 } // namespace
@@ -74,6 +75,17 @@ TEST_CASE ("preset json round trip", "[preset]")
     CHECK (ok);
     CHECK (q == p);
     CHECK_FALSE (q.factory);
+}
+
+TEST_CASE ("preset facade is kept as a nested object and optional", "[preset]")
+{
+    Preset p = sample ("Avec facade");
+    const auto text = toJson (p);
+    CHECK (text.find ("\"facade\"") != std::string::npos);
+    CHECK (presetFromJson (text).facade == p.facade);
+    p.facade.clear();
+    CHECK (toJson (p).find ("\"facade\"") == std::string::npos);
+    CHECK (presetFromJson (toJson (p)).facade.empty());
 }
 
 TEST_CASE ("preset reading is tolerant", "[preset]")

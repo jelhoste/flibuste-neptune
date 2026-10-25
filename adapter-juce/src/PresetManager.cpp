@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <set>
 
+#include "FacadeBundle.h"
 #include "PresetHost.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FileUtil.h"
@@ -830,6 +831,16 @@ private:
                                    };
                                    add ("bundle-manifest.json", preset::toJson (manifest));
                                    for (const auto& p : presets) add ("presets/" + U (p.id) + preset::presetExtension, preset::toJson (p));
+                                   // images et packs des Façades enregistrées dans les presets
+                                   const auto assets = facade_bundle::presetAssetsFolder (c_.p.library().root());
+                                   std::set<std::string> carried;
+                                   for (const auto& p : presets)
+                                       for (const auto& name : facade_bundle::referencedFiles (p.facade))
+                                       {
+                                           const auto file = assets.getChildFile (juce::String::fromUTF8 (name.c_str()));
+                                           if (! carried.insert (name).second || ! file.existsAsFile()) continue;
+                                           builder.addEntry (new juce::FileInputStream (file), 6, "facade-assets/" + juce::String::fromUTF8 (name.c_str()), juce::Time::getCurrentTime());
+                                       }
                                    juce::FileOutputStream out (file);
                                    if (out.openedOk())
                                    {
@@ -852,7 +863,7 @@ private:
                                    const auto file = fc.getResult();
                                    if (file == juce::File()) return;
                                    juce::ZipFile zip (file);
-                                   if (zip.getNumEntries() <= 0 || zip.getNumEntries() > 300) { c_.status (c_.text ("bank.import_failed")); return; }
+                                   if (zip.getNumEntries() <= 0 || zip.getNumEntries() > 1000) { c_.status (c_.text ("bank.import_failed")); return; }
                                    auto readEntry = [&zip] (int index) -> std::string
                                    {
                                        const auto* e = zip.getEntry (index);
@@ -871,6 +882,23 @@ private:
                                        bool ok = false;
                                        auto p = preset::presetFromJson (readEntry (i), &ok);
                                        if (ok && presets.size() < static_cast<std::size_t> (preset::programsPerBank)) presets.push_back (std::move (p));
+                                   }
+                                   // images et packs des Façades : posés dans la bibliothèque s'ils n'y sont pas déjà
+                                   const auto assets = facade_bundle::presetAssetsFolder (c_.p.library().root());
+                                   for (int i = 0; i < zip.getNumEntries(); ++i)
+                                   {
+                                       const auto* e = zip.getEntry (i);
+                                       if (e == nullptr || ! e->filename.startsWith ("facade-assets/") || e->filename.endsWithChar ('/')
+                                           || e->uncompressedSize > 64 * 1024 * 1024) continue;
+                                       const auto name = e->filename.fromFirstOccurrenceOf ("facade-assets/", false, false);
+                                       if (! neptune::core::stylepack::isSafeEntryName (name.toStdString())) continue;
+                                       const auto target = assets.getChildFile (name);
+                                       if (target.existsAsFile()) continue;
+                                       std::unique_ptr<juce::InputStream> in (zip.createStreamForEntry (i));
+                                       if (in == nullptr) continue;
+                                       target.getParentDirectory().createDirectory();
+                                       juce::FileOutputStream o (target);
+                                       if (o.openedOk()) o.writeFromInputStream (*in, -1);
                                    }
                                    std::string error;
                                    const int placed = c_.p.library().importBundle (manifest, std::move (presets), bank_, &error);

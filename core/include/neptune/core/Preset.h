@@ -63,6 +63,9 @@ struct Preset
     // Extension du modèle (état structuré d'un module : formes d'onde, enveloppes, filtres...), propre au plugin.
     std::string module;                            // identifiant du module qui sait lire `state` ("analogsynth")
     std::string state;                             // objet JSON sérialisé ; "" = aucun
+    // Façade de la piste d'origine (Neptune) : objet JSON {"track":n,"facade":{...}}, images désignées par « asset:<nom> » (fichiers
+    // copiés sous <bibliothèque>/facade-assets) ; "" = aucune. Les autres plugins la conservent sans la lire.
+    std::string facade;
 
     // Effets uniquement : conservés tels quels.
     std::string reverbEngine;                      // "light" | "convolution" | ""

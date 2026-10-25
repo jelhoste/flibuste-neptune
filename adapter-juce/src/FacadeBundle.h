@@ -1,8 +1,10 @@
 #pragma once
 #include <juce_core/juce_core.h>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 #include <nlohmann/json.hpp>
 #include "StyleLibrary.h"
 #include "neptune/core/Facade.h"
@@ -133,5 +135,94 @@ inline LoadReport load (const juce::File& file, int targetTrack, const juce::Fil
     });
     report.ok = true;
     return report;
+}
+// ---- Façade dans un preset de la bibliothèque ----
+// Le preset (`Preset::facade`) garde {"track":n,"facade":{...}} ; ses images sont des fichiers à contenu nommé (« <empreinte>_<nom> ») dans
+// <bibliothèque>/facade-assets, désignés par « asset:<nom> », et ses packs de styles sont copiés dans facade-assets/packs/<id>.neptunestyle.
+// Enregistrer deux fois la même image ne crée qu'un fichier.
+inline juce::File presetAssetsFolder (const std::filesystem::path& libraryRoot)
+{
+    return juce::File (juce::String::fromUTF8 (libraryRoot.string().c_str())).getChildFile ("facade-assets");
+}
+
+inline std::string storeInFolder (fc::Facade f, int sourceTrack, const juce::File& folder, SaveReport& report)
+{
+    std::set<std::string> packs;
+    std::map<std::string, std::string> done;
+    fc::forEachImagePath (f, [&] (std::string& path)
+    {
+        const std::string old = path;
+        if (const auto it = done.find (old); it != done.end()) { path = it->second; return; }
+        std::string packId, entry;
+        if (sp::parseReference (old, packId, entry)) { packs.insert (packId); done[old] = old; return; }
+        juce::MemoryBlock bytes;
+        if (! stylelib::readBytes (old, bytes) || bytes.getSize() == 0) { ++report.missing; done[old] = old; return; }
+        const auto fileName = juce::File (juce::String::fromUTF8 (old.c_str())).getFileName().replaceCharacters (" \\/:", "____");
+        juce::uint64 hash = 1469598103934665603ull;   // FNV-1a sur tout le contenu
+        for (size_t i = 0; i < bytes.getSize(); ++i) hash = (hash ^ static_cast<juce::uint8> (bytes[i])) * 1099511628211ull;
+        const auto name = juce::String::toHexString (static_cast<juce::int64> (hash)) + "_" + fileName;
+        const auto target = folder.getChildFile (name);
+        if (! target.existsAsFile())
+        {
+            folder.createDirectory();
+            if (! target.replaceWithData (bytes.getData(), bytes.getSize())) { ++report.missing; done[old] = old; return; }
+        }
+        ++report.images;
+        path = ("asset:" + name).toStdString();
+        done[old] = path;
+    });
+    for (const auto& id : packs)
+    {
+        const auto target = folder.getChildFile ("packs").getChildFile (juce::String (id) + ".neptunestyle");
+        if (target.existsAsFile()) { ++report.packs; continue; }
+        juce::MemoryBlock bytes;
+        if (! stylelib::packArchiveBytes (id, bytes)) { ++report.missing; continue; }
+        target.getParentDirectory().createDirectory();
+        if (target.replaceWithData (bytes.getData(), bytes.getSize())) ++report.packs; else ++report.missing;
+    }
+    report.ok = true;
+    return "{\"track\":" + std::to_string (sourceTrack) + ",\"facade\":" + fc::toJson (f) + "}";
+}
+
+// Fichiers (relatifs au dossier des images) dont dépend une Façade enregistrée dans un preset : pour les mettre dans un .flibank.
+inline std::vector<std::string> referencedFiles (const std::string& presetFacade)
+{
+    std::vector<std::string> names;
+    const auto doc = nlohmann::json::parse (presetFacade, nullptr, false);
+    if (! doc.is_object() || ! doc.contains ("facade") || ! doc["facade"].is_object()) return names;
+    auto f = fc::fromJson (doc["facade"].dump());
+    std::set<std::string> seen;
+    fc::forEachImagePath (f, [&] (std::string& path)
+    {
+        std::string packId, entry;
+        if (path.rfind ("asset:", 0) == 0) { if (sp::isSafeEntryName (path.substr (6))) seen.insert (path.substr (6)); }
+        else if (sp::parseReference (path, packId, entry) && sp::isSafeEntryName (packId)) seen.insert ("packs/" + packId + ".neptunestyle");
+    });
+    names.assign (seen.begin(), seen.end());
+    return names;
+}
+
+// Charge la Façade d'un preset pour `targetTrack` : widgets rebranchés, images résolues dans `folder`, packs absents installés.
+inline bool restoreFromFolder (const std::string& presetFacade, int targetTrack, const juce::File& folder, fc::Facade& out)
+{
+    const auto doc = nlohmann::json::parse (presetFacade, nullptr, false);
+    if (! doc.is_object() || ! doc.contains ("facade") || ! doc["facade"].is_object()) return false;
+    const int fromTrack = doc.contains ("track") && doc["track"].is_number_integer() ? doc["track"].get<int>() : targetTrack;
+    out = fc::fromJson (doc["facade"].dump());
+    fc::remapTrack (out, fromTrack, targetTrack);
+    const auto packsDir = folder.getChildFile ("packs");
+    if (packsDir.isDirectory() && stylelib::directory().createDirectory().wasOk())
+        for (const auto& pack : packsDir.findChildFiles (juce::File::findFiles, false, "*.neptunestyle"))
+        {
+            const auto id = pack.getFileNameWithoutExtension().toLowerCase().toStdString();
+            if (stylelib::findSource (id) == juce::File()) pack.copyFileTo (stylelib::directory().getChildFile (juce::String (id) + ".neptunestyle"));
+        }
+    fc::forEachImagePath (out, [&folder] (std::string& path)
+    {
+        if (path.rfind ("asset:", 0) != 0) return;
+        const auto name = path.substr (6);
+        if (sp::isSafeEntryName (name)) path = folder.getChildFile (juce::String::fromUTF8 (name.c_str())).getFullPathName().toStdString();
+    });
+    return true;
 }
 } // namespace facade_bundle

@@ -113,7 +113,7 @@ bool Preset::operator== (const Preset& o) const noexcept
 {
     return id == o.id && name == o.name && type == o.type && characteristics == o.characteristics && rating == o.rating
         && locked == o.locked && customFields == o.customFields && derivedFrom == o.derivedFrom && parameters == o.parameters
-        && captureOverrides == o.captureOverrides && module == o.module && state == o.state && reverbEngine == o.reverbEngine
+        && captureOverrides == o.captureOverrides && module == o.module && state == o.state && facade == o.facade && reverbEngine == o.reverbEngine
         && reverbIrRef == o.reverbIrRef && declaredLatencySamples == o.declaredLatencySamples
         && pedalHeldOverride == o.pedalHeldOverride;
 }
@@ -161,6 +161,7 @@ Preset sanitised (Preset p)
     while (p.parameters.size() > kMaxParams) p.parameters.erase (std::prev (p.parameters.end()));
     p.module = clipped (p.module, 32);
     if (p.state.size() > kMaxState) p.state.clear();
+    if (p.facade.size() > kMaxState) p.facade.clear();
     p.reverbEngine = p.reverbEngine == "light" || p.reverbEngine == "convolution" ? p.reverbEngine : std::string();
     p.reverbIrRef = clipped (p.reverbIrRef, 64);
     p.declaredLatencySamples = std::clamp (p.declaredLatencySamples, 0, 1 << 20);
@@ -196,6 +197,11 @@ std::string toJson (const Preset& in)
     {
         const auto st = json::parse (p.state, nullptr, false);
         if (! st.is_discarded() && st.is_object()) o["state"] = st;
+    }
+    if (! p.facade.empty())
+    {
+        const auto f = json::parse (p.facade, nullptr, false);
+        if (! f.is_discarded() && f.is_object()) o["facade"] = f;
     }
     return o.dump (2);
 }
@@ -237,6 +243,7 @@ Preset presetFromJson (std::string_view text, bool* ok)
     p.pedalHeldOverride = pedalFrom (o, "pedalHeldBehaviorOverride");
     p.module = strOf (o, "module");
     if (const auto it = o.find ("state"); it != o.end() && it->is_object()) p.state = it->dump();
+    if (const auto it = o.find ("facade"); it != o.end() && it->is_object()) p.facade = it->dump();
     return sanitised (std::move (p));
 }
 
