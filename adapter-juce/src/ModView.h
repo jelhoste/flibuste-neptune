@@ -51,6 +51,8 @@ private:
     std::unique_ptr<EnvelopeEditor> envEditor_;
     int envSel_ = 0;
     juce::Label lfoCaption_, envCaption_, routesCaption_, hint_, envTag_;   // envTag_ : l'enveloppe en cours d'édition, en haut à droite
+    std::array<juce::Label, 3> lfoHead_;      // légende des colonnes des LFO : forme, vitesse, phase
+    std::array<juce::Label, 6> routeHead_;    // légende des colonnes des routes
     juce::TextButton addButton_;
     juce::Viewport view_;
     juce::Component routesHolder_;

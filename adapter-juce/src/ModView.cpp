@@ -10,6 +10,8 @@ namespace mod = neptune::core::modulation;
 
 namespace
 {
+// Largeurs des colonnes d'une route (la ligne de légende au-dessus de la liste reprend les mêmes).
+constexpr int kRemoveW = 34, kDestW = 300, kKindW = 150, kIndexW = 90, kChannelW = 90, kRangeW = 84, kGapS = 6, kGapL = 10;
 juce::String num (double v, int decimals) { return juce::String (v, decimals); }
 }
 
@@ -38,10 +40,10 @@ public:
         amount_.setDoubleClickReturnValue (true, 0.0);
         amount_.onValueChange = [this] { if (! updating_) { edit().amount = amount_.getValue() / 100.0; owner_.commit(); } };
         addAndMakeVisible (amount_);
-        centred_.setButtonText (owner.text ("mod.centred"));
         centred_.setTooltip (owner.text ("mod.tip_centred"));
-        centred_.setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
-        centred_.onClick = [this] { if (! updating_) { edit().centred = centred_.getToggleState(); owner_.commit(); } };
+        centred_.setClickingTogglesState (true);
+        centred_.setColour (juce::TextButton::buttonOnColourId, owner.colour (Token::Accent));
+        centred_.onClick = [this] { if (! updating_) { edit().centred = centred_.getToggleState(); refresh (edit()); owner_.commit(); } };
         addAndMakeVisible (centred_);
         dest_.onClick = [this] { owner_.chooseDestination (index_); };
         addAndMakeVisible (dest_);
@@ -55,17 +57,17 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (2);
-        remove_.setBounds (r.removeFromRight (34));
-        r.removeFromRight (6);
-        dest_.setBounds (r.removeFromRight (300));
-        r.removeFromRight (6);
-        kind_.setBounds (r.removeFromLeft (150));
-        r.removeFromLeft (6);
-        indexBox_.setBounds (r.removeFromLeft (90));
-        r.removeFromLeft (6);
-        channel_.setBounds (r.removeFromLeft (90));
-        r.removeFromLeft (10);
-        centred_.setBounds (r.removeFromRight (70));
+        remove_.setBounds (r.removeFromRight (kRemoveW));
+        r.removeFromRight (kGapS);
+        dest_.setBounds (r.removeFromRight (kDestW));
+        r.removeFromRight (kGapS);
+        kind_.setBounds (r.removeFromLeft (kKindW));
+        r.removeFromLeft (kGapS);
+        indexBox_.setBounds (r.removeFromLeft (kIndexW));
+        r.removeFromLeft (kGapS);
+        channel_.setBounds (r.removeFromLeft (kChannelW));
+        r.removeFromLeft (kGapL);
+        centred_.setBounds (r.removeFromRight (kRangeW));
         amount_.setBounds (r);
     }
 
@@ -89,8 +91,11 @@ public:
         indexBox_.setSelectedId (r.source.index + 1, juce::dontSendNotification);
         channel_.setSelectedId (r.source.channel + 1, juce::dontSendNotification);
         amount_.setValue (r.amount * 100.0, juce::dontSendNotification);
-        centred_.setToggleState (r.centred, juce::dontSendNotification);
-        centred_.setEnabled (! mod::isBipolar (r.source.kind));
+        // plage de la source : 0..1 (n'ajoute que vers le haut) ou -1..+1 (centrée) ; LFO et pitch bend sont toujours -1..+1
+        const bool bipolar = mod::isBipolar (r.source.kind);
+        centred_.setToggleState (bipolar || r.centred, juce::dontSendNotification);
+        centred_.setButtonText (owner_.text (bipolar || r.centred ? "mod.range_bipolar" : "mod.range_unipolar"));
+        centred_.setEnabled (! bipolar);
         const auto destName = r.dest != 0 ? owner_.processor_.modulationDestName (owner_.track_, r.dest) : std::string();
         dest_.setButtonText (! destName.empty() ? juce::String::fromUTF8 (destName.c_str()) : owner_.text ("mod.choose_dest"));
         updating_ = false;
@@ -128,7 +133,7 @@ private:
     bool updating_ = false;
     juce::ComboBox kind_, indexBox_, channel_;
     juce::Slider amount_;
-    juce::ToggleButton centred_;
+    juce::TextButton centred_;
     juce::TextButton dest_, remove_;
 };
 
@@ -151,6 +156,19 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
     hint_.setFont (juce::FontOptions (13.0f));
     hint_.setColour (juce::Label::textColourId, colour (Token::TextDim));
     addAndMakeVisible (hint_);
+    auto legend = [this] (juce::Label& l, const char* key)
+    {
+        l.setText (text (key), juce::dontSendNotification);
+        l.setFont (juce::FontOptions (13.0f));
+        l.setColour (juce::Label::textColourId, colour (Token::TextDim));
+        l.setMinimumHorizontalScale (0.7f);
+        addAndMakeVisible (l);
+    };
+    legend (lfoHead_[0], "mod.head_shape");
+    legend (lfoHead_[1], "mod.head_rate");
+    legend (lfoHead_[2], "mod.head_phase");
+    const char* routeKeys[6] = { "mod.head_source", "mod.head_number", "mod.head_channel", "mod.head_amount", "mod.head_range", "mod.head_dest" };
+    for (int i = 0; i < 6; ++i) legend (routeHead_[static_cast<std::size_t> (i)], routeKeys[i]);
 
     auto field = [this] (juce::TextEditor& e, const char* tooltip)
     {
@@ -227,6 +245,15 @@ void ModView::resized()
     top.removeFromLeft (20);
     lfoCaption_.setBounds (left.removeFromTop (26));
     envCaption_.setBounds (top.removeFromTop (26));
+    {
+        auto head = left.removeFromTop (20);
+        head.removeFromLeft (60);
+        lfoHead_[0].setBounds (head.removeFromLeft (150));
+        head.removeFromLeft (8);
+        lfoHead_[1].setBounds (head.removeFromLeft (80));
+        head.removeFromLeft (8);
+        lfoHead_[2].setBounds (head.removeFromLeft (70));
+    }
     for (int i = 0; i < mod::kLfos; ++i)
     {
         auto row = left.removeFromTop (34);
@@ -248,8 +275,25 @@ void ModView::resized()
     addButton_.setBounds (head.removeFromRight (160));
     hint_.setBounds (head);
     r.removeFromTop (4);
+    auto legendRow = r.removeFromTop (20);
     view_.setBounds (r);
     layoutRoutes();
+    {
+        // même géométrie que RouteRow::resized(), sur la largeur visible de la liste
+        const int width = std::max (400, view_.getMaximumVisibleWidth());
+        auto row = legendRow.withWidth (width).reduced (2, 0);
+        row.removeFromRight (kRemoveW + kGapS);
+        routeHead_[5].setBounds (row.removeFromRight (kDestW));
+        row.removeFromRight (kGapS);
+        routeHead_[4].setBounds (row.removeFromRight (kRangeW));
+        routeHead_[0].setBounds (row.removeFromLeft (kKindW));
+        row.removeFromLeft (kGapS);
+        routeHead_[1].setBounds (row.removeFromLeft (kIndexW));
+        row.removeFromLeft (kGapS);
+        routeHead_[2].setBounds (row.removeFromLeft (kChannelW));
+        row.removeFromLeft (kGapL);
+        routeHead_[3].setBounds (row);
+    }
     if (search_ != nullptr) search_->setBounds (getLocalBounds());
 }
 
