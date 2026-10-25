@@ -12,6 +12,7 @@ using neptune::core::theme::Token;
 namespace
 {
 constexpr int kToolbarH = 40;
+constexpr int kGroupBarH = 34;   // rangée des Groupes, au-dessus de la barre d'outils
 constexpr int kKeyboardH = 46;
 constexpr int kLeftMargin = 36;
 constexpr int kScrollH = 14;
@@ -26,14 +27,58 @@ bool isBlackKey (int k) { const int p = k % 12; return p == 1 || p == 3 || p == 
 MappingMatrix::MappingMatrix (const theme::Palette& palette, const i18n::Translator& tr) : palette_ (palette), tr_ (tr)
 {
     setWantsKeyboardFocus (true);
-    addAndMakeVisible (viewBox_);
-    viewBox_.onChange = [this]
+    addAndMakeVisible (groupLabel_);
+    groupLabel_.setText (text ("grp.bar"), juce::dontSendNotification);
+    groupLabel_.setColour (juce::Label::textColourId, colour (Token::TextDim));
+    addAndMakeVisible (groupBox_);
+    groupBox_.onChange = [this]
     {
-        const int i = viewBox_.getSelectedId() - 1;
-        if (i >= 0 && i < static_cast<int> (viewChoices_.size())) view_ = viewChoices_[static_cast<std::size_t> (i)];
+        const int i = groupBox_.getSelectedId() - 2;   // 1 : sans Groupe
+        view_.group = i >= 0 && i < static_cast<int> (groupChoices_.size()) ? groupChoices_[static_cast<std::size_t> (i)] : std::string();
+        renameGroup_.setEnabled (! view_.group.empty());   // le menu n'est pas reconstruit depuis son propre rappel
+        deleteGroup_.setEnabled (! view_.group.empty());
         rebuildPlaces();
         repaint();
     };
+    addAndMakeVisible (categoryBox_);
+    categoryBox_.addItem (text ("trig.attack"), 1);
+    categoryBox_.addItem (text ("trig.first"), 2);
+    categoryBox_.addItem (text ("trig.legato"), 3);
+    categoryBox_.addItem (text ("trig.release"), 4);
+    categoryBox_.setSelectedId (1, juce::dontSendNotification);
+    categoryBox_.onChange = [this]
+    {
+        view_.category = static_cast<mapping::View::Category> (juce::jlimit (1, 4, categoryBox_.getSelectedId()) - 1);
+        rebuildPlaces();
+        repaint();
+    };
+    addGroup_.setButtonText (text ("grp.add"));
+    addGroup_.onClick = [this]
+    {
+        askGroupName (text ("grp.add_title"), {}, [this] (std::string name)
+        {
+            const auto clean = mapping::cleanGroupName (name);
+            editGroups ([&name] (InstrumentDescription& d) { return mapping::addGroup (d, name); }, clean);
+        });
+    };
+    renameGroup_.setButtonText (text ("grp.rename_short"));
+    renameGroup_.onClick = [this]
+    {
+        const auto current = view_.group;
+        if (current.empty()) return;
+        askGroupName (text ("grp.rename"), u8 (current), [this, current] (std::string name)
+        {
+            editGroups ([&] (InstrumentDescription& d) { return mapping::renameGroup (d, current, name); }, mapping::cleanGroupName (name));
+        });
+    };
+    deleteGroup_.setButtonText (text ("grp.delete_short"));
+    deleteGroup_.onClick = [this]
+    {
+        const auto current = view_.group;
+        if (current.empty()) return;
+        editGroups ([&] (InstrumentDescription& d) { d = mapping::deleteGroup (d, current); return true; }, {});
+    };
+    for (auto* b : { &addGroup_, &renameGroup_, &deleteGroup_ }) addAndMakeVisible (*b);
     zoomIn_.setButtonText ("+");
     zoomOut_.setButtonText ("-");
     zoomFit_.setButtonText (text ("map.fit"));
@@ -86,37 +131,57 @@ void MappingMatrix::setSelection (const std::vector<int>& zones)
 
 void MappingMatrix::rebuildViewChoices()
 {
-    const auto all = mapping::views (description_);
-    std::string signature;
-    for (const auto& v : all) signature += std::to_string (static_cast<int> (v.category)) + ":" + v.group + "|";
+    groupChoices_ = mapping::groupNames (description_);
+    if (! view_.group.empty() && std::find (groupChoices_.begin(), groupChoices_.end(), view_.group) == groupChoices_.end()) view_.group.clear();   // le Groupe n'existe plus
+    std::string signature = std::to_string (static_cast<int> (view_.category)) + "/" + view_.group + "/";
+    for (const auto& g : groupChoices_) signature += g + "|";
     if (signature == viewSignature_) return;
     viewSignature_ = signature;
 
-    viewChoices_.clear();
-    viewBox_.clear (juce::dontSendNotification);
-    auto categoryLabel = [this] (mapping::View::Category c, bool grouped)
-    {
-        switch (c)
-        {
-            case mapping::View::Category::First: return text (grouped ? "trig.first" : "map.view_first");
-            case mapping::View::Category::Legato: return text (grouped ? "trig.legato" : "map.view_legato");
-            case mapping::View::Category::Release: return text (grouped ? "trig.release" : "map.view_release");
-            default: return text (grouped ? "trig.attack" : "map.view_main");
-        }
-    };
-    for (const auto& v : all)
-    {
-        viewChoices_.push_back (v);
-        const juce::String label = v.group.empty()
-            ? categoryLabel (v.category, false)
-            : u8 (tr_.format ("map.view_group", { v.group })) + "  -  " + categoryLabel (v.category, true);
-        viewBox_.addItem (label, static_cast<int> (viewChoices_.size()));
-    }
+    groupBox_.clear (juce::dontSendNotification);
+    groupBox_.addItem (text ("grp.none_short"), 1);
     int select = 1;
-    for (std::size_t i = 0; i < viewChoices_.size(); ++i)
-        if (viewChoices_[i] == view_) select = static_cast<int> (i) + 1;
-    viewBox_.setSelectedId (select, juce::dontSendNotification);
-    view_ = viewChoices_[static_cast<std::size_t> (select - 1)];
+    for (std::size_t i = 0; i < groupChoices_.size(); ++i)
+    {
+        groupBox_.addItem (u8 (groupChoices_[i]), static_cast<int> (i) + 2);
+        if (groupChoices_[i] == view_.group) select = static_cast<int> (i) + 2;
+    }
+    groupBox_.setSelectedId (select, juce::dontSendNotification);
+    categoryBox_.setSelectedId (static_cast<int> (view_.category) + 1, juce::dontSendNotification);
+    renameGroup_.setEnabled (! view_.group.empty());
+    deleteGroup_.setEnabled (! view_.group.empty());
+}
+
+// Création, renommage ou suppression d'un Groupe depuis la barre : la description locale est mise à jour tout de suite (le Groupe créé ou renommé devient le
+// Groupe affiché), puis envoyée à l'éditeur comme une seule entrée d'annulation. `shownGroup` : le Groupe à afficher ensuite ("" : sans Groupe).
+void MappingMatrix::editGroups (const std::function<bool (InstrumentDescription&)>& change, const std::string& shownGroup)
+{
+    if (op_ != Op::None) return;
+    auto d = description_;
+    if (! change (d))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, text ("grp.rename"), text ("grp.rename_refused"));
+        return;
+    }
+    description_ = d;
+    view_.group = shownGroup;
+    viewSignature_.clear();
+    rebuildViewChoices();
+    rebuildPlaces();
+    repaint();
+    if (onEdit) onEdit (std::move (d), "Group");
+}
+
+void MappingMatrix::askGroupName (const juce::String& title, const juce::String& initial, std::function<void (std::string)> done)
+{
+    auto* w = new juce::AlertWindow (title, text ("grp.name_prompt"), juce::MessageBoxIconType::NoIcon, this);
+    w->addTextEditor ("name", initial);
+    w->addButton (text ("grp.ok"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, safe = juce::Component::SafePointer<MappingMatrix> (this), done = std::move (done)] (int result)
+    {
+        if (result == 1 && safe != nullptr) done (w->getTextEditorContents ("name").toStdString());
+    }), true);
 }
 
 void MappingMatrix::rebuildPlaces()
@@ -167,9 +232,9 @@ void MappingMatrix::selectPlaces (const std::vector<int>& placeIndices, bool add
 
 juce::Rectangle<float> MappingMatrix::plotArea() const
 {
-    return juce::Rectangle<float> (static_cast<float> (kLeftMargin), static_cast<float> (kToolbarH),
+    return juce::Rectangle<float> (static_cast<float> (kLeftMargin), static_cast<float> (kGroupBarH + kToolbarH),
                                    static_cast<float> (getWidth() - kLeftMargin - 4),
-                                   static_cast<float> (getHeight() - kToolbarH - kKeyboardH - kScrollH - 2));
+                                   static_cast<float> (getHeight() - kGroupBarH - kToolbarH - kKeyboardH - kScrollH - 2));
 }
 
 float MappingMatrix::keyX (double key) const
@@ -261,8 +326,17 @@ void MappingMatrix::scrollBarMoved (juce::ScrollBar*, double newStart)
 void MappingMatrix::resized()
 {
     auto r = getLocalBounds();
+    {
+        auto groups = r.removeFromTop (kGroupBarH).reduced (2);
+        groupLabel_.setBounds (groups.removeFromLeft (64));
+        groupBox_.setBounds (groups.removeFromLeft (220));
+        groups.removeFromLeft (6);
+        addGroup_.setBounds (groups.removeFromLeft (92));
+        renameGroup_.setBounds (groups.removeFromLeft (92));
+        deleteGroup_.setBounds (groups.removeFromLeft (92));
+    }
     auto bar = r.removeFromTop (kToolbarH).reduced (2);
-    viewBox_.setBounds (bar.removeFromLeft (170));
+    categoryBox_.setBounds (bar.removeFromLeft (130));
     zoomOut_.setBounds (bar.removeFromLeft (36));
     zoomIn_.setBounds (bar.removeFromLeft (36));
     zoomFit_.setBounds (bar.removeFromLeft (72));

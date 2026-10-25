@@ -72,7 +72,9 @@ private:
     juce::String text (const char* key) const;
 
     void rebuildPlaces();
-    void rebuildViewChoices();
+    void rebuildViewChoices();   // liste des Groupes (menu) et vue affichée : un Groupe + un déclenchement
+    void editGroups (const std::function<bool (neptune::core::InstrumentDescription&)>& change, const std::string& shownGroup);
+    void askGroupName (const juce::String& title, const juce::String& initial, std::function<void (std::string)> done);
     neptune::core::mapping::View currentView() const;
     juce::Rectangle<float> plotArea() const;
     float keyX (double key) const;
@@ -96,10 +98,12 @@ private:
     std::vector<neptune::core::LayerFade> fades_;   // par zone de la description (fondu entre couches)
     std::vector<int> selected_;                 // indices de zones
     neptune::core::mapping::View view_;
-    std::vector<neptune::core::mapping::View> viewChoices_;
+    std::vector<std::string> groupChoices_;     // noms des Groupes du menu (l'élément 1 du menu est « sans Groupe »)
     std::string viewSignature_;
 
-    juce::ComboBox viewBox_;
+    juce::ComboBox groupBox_, categoryBox_;
+    juce::Label groupLabel_;
+    juce::TextButton addGroup_, renameGroup_, deleteGroup_;
     juce::TextButton zoomIn_, zoomOut_, zoomFit_, duplicate_, velocity_, polyphony_;
     juce::Label hint_;
     juce::ScrollBar scroll_ { false };

@@ -283,6 +283,7 @@ std::string toJson (const InstrumentDescription& d)
     if (! d.pool.empty()) doc["pool"] = d.pool;
     if (! d.loadReleaseSamples) doc["load_release_samples"] = false;
     if (! d.unloadedGroups.empty()) doc["unloaded_groups"] = d.unloadedGroups;
+    if (! d.declaredGroups.empty()) doc["declared_groups"] = d.declaredGroups;
     if (d.polyphony != PolyphonyMode::Poly) doc["polyphony"] = toString (d.polyphony);
     if (d.maxVoices != InstrumentDescription::defaultMaxVoices) doc["max_voices"] = d.maxVoices;
     if (d.stealMode != VoiceStealMode::Oldest) doc["voice_steal"] = toString (d.stealMode);
@@ -577,6 +578,11 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("unloaded_groups"); m != doc.end() && m->is_array())
         for (const auto& g : *m)
             if (g.is_string() && g.get<std::string>().size() <= 128 && d.unloadedGroups.size() < 256) d.unloadedGroups.push_back (g.get<std::string>());
+    if (const auto m = doc.find ("declared_groups"); m != doc.end() && m->is_array())
+        for (const auto& g : *m)
+            if (g.is_string() && ! g.get<std::string>().empty() && g.get<std::string>().size() <= 64 && d.declaredGroups.size() < 256
+                && std::find (d.declaredGroups.begin(), d.declaredGroups.end(), g.get<std::string>()) == d.declaredGroups.end())
+                d.declaredGroups.push_back (g.get<std::string>());
     if (const auto sl = doc.find ("slots"); sl != doc.end() && sl->is_array())
         for (const auto& o : *sl)
         {

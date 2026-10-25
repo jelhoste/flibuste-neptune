@@ -281,3 +281,31 @@ TEST_CASE ("groups: names are trimmed and cut on a character boundary")
     CHECK (cut.size() <= 64);
     CHECK (cut.size() % 2 == 0);
 }
+
+TEST_CASE ("groups: a declared Group stays without zones, keeps its order, and survives rename, delete and JSON")
+{
+    InstrumentDescription d;
+    d.zones = { zone ("a.wav", 0, 10, 1, 127, 5), zone ("b.wav", 11, 20, 1, 127, 15) };
+    REQUIRE (addGroup (d, " Bourdon 8' "));
+    REQUIRE (addGroup (d, "Flûte 4'"));
+    CHECK_FALSE (addGroup (d, "Flûte 4'"));
+    CHECK_FALSE (addGroup (d, "  "));
+    d = assignGroup (d, { 0 }, "Zimbel");                      // utilisé mais pas déclaré : après les déclarés
+    CHECK (groupNames (d) == std::vector<std::string> ({ "Bourdon 8'", "Flûte 4'", "Zimbel" }));
+
+    d = assignGroup (d, { 0 }, "Flûte 4'");                    // Zimbel n'a plus de zone et n'était pas déclaré : disparaît
+    CHECK (groupNames (d) == std::vector<std::string> ({ "Bourdon 8'", "Flûte 4'" }));
+    d = assignGroup (d, { 0 }, "");                            // les déclarés restent vides
+    CHECK (groupNames (d) == std::vector<std::string> ({ "Bourdon 8'", "Flûte 4'" }));
+
+    REQUIRE (renameGroup (d, "Bourdon 8'", "Bourdon 16'"));
+    CHECK (d.declaredGroups == std::vector<std::string> ({ "Bourdon 16'", "Flûte 4'" }));
+    CHECK_FALSE (renameGroup (d, "Bourdon 16'", "Flûte 4'"));
+
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back.declaredGroups == d.declaredGroups);
+
+    const auto removed = deleteGroup (d, "Bourdon 16'");
+    CHECK (removed.declaredGroups == std::vector<std::string> ({ "Flûte 4'" }));
+    CHECK (groupNames (removed) == std::vector<std::string> ({ "Flûte 4'" }));
+}

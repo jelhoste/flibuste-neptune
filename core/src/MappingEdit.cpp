@@ -195,10 +195,12 @@ InstrumentDescription duplicateZones (const InstrumentDescription& base, const s
 // ---- Groupes ----
 std::vector<std::string> groupNames (const InstrumentDescription& d)
 {
-    std::set<std::string> names;
+    std::vector<std::string> out = d.declaredGroups;
+    std::set<std::string> used;
     for (const auto& z : d.zones)
-        if (! z.group.empty()) names.insert (z.group);
-    return { names.begin(), names.end() };
+        if (! z.group.empty() && std::find (out.begin(), out.end(), z.group) == out.end()) used.insert (z.group);
+    out.insert (out.end(), used.begin(), used.end());
+    return out;
 }
 
 std::string cleanGroupName (std::string name)
@@ -223,7 +225,7 @@ namespace
 void pruneGroups (InstrumentDescription& d)
 {
     const auto alive = groupNames (d);
-    auto isAlive = [&alive] (const std::string& g) { return std::binary_search (alive.begin(), alive.end(), g); };
+    auto isAlive = [&alive] (const std::string& g) { return std::find (alive.begin(), alive.end(), g) != alive.end(); };
     for (auto it = d.groups.begin(); it != d.groups.end();)
         it = isAlive (it->first) ? std::next (it) : d.groups.erase (it);
     for (auto& s : d.slots)
@@ -248,7 +250,10 @@ bool renameGroup (InstrumentDescription& d, const std::string& from, const std::
     const auto name = cleanGroupName (to);
     if (name.empty() || name == from) return false;
     const auto names = groupNames (d);
-    if (! std::binary_search (names.begin(), names.end(), from) || std::binary_search (names.begin(), names.end(), name)) return false;
+    const auto has = [&names] (const std::string& g) { return std::find (names.begin(), names.end(), g) != names.end(); };
+    if (! has (from) || has (name)) return false;
+    for (auto& g : d.declaredGroups)
+        if (g == from) g = name;
     for (auto& z : d.zones)
         if (z.group == from) z.group = name;
     if (const auto it = d.groups.find (from); it != d.groups.end())
@@ -263,9 +268,20 @@ bool renameGroup (InstrumentDescription& d, const std::string& from, const std::
     return true;
 }
 
+bool addGroup (InstrumentDescription& d, const std::string& name)
+{
+    const auto clean = cleanGroupName (name);
+    if (clean.empty()) return false;
+    const auto names = groupNames (d);
+    if (std::find (names.begin(), names.end(), clean) != names.end()) return false;
+    d.declaredGroups.push_back (clean);
+    return true;
+}
+
 InstrumentDescription deleteGroup (const InstrumentDescription& base, const std::string& group)
 {
     InstrumentDescription d = base;
+    d.declaredGroups.erase (std::remove (d.declaredGroups.begin(), d.declaredGroups.end(), group), d.declaredGroups.end());
     for (auto& z : d.zones)
         if (z.group == group) z.group.clear();
     pruneGroups (d);

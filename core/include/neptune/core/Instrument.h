@@ -181,6 +181,7 @@ struct InstrumentDescription
     bool mainRoundRobinOnly = false;           // ne charger que l'échantillon principal de chaque place
     bool loadReleaseSamples = true;            // zones déclenchées au relâchement
     std::vector<std::string> unloadedGroups;   // noms de Groupe (articulations, pédales...) laissés sur le disque
+    std::vector<std::string> declaredGroups;   // Groupes créés dans la matrice, gardés même sans zone (ordre de création)
 
     // Streaming disque (réglage par instrument, sauvegardé avec lui) : en mémoire seulement le début de chaque sample
     // (`preloadKB` Ko de PCM par fichier), le reste est lu sur le disque pendant le jeu. Les zones en boucle gardent en
@@ -222,7 +223,7 @@ struct InstrumentDescription
     void copySettingsFrom (const InstrumentDescription& o)
     {
         roundRobinMode = o.roundRobinMode; rrBorrow = o.rrBorrow; mainRoundRobinOnly = o.mainRoundRobinOnly; loadReleaseSamples = o.loadReleaseSamples;
-        unloadedGroups = o.unloadedGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
+        unloadedGroups = o.unloadedGroups; declaredGroups = o.declaredGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
         cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups; modulators = o.modulators; trackModulators = o.trackModulators;
@@ -233,7 +234,7 @@ struct InstrumentDescription
     bool operator== (const InstrumentDescription& o) const noexcept
     {
         return zones == o.zones && pool == o.pool && roundRobinMode == o.roundRobinMode && rrBorrow == o.rrBorrow && mainRoundRobinOnly == o.mainRoundRobinOnly
-            && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups
+            && loadReleaseSamples == o.loadReleaseSamples && unloadedGroups == o.unloadedGroups && declaredGroups == o.declaredGroups
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey

@@ -61,13 +61,15 @@ InstrumentDescription duplicateZones (const InstrumentDescription& base, const s
                                       std::vector<int>* newIndices = nullptr);
 
 // ---- Groupes (articulations, micros, jeux d'orgue...) : créés, renommés, supprimés depuis la liste des zones ----
-// Les noms de Groupe existants : ceux des zones, triés, sans doublon.
+// Les noms de Groupe existants : ceux déclarés dans la matrice (dans l'ordre de création) puis ceux des zones qui ne le sont pas (triés), sans doublon.
 std::vector<std::string> groupNames (const InstrumentDescription&);
 // Nom de Groupe admissible : espaces de bord retirés, au plus 64 octets (coupé sans casser un caractère UTF-8).
 std::string cleanGroupName (std::string);
 // Met les zones indiquées dans le Groupe `group` ("" = aucun). Un Groupe qui n'a plus de zone perd ses réglages propres, ses emplacements assignés
 // et sa mention « non chargé ». Les indices hors de l'instrument sont ignorés.
 InstrumentDescription assignGroup (const InstrumentDescription& base, const std::vector<int>& zones, const std::string& group);
+// Déclare un Groupe vide (« + Groupe » de la matrice). Faux, et rien ne change, si le nom est vide ou déjà pris.
+bool addGroup (InstrumentDescription& d, const std::string& name);
 // Renomme un Groupe (zones, réglages propres, emplacements, « non chargé »). Faux, et rien ne change, si le nouveau nom est vide, identique ou déjà pris.
 bool renameGroup (InstrumentDescription& d, const std::string& from, const std::string& to);
 // Supprime un Groupe : ses zones n'ont plus de Groupe, ses réglages propres et ses emplacements disparaissent. Les zones restent.

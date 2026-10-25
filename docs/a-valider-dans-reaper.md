@@ -50,3 +50,9 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Renommer** : le nom change partout (colonne, matrice, cases de chargement), les modulateurs et emplacements du Groupe suivent ; un nom déjà pris est refusé avec un message.
 - [ ] **Supprimer** : les zones restent, sans Groupe ; les réglages propres du Groupe disparaissent.
 - [ ] **Jeu d'orgue** : un Groupe commandé par un modulateur (menu Modulateurs du même clic droit) ; couper le modulateur (CC / macro / bouton de Façade) rend les zones du Groupe muettes.
+
+## Groupes dans la matrice
+- [ ] **Rangée des Groupes** au-dessus de la matrice : menu « Groupe : », « + Groupe », « Renommer », « Supprimer » ; ne chevauche pas la barre d'outils ; la matrice garde une hauteur correcte.
+- [ ] **+ Groupe** : nom demandé, le Groupe devient celui affiché, vide ; il reste après enregistrement et rechargement du projet.
+- [ ] **Quatre déclenchements** : Attaque / Premier / Legato / Relâchement pour chaque Groupe ; déposer des zones de la liste ou de la réserve les met dans ce Groupe et ce déclenchement.
+- [ ] **Renommer / Supprimer** depuis la rangée ; Annuler défait chaque geste.
