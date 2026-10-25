@@ -194,6 +194,9 @@ public:
     // Export d'une piste complète (état de la piste + valeurs de ses réglages) et import dans une NOUVELLE piste (rend son indice, -1 si
     // les 16 pistes sont prises). L'import vide l'historique d'annulation ; le canal MIDI de la nouvelle piste est conservé.
     neptune::core::trackexport::Bundle exportTrackBundle (int track) const;
+    // Routeur de notes (accouplements, divisions de clavier) : réglage global, enregistré avec le mixeur, annulable.
+    neptune::core::router::Config routerConfig() const;
+    void uiEditRouter (neptune::core::router::Config, std::string name, std::string mergeKey = {});
     // Preset global : l'état du projet sans ce qui est propre à l'instance (identifiant, verrou de profil, assignations CC / OSC).
     // Le chargement remplace tout le mixeur et les valeurs des réglages (comme ouvrir un autre projet) et vide l'historique d'annulation.
     std::string globalStateText() const;

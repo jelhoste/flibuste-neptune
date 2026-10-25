@@ -303,6 +303,7 @@ std::string toJson (const MixerState& m)
     if (m.master.maxVoices != mixer::MasterSettings::defaultMaxVoices) master["max_voices"] = m.master.maxVoices;
     if (anyInsert (m.master.inserts)) master["inserts"] = insertsToJson (m.master.inserts);
     doc["master"] = std::move (master);
+    if (! m.router.rules.empty()) doc["router"] = json::parse (router::toJson (m.router));
     return doc.dump();
 }
 
@@ -365,6 +366,7 @@ MixerState mixerFromJson (std::string_view text)
         insertsFromJson (*mm, m.master.inserts);
         m.master = mixer::sanitised (m.master);
     }
+    if (const auto rt = doc.find ("router"); rt != doc.end() && rt->is_object()) m.router = router::fromJson (rt->dump());
     m.fixParallels();
     m.fixSelection();
     return m;

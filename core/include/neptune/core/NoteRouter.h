@@ -1,0 +1,93 @@
+#pragma once
+// Routeur de notes (mode orgue, palier 7) : une couche entre l'entrée MIDI et les pistes. Chaque règle dit : « une note jouée sur tel canal, dans
+// telle étendue de touches, est aussi (ou à la place) donnée à tel autre canal, transposée de tant de demi-tons, tant que sa condition est vraie ».
+// C'est un accouplement (clavier à clavier, octave grave ou aiguë) ou une division de clavier (règle « à la place »). Un clavier = une piste = un
+// canal MIDI. La condition est une combinaison logique (ET, OU, OU exclusif, NON ET, NON OU) de paramètres à deux états (tirants d'accouplement
+// `routerSwitchParam`, pistons, interrupteurs quelconques) ; sans condition, la règle est toujours vraie. Cœur portable, sans JUCE.
+// Le Note Off défait exactement ce que le Note On a fait, même si un accouplement a été tiré ou repoussé entre-temps.
+#include <array>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "neptune/core/Parameter.h"
+
+namespace neptune::core::router
+{
+constexpr int kMaxRules = 64;
+constexpr int kMaxTerms = 4;
+constexpr int kMaxTargets = 8;           // destinations d'une même note (celle d'origine comprise)
+constexpr int kSwitches = 32;            // tirants d'accouplement (paramètres)
+
+enum class Combine { All = 0, Any, One, NotAll, None };   // ET, OU, OU exclusif (exactement un), NON ET, NON OU
+constexpr int numCombines = 5;
+const char* toString (Combine) noexcept;
+
+struct Term
+{
+    ParamId param = 0;
+    bool negate = false;
+    bool operator== (const Term& o) const noexcept { return param == o.param && negate == o.negate; }
+};
+
+struct Rule
+{
+    bool on = true;                      // la règle est-elle en service (case de la liste)
+    std::string name;
+    int srcChannel = 0;                  // 0 : tous les canaux, 1..16
+    int keyLo = 0, keyHi = 127;          // touches concernées
+    int dstChannel = 1;                  // 1..16
+    int transpose = 0;                   // demi-tons, -48..+48
+    bool replace = false;                // vrai : la note d'origine n'est pas jouée (division de clavier)
+    Combine combine = Combine::All;
+    std::vector<Term> terms;             // au plus kMaxTerms ; vide : toujours vraie
+    bool operator== (const Rule& o) const noexcept
+    {
+        return on == o.on && name == o.name && srcChannel == o.srcChannel && keyLo == o.keyLo && keyHi == o.keyHi && dstChannel == o.dstChannel
+            && transpose == o.transpose && replace == o.replace && combine == o.combine && terms == o.terms;
+    }
+};
+
+struct Config
+{
+    std::vector<Rule> rules;
+    bool operator== (const Config& o) const noexcept { return rules == o.rules; }
+    bool operator!= (const Config& o) const noexcept { return ! (*this == o); }
+};
+
+Config sanitised (Config);               // bornes ; au plus kMaxRules règles, kMaxTerms termes
+std::string toJson (const Config&);
+Config fromJson (std::string_view);      // lecture tolérante
+
+// Paramètres « tirants d'accouplement » : kSwitches interrupteurs automatisables (CC, OSC, macro, bouton de Façade), identifiants `15000 + i`.
+constexpr ParamId switchBase = 15000;
+constexpr ParamId switchParam (int index) { return switchBase + static_cast<ParamId> (index); }
+bool addSwitchParams (ParameterSet&, std::string* error = nullptr);
+
+// Règles résolues : indices de paramètres dans un jeu donné.
+struct CompiledRule
+{
+    int srcChannel = 0, keyLo = 0, keyHi = 127, dstChannel = 0, transpose = 0;   // canaux 0..15 (srcChannel -1 : tous)
+    bool replace = false;
+    Combine combine = Combine::All;
+    int termCount = 0;
+    std::array<std::size_t, kMaxTerms> term {};
+    std::array<bool, kMaxTerms> negate {};
+};
+struct Compiled
+{
+    std::vector<CompiledRule> rules;
+};
+std::shared_ptr<const Compiled> compile (const Config&, const ParameterSet&);
+
+struct Target
+{
+    int channel = 0;   // 0..15
+    int key = 0;       // 0..127
+    bool operator== (const Target& o) const noexcept { return channel == o.channel && key == o.key; }
+};
+// Destinations d'une note jouée sur `channel` (0..15), touche `key` : la note d'origine (sauf si une règle en service « à la place » la
+// concerne) puis celles des règles en service dont la condition est vraie, sans doublon. Rend leur nombre (au plus kMaxTargets). Sans allocation.
+int expand (const Compiled&, const ParameterSet&, int channel, int key, std::array<Target, kMaxTargets>& out) noexcept;
+} // namespace neptune::core::router

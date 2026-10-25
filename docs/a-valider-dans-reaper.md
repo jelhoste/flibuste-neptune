@@ -56,3 +56,12 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **+ Groupe** : nom demandé, le Groupe devient celui affiché, vide ; il reste après enregistrement et rechargement du projet.
 - [ ] **Quatre déclenchements** : Attaque / Premier / Legato / Relâchement pour chaque Groupe ; déposer des zones de la liste ou de la réserve les met dans ce Groupe et ce déclenchement.
 - [ ] **Renommer / Supprimer** depuis la rangée ; Annuler défait chaque geste.
+
+## Routeur de notes (onglet ROUTEUR)
+- [ ] **Onglet** : « ROUTEUR » à gauche de MOD dans la barre du haut, sans chevaucher les boutons voisins (sinon dites ce qu'il faut raccourcir).
+- [ ] **Accouplement** : deux pistes Sampler ou Orgue (clavier 1 sur le canal 1, clavier 2 sur le canal 2) ; règle « du canal 2 vers canal 1 », condition = un tirant. Tirant éteint : le clavier 2 ne joue que sa piste. Tirant allumé (bouton de la Façade lié à `Router Switch 1`, ou CC assigné) : il joue aussi la piste 1.
+- [ ] **Note tenue pendant qu'on repousse le tirant** : rien ne reste bloqué quand on relâche la touche.
+- [ ] **Octave** : règle du canal 1 vers le canal 1, transposition +12, étendue de touches limitée : l'octave aiguë sonne en plus.
+- [ ] **Division** : un clavier maître sur le canal 1, deux règles « À la place » (touches 0-59 vers le canal 2, 60-127 vers le canal 3) : la note d'origine ne joue plus.
+- [ ] **Conditions** : ET / OU / OU exclusif / NON ET / NON OU avec deux tirants ; « Inverser » ; « Autre paramètre... » (par exemple un modulateur ou un mute).
+- [ ] **Annuler** défait une modification de règle ; le routeur est enregistré avec le projet et avec un preset global.

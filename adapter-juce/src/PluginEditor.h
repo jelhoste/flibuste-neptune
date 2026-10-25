@@ -6,6 +6,7 @@
 #include "FacadeView.h"
 #include "MidiMessagePanel.h"
 #include "ModView.h"
+#include "RouterView.h"
 #include "MidiFilterEditor.h"
 #include "ScaledRoot.h"
 #include "InsertOverlay.h"
@@ -74,9 +75,11 @@ private:
     bool showMixer_ = true; // on arrive sur le Mixeur
     bool showFacade_ = false;
     bool showMod_ = false;
+    bool showRouter_ = false;
     // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
-    juce::TextButton mixerButton_, mappingButton_, facadeButton_, modButton_;
+    juce::TextButton mixerButton_, mappingButton_, facadeButton_, modButton_, routerButton_;
     std::unique_ptr<MixerView> mixerView_;
+    std::unique_ptr<RouterView> routerView_;    // le routeur de notes (accouplements, divisions de clavier)
     std::unique_ptr<ModView> modView_;          // la matrice de modulation de la piste sélectionnée
     std::unique_ptr<FacadeView> facadeView_;   // la Façade de la piste sélectionnée
     // Vue Synthé : remplace la vue Mapping quand la piste sélectionnée est un synthé.
@@ -97,7 +100,7 @@ private:
     juce::ComboBox trackBox_;   // piste sélectionnée
     int knobTrack_ = -1;        // piste sur laquelle les potards d'instrument sont branchés
     std::uint32_t trackBoxRevision_ = 0xFFFFFFFFu;
-    void setView (bool mixer, bool probe, bool facade = false, bool mod = false);
+    void setView (bool mixer, bool probe, bool facade = false, bool mod = false, bool router = false);
     void rebindKnobs();
     void updateTrackBox();
     void updateViewVisibility();

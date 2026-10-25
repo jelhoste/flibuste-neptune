@@ -450,6 +450,30 @@ int NeptuneProcessor::uiAddTrack()
     return index;
 }
 
+neptune::core::router::Config NeptuneProcessor::routerConfig() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.router;
+}
+
+void NeptuneProcessor::uiEditRouter (neptune::core::router::Config c, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    c = router::sanitised (std::move (c));
+    const auto previous = routerConfig();
+    if (previous == c) return;
+    undo_.perform (std::make_unique<SnapshotCommand<router::Config>> (
+        previous, c,
+        [this] (const router::Config& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.router = v; }
+            engine_.setRouter (v);
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
 neptune::core::trackexport::Bundle NeptuneProcessor::exportTrackBundle (int track) const
 {
     using namespace neptune::core;
@@ -1275,8 +1299,10 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
         mixer_.buses = m->buses;
         mixer_.parallels = m->parallels;
         mixer_.master = m->master;
+        mixer_.router = m->router;
         mixer_.selectedTrack = m->selectedTrack;
     }
+    engine_.setRouter (m->router);
     selectedTrack_.store (m->selectedTrack);
     pushMixerSettingsToEngine();
     undo_.clear(); // l'historique pointait vers les modules et les instruments remplacés

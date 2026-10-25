@@ -8,6 +8,7 @@
 
 #include "neptune/core/DiskStreamer.h"
 #include "neptune/core/HandoffSlot.h"
+#include "neptune/core/NoteRouter.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/InstrumentSlot.h"
 #include "neptune/core/Mixer.h"
@@ -46,6 +47,8 @@ public:
     // Notes de l'hôte : réparties entre les pistes selon leur canal MIDI (0 = toutes). `channel` : 0..15.
     void noteOn (int channel, int key, float velocity) noexcept;
     void noteOff (int channel, int key) noexcept;
+    // Routeur de notes (accouplements, divisions de clavier) : voir NoteRouter.h. Thread de message. Résolu quand les paramètres sont rattachés.
+    void setRouter (const router::Config&);
     // Notes adressées à UNE piste (clavier de l'interface), sans filtre de canal.
     void noteOnTrack (int track, int channel, int key, float velocity) noexcept;
     void noteOffTrack (int track, int channel, int key) noexcept;
@@ -209,6 +212,18 @@ private:
         std::size_t bypass = ParameterSet::npos;
     };
     using Inserts = std::array<InsertSlot, mixer::numInserts>;
+
+    // Routeur de notes : règles résolues (remises au thread audio) et, pour chaque note en cours, où elle a été envoyée (le Note Off défait la même chose).
+    HandoffSlot<router::Compiled> routerSlot_;
+    const router::Compiled* router_ = nullptr;      // thread audio
+    router::Config routerConfig_;                   // thread de message : ce qui est publié
+    struct Routed { std::uint8_t count = 0; std::array<std::uint8_t, router::kMaxTargets> channel {}, key {}; };
+    std::array<Routed, 16 * 128> routed_ {};        // par (canal, touche) jouée
+    std::array<std::uint8_t, 16 * 128> routeCount_ {};   // par (canal, touche) destinataire : nombre de sources qui la tiennent
+    void dispatchNoteOn (int channel, int key, float velocity) noexcept;
+    void dispatchNoteOff (int channel, int key) noexcept;
+    void releaseRouted (int slot) noexcept;
+    void clearRouted() noexcept { routed_.fill (Routed {}); routeCount_.fill (0); }
 
     struct Track
     {

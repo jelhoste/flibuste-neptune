@@ -47,6 +47,7 @@ target_sources(Neptune PRIVATE
   src/MixerView.cpp
   src/FacadeView.cpp
   src/ModView.cpp
+  src/RouterView.cpp
   src/SynthKeyboard.cpp
   src/PresetManager.cpp
   src/MidiFilterEditor.cpp

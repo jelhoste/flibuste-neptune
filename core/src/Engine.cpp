@@ -163,6 +163,7 @@ void Engine::setInsert (StripKind kind, int index, int slot, std::shared_ptr<con
 
 void Engine::collectGarbage()
 {
+    routerSlot_.collect();
     for (auto& t : tracks_)
     {
         t.slot.collect();
@@ -279,9 +280,16 @@ void Engine::setMasterSettings (const mixer::MasterSettings& m) noexcept
     globalMaxVoices_.store (s.maxVoices, std::memory_order_relaxed);
 }
 
+void Engine::setRouter (const router::Config& config)
+{
+    routerConfig_ = router::sanitised (config);
+    if (params_ != nullptr) routerSlot_.publish (router::compile (routerConfig_, *params_));
+}
+
 void Engine::attachParameters (const ParameterSet* parameters) noexcept
 {
     params_ = parameters;
+    if (parameters != nullptr) routerSlot_.publish (router::compile (routerConfig_, *parameters));
     if (parameters != nullptr)
         for (int t = 0; t < kTracks; ++t) publishModulation (t);
     if (parameters == nullptr) return;
@@ -472,6 +480,42 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
 // Un Note Off suit toujours le sort de son Note On (sinon une note resterait bloquée si la règle dépend de la vélocité).
 void Engine::noteOn (int channel, int key, float velocity) noexcept
 {
+    if (router_ == nullptr || router_->rules.empty() || params_ == nullptr || key < 0 || key > 127)
+    {
+        dispatchNoteOn (channel, key, velocity);
+        return;
+    }
+    const int slot = ((channel & 15) << 7) | key;
+    releaseRouted (slot);   // la même touche rejouée sans Note Off : on défait d'abord la fois précédente
+    std::array<router::Target, router::kMaxTargets> targets;
+    const int n = router::expand (*router_, *params_, channel & 15, key, targets);
+    auto& r = routed_[static_cast<std::size_t> (slot)];
+    r.count = static_cast<std::uint8_t> (n);
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& t = targets[static_cast<std::size_t> (i)];
+        r.channel[static_cast<std::size_t> (i)] = static_cast<std::uint8_t> (t.channel);
+        r.key[static_cast<std::size_t> (i)] = static_cast<std::uint8_t> (t.key);
+        auto& count = routeCount_[static_cast<std::size_t> ((t.channel << 7) | t.key)];
+        if (count++ == 0) dispatchNoteOn (t.channel, t.key, velocity);   // une destination déjà tenue par une autre source ne rejoue pas
+    }
+}
+
+void Engine::releaseRouted (int slot) noexcept
+{
+    auto& r = routed_[static_cast<std::size_t> (slot)];
+    const int n = r.count;
+    r.count = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        const int ch = r.channel[static_cast<std::size_t> (i)], k = r.key[static_cast<std::size_t> (i)];
+        auto& count = routeCount_[static_cast<std::size_t> ((ch << 7) | k)];
+        if (count > 0 && --count == 0) dispatchNoteOff (ch, k);
+    }
+}
+
+void Engine::dispatchNoteOn (int channel, int key, float velocity) noexcept
+{
     midi::Message m;
     m.kind = midi::MsgKind::NoteOn;
     m.channel = channel & 15;
@@ -493,6 +537,16 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
 
 void Engine::noteOff (int channel, int key) noexcept
 {
+    if (key >= 0 && key < 128)
+    {
+        const int slot = ((channel & 15) << 7) | key;
+        if (routed_[static_cast<std::size_t> (slot)].count > 0) { releaseRouted (slot); return; }
+    }
+    dispatchNoteOff (channel, key);
+}
+
+void Engine::dispatchNoteOff (int channel, int key) noexcept
+{
     const auto bit = static_cast<std::size_t> (((channel & 15) << 7) | (key & 127));
     for (int t = 0; t < kTracks; ++t)
     {
@@ -511,12 +565,14 @@ void Engine::noteOff (int channel, int key) noexcept
 void Engine::panic() noexcept
 {
     activeNotes_ = 0;
+    clearRouted();
     for (auto& t : tracks_) { t.voices.panic(); t.synth.panic(); t.fm.panic(); t.organ.panic(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); clearHeldChannels (t); }
 }
 
 void Engine::releaseAll() noexcept
 {
     activeNotes_ = 0;
+    clearRouted();
     for (auto& t : tracks_) { t.voices.releaseAll(); t.synth.releaseAll(); t.fm.releaseAll(); t.organ.allNotesOff(); t.held[0].store (0, std::memory_order_relaxed); t.held[1].store (0, std::memory_order_relaxed); clearHeldChannels (t); }
 }
 
@@ -594,6 +650,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     for (int c = 0; c < numChannels; ++c)
         if (out[c] != nullptr) std::fill (out[c], out[c] + numFrames, 0.0f);
 
+    if (routerSlot_.adoptPending()) router_ = routerSlot_.current();
     for (auto& t : tracks_)
     {
         if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());

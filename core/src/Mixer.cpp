@@ -1,4 +1,5 @@
 #include "neptune/core/Mixer.h"
+#include "neptune/core/NoteRouter.h"
 
 #include <algorithm>
 
@@ -134,6 +135,7 @@ bool addParams (ParameterSet& set, int tracks, int buses, std::string* error)
     for (int t = 0; ok && t < tracks; ++t) ok = addFmParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addOrganParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
     for (int t = 0; ok && t < tracks; ++t) ok = addZoneSlotParams (set, t, "Track " + std::to_string (t + 1) + " ", error) && addModulatorParams (set, t, "Track " + std::to_string (t + 1) + " ", error);
+    if (ok) ok = router::addSwitchParams (set, error);   // tirants d'accouplement du routeur de notes
 
     // Pistes parallèles
     for (int p = 0; ok && p < numParallels; ++p)

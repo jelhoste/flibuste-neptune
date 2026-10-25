@@ -1,4 +1,5 @@
 #include "neptune/core/Osc.h"
+#include "neptune/core/NoteRouter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -216,6 +217,7 @@ Table buildTable()
         for (int s = 0; s < 16; ++s) t.add (mixer::modulatorParam (tr, s), p + "/mod/" + num (s + 1));
     }
     for (int m = 0; m < control::kMacros; ++m) t.add (control::macroParamId (m), "/macro/" + num (m + 1));
+    for (int i = 0; i < router::kSwitches; ++i) t.add (router::switchParam (i), "/router/" + num (i + 1));
     for (int b = 0; b < mixer::numBuses; ++b) addStrip (t, mixer::busParam (b, 0), "/bus/" + num (b + 1), false);
     for (int q = 0; q < mixer::numParallels; ++q) addStrip (t, mixer::parallelParam (q, 0), "/parallel/" + num (q + 1), false);
     return t;

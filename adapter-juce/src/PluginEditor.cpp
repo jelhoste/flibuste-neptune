@@ -89,6 +89,9 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     modButton_.setButtonText (text ("mod.tab"));
     modButton_.onClick = [this] { setView (false, false, false, true); };
     addAndMakeVisible (modButton_);
+    routerButton_.setButtonText (text ("router.tab"));
+    routerButton_.onClick = [this] { setView (false, false, false, false, true); };
+    addAndMakeVisible (routerButton_);
 
     mixerView_ = std::make_unique<MixerView> (processor_, palette_, tr_);
     mixerView_->onSelectTrack = [this] (int t) { processor_.selectTrack (t); };
@@ -99,6 +102,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     addChildComponent (*facadeView_);
     modView_ = std::make_unique<ModView> (processor_, palette_, tr_);
     addChildComponent (*modView_);
+    routerView_ = std::make_unique<RouterView> (processor_, palette_, tr_);
+    addChildComponent (*routerView_);
 
 
     {
@@ -267,7 +272,7 @@ void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int
 // L'éditeur NOVA de la piste Synthé ou FM sélectionnée occupe la page Edit ; il est reconstruit quand la piste ou son type change.
 void NeptuneEditor::updateInstrumentPanel()
 {
-    const bool wanted = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! selectedIsAudioIn();
+    const bool wanted = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && ! selectedIsAudioIn();
     if (! wanted) { instrumentPanel_.reset(); return; }
     const int track = processor_.selectedTrack();
     const auto type = processor_.trackType (track);
@@ -299,7 +304,7 @@ void NeptuneEditor::closeModal()
 void NeptuneEditor::updateViewVisibility()
 {
     // Vues : Mixeur, Edit (l'éditeur NOVA de l'instrument de la piste sélectionnée ; l'entrée audio garde sa vue) et Sonde (diagnostic de l'hôte).
-    const bool mapping = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_;
+    const bool mapping = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_;
     const bool audioIn = mapping && selectedIsAudioIn();
     audioInShown_ = audioIn;
     audioInView_->setVisible (audioIn);
@@ -307,6 +312,8 @@ void NeptuneEditor::updateViewVisibility()
     mixerView_->setVisible (showMixer_);
     facadeView_->setVisible (showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_);
     modView_->setVisible (showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_);
+    routerView_->setVisible (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_);
+    routerButton_.setToggleState (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_, juce::dontSendNotification);
     modButton_.setToggleState (showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_, juce::dontSendNotification);
     facadeButton_.setToggleState (showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_, juce::dontSendNotification);
     trackBox_.setVisible (! showProbe_);
@@ -316,8 +323,9 @@ void NeptuneEditor::updateViewVisibility()
     viewButton_.setToggleState (showProbe_, juce::dontSendNotification);
 }
 
-void NeptuneEditor::setView (bool mixer, bool probe, bool facade, bool mod)
+void NeptuneEditor::setView (bool mixer, bool probe, bool facade, bool mod, bool router)
 {
+    showRouter_ = router;
     showMixer_ = mixer;
     showProbe_ = probe;
     showFacade_ = facade;
@@ -569,7 +577,7 @@ void NeptuneEditor::timerCallback()
     updateTrackBox();
     rebindKnobs();
     updateInstrumentPanel();   // piste ou type changé : l'éditeur NOVA est reconstruit
-    if (audioInShown_ != (! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && selectedIsAudioIn())) { updateViewVisibility(); resized(); } // type de la piste changé
+    if (audioInShown_ != (! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && selectedIsAudioIn())) { updateViewVisibility(); resized(); } // type de la piste changé
     if (audioInView_->isVisible()) audioInView_->refresh();
     updateRecoveryBanner();
     updateProfileControls();
@@ -624,7 +632,7 @@ void NeptuneEditor::resized()
             return std::max (minWidth, juce::roundToInt (std::ceil (f.getStringWidthFloat (b.getButtonText()))) + pad);
         };
         int right = lw_ - 32;
-        for (auto* b : { &viewButton_, &modButton_, &facadeButton_, &mappingButton_, &mixerButton_ })
+        for (auto* b : { &viewButton_, &routerButton_, &modButton_, &facadeButton_, &mappingButton_, &mixerButton_ })
         {
             const int w = fit (*b, 60);
             right -= w;
@@ -648,6 +656,7 @@ void NeptuneEditor::resized()
         }
         mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
         modView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
+        routerView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
         facadeView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());

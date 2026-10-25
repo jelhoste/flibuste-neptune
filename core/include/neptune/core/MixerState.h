@@ -9,6 +9,7 @@
 
 #include "neptune/core/Instrument.h"
 #include "neptune/core/Mixer.h"
+#include "neptune/core/NoteRouter.h"
 #include "neptune/core/FmVoices.h"
 #include "neptune/core/OrganEngine.h"
 #include "neptune/core/Synth.h"
@@ -39,6 +40,7 @@ struct MixerState
     std::array<mixer::ParallelSettings, mixer::numParallels> parallels;
     std::array<mixer::StripSettings, mixer::numBuses> buses;
     mixer::MasterSettings master;
+    router::Config router;               // routeur de notes : accouplements et divisions de clavier (voir NoteRouter.h)
     int selectedTrack = 0;
 
     MixerState();  // canaux MIDI par défaut : piste 1 « tous », piste n : canal n ; piste 1 active (Sampler)
@@ -66,7 +68,7 @@ struct MixerState
 
     bool operator== (const MixerState& o) const noexcept
     {
-        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && selectedTrack == o.selectedTrack;
+        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && selectedTrack == o.selectedTrack;
     }
 };
 
