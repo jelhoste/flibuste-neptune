@@ -10,6 +10,11 @@ bool buildPool (ParameterSet& set, int tracks, std::string* error)
         s.minText = "-inf";
         return s;
     };
+    auto unmodulated = [] (ParamSpec s)   // type de piste et algorithme : ne se modulent pas
+    {
+        s.modulatable = false;
+        return s;
+    };
     auto pan = [] (ParamId id, std::string name)
     {
         return ParamSpec::continuous (id, std::move (name), Unit::Percent, -100.0, 100.0, 0.0);
@@ -18,7 +23,7 @@ bool buildPool (ParameterSet& set, int tracks, std::string* error)
     bool ok = set.add (level (masterVolume, "Master Volume", 0.0), error)
            && set.add (pan (masterPan, "Master Pan"), error)
            && set.add (ParamSpec::toggle (masterMute, "Master Mute"), error)
-           && set.add (ParamSpec::stepped (algorithm, "FM Algorithm", Unit::None, 1, 32, 1), error);
+           && set.add (unmodulated (ParamSpec::stepped (algorithm, "FM Algorithm", Unit::None, 1, 32, 1)), error);
 
     for (int t = 0; ok && t < tracks; ++t)
     {
@@ -27,8 +32,8 @@ bool buildPool (ParameterSet& set, int tracks, std::string* error)
           && set.add (pan (trackParam (t, kPan), p + "Pan"), error)
           && set.add (ParamSpec::toggle (trackParam (t, kMute), p + "Mute"), error)
           && set.add (ParamSpec::toggle (trackParam (t, kSolo), p + "Solo"), error)
-          && set.add (ParamSpec::choice (trackParam (t, kType), p + "Type",
-                                         { "Sampler", "Subtractive", "FM", "Audio In" }), error);
+          && set.add (unmodulated (ParamSpec::choice (trackParam (t, kType), p + "Type",
+                                                      { "Sampler", "Subtractive", "FM", "Audio In" })), error);
 
         for (int i = 0; ok && i < insertsPerTrack; ++i)
             ok = set.add (ParamSpec::toggle (trackParam (t, kInsertBypass + static_cast<ParamId> (i)),

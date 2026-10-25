@@ -29,6 +29,9 @@ ParameterSet makeSet()
     set.add (ParamSpec::continuous (kDest, "Dest", Unit::None, 0.0, 100.0, 50.0));
     set.add (ParamSpec::stepped (501, "Steps", Unit::None, 0, 8, 0));
     set.add (ParamSpec::toggle (502, "Toggle"));
+    auto fixed = ParamSpec::stepped (503, "Fixed", Unit::None, 0, 8, 0);
+    fixed.modulatable = false;
+    set.add (fixed);
     control::addMacroParams (set);
     return set;
 }
@@ -67,11 +70,11 @@ TEST_CASE ("modulation: matrix JSON round trip and bounds")
     CHECK (sanitised (many).routes.size() == kMaxRoutes);
 }
 
-TEST_CASE ("modulation: only continuous modulatable parameters are compiled")
+TEST_CASE ("modulation: continuous and stepped modulatable parameters are compiled")
 {
     auto set = makeSet();
     Matrix m;
-    for (const ParamId dest : { kDest, ParamId (501), ParamId (502), ParamId (99999) })
+    for (const ParamId dest : { kDest, ParamId (501), ParamId (502), ParamId (503), ParamId (99999) })
     {
         Route r; r.source = { SourceKind::Lfo, 0, 0 }; r.dest = dest;
         m.routes.push_back (r);
@@ -79,9 +82,11 @@ TEST_CASE ("modulation: only continuous modulatable parameters are compiled")
     Route macro; macro.source = { SourceKind::Macro, 3, 0 }; macro.dest = kDest;
     m.routes.push_back (macro);
     const auto c = compile (m, set);
-    REQUIRE (c->routes.size() == 2);                    // la destination continue, et celle de la macro
+    REQUIRE (c->routes.size() == 4);                    // continue, par pas, interrupteur (pas la destination non modulable ni l'inconnue), et la macro
     CHECK (c->routes[0].dest == set.indexOf (kDest));
-    CHECK (c->routes[1].macro == set.indexOf (control::macroParamId (3)));
+    CHECK (c->routes[1].dest == set.indexOf (501));
+    CHECK (c->routes[2].dest == set.indexOf (502));
+    CHECK (c->routes[3].macro == set.indexOf (control::macroParamId (3)));
 }
 
 TEST_CASE ("parameter set: an offset moves the effective value without touching the base")
@@ -447,6 +452,64 @@ TEST_CASE ("modulation: a route reaches a parameter of an insert, and the knob v
     engine.setInsert (StripKind::Track, 0, 2, other);
     engine.midiController (cc);
     CHECK (peakOf (30) == Approx (open).epsilon (0.05));
+}
+
+TEST_CASE ("modulation: a route reaches a switch (track mute) and flips it past the middle, the base value stays put")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto peakOf = [&] (int blocks)
+    {
+        float peak = 0.0f;
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256);
+            peak = 0.0f;
+            for (const float s : bufs[0]) peak = std::max (peak, std::abs (s));
+        }
+        return peak;
+    };
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    d.filters.filter[0].on = false;
+    d.ampEnv.attack.ms = 0.0;
+    engine.setTrackType (0, TrackType::Synth);
+    engine.publishSynth (0, std::make_shared<SynthPatch> (d));
+    mixer::StripSettings strip;
+    Route r;
+    r.source = { SourceKind::ControlChange, 1, 0 };
+    r.dest = probe::trackParam (0, probe::kMute);
+    r.amount = 1.0;
+    strip.modulation.routes = { r };
+    engine.setTrackSettings (0, strip);
+    peakOf (1);
+    engine.noteOn (0, 60, 1.0f);
+    const float open = peakOf (16);
+    CHECK (open > 0.05f);
+    midi::Message cc;
+    cc.kind = midi::MsgKind::ControlChange; cc.channel = 0; cc.data1 = 1; cc.data2 = 127;
+    engine.midiController (cc);
+    CHECK (peakOf (30) < open * 0.02f);                          // coupée par la modulation
+    CHECK (params.get (probe::trackParam (0, probe::kMute)) == Approx (0.0));   // l'interrupteur réglé n'a pas bougé
+    cc.data2 = 0;
+    engine.midiController (cc);
+    CHECK (peakOf (30) == Approx (open).epsilon (0.05));         // et revient avec la source
+}
+
+TEST_CASE ("modulation: the track type and the FM algorithm cannot be modulated")
+{
+    ParameterSet params;
+    REQUIRE (probe::buildPool (params, 2));
+    CHECK_FALSE (params.spec (params.indexOf (probe::trackParam (0, probe::kType))).modulatable);
+    CHECK_FALSE (params.spec (params.indexOf (probe::algorithm)).modulatable);
 }
 
 TEST_CASE ("modulation: a large host buffer is evaluated in short pieces, the LFO keeps its pace")

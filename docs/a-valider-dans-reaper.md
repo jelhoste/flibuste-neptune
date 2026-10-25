@@ -35,3 +35,10 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Samples** : ils se rechargent depuis leurs chemins d'origine (non copiés dans le fichier).
 - [ ] **Supprimer** : le fichier va à la corbeille du système. **Ouvrir le dossier** : ouvre `GlobalPresets/`.
 - [ ] **Sauvegarde du projet Reaper** après un chargement : le projet se rouvre avec le même état.
+
+## Modulation des paramètres par pas
+- [ ] **Tirettes de l'orgue** : une route LFO (quantité 0,5, centrée) vers `Track N Upper 8'` : la registration se balade autour de la valeur réglée, sans clic gênant ; la tirette affichée garde sa valeur réglée.
+- [ ] **Interrupteur** : une route CC vers `Track N Mute` ou `Percussion` : l'interrupteur bascule quand le CC dépasse la moitié ; la valeur réglée ne change pas.
+- [ ] **Choix** : une route vers `Leslie Speed` ou `Vibrato` : les positions défilent avec la source.
+- [ ] **FM / Sampler** : une route vers `FM LFO Speed` ou `Tune (semitones)` (LFO carré : arpège de hauteurs).
+- [ ] **Liste de l'onglet MOD** : les paramètres par pas apparaissent maintenant ; `Track N Type` et `FM Algorithm` restent absents.

@@ -872,7 +872,7 @@ void Engine::addInsertOffset (void* context, int slot, ParamId moduleParam, floa
     const auto index = ps.indexOf (moduleParam);
     if (index == ParameterSet::npos) return;
     const auto& spec = ps.spec (index);
-    if (spec.kind != Kind::Continuous || ! spec.modulatable || spec.hidden) return;
+    if (! spec.modulatable || spec.hidden) return;
     ps.addModOffsetAt (index, delta);
     if (c.engine->insertTouched_.size() < c.engine->insertTouched_.capacity()) c.engine->insertTouched_.push_back ({ c.track, slot, inst, index });
 }

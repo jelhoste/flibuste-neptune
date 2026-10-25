@@ -142,7 +142,7 @@ std::shared_ptr<const Compiled> compile (const Matrix& in, const ParameterSet& s
             cr.dest = set.indexOf (r.dest);
             if (cr.dest == ParameterSet::npos) continue;
             const auto& spec = set.spec (cr.dest);
-            if (spec.kind != Kind::Continuous || ! spec.modulatable || spec.hidden) continue;   // seuls les paramètres continus se modulent
+            if (! spec.modulatable || spec.hidden) continue;   // continus comme par pas (pas, interrupteur, choix : le décalage se rend en pas)
         }
         if (r.source.kind == SourceKind::Macro)
         {

@@ -846,7 +846,7 @@ std::vector<std::pair<neptune::core::ParamId, std::string>> NeptuneProcessor::in
         for (std::size_t i = 0; i < ps.size(); ++i)
         {
             const auto& spec = ps.spec (i);
-            if (spec.hidden || spec.kind != neptune::core::Kind::Continuous || ! spec.modulatable) continue;
+            if (spec.hidden || ! spec.modulatable) continue;
             out.emplace_back (mod::insertDest (slot, spec.id),
                               "Track " + std::to_string (track + 1) + " Insert " + std::to_string (slot + 1) + " (" + inst->type + ") " + spec.name);
         }

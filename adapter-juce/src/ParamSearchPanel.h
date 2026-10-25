@@ -25,7 +25,7 @@ public:
         {
             const auto& s = set.spec (i);
             if (s.hidden) continue;
-            if (continuousOnly && (s.kind != neptune::core::Kind::Continuous || ! s.modulatable)) continue;
+            if (continuousOnly && ! s.modulatable) continue;
             entries_.push_back ({ s.id, juce::String::fromUTF8 (s.name.c_str()), neptune::core::paramgroups::classify (s.name) });
         }
         for (const auto& [id, name] : extras)   // paramètres des modules en insert de la piste : famille « Inserts » de cette piste
