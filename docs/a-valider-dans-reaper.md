@@ -42,3 +42,11 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Choix** : une route vers `Leslie Speed` ou `Vibrato` : les positions défilent avec la source.
 - [ ] **FM / Sampler** : une route vers `FM LFO Speed` ou `Tune (semitones)` (LFO carré : arpège de hauteurs).
 - [ ] **Liste de l'onglet MOD** : les paramètres par pas apparaissent maintenant ; `Track N Type` et `FM Algorithm` restent absents.
+
+## Groupes dans la liste des zones (page Sampler)
+- [ ] **Colonne Groupe** dans la liste des zones (avant Déclenchement), vide pour les zones sans Groupe.
+- [ ] **Nouveau Groupe** : sélectionner des zones, clic droit -> Groupe -> « Nouveau Groupe avec la sélection... », taper « Principal 8' » : la colonne se remplit ; la matrice propose une vue pour ce Groupe ; Annuler défait d'un coup.
+- [ ] **Affecter** : clic droit sur d'autres zones -> Groupe -> choisir le Groupe existant (coché pour celui de la zone) ; « Aucun Groupe » le retire.
+- [ ] **Renommer** : le nom change partout (colonne, matrice, cases de chargement), les modulateurs et emplacements du Groupe suivent ; un nom déjà pris est refusé avec un message.
+- [ ] **Supprimer** : les zones restent, sans Groupe ; les réglages propres du Groupe disparaissent.
+- [ ] **Jeu d'orgue** : un Groupe commandé par un modulateur (menu Modulateurs du même clic droit) ; couper le modulateur (CC / macro / bouton de Façade) rend les zones du Groupe muettes.

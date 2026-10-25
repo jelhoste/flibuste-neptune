@@ -15,6 +15,7 @@ ZoneTable::ZoneTable (const neptune::core::theme::Palette& palette, const neptun
     h.addColumn (name ("import.col_velocity"), 4, 70, 40, 140, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("import.col_rr"), 5, 34, 24, 80, juce::TableHeaderComponent::notSortable);
     h.addColumn ("Mode", 6, 64, 40, 120, juce::TableHeaderComponent::notSortable);
+    h.addColumn (name ("zone.d_group"), 11, 110, 50, 260, juce::TableHeaderComponent::notSortable);   // Groupe : texte, modifié par le menu contextuel
     h.addColumn (name ("trig.label"), 7, 104, 80, 160, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("choke.cuts_short"), 8, 62, 50, 100, juce::TableHeaderComponent::notSortable);
     h.addColumn (name ("choke.cut_by_short"), 9, 74, 50, 120, juce::TableHeaderComponent::notSortable);
@@ -152,7 +153,7 @@ private:
 
 juce::Component* ZoneTable::refreshComponentForCell (int row, int column, bool, juce::Component* existing)
 {
-    if (row < 0 || row >= static_cast<int> (zones_.size()) || column < 7)
+    if (row < 0 || row >= static_cast<int> (zones_.size()) || column < 7 || column == 11)
     {
         delete existing;
         return nullptr;
@@ -238,6 +239,7 @@ void ZoneTable::paintCell (juce::Graphics& g, int row, int column, int width, in
             text = z.mode == neptune::core::PlayMode::Loop ? "Loop" : "One-shot";
             if (z.onRelease) text << " (rel)";
             break;
+        case 11: text = juce::String::fromUTF8 (z.group.c_str()); break;
         default: break;
     }
     g.setColour (colour (Token::Text));

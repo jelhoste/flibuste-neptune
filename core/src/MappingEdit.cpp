@@ -191,4 +191,84 @@ InstrumentDescription duplicateZones (const InstrumentDescription& base, const s
     }
     return d;
 }
+
+// ---- Groupes ----
+std::vector<std::string> groupNames (const InstrumentDescription& d)
+{
+    std::set<std::string> names;
+    for (const auto& z : d.zones)
+        if (! z.group.empty()) names.insert (z.group);
+    return { names.begin(), names.end() };
+}
+
+std::string cleanGroupName (std::string name)
+{
+    const auto isSpace = [] (char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    while (! name.empty() && isSpace (name.back())) name.pop_back();
+    std::size_t first = 0;
+    while (first < name.size() && isSpace (name[first])) ++first;
+    name.erase (0, first);
+    if (name.size() > 64)
+    {
+        std::size_t cut = 64;
+        while (cut > 0 && (static_cast<unsigned char> (name[cut]) & 0xC0u) == 0x80u) --cut;   // pas au milieu d'un caractère UTF-8
+        name.resize (cut);
+    }
+    return name;
+}
+
+namespace
+{
+// Retire ce qui visait des Groupes qui n'ont plus aucune zone.
+void pruneGroups (InstrumentDescription& d)
+{
+    const auto alive = groupNames (d);
+    auto isAlive = [&alive] (const std::string& g) { return std::binary_search (alive.begin(), alive.end(), g); };
+    for (auto it = d.groups.begin(); it != d.groups.end();)
+        it = isAlive (it->first) ? std::next (it) : d.groups.erase (it);
+    for (auto& s : d.slots)
+        if (s.isGroup && ! isAlive (s.group)) s = SlotAssignment {};
+    d.unloadedGroups.erase (std::remove_if (d.unloadedGroups.begin(), d.unloadedGroups.end(), [&isAlive] (const std::string& g) { return ! isAlive (g); }),
+                            d.unloadedGroups.end());
+}
+} // namespace
+
+InstrumentDescription assignGroup (const InstrumentDescription& base, const std::vector<int>& zones, const std::string& group)
+{
+    InstrumentDescription d = base;
+    const auto name = cleanGroupName (group);
+    for (const int i : zones)
+        if (i >= 0 && i < static_cast<int> (d.zones.size())) d.zones[static_cast<std::size_t> (i)].group = name;
+    pruneGroups (d);
+    return d;
+}
+
+bool renameGroup (InstrumentDescription& d, const std::string& from, const std::string& to)
+{
+    const auto name = cleanGroupName (to);
+    if (name.empty() || name == from) return false;
+    const auto names = groupNames (d);
+    if (! std::binary_search (names.begin(), names.end(), from) || std::binary_search (names.begin(), names.end(), name)) return false;
+    for (auto& z : d.zones)
+        if (z.group == from) z.group = name;
+    if (const auto it = d.groups.find (from); it != d.groups.end())
+    {
+        d.groups[name] = it->second;
+        d.groups.erase (from);
+    }
+    for (auto& s : d.slots)
+        if (s.isGroup && s.group == from) s.group = name;
+    for (auto& g : d.unloadedGroups)
+        if (g == from) g = name;
+    return true;
+}
+
+InstrumentDescription deleteGroup (const InstrumentDescription& base, const std::string& group)
+{
+    InstrumentDescription d = base;
+    for (auto& z : d.zones)
+        if (z.group == group) z.group.clear();
+    pruneGroups (d);
+    return d;
+}
 } // namespace neptune::core::mapping

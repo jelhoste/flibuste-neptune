@@ -6,6 +6,7 @@
 
 #include "ChokePanel.h"
 #include "MidiFilterEditor.h"
+#include "neptune/core/MappingEdit.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/SampleMeta.h"
 #include "neptune/core/SamplerParams.h"
@@ -2466,6 +2467,25 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
         }
         menu.addSubMenu (tx ("mod.menu"), sub);
     }
+    const auto groupNames = mapping::groupNames (d);
+    {
+        // Groupe : affecter la zone (et la sélection) à un Groupe, en créer un, renommer ou supprimer celui-ci
+        juce::PopupMenu sub;
+        const std::string current = group.empty() ? d.zones[static_cast<std::size_t> (zone)].group : group;
+        if (group.empty())
+        {
+            sub.addItem (3000, tx ("grp.none"), true, current.empty());
+            for (std::size_t i = 0; i < groupNames.size(); ++i) sub.addItem (3100 + static_cast<int> (i), U (groupNames[i]), true, groupNames[i] == current);
+            sub.addSeparator();
+            sub.addItem (3001, tx ("grp.new"));
+        }
+        if (! current.empty())
+        {
+            sub.addItem (3002, tx ("grp.rename"));
+            sub.addItem (3003, tx ("grp.delete"));
+        }
+        menu.addSubMenu (tx ("grp.menu"), sub);
+    }
     if (group.empty())
     {
         // mode du jeu d'alternatives de la zone (round-robin)
@@ -2481,10 +2501,11 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
     menu.addItem (kOpenWindow, tx ("slots.open_window"));
     juce::Component::SafePointer<NovaSamplerEditor> safe (this);
     menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
-    menu.showMenuAsync (juce::PopupMenu::Options(), [safe, zone, group] (int choice)
+    menu.showMenuAsync (juce::PopupMenu::Options(), [safe, zone, group, groupNames] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
         if (choice == kOpenWindow) { safe->openSlotsPanel (*safe->slotsPill_); return; }
+        if (choice >= 3000 && choice < 4000) { safe->groupMenuChoice (choice, zone, group, groupNames); return; }
         if (choice >= 1000 && choice < 1000 + kModulators)
         {
             auto desc = safe->proc_.instrumentDescription();
@@ -2530,6 +2551,56 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
         }
         safe->proc_.uiEditInstrument (std::move (desc), "Slots", "slots");
     });
+}
+
+void NovaSamplerEditor::groupMenuChoice (int choice, int zone, const std::string& group, const std::vector<std::string>& names)
+{
+    const auto d = proc_.instrumentDescription();
+    auto rows = zones_->selectedRows();   // la sélection si la ligne cliquée en fait partie, sinon la ligne seule
+    if (std::find (rows.begin(), rows.end(), zone) == rows.end()) rows = { zone };
+    const std::string current = ! group.empty() ? group : (zone >= 0 && zone < static_cast<int> (d.zones.size()) ? d.zones[static_cast<std::size_t> (zone)].group : std::string());
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    auto apply = [safe] (InstrumentDescription next, const char* name)
+    {
+        if (safe == nullptr) return;
+        safe->proc_.uiEditInstrument (std::move (next), name);
+        safe->lastRevision_ = 0xFFFFFFFFu;
+    };
+    if (choice == 3000) apply (mapping::assignGroup (d, rows, {}), "Group");
+    else if (choice >= 3100 && choice - 3100 < static_cast<int> (names.size())) apply (mapping::assignGroup (d, rows, names[static_cast<std::size_t> (choice - 3100)]), "Group");
+    else if (choice == 3001)
+        askGroupName (tx ("grp.new"), {}, [safe, rows] (std::string name)
+        {
+            if (safe == nullptr || mapping::cleanGroupName (name).empty()) return;
+            safe->proc_.uiEditInstrument (mapping::assignGroup (safe->proc_.instrumentDescription(), rows, name), "Group");
+            safe->lastRevision_ = 0xFFFFFFFFu;
+        });
+    else if (choice == 3002 && ! current.empty())
+        askGroupName (tx ("grp.rename"), U (current), [safe, current] (std::string name)
+        {
+            if (safe == nullptr) return;
+            auto next = safe->proc_.instrumentDescription();
+            if (! mapping::renameGroup (next, current, name))
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->tx ("grp.rename"), safe->tx ("grp.rename_refused"));
+                return;
+            }
+            safe->proc_.uiEditInstrument (std::move (next), "Group");
+            safe->lastRevision_ = 0xFFFFFFFFu;
+        });
+    else if (choice == 3003 && ! current.empty()) apply (mapping::deleteGroup (d, current), "Group");
+}
+
+void NovaSamplerEditor::askGroupName (const juce::String& title, const juce::String& initial, std::function<void (std::string)> done)
+{
+    auto* w = new juce::AlertWindow (title, tx ("grp.name_prompt"), juce::MessageBoxIconType::NoIcon, this);
+    w->addTextEditor ("name", initial);
+    w->addButton (tx ("grp.ok"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tx ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, done = std::move (done)] (int result)
+    {
+        if (result == 1) done (w->getTextEditorContents ("name").toStdString());
+    }), true);
 }
 
 // ------------------------------------------------------------------------------------------------ filtres (calque)

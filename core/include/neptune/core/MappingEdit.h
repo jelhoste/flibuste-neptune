@@ -59,4 +59,17 @@ InstrumentDescription resizeEdge (const InstrumentDescription& base, const std::
 // la fin, dans l'ordre. `newIndices` reçoit leurs indices. La racine des copies reste celle de l'original.
 InstrumentDescription duplicateZones (const InstrumentDescription& base, const std::vector<int>& zones, int dKey, int dVel,
                                       std::vector<int>* newIndices = nullptr);
+
+// ---- Groupes (articulations, micros, jeux d'orgue...) : créés, renommés, supprimés depuis la liste des zones ----
+// Les noms de Groupe existants : ceux des zones, triés, sans doublon.
+std::vector<std::string> groupNames (const InstrumentDescription&);
+// Nom de Groupe admissible : espaces de bord retirés, au plus 64 octets (coupé sans casser un caractère UTF-8).
+std::string cleanGroupName (std::string);
+// Met les zones indiquées dans le Groupe `group` ("" = aucun). Un Groupe qui n'a plus de zone perd ses réglages propres, ses emplacements assignés
+// et sa mention « non chargé ». Les indices hors de l'instrument sont ignorés.
+InstrumentDescription assignGroup (const InstrumentDescription& base, const std::vector<int>& zones, const std::string& group);
+// Renomme un Groupe (zones, réglages propres, emplacements, « non chargé »). Faux, et rien ne change, si le nouveau nom est vide, identique ou déjà pris.
+bool renameGroup (InstrumentDescription& d, const std::string& from, const std::string& to);
+// Supprime un Groupe : ses zones n'ont plus de Groupe, ses réglages propres et ses emplacements disparaissent. Les zones restent.
+InstrumentDescription deleteGroup (const InstrumentDescription& base, const std::string& group);
 } // namespace neptune::core::mapping

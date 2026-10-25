@@ -88,6 +88,9 @@ private:
     void showPoolMenu (int row);
     void openSlotsPanel (juce::Component& anchor);
     void showSlotAssignMenu (int zone, const std::string& group);
+    // Groupes : choix du sous-menu « Groupe » (affecter les zones, nouveau, renommer, supprimer) et saisie d'un nom.
+    void groupMenuChoice (int choice, int zone, const std::string& group, const std::vector<std::string>& names);
+    void askGroupName (const juce::String& title, const juce::String& initial, std::function<void (std::string)> done);
     void openFilterEditor();
     void closeFilterEditor();
     void updateFilterEditor();

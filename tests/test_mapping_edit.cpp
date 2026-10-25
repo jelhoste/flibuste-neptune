@@ -227,3 +227,57 @@ TEST_CASE ("an edit that changes only load settings round-trips through undo")
     um.redo();
     CHECK (current == next);
 }
+
+TEST_CASE ("groups: assign zones, rename and delete keep the settings, slots and loading flags consistent")
+{
+    InstrumentDescription d;
+    d.zones = { zone ("a.wav", 0, 10, 1, 127, 5), zone ("b.wav", 11, 20, 1, 127, 15), zone ("c.wav", 21, 30, 1, 127, 25) };
+    d = assignGroup (d, { 0, 1, 7, -1 }, "  Principal 8'  ");
+    CHECK (d.zones[0].group == "Principal 8'");
+    CHECK (d.zones[1].group == "Principal 8'");
+    CHECK (d.zones[2].group.empty());
+    CHECK (groupNames (d) == std::vector<std::string> ({ "Principal 8'" }));
+
+    d.groups["Principal 8'"].modulators = 0x0004;
+    d.slots[0].param = SlotParam::Attack;
+    d.slots[0].isGroup = true;
+    d.slots[0].group = "Principal 8'";
+    d.unloadedGroups = { "Principal 8'" };
+
+    REQUIRE (renameGroup (d, "Principal 8'", "Montre 8'"));
+    CHECK (d.zones[0].group == "Montre 8'");
+    REQUIRE (d.groups.count ("Montre 8'") == 1);
+    CHECK (d.groups.count ("Principal 8'") == 0);
+    CHECK (d.groups.at ("Montre 8'").modulators == 0x0004);
+    CHECK (d.slots[0].group == "Montre 8'");
+    CHECK (d.unloadedGroups == std::vector<std::string> ({ "Montre 8'" }));
+
+    d = assignGroup (d, { 2 }, "Flûte 4'");
+    CHECK_FALSE (renameGroup (d, "Montre 8'", "Flûte 4'"));   // déjà pris
+    CHECK_FALSE (renameGroup (d, "Montre 8'", "   "));        // vide
+    CHECK_FALSE (renameGroup (d, "Montre 8'", "Montre 8'"));  // identique
+    CHECK_FALSE (renameGroup (d, "Inconnu", "Autre"));
+
+    const auto removed = deleteGroup (d, "Montre 8'");
+    CHECK (removed.zones[0].group.empty());
+    CHECK (removed.zones[2].group == "Flûte 4'");
+    CHECK (removed.groups.empty());
+    CHECK_FALSE (removed.slots[0].assigned());
+    CHECK (removed.unloadedGroups.empty());
+    CHECK (removed.zones.size() == 3);
+
+    // vider un Groupe en y retirant ses zones le fait disparaître aussi
+    const auto emptied = assignGroup (d, { 2 }, "");
+    CHECK (groupNames (emptied) == std::vector<std::string> ({ "Montre 8'" }));
+}
+
+TEST_CASE ("groups: names are trimmed and cut on a character boundary")
+{
+    CHECK (cleanGroupName ("\t x \n") == "x");
+    CHECK (cleanGroupName ("") == "");
+    std::string longName;
+    for (int i = 0; i < 40; ++i) longName += "é";   // 80 octets
+    const auto cut = cleanGroupName (longName);
+    CHECK (cut.size() <= 64);
+    CHECK (cut.size() % 2 == 0);
+}
