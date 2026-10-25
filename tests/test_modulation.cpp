@@ -471,7 +471,7 @@ TEST_CASE ("modulation: a large host buffer is evaluated in short pieces, the LF
     strip.modulation.routes = { r };
     engine.setTrackSettings (0, strip);
     engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 4096);
-    // 5 Hz : un tour = 9600 échantillons. Évalué par morceaux de 256, le LFO a avancé de 32 pas par tampon : sa phase suit l'horloge audio.
+    // 5 Hz : un tour = 9600 échantillons. Évalué par morceaux de 64, le LFO a avancé de 64 pas par tampon : sa phase suit l'horloge audio.
     // (Évalué une fois par tampon de 4096, il n'aurait avancé que de deux pas.)
     engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 4096);
     const auto pan = params.indexOf (probe::trackParam (0, probe::kPan));

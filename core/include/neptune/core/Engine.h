@@ -324,7 +324,7 @@ private:
     std::vector<InsertTouch> insertTouched_;
     struct InsertSinkContext { Engine* engine; int track; };
     static void addInsertOffset (void* context, int slot, ParamId moduleParam, float delta) noexcept;
-    static constexpr int kModulationChunk = 256;
+    static constexpr int kModulationChunk = 64;
     std::atomic<bool> modulationActive_ { false };   // au moins une piste a des routes de modulation
     std::vector<std::size_t> modTouched_;   // paramètres dont le décalage de modulation est non nul (remis à zéro au bloc suivant)
     std::size_t masterVolume_ = ParameterSet::npos, masterPan_ = ParameterSet::npos, masterMute_ = ParameterSet::npos,

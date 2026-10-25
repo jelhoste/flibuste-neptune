@@ -126,6 +126,68 @@ namespace
 constexpr int kMeterTracks = 16, kMeterBuses = 16, kMeterParallels = 32;   // = mixer::numTracks / numBuses / numParallels (Facade n'inclut pas Mixer.h)
 }
 
+namespace
+{
+// Valeur réelle pour une progression u (0..1) de la course logarithmique entre min et max (min <= 0 : décalée pour rester positive).
+double logValue (const ParamSpec& s, double u) noexcept
+{
+    if (s.min > 0.0) return s.min * std::pow (s.max / s.min, u);
+    const double c = (s.max - s.min) * 0.001;
+    return s.min - c + c * std::pow ((s.max - s.min + c) / c, u);
+}
+
+double logProgress (const ParamSpec& s, double plain) noexcept
+{
+    if (s.min > 0.0) return std::log (std::max (plain, s.min) / s.min) / std::log (s.max / s.min);
+    const double c = (s.max - s.min) * 0.001;
+    return std::log (std::max (plain - s.min + c, c) / c) / std::log ((s.max - s.min + c) / c);
+}
+
+bool scalable (const Widget& w, const ParamSpec& s) noexcept
+{
+    return s.kind == Kind::Continuous && s.max > s.min && (w.scale != 0 || w.response.active());
+}
+} // namespace
+
+double widgetNormalised (const Widget& w, const ParamSpec& s, double position) noexcept
+{
+    double t = std::clamp (position, 0.0, 1.0);
+    if (! scalable (w, s)) return t;
+    if (w.response.active()) t = evaluate (w.response, t);
+    switch (w.scale)
+    {
+        case 1: return s.toNormalized (s.min + t * (s.max - s.min));
+        case 2: return s.toNormalized (logValue (s, t));
+        case 3: return s.toNormalized (s.min + s.max - logValue (s, 1.0 - t));
+        default: return t;
+    }
+}
+
+double widgetPosition (const Widget& w, const ParamSpec& s, double normalised) noexcept
+{
+    const double n = std::clamp (normalised, 0.0, 1.0);
+    if (! scalable (w, s)) return n;
+    const double plain = s.fromNormalized (n);
+    double t = n;
+    switch (w.scale)
+    {
+        case 1: t = (plain - s.min) / (s.max - s.min); break;
+        case 2: t = logProgress (s, plain); break;
+        case 3: t = 1.0 - logProgress (s, s.min + s.max - plain); break;
+        default: break;
+    }
+    t = std::clamp (t, 0.0, 1.0);
+    if (! w.response.active()) return t;
+    // réciproque de la courbe libre (croissante) par dichotomie
+    double lo = 0.0, hi = 1.0;
+    for (int i = 0; i < 40; ++i)
+    {
+        const double mid = 0.5 * (lo + hi);
+        if (evaluate (w.response, mid) < t) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+}
+
 MeterSource decodeMeterSource (int source) noexcept
 {
     MeterSource m;
@@ -228,6 +290,8 @@ Facade sanitised (Facade f)
         w.midiTarget = std::clamp (w.midiTarget, 1, 3);
         w.midiFader = w.midiFader != 0 ? 1 : 0;
         w.invert = w.invert != 0 ? 1 : 0;
+        w.scale = std::clamp (w.scale, 0, numWidgetScales - 1);
+        w.response = sanitised (std::move (w.response));
         w.stepMode = std::clamp (w.stepMode, 0, 2);
         w.notches.erase (std::remove_if (w.notches.begin(), w.notches.end(), [] (double v) { return ! std::isfinite (v); }), w.notches.end());
         std::sort (w.notches.begin(), w.notches.end());
@@ -629,6 +693,8 @@ std::string toJson (const Facade& f)
         {
             if (w.stepMode != 0) e["steps"] = w.stepMode;
             if (w.invert != 0) e["invert"] = 1;
+            if (w.scale != 0) e["scale"] = w.scale;
+            if (! w.response.isLinear()) e["response"] = json::parse (neptune::core::toJson (w.response), nullptr, false);
             if (! w.notches.empty()) e["notches"] = w.notches;
         }
         if (w.type == WidgetType::Slider || w.type == WidgetType::Meter) e["vertical"] = w.vertical;
@@ -766,6 +832,8 @@ Facade fromJson (std::string_view text)
             w.style = intOf (e, "style", 0);
             w.stepMode = intOf (e, "steps", 0);
             w.invert = intOf (e, "invert", 0);
+            w.scale = intOf (e, "scale", 0);
+            if (const auto r = e.find ("response"); r != e.end() && r->is_object()) w.response = velocityCurveFromJson (r->dump());
             if (const auto n = e.find ("notches"); n != e.end() && n->is_array())
                 for (const auto& v : *n)
                     if (v.is_number() && w.notches.size() < maxNotches) w.notches.push_back (v.get<double>());

@@ -7,6 +7,7 @@
 
 #include "FacadeBundle.h"
 #include "ParamFilterBar.h"
+#include "VelocityPanel.h"
 #include "FacadeExamples.h"
 #include "FacadeSpec.h"
 #include "StyleLibrary.h"
@@ -682,7 +683,7 @@ private:
         auto& ps = owner_.processor_.parameters();
         const auto* spec = w.param != 0 ? ps.find (w.param) : nullptr;
         if (spec == nullptr) return 0.0;
-        const double t = w.stepMode == 2 && w.notches.size() >= 2 ? fc::notchPosition (w.notches, ps.get (w.param)) : ps.getNormalized (w.param);
+        const double t = w.stepMode == 2 && w.notches.size() >= 2 ? fc::notchPosition (w.notches, ps.get (w.param)) : fc::widgetPosition (w, *spec, ps.getNormalized (w.param));
         return w.invert != 0 ? 1.0 - t : t;
     }
 
@@ -696,7 +697,7 @@ private:
         if (w.stepMode == 2 && w.notches.size() >= 2) return spec->toNormalized (spec->clamp (fc::notchValueAt (w.notches, t)));
         const bool discrete = spec->kind == neptune::core::Kind::Choice || spec->kind == neptune::core::Kind::Stepped || spec->kind == neptune::core::Kind::Toggle;
         if (w.stepMode == 0 && slider && discrete && spec->max > spec->min) return spec->toNormalized (spec->min + std::round (t * (spec->max - spec->min)));
-        return t;
+        return fc::widgetNormalised (w, *spec, t);
     }
 
     // Place la poignée du curseur sous le point (canevas) : crans automatiques sur un paramètre à pas ou à choix.
@@ -998,7 +999,12 @@ private:
                     paintNeptuneKnob (g, r, pos, o.palette_, o.knobStyle_);
                 if (linked)
                     if (const float off = ps.modOffsetAt (ps.indexOf (w.param)); off != 0.0f)
-                        paintModulationRing (g, r, pos, pos + (w.invert != 0 ? -off : off), o.palette_);
+                    {
+                        // la position modulée suit l'échelle et la courbe du widget : on la recalcule à partir de la valeur normalisée modulée
+                        const auto* modSpec = ps.find (w.param);
+                        const double modulated = modSpec != nullptr ? fc::widgetPosition (w, *modSpec, std::clamp (ps.getNormalized (w.param) + static_cast<double> (off), 0.0, 1.0)) : pos + off;
+                        paintModulationRing (g, r, pos, static_cast<float> (w.invert != 0 ? 1.0 - modulated : modulated), o.palette_);
+                    }
                 if (style != nullptr && (style->textSize > 0 || ! style->textColour.empty() || style->textPosition != 0 || ! style->textBold))
                     drawStyledText (g, style, caption, captionRow, 0.8f, o.colour (Token::Text));
                 else
@@ -2568,6 +2574,115 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NotchPanel)
 };
 
+// Échelle et courbe libre du lien d'un potard ou d'un curseur : comment la position du widget devient la valeur du paramètre.
+// Travaille sur une copie ; OK applique en un seul geste annulable, Annuler jette.
+class FacadeView::ScalePanel : public juce::Component
+{
+public:
+    ScalePanel (FacadeView& owner, int widgetId) : owner_ (owner), id_ (widgetId)
+    {
+        const auto* w = owner.facade_.find (widgetId);
+        scale_ = w != nullptr ? w->scale : 0;
+        curve_ = w != nullptr ? w->response : neptune::core::VelocityCurve();
+        const auto* spec = w != nullptr && w->param != 0 ? owner.processor_.parameters().find (w->param) : nullptr;
+        applicable_ = spec != nullptr && spec->kind == neptune::core::Kind::Continuous;
+        title_.setText (owner.text ("facade.scale_title"), juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (title_);
+        const char* keys[fc::numWidgetScales] = { "facade.scale_param", "facade.scale_linear", "facade.scale_log", "facade.scale_exp" };
+        for (int i = 0; i < fc::numWidgetScales; ++i)
+        {
+            auto& b = modes_[static_cast<std::size_t> (i)];
+            b.setButtonText (owner.text (keys[i]));
+            b.setRadioGroupId (4343);
+            b.setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
+            b.setEnabled (applicable_);
+            b.onClick = [this, i] { scale_ = i; };
+            addAndMakeVisible (b);
+        }
+        modes_[static_cast<std::size_t> (juce::jlimit (0, fc::numWidgetScales - 1, scale_))].setToggleState (true, juce::dontSendNotification);
+        hint_.setText (owner.text (applicable_ ? "facade.scale_hint" : "facade.scale_unavailable"), juce::dontSendNotification);
+        hint_.setFont (juce::FontOptions (13.0f));
+        hint_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
+        addAndMakeVisible (hint_);
+        curveLabel_.setText (owner.text ("facade.scale_curve"), juce::dontSendNotification);
+        curveLabel_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
+        addAndMakeVisible (curveLabel_);
+        editor_ = std::make_unique<VelocityPanel> (owner.palette_, owner.tr_, 0, false, curve_);
+        editor_->setFadeControlsVisible (false);
+        editor_->setEnabled (applicable_);
+        editor_->onChange = [this] (int, bool, const neptune::core::VelocityCurve& c) { curve_ = c; };
+        addAndMakeVisible (*editor_);
+        ok_.setButtonText (owner.text ("facade.ok"));
+        ok_.setEnabled (applicable_);
+        ok_.onClick = [this] { accept(); };
+        cancel_.setButtonText (owner.text ("facade.picker_cancel"));
+        cancel_.onClick = [this] { close(); };
+        addAndMakeVisible (ok_);
+        addAndMakeVisible (cancel_);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.6f));
+        g.setColour (owner_.colour (Token::PanelBg));
+        g.fillRoundedRectangle (panel().toFloat(), 10.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (panel().toFloat(), 10.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto r = panel().reduced (18);
+        title_.setBounds (r.removeFromTop (32));
+        for (auto& m : modes_) m.setBounds (r.removeFromTop (28));
+        hint_.setBounds (r.removeFromTop (48));
+        curveLabel_.setBounds (r.removeFromTop (26));
+        auto bottom = r.removeFromBottom (44);
+        r.removeFromBottom (6);
+        editor_->setBounds (r);
+        cancel_.setBounds (bottom.removeFromRight (150));
+        bottom.removeFromRight (10);
+        ok_.setBounds (bottom.removeFromRight (150));
+    }
+
+private:
+    juce::Rectangle<int> panel() const { return juce::Rectangle<int> (600, juce::jmin (640, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
+
+    void accept()
+    {
+        auto f = owner_.facade_;
+        if (auto* w = f.find (id_))
+        {
+            w->scale = scale_;
+            w->response = curve_;
+            owner_.commit (std::move (f), "Facade: scale");
+        }
+        close();
+    }
+
+    void close()
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FacadeView> (&owner_)]
+        {
+            if (safe != nullptr) { safe->scalePanel_.reset(); if (safe->canvas_ != nullptr) safe->canvas_->grabKeyboardFocus(); }
+        });
+    }
+
+    FacadeView& owner_;
+    int id_;
+    int scale_ = 0;
+    bool applicable_ = false;
+    neptune::core::VelocityCurve curve_;
+    juce::Label title_, hint_, curveLabel_;
+    std::array<juce::ToggleButton, fc::numWidgetScales> modes_;
+    std::unique_ptr<VelocityPanel> editor_;
+    juce::TextButton ok_, cancel_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ScalePanel)
+};
+
 // ============================== Vue ==============================
 
 FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
@@ -2623,6 +2738,9 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     notchesButton_.setButtonText (text ("facade.notches"));
     notchesButton_.setTooltip (text ("facade.tip_notches"));
     notchesButton_.onClick = [this] { openNotches(); };
+    scaleButton_.setButtonText (text ("facade.scale"));
+    scaleButton_.setTooltip (text ("facade.tip_scale"));
+    scaleButton_.onClick = [this] { openScale(); };
     invertButton_.setButtonText (text ("facade.invert"));
     invertButton_.setTooltip (text ("facade.tip_invert"));
     invertButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.invert = w.invert != 0 ? 0 : 1; }, "Facade: invert"); };
@@ -2719,7 +2837,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     alignButton_.setTooltip (text ("facade.tip_align"));
 
     for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &meterButton_, &meterSourceButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -2765,6 +2883,7 @@ void FacadeView::updateButtons()
     orientButton_.setVisible (editMode_ && one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Meter));
     const bool dial = editMode_ && one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Knob);
     notchesButton_.setVisible (dial);
+    scaleButton_.setVisible (dial);
     invertButton_.setVisible (dial);
     if (dial) invertButton_.setToggleState (one->invert != 0, juce::dontSendNotification);
     if (one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Meter)) orientButton_.setToggleState (one->vertical != 0, juce::dontSendNotification);
@@ -2822,7 +2941,7 @@ void FacadeView::resized()
     if (editMode_)
     {
         flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());
@@ -2830,6 +2949,7 @@ void FacadeView::resized()
     if (help_ != nullptr) help_->setBounds (getLocalBounds());
     if (stylePanel_ != nullptr) stylePanel_->setBounds (getLocalBounds());
     if (notchPanel_ != nullptr) notchPanel_->setBounds (getLocalBounds());
+    if (scalePanel_ != nullptr) scalePanel_->setBounds (getLocalBounds());
     if (midiPanel_ != nullptr) midiPanel_->setBounds (getLocalBounds());
 }
 
@@ -3290,6 +3410,16 @@ void FacadeView::openNotches()
     addAndMakeVisible (*notchPanel_);
     notchPanel_->setBounds (getLocalBounds());
     notchPanel_->toFront (true);
+}
+
+void FacadeView::openScale()
+{
+    const auto* w = facade_.find (single());
+    if (scalePanel_ != nullptr || w == nullptr || (w->type != fc::WidgetType::Knob && w->type != fc::WidgetType::Slider)) return;
+    scalePanel_ = std::make_unique<ScalePanel> (*this, w->id);
+    addAndMakeVisible (*scalePanel_);
+    scalePanel_->setBounds (getLocalBounds());
+    scalePanel_->toFront (true);
 }
 
 void FacadeView::openStyles()

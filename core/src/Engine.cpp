@@ -627,7 +627,7 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     // Blocs plus longs que prévu par l'hôte : découpés
     std::array<float*, 128> shifted {};
     const int channels = std::min (numChannels, static_cast<int> (shifted.size()));
-    // Avec une matrice de modulation, le bloc est découpé en morceaux d'au plus kModulationChunk échantillons (~5 ms à 48 kHz) : la modulation
+    // Avec une matrice de modulation, le bloc est découpé en morceaux d'au plus kModulationChunk échantillons (~1,3 ms à 48 kHz pour 64) : la modulation
     // est évaluée une fois par morceau, quelle que soit la taille du tampon de l'hôte.
     const int chunkSize = modulationActive_.load (std::memory_order_relaxed) ? std::min (maxBlockSize_, kModulationChunk) : maxBlockSize_;
     for (int offset = 0; offset < numFrames; offset += chunkSize)

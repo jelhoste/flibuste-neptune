@@ -1,3 +1,5 @@
+#include <catch2/catch_approx.hpp>
+#include <cmath>
 #include <catch2/catch_test_macros.hpp>
 
 #include "neptune/core/Engine.h"
@@ -585,4 +587,80 @@ TEST_CASE ("facade: meter sources round trip and unknown ones fall back to the t
     CHECK (fromJson (toJson (sanitised (f))).widgets.at (0).source == 612);
     f.widgets[0].source = 12345;
     CHECK (sanitised (f).widgets.at (0).source == 0);
+}
+
+using Catch::Approx;
+
+TEST_CASE ("facade: widget scale and free curve map the position to the parameter and back")
+{
+    using namespace neptune::core;
+    using namespace neptune::core::facade;
+    const auto freq = ParamSpec::continuous (1, "Freq", Unit::Hertz, 20.0, 20000.0, 1000.0);
+    Widget w;
+    w.type = WidgetType::Knob;
+
+    // échelle du paramètre : la position est la valeur normalisée
+    CHECK (widgetNormalised (w, freq, 0.3) == Approx (0.3));
+
+    // linéaire en valeur : à mi-course, la moitié de l'écart en hertz
+    w.scale = 1;
+    CHECK (freq.fromNormalized (widgetNormalised (w, freq, 0.5)) == Approx (10010.0).margin (1.0));
+
+    // logarithmique : à mi-course, la moyenne géométrique (rapport constant par distance)
+    w.scale = 2;
+    CHECK (freq.fromNormalized (widgetNormalised (w, freq, 0.5)) == Approx (std::sqrt (20.0 * 20000.0)).margin (0.5));
+    CHECK (freq.fromNormalized (widgetNormalised (w, freq, 0.0)) == Approx (20.0));
+    CHECK (freq.fromNormalized (widgetNormalised (w, freq, 1.0)) == Approx (20000.0));
+
+    // exponentielle : le miroir de la logarithmique, la valeur monte lentement puis vite
+    w.scale = 3;
+    CHECK (freq.fromNormalized (widgetNormalised (w, freq, 0.5)) == Approx (20.0 + 20000.0 - std::sqrt (20.0 * 20000.0)).margin (1.0));
+
+    // un paramètre dont le minimum est négatif reste borné et monotone en échelle logarithmique
+    const auto gain = ParamSpec::continuous (2, "Gain", Unit::Decibel, -24.0, 24.0, 0.0);
+    w.scale = 2;
+    double previous = -1.0;
+    for (int i = 0; i <= 20; ++i)
+    {
+        const double n = widgetNormalised (w, gain, i / 20.0);
+        CHECK (n >= previous);
+        CHECK (n >= 0.0);
+        CHECK (n <= 1.0);
+        previous = n;
+    }
+
+    // allers-retours, avec et sans courbe libre
+    for (const int scale : { 0, 1, 2, 3 })
+        for (const bool curved : { false, true })
+        {
+            Widget x;
+            x.type = WidgetType::Knob;
+            x.scale = scale;
+            if (curved) { x.response.points = { { 0.3, 0.1 }, { 0.7, 0.8 } }; x.response = sanitised (x.response); }
+            for (int i = 0; i <= 10; ++i)
+            {
+                const double t = i / 10.0;
+                const double back = widgetPosition (x, freq, widgetNormalised (x, freq, t));
+                CHECK (back == Approx (t).margin (1.0e-4));
+            }
+        }
+
+    // un paramètre à pas ou à choix n'est pas touché
+    const auto steps = ParamSpec::stepped (3, "Steps", Unit::None, 0, 8, 0);
+    w.scale = 2;
+    CHECK (widgetNormalised (w, steps, 0.4) == Approx (0.4));
+
+    // sauvegarde : l'échelle et la courbe font l'aller-retour, hors défauts rien n'est écrit
+    Facade f;
+    Widget k;
+    k.type = WidgetType::Knob;
+    k.scale = 2;
+    k.response.points = { { 0.5, 0.2 } };
+    f.widgets.push_back (k);
+    const auto back = fromJson (toJson (sanitised (f))).widgets.at (0);
+    CHECK (back.scale == 2);
+    CHECK (back.response == sanitised (k.response));
+    f.widgets[0].scale = 9;
+    CHECK (sanitised (f).widgets.at (0).scale == numWidgetScales - 1);
+    CHECK (toJson (Facade {}).find ("response") == std::string::npos);
 }

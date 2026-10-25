@@ -39,6 +39,7 @@ private:
     class HelpPanel;
     class StylePanel;
     class NotchPanel;
+    class ScalePanel;
     void timerCallback() override;
     void refresh();                              // relit la Façade de la piste sélectionnée si elle a changé
     void commit (neptune::core::facade::Facade, const char* undoName);
@@ -69,6 +70,7 @@ private:
     void refreshMissing();
     void openStyles();
     void openNotches();
+    void openScale();
     void showStyleMenu();
     void duplicateSelected();
     void deleteSelected();
@@ -92,7 +94,7 @@ private:
     int missing_ = 0;                            // images de la Façade introuvables (fond, styles)
     int missingTick_ = 0;
 
-    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
+    juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, scaleButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
     juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
@@ -100,6 +102,7 @@ private:
     std::unique_ptr<HelpPanel> help_;
     std::unique_ptr<StylePanel> stylePanel_;
     std::unique_ptr<NotchPanel> notchPanel_;
+    std::unique_ptr<ScalePanel> scalePanel_;
     std::unique_ptr<MidiMessagePanel> midiPanel_;
     std::unique_ptr<juce::FileChooser> chooser_;
 

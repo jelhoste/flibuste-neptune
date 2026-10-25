@@ -10,6 +10,7 @@
 
 #include "neptune/core/MidiSend.h"
 #include "neptune/core/Parameter.h"
+#include "neptune/core/VelocityResponse.h"
 
 namespace neptune::core::facade
 {
@@ -128,6 +129,11 @@ struct Widget
     //  1 : toujours continu ; 2 : crans personnalisés, aux valeurs réelles de `notches` (une position par cran, à égale distance).
     int stepMode = 0;
     int invert = 0;                 // 1 : sens inversé
+    // Échelle et courbe du lien (potard et curseur sur un paramètre continu) : comment la position du widget devient une valeur.
+    //  scale 0 : l'échelle propre du paramètre ; 1 : linéaire en valeur ; 2 : logarithmique (rapport constant par distance) ; 3 : exponentielle.
+    //  response : courbe libre (croissante) appliquée à la position avant l'échelle ; la droite d'origine ne change rien.
+    int scale = 0;
+    VelocityCurve response;
     std::vector<double> notches;    // valeurs réelles (celles du paramètre), triées, sans doublon
     midisend::Message midi;         // Midi : le message (canal 1..16 dans `midi.channel`)
     int midiTarget = 1;             // Midi : 1 Neptune (comme un clavier MIDI), 2 sortie MIDI de l'hôte, 3 les deux
@@ -142,7 +148,7 @@ struct Widget
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
-            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && notches == o.notches;
+            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches;
     }
 };
 
@@ -170,6 +176,12 @@ double notchPosition (const std::vector<double>& notches, double plain) noexcept
 double notchValueAt (const std::vector<double>& notches, double position) noexcept;   // valeur du cran le plus proche de `position`
 // `n` crans (2..maxNotches) répartis régulièrement sur la course du paramètre (en tenant compte de sa courbe), sans doublon.
 std::vector<double> evenNotches (const ParamSpec&, int n);
+
+// Position du widget (0..1, sens de l'écran, hors inversion) -> position normalisée du paramètre, selon l'échelle et la courbe du widget ;
+// et la réciproque. Sans effet sur un paramètre qui n'est pas continu.
+double widgetNormalised (const Widget&, const ParamSpec&, double position) noexcept;
+double widgetPosition (const Widget&, const ParamSpec&, double normalised) noexcept;
+constexpr int numWidgetScales = 4;
 
 // Dimensions par défaut d'un nouveau widget du type donné.
 Widget defaultWidget (WidgetType type, int id, int x, int y);
