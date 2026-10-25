@@ -90,6 +90,22 @@ Matrix fromJson (std::string_view);        // lecture tolérante
 
 // Matrice résolue pour le moteur : les destinations deviennent des indices du ParameterSet (seuls les paramètres continus et modulables
 // sont gardés), les macros aussi. Construite sur le thread de message, lue par le thread audio.
+// Destination dans un module en insert de la piste : `dest` = base + emplacement x 0x10000 + identifiant du paramètre dans le module. Le module
+// n'est connu que du thread audio (il peut changer ou disparaître) : ces routes sont donc résolues à chaque bloc, par le moteur.
+constexpr int kInsertSlots = 8;
+constexpr ParamId kInsertDestBase = 0x40000000u;
+constexpr ParamId insertDest (int slot, ParamId moduleParam) noexcept { return kInsertDestBase + static_cast<ParamId> (slot) * 0x10000u + (moduleParam & 0xFFFFu); }
+constexpr bool isInsertDest (ParamId dest) noexcept { return dest >= kInsertDestBase && dest < kInsertDestBase + static_cast<ParamId> (kInsertSlots) * 0x10000u; }
+constexpr int insertSlotOf (ParamId dest) noexcept { return static_cast<int> ((dest - kInsertDestBase) >> 16); }
+constexpr ParamId insertParamOf (ParamId dest) noexcept { return dest & 0xFFFFu; }
+
+// Reçoit les décalages destinés aux modules en insert (voir ci-dessus) ; fourni par le moteur, appelé depuis le thread audio.
+struct InsertSink
+{
+    void* context = nullptr;
+    void (*add) (void* context, int slot, ParamId moduleParam, float delta) noexcept = nullptr;
+};
+
 struct CompiledRoute
 {
     Source source;
@@ -97,6 +113,8 @@ struct CompiledRoute
     std::size_t macro = ParameterSet::npos;   // source Macro : indice du paramètre de la macro
     double amount = 0.0;
     bool centred = false;
+    int insertSlot = -1;                      // destination dans un module en insert : emplacement et paramètre du module
+    ParamId insertParam = 0;
 };
 struct Compiled
 {
@@ -114,7 +132,7 @@ public:
     void reset() noexcept;
     void setCompiled (const Compiled* c) noexcept { compiled_ = c; }
     // `gate` : une touche au moins est tenue sur la piste. `touched` reçoit les indices écrits (à remettre à zéro au bloc suivant).
-    void process (int frames, bool gate, const midi::State& midi, const ParameterSet& set, std::vector<std::size_t>& touched) noexcept;
+    void process (int frames, bool gate, const midi::State& midi, const ParameterSet& set, std::vector<std::size_t>& touched, const InsertSink* inserts = nullptr) noexcept;
 
 private:
     double sampleRate_ = 48000.0;

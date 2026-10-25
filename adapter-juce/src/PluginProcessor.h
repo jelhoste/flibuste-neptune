@@ -206,6 +206,10 @@ public:
         std::unique_ptr<ParamHost> host;                          // édition annulable des paramètres du module
     };
     InsertHandle openInsert (StripKind, int index, int slot); // instance nulle si l'emplacement est vide
+    // Paramètres des modules en insert d'une piste qu'une route de modulation peut viser : (destination, nom), voir modulation::insertDest.
+    std::vector<std::pair<neptune::core::ParamId, std::string>> insertModulationTargets (int track) const;
+    // Nom lisible d'une destination de modulation : un paramètre de Neptune ou d'un insert de la piste ; vide si elle n'existe plus.
+    std::string modulationDestName (int track, neptune::core::ParamId dest) const;
     // Réduction de gain (dB, >= 0) des compresseurs insérés sur une bande (le plus fort de ceux qui ne sont pas en bypass), par canal.
     std::pair<float, float> compressorReduction (StripKind, int index) const;
 

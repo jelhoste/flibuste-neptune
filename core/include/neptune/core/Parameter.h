@@ -104,6 +104,13 @@ public:
         const auto& spec = slots_[index].spec;
         return spec.fromNormalized (std::clamp (spec.toNormalized (base) + static_cast<double> (off), 0.0, 1.0));
     }
+    // Vrai si un décalage de modulation est non nul quelque part dans le jeu.
+    bool anyModOffset() const noexcept
+    {
+        for (const auto& slot : slots_)
+            if (slot.offset.load (std::memory_order_relaxed) != 0.0f) return true;
+        return false;
+    }
     double effectiveNormalizedAt (std::size_t index) const noexcept
     {
         return std::clamp (slots_[index].spec.toNormalized (slots_[index].value.load (std::memory_order_relaxed)) + static_cast<double> (slots_[index].offset.load (std::memory_order_relaxed)), 0.0, 1.0);

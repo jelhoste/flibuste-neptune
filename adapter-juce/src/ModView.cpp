@@ -91,8 +91,8 @@ public:
         amount_.setValue (r.amount * 100.0, juce::dontSendNotification);
         centred_.setToggleState (r.centred, juce::dontSendNotification);
         centred_.setEnabled (! mod::isBipolar (r.source.kind));
-        const auto* spec = r.dest != 0 ? owner_.processor_.parameters().find (r.dest) : nullptr;
-        dest_.setButtonText (spec != nullptr ? juce::String::fromUTF8 (spec->name.c_str()) : owner_.text ("mod.choose_dest"));
+        const auto destName = r.dest != 0 ? owner_.processor_.modulationDestName (owner_.track_, r.dest) : std::string();
+        dest_.setButtonText (! destName.empty() ? juce::String::fromUTF8 (destName.c_str()) : owner_.text ("mod.choose_dest"));
         updating_ = false;
     }
 
@@ -341,7 +341,8 @@ void ModView::chooseDestination (std::size_t index)
         [safe = juce::Component::SafePointer<ModView> (this)]
         {
             juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->search_.reset(); });
-        });
+        },
+        processor_.insertModulationTargets (track_));
     addAndMakeVisible (*search_);
     search_->setBounds (getLocalBounds());
     search_->toFront (true);

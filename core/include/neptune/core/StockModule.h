@@ -93,11 +93,15 @@ public:
 private:
     // Les paramètres sont déclarés AVANT le module : à la destruction, le module (et un éventuel thread qui lit les paramètres) disparaît le premier.
     ParameterSet params_;
+    // Même déclaration que params_ : quand la matrice de modulation écrit des décalages dans params_, process() recopie ici les valeurs effectives
+    // (réglage + décalage) et le module lit cette copie. L'interface, l'hôte et les presets ne voient que params_.
+    ParameterSet effective_;
     std::unique_ptr<StockModule> module_;
     bool ok_ = true;
     std::size_t idxIn_ = ParameterSet::npos, idxOut_ = ParameterSet::npos, idxMix_ = ParameterSet::npos, idxBypass_ = ParameterSet::npos;
     double sampleRate_ = 0.0;
     int maxBlock_ = 0;
+    const ParameterSet& valuesForBlock() noexcept;   // params_, ou la copie effective_ si une modulation est en cours
     std::vector<float> dryL_, dryR_;
     std::vector<float> ringL_, ringR_;     // retard du signal sec : le module a une latence, le sec doit lui être aligné (mix, bypass)
     std::size_t ringPos_ = 0;

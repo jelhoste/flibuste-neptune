@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 #include "ParamFilterBar.h"
 #include "neptune/core/I18n.h"
@@ -16,7 +17,8 @@ class ParamSearchPanel : public juce::Component, private juce::ListBoxModel
 {
 public:
     ParamSearchPanel (const neptune::core::ParameterSet& set, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
-                      int track, bool continuousOnly, std::function<void (neptune::core::ParamId)> onChoose, std::function<void()> onClose)
+                      int track, bool continuousOnly, std::function<void (neptune::core::ParamId)> onChoose, std::function<void()> onClose,
+                      std::vector<std::pair<neptune::core::ParamId, std::string>> extras = {})
         : palette_ (palette), tr_ (tr), onChoose_ (std::move (onChoose)), onClose_ (std::move (onClose))
     {
         for (std::size_t i = 0; i < set.size(); ++i)
@@ -25,6 +27,14 @@ public:
             if (s.hidden) continue;
             if (continuousOnly && (s.kind != neptune::core::Kind::Continuous || ! s.modulatable)) continue;
             entries_.push_back ({ s.id, juce::String::fromUTF8 (s.name.c_str()), neptune::core::paramgroups::classify (s.name) });
+        }
+        for (const auto& [id, name] : extras)   // paramètres des modules en insert de la piste : famille « Inserts » de cette piste
+        {
+            neptune::core::paramgroups::Group g;
+            g.scope = neptune::core::paramgroups::Scope::Track;
+            g.index = track;
+            g.family = neptune::core::paramgroups::Family::Inserts;
+            entries_.push_back ({ id, juce::String::fromUTF8 (name.c_str()), g });
         }
         title_.setText (text ("modsearch.title"), juce::dontSendNotification);
         title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));

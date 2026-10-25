@@ -318,6 +318,14 @@ private:
     std::vector<float> loudL_, loudR_; // le signal du Master tel qu'envoyé (après trim, inserts, fader, pan, mono)
     std::atomic<int> globalMaxVoices_ { mixer::MasterSettings::defaultMaxVoices };
     const ParameterSet* params_ = nullptr;
+    // Décalages de modulation écrits dans des modules en insert : (piste, emplacement, instance, indice du paramètre du module). L'instance sert
+    // seulement de repère (jamais déréférencée au reset) : si l'emplacement en porte une autre, le décalage ne concerne plus personne.
+    struct InsertTouch { int track; int slot; const InsertInstance* instance; std::size_t index; };
+    std::vector<InsertTouch> insertTouched_;
+    struct InsertSinkContext { Engine* engine; int track; };
+    static void addInsertOffset (void* context, int slot, ParamId moduleParam, float delta) noexcept;
+    static constexpr int kModulationChunk = 256;
+    std::atomic<bool> modulationActive_ { false };   // au moins une piste a des routes de modulation
     std::vector<std::size_t> modTouched_;   // paramètres dont le décalage de modulation est non nul (remis à zéro au bloc suivant)
     std::size_t masterVolume_ = ParameterSet::npos, masterPan_ = ParameterSet::npos, masterMute_ = ParameterSet::npos,
                 masterTrim_ = ParameterSet::npos, masterMono_ = ParameterSet::npos;

@@ -763,6 +763,43 @@ NeptuneProcessor::InsertHandle NeptuneProcessor::openInsert (StripKind kind, int
     return h;
 }
 
+std::vector<std::pair<neptune::core::ParamId, std::string>> NeptuneProcessor::insertModulationTargets (int track) const
+{
+    namespace mod = neptune::core::modulation;
+    std::vector<std::pair<neptune::core::ParamId, std::string>> out;
+    for (int slot = 0; slot < neptune::core::mixer::numInserts; ++slot)
+    {
+        std::shared_ptr<neptune::core::InsertInstance> inst;
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            inst = insertInstances_[static_cast<std::size_t> (insertFlatIndex (StripKind::Track, track))][static_cast<std::size_t> (slot)];
+        }
+        if (inst == nullptr) continue;
+        const auto& ps = inst->runner.params();
+        for (std::size_t i = 0; i < ps.size(); ++i)
+        {
+            const auto& spec = ps.spec (i);
+            if (spec.hidden || spec.kind != neptune::core::Kind::Continuous || ! spec.modulatable) continue;
+            out.emplace_back (mod::insertDest (slot, spec.id),
+                              "Track " + std::to_string (track + 1) + " Insert " + std::to_string (slot + 1) + " (" + inst->type + ") " + spec.name);
+        }
+    }
+    return out;
+}
+
+std::string NeptuneProcessor::modulationDestName (int track, neptune::core::ParamId dest) const
+{
+    namespace mod = neptune::core::modulation;
+    if (! mod::isInsertDest (dest))
+    {
+        const auto* spec = params_.find (dest);
+        return spec != nullptr ? spec->name : std::string();
+    }
+    for (const auto& [id, name] : insertModulationTargets (track))
+        if (id == dest) return name;
+    return {};
+}
+
 std::pair<float, float> NeptuneProcessor::compressorReduction (StripKind kind, int index) const
 {
     namespace cm = neptune::core::compressor;

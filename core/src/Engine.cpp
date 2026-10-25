@@ -39,6 +39,8 @@ void Engine::prepare (double sampleRate, int maxBlockSize) noexcept
 {
     modTouched_.clear();
     modTouched_.reserve (kTracks * modulation::kMaxRoutes + 64);
+    insertTouched_.clear();
+    insertTouched_.reserve (kTracks * modulation::kMaxRoutes + 64);
     fm::initTables (sampleRate); // tables globales de msfa (module FM)
     sampleRate_ = sampleRate;
     maxBlockSize_ = std::max (1, maxBlockSize);
@@ -236,6 +238,9 @@ void Engine::publishModulation (int track)
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (params_ == nullptr) return;   // la matrice est résolue quand les paramètres sont rattachés
     t.modSlot.publish (modulation::compile (t.modDescription, *params_));
+    bool any = false;
+    for (const auto& x : tracks_) any = any || ! x.modDescription.routes.empty();
+    modulationActive_.store (any, std::memory_order_relaxed);
 }
 
 void Engine::setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter> filter)
@@ -622,9 +627,12 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     // Blocs plus longs que prévu par l'hôte : découpés
     std::array<float*, 128> shifted {};
     const int channels = std::min (numChannels, static_cast<int> (shifted.size()));
-    for (int offset = 0; offset < numFrames; offset += maxBlockSize_)
+    // Avec une matrice de modulation, le bloc est découpé en morceaux d'au plus kModulationChunk échantillons (~5 ms à 48 kHz) : la modulation
+    // est évaluée une fois par morceau, quelle que soit la taille du tampon de l'hôte.
+    const int chunkSize = modulationActive_.load (std::memory_order_relaxed) ? std::min (maxBlockSize_, kModulationChunk) : maxBlockSize_;
+    for (int offset = 0; offset < numFrames; offset += chunkSize)
     {
-        const int frames = std::min (maxBlockSize_, numFrames - offset);
+        const int frames = std::min (chunkSize, numFrames - offset);
         for (int c = 0; c < channels; ++c) shifted[static_cast<std::size_t> (c)] = out[c] != nullptr ? out[c] + offset : nullptr;
         const bool hostOk = hostL_ != nullptr && hostR_ != nullptr && offset + frames <= hostFrames_;
         chunkHostL_ = hostOk ? hostL_ + offset : nullptr;
@@ -852,6 +860,23 @@ void Engine::processParallel (int p, int depth, bool ancestorSolo, const Stereo&
         }
 }
 
+static_assert (modulation::kInsertSlots == mixer::numInserts, "les emplacements d'insert de la modulation doivent suivre le mixeur");
+
+void Engine::addInsertOffset (void* context, int slot, ParamId moduleParam, float delta) noexcept
+{
+    const auto& c = *static_cast<InsertSinkContext*> (context);
+    if (slot < 0 || slot >= kInserts) return;
+    auto* inst = const_cast<InsertInstance*> (c.engine->tracks_[static_cast<std::size_t> (c.track)].inserts[static_cast<std::size_t> (slot)].slot.current());
+    if (inst == nullptr) return;
+    auto& ps = inst->runner.params();
+    const auto index = ps.indexOf (moduleParam);
+    if (index == ParameterSet::npos) return;
+    const auto& spec = ps.spec (index);
+    if (spec.kind != Kind::Continuous || ! spec.modulatable || spec.hidden) return;
+    ps.addModOffsetAt (index, delta);
+    if (c.engine->insertTouched_.size() < c.engine->insertTouched_.capacity()) c.engine->insertTouched_.push_back ({ c.track, slot, inst, index });
+}
+
 void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
 {
     using namespace mixer;
@@ -863,9 +888,20 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     {
         for (const auto i : modTouched_) params_->setModOffsetAt (i, 0.0f);
         modTouched_.clear();
-        for (auto& t : tracks_)
-            if (t.active.load (std::memory_order_relaxed) != 0)
-                t.modulator.process (n, (t.held[0].load (std::memory_order_relaxed) | t.held[1].load (std::memory_order_relaxed)) != 0, midiState_, *params_, modTouched_);
+        for (const auto& touch : insertTouched_)
+        {
+            auto* inst = const_cast<InsertInstance*> (tracks_[static_cast<std::size_t> (touch.track)].inserts[static_cast<std::size_t> (touch.slot)].slot.current());
+            if (inst == touch.instance) inst->runner.params().setModOffsetAt (touch.index, 0.0f);
+        }
+        insertTouched_.clear();
+        for (int ti = 0; ti < kTracks; ++ti)
+        {
+            auto& t = tracks_[static_cast<std::size_t> (ti)];
+            if (t.active.load (std::memory_order_relaxed) == 0) continue;
+            InsertSinkContext context { this, ti };
+            const modulation::InsertSink sink { &context, &Engine::addInsertOffset };
+            t.modulator.process (n, (t.held[0].load (std::memory_order_relaxed) | t.held[1].load (std::memory_order_relaxed)) != 0, midiState_, *params_, modTouched_, &sink);
+        }
     }
     auto zero = [n] (Stereo& s) { std::fill (s.l.begin(), s.l.begin() + n, 0.0f); std::fill (s.r.begin(), s.r.begin() + n, 0.0f); };
     zero (master_);

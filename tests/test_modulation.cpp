@@ -1,8 +1,16 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+#include <vector>
+
 #include "neptune/core/Control.h"
 #include "neptune/core/Engine.h"
+#include "neptune/core/FmVoices.h"
+#include "neptune/core/Mixer.h"
+#include "neptune/core/StockModule.h"
+#include "neptune/core/Synth.h"
+#include "neptune/core/WaveCatalog.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/Modulation.h"
@@ -280,4 +288,193 @@ TEST_CASE ("modulation: the engine applies a track's matrix to the effective vol
     engine.midiController (cc);
     engine.process (out, 2, 256);
     CHECK (set.modOffsetAt (pan) == Approx (0.0f));
+}
+
+TEST_CASE ("modulation: a route reaches the synth oscillator level through the engine")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto peakOf = [&] (int blocks)
+    {
+        float peak = 0.0f;
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256);
+            peak = 0.0f;
+            for (const float s : bufs[0]) peak = std::max (peak, std::abs (s));
+        }
+        return peak;
+    };
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    d.filters.filter[0].on = false;
+    d.ampEnv.attack.ms = 0.0;
+    engine.setTrackType (0, TrackType::Synth);
+    engine.publishSynth (0, std::make_shared<SynthPatch> (d));
+    mixer::StripSettings strip;
+    Route r;
+    r.source = { SourceKind::ControlChange, 1, 0 };
+    r.dest = mixer::synthParam (0, mixer::kLevelOsc1);
+    r.amount = -1.0;                                             // à fond : le niveau de l'oscillateur 1 tombe à zéro
+    strip.modulation.routes = { r };
+    engine.setTrackSettings (0, strip);
+    peakOf (1);
+    engine.noteOn (0, 60, 1.0f);
+    CHECK (peakOf (8) > 0.05f);                                  // CC à zéro : l'oscillateur sonne
+    midi::Message cc;
+    cc.kind = midi::MsgKind::ControlChange; cc.channel = 0; cc.data1 = 1; cc.data2 = 127;
+    engine.midiController (cc);
+    CHECK (peakOf (16) < 0.005f);                                // CC à fond : silence
+    CHECK (params.getAt (params.indexOf (r.dest)) == Approx (100.0));   // le potard n'a pas bougé
+    cc.data2 = 0;
+    engine.midiController (cc);
+    CHECK (peakOf (16) > 0.05f);                                 // et ça revient
+}
+
+TEST_CASE ("modulation: a route reaches the FM operator levels through the engine")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<float> l (256), r (256);
+    float* out[2] = { l.data(), r.data() };
+    auto peakOf = [&] (int blocks)
+    {
+        float peak = 0.0f;
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (out, 2, 256);
+            peak = 0.0f;
+            for (const float s : l) peak = std::max (peak, std::abs (s));
+        }
+        return peak;
+    };
+    engine.setTrackActive (0, true);
+    engine.setTrackType (0, TrackType::Fm);
+    engine.publishFm (0, std::make_shared<fm::FmDescription>());
+    mixer::StripSettings strip;
+    for (int op = 0; op < 6; ++op)
+    {
+        Route r2;
+        r2.source = { SourceKind::ControlChange, 1, 0 };
+        r2.dest = mixer::fmParam (0, static_cast<mixer::FmKind> (mixer::kFmLevelOp1 + op));
+        r2.amount = -0.5;                                        // décalage de -50 sur chaque opérateur
+        strip.modulation.routes.push_back (r2);
+    }
+    engine.setTrackSettings (0, strip);
+    peakOf (1);
+    engine.noteOnTrack (0, 0, 60, 0.8f);
+    const float open = peakOf (30);
+    CHECK (open > 0.01f);
+    midi::Message cc;
+    cc.kind = midi::MsgKind::ControlChange; cc.channel = 0; cc.data1 = 1; cc.data2 = 127;
+    engine.midiController (cc);
+    const float moved = peakOf (30);
+    INFO ("open " << open << " moved " << moved);
+    CHECK (std::abs (moved - open) > open * 0.2f);               // les niveaux d'opérateurs ont bougé : le son a changé
+}
+
+TEST_CASE ("modulation: a route reaches a parameter of an insert, and the knob value stays put")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto peakOf = [&] (int blocks)
+    {
+        float peak = 0.0f;
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256);
+            peak = 0.0f;
+            for (const float s : bufs[0]) peak = std::max (peak, std::abs (s));
+        }
+        return peak;
+    };
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    d.filters.filter[0].on = false;
+    d.ampEnv.attack.ms = 0.0;
+    engine.setTrackType (0, TrackType::Synth);
+    engine.publishSynth (0, std::make_shared<SynthPatch> (d));
+    auto insert = createInsert ("utility", 48000.0, 256);
+    REQUIRE (insert != nullptr);
+    engine.setInsert (StripKind::Track, 0, 2, insert);           // l'emplacement 3
+    mixer::StripSettings strip;
+    Route r;
+    r.source = { SourceKind::ControlChange, 1, 0 };
+    r.dest = insertDest (2, stock::outputTrim);
+    r.amount = -1.0;                                             // le trim de sortie tombe de 0 dB à -24 dB
+    strip.modulation.routes = { r };
+    engine.setTrackSettings (0, strip);
+    peakOf (1);
+    engine.noteOn (0, 60, 1.0f);
+    const float open = peakOf (16);
+    CHECK (open > 0.05f);
+    midi::Message cc;
+    cc.kind = midi::MsgKind::ControlChange; cc.channel = 0; cc.data1 = 1; cc.data2 = 127;
+    engine.midiController (cc);
+    const float closed = peakOf (30);
+    CHECK (closed < open * 0.2f);
+    CHECK (closed > open * 0.02f);                               // -24 dB, pas le silence
+    const auto trim = insert->runner.params().indexOf (stock::outputTrim);
+    CHECK (insert->runner.params().getAt (trim) == Approx (0.0));        // le réglage du module n'a pas bougé
+    CHECK (insert->runner.params().modOffsetAt (trim) < -0.4f);          // et la modulation est lisible (anneau du potard)
+    cc.data2 = 0;
+    engine.midiController (cc);
+    CHECK (peakOf (30) == Approx (open).epsilon (0.05));         // elle disparaît avec la source
+
+    // un autre module sur l'emplacement : l'ancien décalage ne le suit pas
+    auto other = createInsert ("utility", 48000.0, 256);
+    engine.setInsert (StripKind::Track, 0, 2, other);
+    engine.midiController (cc);
+    CHECK (peakOf (30) == Approx (open).epsilon (0.05));
+}
+
+TEST_CASE ("modulation: a large host buffer is evaluated in short pieces, the LFO keeps its pace")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 4096);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (4096, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    engine.setTrackActive (0, true);
+    mixer::StripSettings strip;
+    strip.modulation.lfos[0].rateHz = 5.0;
+    Route r;
+    r.source = { SourceKind::Lfo, 0, 0 };
+    r.dest = probe::trackParam (0, probe::kPan);
+    r.amount = 0.5;
+    strip.modulation.routes = { r };
+    engine.setTrackSettings (0, strip);
+    engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 4096);
+    // 5 Hz : un tour = 9600 échantillons. Évalué par morceaux de 256, le LFO a avancé de 32 pas par tampon : sa phase suit l'horloge audio.
+    // (Évalué une fois par tampon de 4096, il n'aurait avancé que de deux pas.)
+    engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 4096);
+    const auto pan = params.indexOf (probe::trackParam (0, probe::kPan));
+    const double phase = std::fmod (5.0 * 8192.0 / 48000.0, 1.0);
+    CHECK (params.modOffsetAt (pan) == Approx (0.5 * std::sin (2.0 * 3.14159265358979323846 * phase)).margin (0.02));
 }

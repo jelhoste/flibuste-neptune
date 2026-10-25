@@ -24,11 +24,15 @@ ModuleRunner::ModuleRunner (std::unique_ptr<StockModule> module) : module_ (std:
         s.automatable = true;
         return s;
     };
-    ok_ = params_.add (trim (stock::inputTrim, "Input Trim"), &error)
-       && params_.add (trim (stock::outputTrim, "Output Trim"), &error)
-       && params_.add (ParamSpec::continuous (stock::mix, "Mix", Unit::Percent, 0.0, 100.0, module_->defaultMixPercent()), &error)
-       && params_.add (ParamSpec::toggle (stock::bypass, "Bypass"), &error)
-       && module_->declareParams (params_, &error);
+    auto declare = [this, &trim, &error] (ParameterSet& set)
+    {
+        return set.add (trim (stock::inputTrim, "Input Trim"), &error)
+            && set.add (trim (stock::outputTrim, "Output Trim"), &error)
+            && set.add (ParamSpec::continuous (stock::mix, "Mix", Unit::Percent, 0.0, 100.0, module_->defaultMixPercent()), &error)
+            && set.add (ParamSpec::toggle (stock::bypass, "Bypass"), &error)
+            && module_->declareParams (set, &error);
+    };
+    ok_ = declare (params_) && declare (effective_);
     idxIn_ = params_.indexOf (stock::inputTrim);
     idxOut_ = params_.indexOf (stock::outputTrim);
     idxMix_ = params_.indexOf (stock::mix);
@@ -59,6 +63,13 @@ void ModuleRunner::reset() noexcept
     idle_ = false;
 }
 
+const ParameterSet& ModuleRunner::valuesForBlock() noexcept
+{
+    if (! params_.anyModOffset()) return params_;
+    for (std::size_t i = 0; i < params_.size(); ++i) effective_.setAt (i, params_.effectiveAt (i));
+    return effective_;
+}
+
 void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noexcept
 {
     if (maxBlock_ <= 0 || n <= 0) return;
@@ -67,7 +78,8 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
         for (int off = 0; off < n; off += maxBlock_) process (left + off, right + off, std::min (maxBlock_, n - off), bypassed);
         return;
     }
-    const float mixTarget = bypassed ? 0.0f : static_cast<float> (std::clamp (params_.getAt (idxMix_), 0.0, 100.0) / 100.0);
+    const ParameterSet& values = valuesForBlock();
+    const float mixTarget = bypassed ? 0.0f : static_cast<float> (std::clamp (values.getAt (idxMix_), 0.0, 100.0) / 100.0);
     // Latence du module : le signal sec (mix, bypass) est retardé d'autant, pour que tout reste aligné et que la latence ne change pas au bypass.
     const int latency = ringL_.empty() ? 0 : std::min (module_->latencySamples (params_), static_cast<int> (ringL_.size()) - 2);
     if (latency != ringLatency_)
@@ -107,15 +119,15 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
     delayed (right, dryR_.data(), ringR_);
     if (latency > 0) ringPos_ = (ringPos_ + un) % ringL_.size();
 
-    const float inGain = mixer::dbToGain (std::clamp (params_.getAt (idxIn_), -24.0, 24.0), -1000.0);
-    const float outGain = mixer::dbToGain (std::clamp (params_.getAt (idxOut_), -24.0, 24.0), -1000.0);
+    const float inGain = mixer::dbToGain (std::clamp (values.getAt (idxIn_), -24.0, 24.0), -1000.0);
+    const float outGain = mixer::dbToGain (std::clamp (values.getAt (idxOut_), -24.0, 24.0), -1000.0);
     const float inStep = (inGain - lastIn_) / static_cast<float> (n);
     float g = lastIn_;
     for (int i = 0; i < n; ++i, g += inStep) { left[i] *= g; right[i] *= g; }
     lastIn_ = inGain;
 
     if (module_->wantsKey()) module_->setKey (keyL_, keyR_);
-    module_->process (left, right, n, params_);
+    module_->process (left, right, n, values);
 
     const float outStep = (outGain - lastOut_) / static_cast<float> (n);
     const float mixStep = (mixTarget - lastMix_) / static_cast<float> (n);

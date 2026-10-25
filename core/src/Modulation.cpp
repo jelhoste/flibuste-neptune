@@ -112,7 +112,7 @@ Matrix fromJson (std::string_view text)
             r.source.index = static_cast<int> (num (j, "index", 0));
             r.source.channel = static_cast<int> (num (j, "channel", 0));
             const double dest = num (j, "dest", 0);
-            r.dest = dest > 0 && dest < 1.0e7 ? static_cast<ParamId> (dest) : 0;
+            r.dest = dest > 0 && dest < 4.0e9 ? static_cast<ParamId> (dest) : 0;
             r.amount = num (j, "amount", 0.5);
             if (const auto c = j.find ("centred"); c != j.end() && c->is_boolean()) r.centred = c->get<bool>();
             m.routes.push_back (r);
@@ -132,10 +132,18 @@ std::shared_ptr<const Compiled> compile (const Matrix& in, const ParameterSet& s
         cr.source = r.source;
         cr.amount = r.amount;
         cr.centred = r.centred;
-        cr.dest = set.indexOf (r.dest);
-        if (cr.dest == ParameterSet::npos) continue;
-        const auto& spec = set.spec (cr.dest);
-        if (spec.kind != Kind::Continuous || ! spec.modulatable || spec.hidden) continue;   // seuls les paramètres continus se modulent
+        if (isInsertDest (r.dest))
+        {
+            cr.insertSlot = insertSlotOf (r.dest);   // le module est vérifié (continu, modulable) par le moteur à chaque bloc
+            cr.insertParam = insertParamOf (r.dest);
+        }
+        else
+        {
+            cr.dest = set.indexOf (r.dest);
+            if (cr.dest == ParameterSet::npos) continue;
+            const auto& spec = set.spec (cr.dest);
+            if (spec.kind != Kind::Continuous || ! spec.modulatable || spec.hidden) continue;   // seuls les paramètres continus se modulent
+        }
         if (r.source.kind == SourceKind::Macro)
         {
             cr.macro = set.indexOf (control::macroParamId (r.source.index));
@@ -179,7 +187,7 @@ double lfoValue (LfoShape shape, double p, double held) noexcept
 }
 } // namespace
 
-void Modulator::process (int frames, bool gate, const midi::State& midi, const ParameterSet& set, std::vector<std::size_t>& touched) noexcept
+void Modulator::process (int frames, bool gate, const midi::State& midi, const ParameterSet& set, std::vector<std::size_t>& touched, const InsertSink* inserts) noexcept
 {
     if (compiled_ == nullptr || compiled_->routes.empty() || frames <= 0) { lastGate_ = gate; return; }
     const double dt = static_cast<double> (frames) / sampleRate_;
@@ -257,6 +265,11 @@ void Modulator::process (int frames, bool gate, const midi::State& midi, const P
             case SourceKind::None: break;
         }
         if (r.centred && ! isBipolar (r.source.kind)) v = v * 2.0 - 1.0;
+        if (r.insertSlot >= 0)
+        {
+            if (inserts != nullptr && inserts->add != nullptr) inserts->add (inserts->context, r.insertSlot, r.insertParam, static_cast<float> (r.amount * v));
+            continue;
+        }
         set.addModOffsetAt (r.dest, static_cast<float> (r.amount * v));
         if (touched.size() < touched.capacity()) touched.push_back (r.dest);
     }
