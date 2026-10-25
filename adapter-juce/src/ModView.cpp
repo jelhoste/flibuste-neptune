@@ -195,6 +195,11 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
         addAndMakeVisible (b);
     }
     envButtons_[0].setToggleState (true, juce::dontSendNotification);
+    envTag_.setText ("ENV 1", juce::dontSendNotification);
+    envTag_.setFont (juce::FontOptions (22.0f, juce::Font::bold));
+    envTag_.setColour (juce::Label::textColourId, colour (Token::Accent));
+    envTag_.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (envTag_);
     addButton_.setButtonText (text ("mod.add_route"));
     addButton_.onClick = [this] { addRoute(); };
     addAndMakeVisible (addButton_);
@@ -235,6 +240,7 @@ void ModView::resized()
     }
     auto selector = top.removeFromTop (30);
     for (auto& b : envButtons_) { b.setBounds (selector.removeFromLeft (80).reduced (2)); }
+    envTag_.setBounds (selector);
     envEditor_->setBounds (top);
     r.removeFromTop (6);
     auto head = r.removeFromTop (30);
@@ -289,6 +295,7 @@ void ModView::rebuildRoutes()
 void ModView::selectEnvelope (int index)
 {
     envSel_ = std::clamp (index, 0, mod::kEnvelopes - 1);
+    envTag_.setText ("ENV " + juce::String (envSel_ + 1), juce::dontSendNotification);
     updating_ = true;
     envEditor_->setEnvelope (matrix_.envelopes[static_cast<std::size_t> (envSel_)].env);
     updating_ = false;
