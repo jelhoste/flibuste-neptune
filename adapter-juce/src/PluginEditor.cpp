@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "neptune/core/Version.h"
 #include "GlobalPresets.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
@@ -805,6 +806,9 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     g.setColour (colour (Token::Text));
     g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
     g.drawText ("Neptune", area.removeFromTop (40), juce::Justification::centredLeft);
+    g.setColour (colour (Token::TextDim));   // numéro de version de développement, sous le titre : pour vérifier quelle version tourne
+    g.setFont (juce::FontOptions (10.0f));
+    g.drawText (neptune::core::version::kString, juce::Rectangle<int> (32, 66, 330, 12), juce::Justification::centredLeft);
 
     if (showProbe_)
     {

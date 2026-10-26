@@ -1,5 +1,28 @@
 add_library(neptune_core STATIC src/Autosave.cpp src/Engine.cpp src/FileUtil.cpp src/Parameter.cpp src/Profile.cpp src/ProbePool.cpp src/Envelope.cpp src/EnvelopeLayout.cpp src/KnobInteraction.cpp src/Instrument.cpp src/SampleLoader.cpp src/ZoneImport.cpp src/SamplerParams.cpp src/SamplerVoices.cpp src/Settings.cpp src/State.cpp src/Theme.cpp src/UiState.cpp src/I18n.cpp src/Undo.cpp src/MemoryBudget.cpp src/WaveformPeaks.cpp src/SampleEdit.cpp src/TimeStretch.cpp src/VolumeFootprint.cpp src/AudioRecorder.cpp src/SampleMeta.cpp src/PitchDetect.cpp src/DiskStreamer.cpp src/MappingEdit.cpp src/InstrumentEdit.cpp src/VelocityResponse.cpp src/Filter.cpp src/Mixer.cpp src/MixerState.cpp src/Synth.cpp src/WaveCatalog.cpp src/SynthVoices.cpp src/StockModule.cpp src/UtilityModule.cpp src/Preset.cpp src/PresetLibrary.cpp src/AnalogSynth.cpp src/MidiFilter.cpp src/Loudness.cpp src/FmPatch.cpp src/FmMsfa.cpp src/FmVoices.cpp src/FmPreset.cpp src/FmSynth.cpp src/OrganCore.c src/OrganEngine.cpp src/OrganSynth.cpp src/OrganPreset.cpp src/ZoneSlots.cpp src/Control.cpp src/Osc.cpp src/Oversampler.cpp src/ShaperModule.cpp src/ShaperPresets.cpp src/CompressorModule.cpp src/CompressorPresets.cpp src/EqualizerModule.cpp src/EqualizerPresets.cpp src/SpectrumAnalyzer.cpp src/DelayModule.cpp src/DelayPresets.cpp src/ChorusModule.cpp src/ChorusPresets.cpp src/MicrodecaleModule.cpp src/MicrodecalePresets.cpp src/OpusFile.cpp src/ConvolutionModule.cpp src/ConvolutionPresets.cpp src/Facade.cpp src/StylePack.cpp src/FacadeTransfer.cpp src/MidiSend.cpp src/Modulation.cpp src/ParamGroups.cpp src/TrackExport.cpp src/GlobalPreset.cpp src/NoteRouter.cpp src/Combinations.cpp)
 target_include_directories(neptune_core PUBLIC include)
+
+# Numéro de version de développement affiché dans les interfaces : date de compilation, commit, numéro de run de la CI.
+set(NEPTUNE_GIT_SHA "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short=7 HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                  OUTPUT_VARIABLE NEPTUNE_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  execute_process(COMMAND ${GIT_EXECUTABLE} status --porcelain --untracked-files=no WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                  OUTPUT_VARIABLE NEPTUNE_GIT_DIRTY OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(NEPTUNE_GIT_SHA STREQUAL "")
+    set(NEPTUNE_GIT_SHA "unknown")
+  elseif(NOT NEPTUNE_GIT_DIRTY STREQUAL "")
+    set(NEPTUNE_GIT_SHA "${NEPTUNE_GIT_SHA}+")
+  endif()
+endif()
+if(DEFINED ENV{GITHUB_RUN_NUMBER})
+  set(NEPTUNE_BUILD "CI #$ENV{GITHUB_RUN_NUMBER}")
+else()
+  set(NEPTUNE_BUILD "local")
+endif()
+string(TIMESTAMP NEPTUNE_BUILD_DATE "%Y-%m-%d %H:%M" UTC)
+configure_file(Version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/neptune/core/Version.h @ONLY)
+target_include_directories(neptune_core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_compile_features(neptune_core PUBLIC cxx_std_17)
 # Règle : aucune dépendance JUCE ici. Le cœur reste portable (tests, web app/WASM plus tard).
 # nlohmann/json reste un détail du cœur (State.cpp) ; PUBLIC seulement parce que StateMigration.h l'expose aux tests de migration.

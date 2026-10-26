@@ -1,0 +1,7 @@
+#pragma once
+// Numéro de version de développement, écrit par CMake à la configuration (voir core/CMakeLists.txt) et affiché dans les interfaces :
+// date de compilation (UTC), commit (« + » si des fichiers étaient modifiés), numéro du run de la CI ou « local ».
+namespace neptune::core::version
+{
+constexpr const char* kString = "dev @NEPTUNE_BUILD_DATE@ - @NEPTUNE_GIT_SHA@ - @NEPTUNE_BUILD@";
+}

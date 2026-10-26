@@ -7,6 +7,7 @@
 #include "neptune/core/Combinations.h"
 #include "neptune/core/Control.h"
 #include "neptune/core/Facade.h"
+#include "neptune/core/Version.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/MixerState.h"
 #include "neptune/core/NoteRouter.h"
@@ -440,4 +441,12 @@ TEST_CASE ("combinations: a Facade button can carry a combination command")
     CHECK (facade::fromJson (facade::toJson (f)).widgets[0].actionMode == 1 + kNumCommands);
     f.widgets[0].actionMode = 999;
     CHECK (facade::fromJson (facade::toJson (f)).widgets[0].actionMode == 1 + kNumCommands);   // borné
+}
+
+TEST_CASE ("version: the development version string is filled in by the build")
+{
+    const std::string v = neptune::core::version::kString;
+    CHECK (v.rfind ("dev ", 0) == 0);
+    CHECK (v.find ("@") == std::string::npos);   // aucune variable CMake laissée telle quelle
+    CHECK (v.size() > 20);
 }
