@@ -2090,6 +2090,8 @@ const Entry kEntries[] = {
     { "slots.parameter", { "Parameter", "Paramètre" } },
     { "slots.value", { "Value (0 = unchanged)", "Valeur (0 = inchangé)" } },
     { "slots.none", { "(none)", "(aucune)" } },
+    { "split.button", { "Mixer + Facade", "Mixeur + Façade" } },
+    { "split.tip", { "Show the Mixer and the Facade side by side (drag the bar between them): to build an instrument. Click again to go back to the Mixer.", "Montrer le Mixeur et la Façade côte à côte (glisser la barre entre les deux) : pour construire un instrument. Un second clic revient au Mixeur." } },
     { "console.button", { "Console", "Console" } },
     { "console.tip", { "Console mode: open Neptune on the Facade of a track with everything else locked", "Mode console : ouvrir Neptune sur la Façade d'une piste, tout le reste verrouillé" } },
     { "console.enable", { "Lock on the Facade of track", "Verrouiller sur la Façade de la piste" } },

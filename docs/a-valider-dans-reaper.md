@@ -85,3 +85,8 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Façade globale** : « Globale » montre une Façade indépendante de la piste sélectionnée (la changer de piste ne change pas la page) ; ses widgets lient n'importe quel paramètre ; un clavier posé dessus (canal 1, 2, 3...) joue les pistes qui écoutent ce canal et suit le routeur ; un voyant « notes du canal » s'allume.
 - [ ] **Fichiers** : « Enregistrer » de la Façade (.neptunefacade) emporte toutes les pages ; recharger sur une autre piste les remet ; le preset global et l'export de piste emportent aussi les pages.
 - [ ] **Mode console** : « Verrouiller sur la Façade globale » : à la réouverture on tombe sur la Façade globale, sans le choix Piste | Globale, mais avec les onglets de pages.
+
+## Vue double Mixeur + Façade
+- [ ] **« + Page » et « Page... »** apparaissent à droite des onglets de pages en mode Édition (correctif).
+- [ ] **Console** : le bouton est dans la barre du bas, plus de chevauchement avec « All Notes Off ».
+- [ ] **Mixeur + Façade** (barre du bas) : le Mixeur à gauche, la Façade à droite, barre à glisser entre les deux (le Mixeur se réduit ou grandit) ; cliquer une piste dans le Mixeur change la Façade ; un second clic sur le bouton revient au Mixeur ; la Façade s'édite normalement (mode Édition, pages).

@@ -76,6 +76,20 @@ private:
     bool showFacade_ = false;
     bool showMod_ = false;
     bool showRouter_ = false;
+    // Vue double : Mixeur à gauche, Façade à droite, séparé par une barre à glisser (pour celui qui construit un instrument).
+    struct SplitBar : juce::Component
+    {
+        std::function<void()> onBegin;
+        std::function<void (int)> onDrag;   // distance horizontale depuis le début du glissé
+        SplitBar() { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); }
+        void paint (juce::Graphics& g) override { g.setColour (juce::Colours::grey.withAlpha (0.45f)); g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (3.0f, 0.0f), 2.0f); }
+        void mouseDown (const juce::MouseEvent&) override { if (onBegin) onBegin(); }
+        void mouseDrag (const juce::MouseEvent& e) override { if (onDrag) onDrag (e.getDistanceFromDragStartX()); }
+    };
+    bool showSplit_ = false;
+    double splitRatio_ = 0.55, splitStartRatio_ = 0.55;   // part de la largeur donnée au Mixeur
+    juce::TextButton splitButton_;
+    SplitBar splitBar_;
     bool consoleLocked_ = false;               // mode console actif et non déverrouillé pour cette session
     juce::TextButton consoleButton_, unlockButton_;
     void applyConsoleLock();                   // montre ou masque les commandes selon le verrou
@@ -105,6 +119,7 @@ private:
     int knobTrack_ = -1;        // piste sur laquelle les potards d'instrument sont branchés
     std::uint32_t trackBoxRevision_ = 0xFFFFFFFFu;
     void setView (bool mixer, bool probe, bool facade = false, bool mod = false, bool router = false);
+    void setSplit();
     void rebindKnobs();
     void updateTrackBox();
     void updateViewVisibility();

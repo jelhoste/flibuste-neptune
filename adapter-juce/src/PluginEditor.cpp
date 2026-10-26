@@ -93,6 +93,19 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     consoleButton_.setTooltip (text ("console.tip"));
     consoleButton_.onClick = [this] { showConsoleMenu(); };
     addAndMakeVisible (consoleButton_);
+    splitButton_.setButtonText (text ("split.button"));
+    splitButton_.setTooltip (text ("split.tip"));
+    splitButton_.setClickingTogglesState (false);
+    splitButton_.onClick = [this] { if (showSplit_) setView (true, false); else setSplit(); };   // un second clic revient au Mixeur
+    addAndMakeVisible (splitButton_);
+    splitBar_.onBegin = [this] { splitStartRatio_ = splitRatio_; };
+    splitBar_.onDrag = [this] (int dx)
+    {
+        const double width = juce::jmax (200, lw_ - 64);
+        splitRatio_ = juce::jlimit (0.25, 0.75, splitStartRatio_ + dx / width);
+        resized();
+    };
+    addChildComponent (splitBar_);
     unlockButton_.setButtonText (text ("console.unlock"));
     unlockButton_.setTooltip (text ("console.unlock_tip"));
     unlockButton_.onClick = [this] { consoleLocked_ = false; applyConsoleLock(); updateViewVisibility(); resized(); };
@@ -288,7 +301,7 @@ void NeptuneEditor::openInsert (NeptuneProcessor::StripKind kind, int index, int
 // L'éditeur NOVA de la piste Synthé ou FM sélectionnée occupe la page Edit ; il est reconstruit quand la piste ou son type change.
 void NeptuneEditor::updateInstrumentPanel()
 {
-    const bool wanted = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && ! selectedIsAudioIn();
+    const bool wanted = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && ! showSplit_ && ! selectedIsAudioIn();
     if (! wanted) { instrumentPanel_.reset(); return; }
     const int track = processor_.selectedTrack();
     const auto type = processor_.trackType (track);
@@ -320,13 +333,15 @@ void NeptuneEditor::closeModal()
 void NeptuneEditor::updateViewVisibility()
 {
     // Vues : Mixeur, Edit (l'éditeur NOVA de l'instrument de la piste sélectionnée ; l'entrée audio garde sa vue) et Sonde (diagnostic de l'hôte).
-    const bool mapping = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_;
+    const bool mapping = ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && ! showSplit_;
     const bool audioIn = mapping && selectedIsAudioIn();
     audioInShown_ = audioIn;
     audioInView_->setVisible (audioIn);
     instrumentShown_ = mapping && ! audioIn;
-    mixerView_->setVisible (showMixer_);
-    facadeView_->setVisible (showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_);
+    mixerView_->setVisible (showMixer_ || showSplit_);
+    facadeView_->setVisible ((showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_) || showSplit_);
+    splitBar_.setVisible (showSplit_);
+    splitButton_.setToggleState (showSplit_, juce::dontSendNotification);
     modView_->setVisible (showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_);
     routerView_->setVisible (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_);
     routerButton_.setToggleState (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_, juce::dontSendNotification);
@@ -344,7 +359,7 @@ void NeptuneEditor::applyConsoleLock()
 {
     const bool visible = ! consoleLocked_;
     for (auto* c : std::initializer_list<juce::Component*> { &viewButton_, &routerButton_, &modButton_, &facadeButton_, &mappingButton_, &mixerButton_, &midiFilterButton_,
-                                                              &controlButton_, &oscButton_, &midiSendButton_, &consoleButton_, &globalPresetButton_, &profileSwitchButton_,
+                                                              &controlButton_, &oscButton_, &midiSendButton_, &consoleButton_, &splitButton_, &globalPresetButton_, &profileSwitchButton_,
                                                               &profileLockButton_, &voiceCountButton_, &latencyLabel_, &profileLabel_, &trackBox_ })
         c->setVisible (visible);
     unlockButton_.setVisible (consoleLocked_);
@@ -378,8 +393,19 @@ void NeptuneEditor::showConsoleMenu()
     });
 }
 
+// Vue double : le Mixeur et la Façade côte à côte.
+void NeptuneEditor::setSplit()
+{
+    showSplit_ = true;
+    showRouter_ = showMixer_ = showProbe_ = showFacade_ = showMod_ = false;
+    updateViewVisibility();
+    resized();
+    repaint();
+}
+
 void NeptuneEditor::setView (bool mixer, bool probe, bool facade, bool mod, bool router)
 {
+    showSplit_ = false;
     showRouter_ = router;
     showMixer_ = mixer;
     showProbe_ = probe;
@@ -638,7 +664,7 @@ void NeptuneEditor::timerCallback()
     updateTrackBox();
     rebindKnobs();
     updateInstrumentPanel();   // piste ou type changé : l'éditeur NOVA est reconstruit
-    if (audioInShown_ != (! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && selectedIsAudioIn())) { updateViewVisibility(); resized(); } // type de la piste changé
+    if (audioInShown_ != (! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_ && ! showRouter_ && ! showSplit_ && selectedIsAudioIn())) { updateViewVisibility(); resized(); } // type de la piste changé
     if (audioInView_->isVisible()) audioInView_->refresh();
     updateRecoveryBanner();
     updateProfileControls();
@@ -713,10 +739,23 @@ void NeptuneEditor::resized()
             b->setBounds (left, barY, w, barH);
             left += w + gap;
         }
-        mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
+        const int areaH = juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0));
+        if (showSplit_)
+        {
+            // Mixeur à gauche (réduit pour tenir), Façade à droite, barre de séparation entre les deux
+            const int total = lw_ - 64, barW = 10;
+            const int leftW = juce::jlimit (160, juce::jmax (160, total - 160 - barW), juce::roundToInt (total * splitRatio_));
+            mixerView_->placeScaled ({ 32, 80, leftW, areaH });
+            splitBar_.setBounds (32 + leftW, 80, barW, areaH);
+            facadeView_->setBounds (32 + leftW + barW, 80, total - leftW - barW, areaH);
+        }
+        else
+        {
+            mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
+            facadeView_->setBounds (32, 80, lw_ - 64, areaH);
+        }
         modView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
         routerView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
-        facadeView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (midiSendPanel_) midiSendPanel_->setBounds (rootBounds());
@@ -742,7 +781,9 @@ void NeptuneEditor::resized()
         globalPresetButton_.setBounds (lw_ - 32 - 64 - 4 - 64 - 12 - presetW, rowY, presetW, rowH);
         const int consoleW = widthOf ({ consoleButton_.getButtonText() });   // le mode console est dans la barre du bas, à gauche de Preset global (la barre du haut était pleine)
         consoleButton_.setBounds (globalPresetButton_.getX() - gap - consoleW, rowY, consoleW, rowH);
-        auto row = juce::Rectangle<int> (32, rowY, consoleButton_.getX() - 32 - 8, rowH);
+        const int splitW = widthOf ({ splitButton_.getButtonText() });
+        splitButton_.setBounds (consoleButton_.getX() - gap - splitW, rowY, splitW, rowH);
+        auto row = juce::Rectangle<int> (32, rowY, splitButton_.getX() - 32 - 8, rowH);
         latencyLabel_.setBounds (row.removeFromLeft (widthOf ({ juce::String::fromUTF8 (tr_.format ("latency.reported", { "99999" }).c_str()) }) - pad + 12));   // la plus longue forme du texte
         row.removeFromLeft (gap);
         profileSwitchButton_.setBounds (row.removeFromLeft (widthOf ({ profileSwitchButton_.getButtonText() })));
