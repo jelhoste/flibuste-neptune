@@ -164,6 +164,14 @@ public:
         if (track < 0 || track >= kTracks || word < 0 || word > 1) return 0;
         return tracks_[static_cast<std::size_t> (track)].heldChannel[channel & 15][word].load (std::memory_order_relaxed);
     }
+    // Touches tenues sur un canal MIDI, toutes pistes confondues (voyants et touches allumées d'une Façade qui n'est pas celle de la piste jouée : console d'orgue).
+    std::uint64_t heldChannelWordAny (int channel, int word) const noexcept
+    {
+        if (word < 0 || word > 1) return 0;
+        std::uint64_t bits = 0;
+        for (const auto& t : tracks_) bits |= t.heldChannel[channel & 15][word].load (std::memory_order_relaxed);
+        return bits;
+    }
     std::uint64_t heldKeyWord (int track, int word) const noexcept
     {
         if (track < 0 || track >= kTracks || word < 0 || word > 1) return 0;

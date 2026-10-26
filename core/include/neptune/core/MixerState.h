@@ -16,6 +16,15 @@
 
 namespace neptune::core
 {
+// Mode console : à l'ouverture de l'éditeur, Neptune va sur la Façade de la piste `track` et verrouille l'interface (les autres onglets, le choix de
+// piste et les réglages sont masqués) ; un bouton « Déverrouiller » rend tout, pour la session. Pour un musicien qui ne veut voir que sa console.
+struct ConsoleMode
+{
+    bool enabled = false;
+    int track = 0;          // 0..15
+    bool operator== (const ConsoleMode& o) const noexcept { return enabled == o.enabled && track == o.track; }
+};
+
 struct TrackState
 {
     // Piste « active » : affichée par le mixeur et jouée. Le moteur garde ses 16 emplacements (pool fixe, spec) ; une piste
@@ -40,6 +49,7 @@ struct MixerState
     std::array<mixer::ParallelSettings, mixer::numParallels> parallels;
     std::array<mixer::StripSettings, mixer::numBuses> buses;
     mixer::MasterSettings master;
+    ConsoleMode console;
     router::Config router;               // routeur de notes : accouplements et divisions de clavier (voir NoteRouter.h)
     int selectedTrack = 0;
 
@@ -68,7 +78,7 @@ struct MixerState
 
     bool operator== (const MixerState& o) const noexcept
     {
-        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && selectedTrack == o.selectedTrack;
+        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && console == o.console && selectedTrack == o.selectedTrack;
     }
 };
 

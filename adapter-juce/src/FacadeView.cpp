@@ -1223,7 +1223,7 @@ private:
                 if (w.source == 0) on = linked && n >= 0.5f;
                 else if (o.track_ >= 0)
                 {
-                    if (w.source == 1) on = (o.processor_.heldChannelWord (o.track_, w.channel - 1, 0) | o.processor_.heldChannelWord (o.track_, w.channel - 1, 1)) != 0;
+                    if (w.source == 1) on = (o.processor_.heldChannelWordAny (w.channel - 1, 0) | o.processor_.heldChannelWordAny (w.channel - 1, 1)) != 0;   // le canal, quelle que soit la piste qui le joue
                     else on = (o.processor_.heldKeyWord (o.track_, 0) | o.processor_.heldKeyWord (o.track_, 1)) != 0;
                 }
                 const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
@@ -1258,8 +1258,8 @@ private:
                 std::uint64_t held[2] = { 0, 0 };
                 if (o.track_ >= 0)
                 {
-                    held[0] = o.processor_.heldChannelWord (o.track_, w.channel - 1, 0);
-                    held[1] = o.processor_.heldChannelWord (o.track_, w.channel - 1, 1);
+                    held[0] = o.processor_.heldChannelWordAny (w.channel - 1, 0);   // les notes du canal, quelle que soit la piste qui les joue
+                    held[1] = o.processor_.heldChannelWordAny (w.channel - 1, 1);
                 }
                 for (const bool black : { false, true })
                     for (int k = 0; k < 128; ++k)
@@ -1427,6 +1427,21 @@ public:
                 updateCount();
             };
             addAndMakeVisible (allButton_);
+            allTracksButton_.setButtonText (owner.text ("facade.capture_all_tracks"));
+            allTracksButton_.setTooltip (owner.text ("facade.tip_capture_all_tracks"));
+            allTracksButton_.onClick = [this]
+            {
+                // toutes les pistes actives (un orgue à plusieurs claviers) et les accouplements du routeur
+                for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+                    if (owner_.processor_.trackActive (t))
+                        for (const auto id : neptune::core::facade::instrumentParamsOfTrack (owner_.processor_.parameters(), t)) chosen_.insert (id);
+                for (int i = 0; i < neptune::core::router::kSwitches; ++i) chosen_.insert (neptune::core::router::switchParam (i));
+                for (int i = 0; i < neptune::core::router::kMaxRules; ++i) chosen_.insert (neptune::core::router::transposeParam (i));
+                checkedOnly_.setToggleState (true, juce::dontSendNotification);
+                refilter();
+                updateCount();
+            };
+            addAndMakeVisible (allTracksButton_);
             checkedOnly_.setButtonText (owner.text ("facade.capture_checked_only"));
             checkedOnly_.setColour (juce::ToggleButton::textColourId, owner.colour (Token::Text));
             checkedOnly_.onClick = [this] { refilter(); };
@@ -1481,7 +1496,7 @@ public:
         cancel_.setBounds (bottom.removeFromRight (120));
         bottom.removeFromRight (8);
         (capture_ ? ok_ : unlink_).setBounds (bottom.removeFromRight (140));
-        if (capture_) allButton_.setBounds (bottom.removeFromLeft (260));
+        if (capture_) { allButton_.setBounds (bottom.removeFromLeft (260)); bottom.removeFromLeft (6); allTracksButton_.setBounds (bottom.removeFromLeft (260)); }
     }
 
 private:
@@ -1581,7 +1596,7 @@ private:
     juce::TextEditor filter_;
     std::unique_ptr<ParamFilterBar> bar_;
     juce::ListBox list_;
-    juce::TextButton cancel_, unlink_, ok_, allButton_;
+    juce::TextButton cancel_, unlink_, ok_, allButton_, allTracksButton_;
     juce::ToggleButton checkedOnly_;
     juce::Label count_;
 

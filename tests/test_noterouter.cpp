@@ -255,6 +255,9 @@ TEST_CASE ("router: a key of an interface keyboard plays its own track and goes 
     engine.noteOnKeyboard (1, 1, 60, 1.0f);
     run (4);
     CHECK (engine.activeVoices() == 1);
+    // les voyants d'un clavier sur le canal 2 voient la note, quelle que soit la piste qui la joue
+    CHECK ((engine.heldChannelWordAny (1, 0) & (std::uint64_t (1) << 60)) != 0);
+    CHECK (engine.heldChannelWordAny (5, 0) == 0);
     engine.noteOffKeyboard (1, 1, 60);
     run (30);
     CHECK (engine.activeVoices() == 0);
@@ -282,6 +285,19 @@ TEST_CASE ("router: a key of an interface keyboard plays its own track and goes 
     engine.noteOffKeyboard (1, 1, 60);
     run (30);
     CHECK (engine.activeVoices() == 0);
+}
+
+TEST_CASE ("console mode: stored in the mixer state, absent when off, track bounded")
+{
+    MixerState m;
+    CHECK_FALSE (mixerFromJson (toJson (m)).console.enabled);
+    m.console.enabled = true;
+    m.console.track = 3;
+    const auto back = mixerFromJson (toJson (m));
+    CHECK (back.console.enabled);
+    CHECK (back.console.track == 3);
+    CHECK (toJson (MixerState {}).find ("console") == std::string::npos);
+    CHECK (mixerFromJson (R"({"console":{"track":99}})").console.track == mixer::numTracks - 1);
 }
 
 TEST_CASE ("router: the configuration lives in the mixer state")

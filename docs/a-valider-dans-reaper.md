@@ -72,3 +72,8 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Pastille Routeur** dans « Choisir le paramètre à lier » (Façade) : montre les Router Switch et les Router Rule n Transpose sans changer de portée.
 - [ ] **Transposition pilotée** : un curseur ou un menu de la Façade lié à `Router Rule 1 Transpose` change la transposition de la règle 1 en direct.
 - [ ] **Clavier de la Façade** sur le canal 2 avec une règle « du canal 2 vers canal 1 » + tirant : la piste du clavier sonne, et la piste 1 aussi quand le tirant est tiré ; le relâchement ne laisse rien bloqué.
+
+## Façade en console d'orgue
+- [ ] **Voyants** : un voyant « notes jouées sur le canal 2 » dans la Façade de la piste 1 s'allume quand on joue le canal 2 (même si seule la piste 2 le joue) ; les touches d'un clavier de la Façade sur le canal 2 s'allument aussi.
+- [ ] **Piston** : « Capturer... » > « Tous les réglages de toutes les pistes » coche les réglages des pistes actives et les accouplements ; le piston les restitue d'un coup.
+- [ ] **Console** : bouton « Console » > « Verrouiller sur la Façade de la piste N » : l'interface se réduit à la Façade (+ Annuler / Rétablir, Tout arrêter, Déverrouiller) ; fermer puis rouvrir l'éditeur, ou rouvrir le projet : on retombe sur la Façade, verrouillé ; « Déverrouiller » rend tout ; « Désactiver le mode console » supprime l'ouverture automatique.

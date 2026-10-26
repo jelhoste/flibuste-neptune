@@ -89,6 +89,14 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     modButton_.setButtonText (text ("mod.tab"));
     modButton_.onClick = [this] { setView (false, false, false, true); };
     addAndMakeVisible (modButton_);
+    consoleButton_.setButtonText (text ("console.button"));
+    consoleButton_.setTooltip (text ("console.tip"));
+    consoleButton_.onClick = [this] { showConsoleMenu(); };
+    addAndMakeVisible (consoleButton_);
+    unlockButton_.setButtonText (text ("console.unlock"));
+    unlockButton_.setTooltip (text ("console.unlock_tip"));
+    unlockButton_.onClick = [this] { consoleLocked_ = false; applyConsoleLock(); updateViewVisibility(); resized(); };
+    addChildComponent (unlockButton_);
     routerButton_.setButtonText (text ("router.tab"));
     routerButton_.onClick = [this] { setView (false, false, false, false, true); };
     addAndMakeVisible (routerButton_);
@@ -160,6 +168,13 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
 
     // La taille en dernier : resized() place les composants, qui doivent donc exister. (Fixée avant leur création,
     // la disposition n'était calculée qu'au premier redimensionnement par l'hôte : potards absents sous Linux.)
+    if (processor_.consoleMode().enabled)   // mode console : on s'ouvre sur la Façade de la piste choisie, interface verrouillée
+    {
+        consoleLocked_ = true;
+        processor_.selectTrack (processor_.consoleMode().track);
+        setView (false, false, true);
+    }
+    applyConsoleLock();
     updateViewVisibility();
     root_.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
     novaLook_.setButtonTextScale (1.5f);
@@ -316,11 +331,47 @@ void NeptuneEditor::updateViewVisibility()
     routerButton_.setToggleState (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_, juce::dontSendNotification);
     modButton_.setToggleState (showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_, juce::dontSendNotification);
     facadeButton_.setToggleState (showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_, juce::dontSendNotification);
-    trackBox_.setVisible (! showProbe_);
+    trackBox_.setVisible (! showProbe_ && ! consoleLocked_);
     updateInstrumentPanel();
     mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
     mappingButton_.setToggleState (mapping, juce::dontSendNotification);
     viewButton_.setToggleState (showProbe_, juce::dontSendNotification);
+}
+
+// Verrou du mode console : seules la Façade, Annuler / Rétablir, « Tout arrêter » et « Déverrouiller » restent.
+void NeptuneEditor::applyConsoleLock()
+{
+    const bool visible = ! consoleLocked_;
+    for (auto* c : std::initializer_list<juce::Component*> { &viewButton_, &routerButton_, &modButton_, &facadeButton_, &mappingButton_, &mixerButton_, &midiFilterButton_,
+                                                              &controlButton_, &oscButton_, &midiSendButton_, &consoleButton_, &globalPresetButton_, &profileSwitchButton_,
+                                                              &profileLockButton_, &voiceCountButton_, &latencyLabel_, &profileLabel_, &trackBox_ })
+        c->setVisible (visible);
+    unlockButton_.setVisible (consoleLocked_);
+}
+
+void NeptuneEditor::showConsoleMenu()
+{
+    const auto mode = processor_.consoleMode();
+    const int track = processor_.selectedTrack();
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("console.enable") + " " + juce::String (track + 1));
+    menu.addItem (2, text ("console.disable"), mode.enabled);
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&consoleButton_), [safe, track] (int choice)
+    {
+        if (safe == nullptr || choice == 0) return;
+        if (choice == 1)
+        {
+            safe->processor_.uiSetConsoleMode (true, track);
+            safe->consoleLocked_ = true;
+            safe->setView (false, false, true);
+            safe->applyConsoleLock();
+        }
+        else safe->processor_.uiSetConsoleMode (false, track);
+        safe->updateViewVisibility();
+        safe->resized();
+    });
 }
 
 void NeptuneEditor::setView (bool mixer, bool probe, bool facade, bool mod, bool router)
@@ -574,6 +625,12 @@ void NeptuneEditor::updateProfileControls()
 
 void NeptuneEditor::timerCallback()
 {
+    if (consoleLocked_)   // la console reste sur sa piste et sur sa Façade
+    {
+        const int track = processor_.consoleMode().track;
+        if (processor_.selectedTrack() != track) processor_.selectTrack (track);
+        if (! showFacade_) setView (false, false, true);
+    }
     updateTrackBox();
     rebindKnobs();
     updateInstrumentPanel();   // piste ou type changé : l'éditeur NOVA est reconstruit
@@ -643,9 +700,10 @@ void NeptuneEditor::resized()
         right -= 4;
         panicButton_.setBounds (right - panicW, barY, panicW, barH);
         int left = 190;
+        unlockButton_.setBounds (left, barY, fit (unlockButton_, 120), barH);
         trackBox_.setBounds (left, barY, 80, barH);
         left += 80 + gap + 2;
-        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_ })
+        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_, &consoleButton_ })
         {
             const int w = fit (*b, 44);
             b->setBounds (left, barY, w, barH);

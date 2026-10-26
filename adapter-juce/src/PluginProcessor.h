@@ -196,6 +196,9 @@ public:
     neptune::core::trackexport::Bundle exportTrackBundle (int track) const;
     // Routeur de notes (accouplements, divisions de clavier) : réglage global, enregistré avec le mixeur, annulable.
     neptune::core::router::Config routerConfig() const;
+    // Mode console (voir MixerState.h) : enregistré avec le projet et les presets globaux, pas annulable.
+    neptune::core::ConsoleMode consoleMode() const;
+    void uiSetConsoleMode (bool enabled, int track);
     void uiEditRouter (neptune::core::router::Config, std::string name, std::string mergeKey = {});
     // Preset global : l'état du projet sans ce qui est propre à l'instance (identifiant, verrou de profil, assignations CC / OSC).
     // Le chargement remplace tout le mixeur et les valeurs des réglages (comme ouvrir un autre projet) et vide l'historique d'annulation.
@@ -285,6 +288,7 @@ public:
     void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
     std::uint64_t heldKeyWord (int track, int word) const noexcept { return engine_.heldKeyWord (track, word); }
     std::uint64_t heldChannelWord (int track, int channel, int word) const noexcept { return engine_.heldChannelWord (track, channel, word); }
+    std::uint64_t heldChannelWordAny (int channel, int word) const noexcept { return engine_.heldChannelWordAny (channel, word); }
     int totalActiveVoices() const noexcept { return engine_.totalActiveVoices(); } // toutes pistes ; lisible depuis l'interface
     // Enregistrement direct de l'entrée audio de l'hôte dans un fichier WAV (dossier de données de Neptune, Edited/Recordings) ; la zone est créée par l'éditeur.
     bool uiStartRecording (std::string& path, std::string* error = nullptr);

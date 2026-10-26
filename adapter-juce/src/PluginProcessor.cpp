@@ -450,6 +450,22 @@ int NeptuneProcessor::uiAddTrack()
     return index;
 }
 
+neptune::core::ConsoleMode NeptuneProcessor::consoleMode() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.console;
+}
+
+void NeptuneProcessor::uiSetConsoleMode (bool enabled, int track)
+{
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        mixer_.console.enabled = enabled;
+        mixer_.console.track = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
+    }
+    notifyStateChanged();
+}
+
 neptune::core::router::Config NeptuneProcessor::routerConfig() const
 {
     const juce::ScopedLock lock (instrumentLock_);
@@ -1300,6 +1316,7 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
         mixer_.parallels = m->parallels;
         mixer_.master = m->master;
         mixer_.router = m->router;
+        mixer_.console = m->console;
         mixer_.selectedTrack = m->selectedTrack;
     }
     engine_.setRouter (m->router);

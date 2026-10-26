@@ -76,6 +76,10 @@ private:
     bool showFacade_ = false;
     bool showMod_ = false;
     bool showRouter_ = false;
+    bool consoleLocked_ = false;               // mode console actif et non déverrouillé pour cette session
+    juce::TextButton consoleButton_, unlockButton_;
+    void applyConsoleLock();                   // montre ou masque les commandes selon le verrou
+    void showConsoleMenu();
     // Trois vues : Mixeur (pistes, bus, master), Mapping (l'instrument de la piste sélectionnée), Sonde (diagnostic de l'hôte)
     juce::TextButton mixerButton_, mappingButton_, facadeButton_, modButton_, routerButton_;
     std::unique_ptr<MixerView> mixerView_;
