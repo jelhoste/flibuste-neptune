@@ -360,6 +360,15 @@ std::string toJson (const InstrumentDescription& d)
 
 namespace
 {
+// Masque de modulateurs : un entier non signé de 32 bits (les anciens fichiers, sur 16 bits, se lisent tels quels).
+ModMask readMask (const nlohmann::json& o, const char* k)
+{
+    const auto it = o.find (k);
+    if (it == o.end() || ! it->is_number()) return 0;
+    const double v = it->get<double>();
+    return v <= 0.0 ? 0u : v >= 4294967295.0 ? 0xFFFFFFFFu : static_cast<ModMask> (v);
+}
+
 int readInt (const nlohmann::json& o, const char* k, int def)
 {
     const auto it = o.find (k);
@@ -437,7 +446,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.pan = readNum (o, "pan", z.pan);
     z.humanizePct = readNum (o, "humanize_pct", z.humanizePct);
     z.rrMode = std::clamp (readInt (o, "rr_mode", z.rrMode), -1, 2);
-    z.modulators = static_cast<std::uint16_t> (std::clamp (readInt (o, "modulators", 0), 0, 65535));
+    z.modulators = readMask (o, "modulators");
     z.velTrackPct = readNum (o, "vel_track_pct", z.velTrackPct);
     z.keyTrackDbPerOct = readNum (o, "key_track_db_per_oct", z.keyTrackDbPerOct);
     z.keyTrackCenter = readInt (o, "key_track_center", z.keyTrackCenter);
@@ -542,7 +551,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
         wrap["envelope"] = *m;
         d.defaultEnvelope = sanitised (envelopeFromJson (wrap));
     }
-    d.trackModulators = static_cast<std::uint16_t> (std::clamp (readInt (doc, "track_modulators", 0), 0, 65535));
+    d.trackModulators = readMask (doc, "track_modulators");
     if (const auto m = doc.find ("modulators"); m != doc.end() && m->is_array())
         for (const auto& mo : *m)
         {
@@ -569,7 +578,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
             if (const auto v = go.find ("filter_override"); v != go.end() && v->is_boolean()) g.filterOverride = v->get<bool>();
             if (g.filterOverride)
                 if (const auto f = go.find ("filters"); f != go.end() && f->is_object()) g.filters = filterBlockFromJson (*f);
-            g.modulators = static_cast<std::uint16_t> (std::clamp (readInt (go, "modulators", 0), 0, 65535));
+            g.modulators = readMask (go, "modulators");
             if (! g.isDefault()) d.groups[name->get<std::string>()] = g;
         }
     if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
@@ -1050,7 +1059,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             z.rrMode = zd.rrMode;
             {
                 const auto g = description.groups.find (zd.group);
-                z.modMask = static_cast<std::uint16_t> (description.trackModulators | zd.modulators | (g != description.groups.end() ? g->second.modulators : 0));
+                z.modMask = static_cast<ModMask> (description.trackModulators | zd.modulators | (g != description.groups.end() ? g->second.modulators : 0));
             }
             z.velTrack = static_cast<float> (zd.velTrackPct / 100.0);
             z.keyTrackDbPerOct = static_cast<float> (zd.keyTrackDbPerOct);

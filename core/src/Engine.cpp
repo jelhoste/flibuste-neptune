@@ -311,7 +311,7 @@ void Engine::attachParameters (const ParameterSet* parameters) noexcept
         for (int k = 0; k < mixer::kFmExtraKinds; ++k) p.fmExtra[k] = idx (mixer::fmExtraParam (t, static_cast<mixer::FmExtraKind> (k)));
         for (int k = 0; k < mixer::kOrganKinds; ++k) p.organ[k] = idx (mixer::organParam (t, k));
         for (int k = 0; k < 16; ++k) p.slot[k] = idx (mixer::zoneSlotParam (t, k));
-        for (int k = 0; k < 16; ++k) p.mod[k] = idx (mixer::modulatorParam (t, k));
+        for (int k = 0; k < kModulators; ++k) p.mod[k] = idx (mixer::modulatorParam (t, k));
     }
     for (int b = 0; b < kBuses; ++b)
     {

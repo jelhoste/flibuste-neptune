@@ -261,7 +261,8 @@ TEST_CASE ("groups: assign zones, rename and delete keep the settings, slots and
     const auto removed = deleteGroup (d, "Montre 8'");
     CHECK (removed.zones[0].group.empty());
     CHECK (removed.zones[2].group == "Flûte 4'");
-    CHECK (removed.groups.empty());
+    CHECK (removed.groups.count ("Montre 8'") == 0);          // son interrupteur est libéré avec lui ; celui du Groupe resté demeure
+    CHECK (removed.groups.count ("Flûte 4'") == 1);
     CHECK_FALSE (removed.slots[0].assigned());
     CHECK (removed.unloadedGroups.empty());
     CHECK (removed.zones.size() == 3);
@@ -327,14 +328,14 @@ TEST_CASE ("mapping edit: a group gets its own on/off switch, found or created")
     CHECK (mapping::groupSwitch (d, "Plein-jeu") == 0);        // le même appel retrouve le même interrupteur
     CHECK (d.groups.at ("Plein-jeu").modulators == 1);
 
-    REQUIRE (mapping::addGroup (d, "Flûte 8"));
+    d.declaredGroups.push_back ("Flûte 8");
     d.trackModulators = 2;                                     // le modulateur 2 (bit 1) commande déjà toute la piste : pris
     CHECK (mapping::groupSwitch (d, "Flûte 8") == 2);
     d.zones[0].modulators = 8;                                 // un modulateur utilisé par une zone n'est pas libre non plus
-    REQUIRE (mapping::addGroup (d, "Bourdon 16"));
+    d.declaredGroups.push_back ("Bourdon 16");
     CHECK (mapping::groupSwitch (d, "Bourdon 16") == 4);
     d.modulators[5].momentary = true;                          // réglages personnalisés : pas libre
-    REQUIRE (mapping::addGroup (d, "Nasard"));
+    d.declaredGroups.push_back ("Nasard");
     CHECK (mapping::groupSwitch (d, "Nasard") == 6);
 
     d.groups["Nasard"].modulators = 0b1100000;                 // plusieurs modulateurs : on en ajoute un dédié
@@ -345,6 +346,38 @@ TEST_CASE ("mapping edit: a group gets its own on/off switch, found or created")
     InstrumentDescription full;
     z.group = "Seul";
     full.zones.push_back (z);
-    full.trackModulators = 0xFFFF;                             // les 16 sont pris
+    full.trackModulators = 0xFFFFFFFFu;                        // les 32 sont pris
     CHECK (mapping::groupSwitch (full, "Seul") == -1);
+}
+
+TEST_CASE ("mapping edit: a new group gets its switch at once, which follows renames and is freed on delete")
+{
+    InstrumentDescription d;
+    d.zones = { zone ("a.wav", 0, 10, 1, 127, 5), zone ("b.wav", 11, 20, 1, 127, 15) };
+    d.zones[1].group = "Importé";                              // un Groupe venu d'un import n'est pas touché
+    REQUIRE (addGroup (d, "Bourdon 16'"));
+    CHECK (d.modulators[0].name == "Bourdon 16'");
+    CHECK (d.groups.at ("Bourdon 16'").modulators == 1u);
+    CHECK (d.groups.count ("Importé") == 0);
+
+    d = assignGroup (d, { 0 }, "Flûte 4'");                    // Groupe créé en y mettant une zone
+    CHECK (d.modulators[1].name == "Flûte 4'");
+    CHECK (d.groups.at ("Flûte 4'").modulators == 2u);
+    d = assignGroup (d, { 0 }, "Flûte 4'");                    // le même Groupe : pas de second interrupteur
+    CHECK (d.groups.size() == 2);
+    CHECK (d.modulators[2].isDefault());
+
+    REQUIRE (renameGroup (d, "Bourdon 16'", "Bourdon"));
+    CHECK (d.modulators[0].name == "Bourdon");                 // l'interrupteur suit le nom
+    d.modulators[0].keyswitchNote = 36;
+
+    d = deleteGroup (d, "Bourdon");
+    CHECK (d.modulators[0].isDefault());                       // libéré, réglages compris
+    CHECK (d.modulators[1].name == "Flûte 4'");                // celui de l'autre Groupe reste
+    CHECK (d.groups.count ("Bourdon") == 0);
+
+    InstrumentDescription full;
+    full.trackModulators = 0xFFFFFFFFu;                        // plus de modulateur libre : le Groupe se crée quand même, sans interrupteur
+    REQUIRE (addGroup (full, "Seul"));
+    CHECK (full.groups.count ("Seul") == 0);
 }

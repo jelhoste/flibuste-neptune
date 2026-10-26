@@ -70,7 +70,7 @@ void SamplerVoices::allSoundOff() noexcept
     for (auto& v : voices_) discard (v);
 }
 
-bool SamplerVoices::modAllows (std::uint16_t mask) const noexcept
+bool SamplerVoices::modAllows (ModMask mask) const noexcept
 {
     if (mask == 0 || instrument_ == nullptr) return true;
     for (int i = 0; i < kModulators; ++i)
@@ -82,7 +82,7 @@ bool SamplerVoices::modAllows (std::uint16_t mask) const noexcept
     return true;
 }
 
-float SamplerVoices::modFactor (std::uint16_t mask) const noexcept
+float SamplerVoices::modFactor (ModMask mask) const noexcept
 {
     if (mask == 0 || instrument_ == nullptr) return 1.0f;
     float f = 1.0f;

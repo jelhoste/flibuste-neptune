@@ -18,7 +18,7 @@ Décisions de l'utilisateur (2026-10-26, par questions à choix) : voir « Déci
 | Sujet | Décision |
 |---|---|
 | Ce qu'enregistre un général | Les **jeux** (modulateurs des Groupes du Sampler, ids `14000 + 16·t + i`), les **32 tirants du routeur** (ids `15000 + i`) et les **transpositions de règles** (ids `15100 + i`). Pas le mixeur ni les réglages sonores des pistes. |
-| Ce que fait un divisionnel | Ne règle que les **jeux d'un seul clavier** (les 16 modulateurs de sa piste). Les autres claviers, les accouplements et les transpositions ne bougent pas. |
+| Ce que fait un divisionnel | Ne règle que les **jeux d'un seul clavier** (les 32 modulateurs de sa piste). Les autres claviers, les accouplements et les transpositions ne bougent pas. |
 | Organisation | **Banques** de pistons numérotés, chaque mémoire peut porter un **nom**. |
 | Annulation générale | **Tout repousser** : jeux à 0 %, tirants à 0, transpositions à 0. Les mémoires ne changent pas. |
 | Enregistrement | **Set + piston**. |

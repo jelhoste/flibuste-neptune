@@ -19,6 +19,7 @@
 
 #include "neptune/core/Facade.h"
 #include "neptune/core/MidiFilter.h"
+#include "neptune/core/Modulators.h"
 #include "neptune/core/Modulation.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/VelocityResponse.h"
@@ -148,9 +149,15 @@ bool addOrganParams (ParameterSet& set, int track, const std::string& prefix, st
 constexpr ParamId zoneSlotBase = 12000;
 constexpr ParamId zoneSlotParam (int track, int slot) { return zoneSlotBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (slot); }
 bool addZoneSlotParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
-// Modulateurs d'une piste Sampler (voir Modulators.h) : 16 valeurs automatisables 0..100 %, identifiants `14000 + 16.t + i`, 100 % par défaut (actif).
+// Modulateurs d'une piste Sampler (voir Modulators.h) : 32 valeurs automatisables 0..100 %, 100 % par défaut (actif). Les 16 premiers ont les identifiants
+// d'origine `14000 + 16.t + i` (les projets et automations existants ne bougent pas), les 16 suivants `16000 + 16.t + (i - 16)`.
 constexpr ParamId modulatorBase = 14000;
-constexpr ParamId modulatorParam (int track, int index) { return modulatorBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (index); }
+constexpr ParamId modulatorExtraBase = 16000;
+constexpr ParamId modulatorParam (int track, int index)
+{
+    return index < 16 ? modulatorBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (index)
+                      : modulatorExtraBase + static_cast<ParamId> (track) * 16 + static_cast<ParamId> (index - 16);
+}
 bool addModulatorParams (ParameterSet& set, int track, const std::string& prefix, std::string* error = nullptr);
 
 // Déclare les 15 paramètres du synthé d'une piste (`prefix` : début du nom affiché, ex. "Track 2 "). Sert aussi au plugin AnalogSynth.

@@ -9,7 +9,9 @@
 
 namespace neptune::core
 {
-constexpr int kModulators = 16;
+// Jusqu'à 32 par piste : un interrupteur par Groupe (un jeu d'orgue) suffit pour un clavier. Les 16 premiers gardent leurs identifiants d'origine.
+constexpr int kModulators = 32;
+using ModMask = std::uint32_t;   // un bit par modulateur
 
 struct ModulatorDescription
 {

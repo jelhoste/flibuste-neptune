@@ -70,7 +70,7 @@ struct ZoneDescription
     // Héritage de l'enveloppe, bloc par bloc (spec §3) : faux = la zone suit celle de son Groupe si le Groupe a la sienne, sinon celle de l'instrument ; vrai = la sienne (ci-dessus).
     bool envelopeOverride = false;
     // Modulateurs qui commandent cette zone (masque de bits, 1 << indice) : elle ne se déclenche que si tous sont actifs. Voir Modulators.h.
-    std::uint16_t modulators = 0;
+    ModMask modulators = 0;
     double tuneCents = 0.0;        // accordage fin de la zone
     double gainDb = 0.0;
     int roundRobin = 0;            // indice dans le jeu round-robin (0 = non précisé)
@@ -147,7 +147,7 @@ struct GroupSettings
     EnvelopeDescription envelope;
     bool filterOverride = false;
     FilterBlock filters;
-    std::uint16_t modulators = 0;     // modulateurs qui commandent toutes les zones du Groupe
+    ModMask modulators = 0;           // modulateurs qui commandent toutes les zones du Groupe
     bool operator== (const GroupSettings& o) const noexcept { return envelopeOverride == o.envelopeOverride && envelope == o.envelope && filterOverride == o.filterOverride && filters == o.filters && modulators == o.modulators; }
     bool isDefault() const noexcept { return ! envelopeOverride && ! filterOverride && modulators == 0; }
 };
@@ -209,8 +209,8 @@ struct InstrumentDescription
     // les PARAMÈTRES automatisables (SamplerParams : filterCutoff/filterResonance) : les valeurs stockées ici sont ignorées.
     FilterBlock defaultFilters;
     EnvelopeDescription defaultEnvelope;                  // enveloppe d'instrument, suivie par les Groupes et les zones qui ne personnalisent pas la leur
-    ModulatorList modulators;                              // les 16 modulateurs de la piste
-    std::uint16_t trackModulators = 0;                     // modulateurs qui commandent toute la piste
+    ModulatorList modulators;                              // les 32 modulateurs de la piste
+    ModMask trackModulators = 0;                           // modulateurs qui commandent toute la piste
     std::map<std::string, GroupSettings> groups;          // réglages propres aux Groupes (seulement ceux qui personnalisent un bloc), par nom de Groupe
     bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
     static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
@@ -300,7 +300,7 @@ struct Zone
     std::array<LoopRt, 3> moreLoops {};   // boucles 2 à 4, strictement croissantes (fin après la fin de la précédente)
     int moreLoopCount = 0;
     int loopRepeats = 0;                  // répétitions de la boucle 1 quand il y en a d'autres (0 = sans fin)
-    std::uint16_t modMask = 0;            // modulateurs qui commandent la zone (les siens, ceux de son Groupe, ceux de la piste)
+    ModMask modMask = 0;                  // modulateurs qui commandent la zone (les siens, ceux de son Groupe, ceux de la piste)
     float panL = 1.0f, panR = 1.0f;       // gains de balance
     bool releaseFollowsLevel = false;     // voir ZoneDescription
     int releaseMeter = 2;

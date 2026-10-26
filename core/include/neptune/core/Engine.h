@@ -213,7 +213,7 @@ private:
         std::size_t fm[mixer::kFmKinds];
         std::size_t organ[mixer::kOrganKinds];
         std::size_t slot[16];
-        std::size_t mod[16];
+        std::size_t mod[kModulators];
         std::size_t fmExtra[mixer::kFmExtraKinds];
         ParamIndices() noexcept { for (auto& v : sendLevel) v = N; for (auto& v : sampler) v = N; for (auto& v : synth) v = N; for (auto& v : fm) v = N; for (auto& v : organ) v = N; for (auto& v : slot) v = N; }
     };

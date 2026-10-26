@@ -28,7 +28,7 @@ public:
     };
     void setFilterParams (const FilterParams& p) noexcept { filterParams_ = p; }
     // Valeurs des 16 emplacements assignables (-1..+1, voir ZoneSlots.h), lues une fois par bloc. Prises au début de chaque note.
-    // Valeurs des 16 modulateurs (0..1), une fois par bloc, avant render() et avant les notes du bloc.
+    // Valeurs des modulateurs (0..1, kModulators), une fois par bloc, avant render() et avant les notes du bloc.
     const Instrument* instrumentPtr() const noexcept { return instrument_; }
     void setModulators (const float* values) noexcept { for (int i = 0; i < kModulators; ++i) modValues_[static_cast<std::size_t> (i)] = values[i]; }
     // La note est-elle une touche de keyswitch de cette piste (elle ne joue alors aucun son) ?
@@ -118,8 +118,8 @@ private:
     const midi::State* midiState_ = nullptr;
     std::array<float, kModulators> modValues_ = [] { std::array<float, kModulators> a {}; a.fill (1.0f); return a; }();
     // Une zone commandée par des modulateurs ne se déclenche que si tous sont actifs ; le volume suit en direct les modulateurs continus.
-    bool modAllows (std::uint16_t mask) const noexcept;
-    float modFactor (std::uint16_t mask) const noexcept;
+    bool modAllows (ModMask mask) const noexcept;
+    float modFactor (ModMask mask) const noexcept;
     std::uint32_t humanRng_ = 0x2545F491u;   // générateur des variations de l'humanize
     LevelCoefs levelCoefs_;   // pondération K et lissages du suivi de niveau (voir LevelTracker.h) ; refaits à prepare()
     float heardGain (const Zone&, int channel, int key, float velocity) const noexcept;   // volume de relâchement lié au niveau (0 : rien ne sonnait)

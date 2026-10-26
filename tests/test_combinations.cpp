@@ -7,6 +7,9 @@
 #include "neptune/core/Combinations.h"
 #include "neptune/core/Control.h"
 #include "neptune/core/Facade.h"
+#include "neptune/core/FacadeTransfer.h"
+#include "neptune/core/Instrument.h"
+#include "neptune/core/MappingEdit.h"
 #include "neptune/core/Version.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/MixerState.h"
@@ -35,16 +38,16 @@ TEST_CASE ("combinations: console parameters are the stops, the router switches 
 {
     auto set = makeSet();
     const auto stops = stopParams (set, 1);
-    REQUIRE (stops.size() == 16);
+    REQUIRE (stops.size() == static_cast<std::size_t> (kModulators));
     CHECK (stops.front() == stop (1, 0));
-    CHECK (stops.back() == stop (1, 15));
+    CHECK (stops.back() == stop (1, kModulators - 1));
     CHECK (stopParams (set, 5).empty());        // piste que le jeu ne connaît pas
     CHECK (stopParams (set, -1).empty());
 
     const auto all = consoleParams (set);
-    CHECK (all.size() == 3 * 16 + router::kSwitches + router::kMaxRules);
+    CHECK (all.size() == static_cast<std::size_t> (3 * kModulators + router::kSwitches + router::kMaxRules));
     CHECK (contains (all, stop (0, 3)));
-    CHECK (contains (all, stop (2, 15)));
+    CHECK (contains (all, stop (2, kModulators - 1)));
     CHECK (contains (all, router::switchParam (31)));
     CHECK (contains (all, router::transposeParam (0)));
     CHECK_FALSE (contains (all, stop (3, 0)));
@@ -129,7 +132,7 @@ TEST_CASE ("combinations: a divisional only sets the stops of its own keyboard")
     c.arm (true);
     CHECK (c.divisional (lib, set, 1, 2).result == Result::Stored);
     REQUIRE (lib.divisional (1, 0, 2) != nullptr);
-    CHECK (lib.divisional (1, 0, 2)->values.size() == 16);
+    CHECK (lib.divisional (1, 0, 2)->values.size() == static_cast<std::size_t> (kModulators));
     CHECK (lib.divisional (0, 0, 2) == nullptr);
 
     set.set (stop (1, 0), 100.0);
@@ -400,8 +403,8 @@ TEST_CASE ("combinations: a writer receives every value that changes, clamped, a
     CHECK (out.result == Result::Recalled);
     REQUIRE (written.size() == 2);
     CHECK (out.changes.size() == 2);
-    CHECK (c.cancel (set).changes.size() == 48);         // les 48 modulateurs (100 % par défaut) passent à 0 ; le tirant 1 déjà à 0
-    CHECK (written.size() == 2 + 48);
+    CHECK (c.cancel (set).changes.size() == static_cast<std::size_t> (3 * kModulators));   // tous les modulateurs (100 % par défaut) passent à 0 ; le tirant 1 déjà à 0
+    CHECK (written.size() == static_cast<std::size_t> (2 + 3 * kModulators));
 
     Memory big;
     big.used = true;
@@ -449,4 +452,67 @@ TEST_CASE ("version: the development version string is filled in by the build")
     CHECK (v.rfind ("dev ", 0) == 0);
     CHECK (v.find ("@") == std::string::npos);   // aucune variable CMake laissée telle quelle
     CHECK (v.size() > 20);
+}
+
+TEST_CASE ("modulators: 32 per track, the first 16 keep their identifiers, the others have their own range")
+{
+    static_assert (kModulators == 32);
+    CHECK (mixer::modulatorParam (0, 0) == 14000);
+    CHECK (mixer::modulatorParam (2, 3) == 14000 + 2 * 16 + 3);            // inchangé : les projets et automations existants
+    CHECK (mixer::modulatorParam (15, 15) == 14000 + 15 * 16 + 15);
+    CHECK (mixer::modulatorParam (0, 16) == 16000);
+    CHECK (mixer::modulatorParam (1, 31) == 16000 + 16 + 15);
+
+    ParameterSet set;                                                      // aucun doublon d'identifiant sur les 16 pistes (l'ajout le refuserait)
+    for (int t = 0; t < mixer::numTracks; ++t) REQUIRE (mixer::addModulatorParams (set, t, "Track " + std::to_string (t + 1) + " "));
+    CHECK (set.size() == static_cast<std::size_t> (mixer::numTracks * kModulators));
+    CHECK (set.find (mixer::modulatorParam (3, 20))->name == "Track 4 Modulator 21");
+
+    // une Façade faite sur une piste se rebranche, modulateurs 17 à 32 compris
+    CHECK (facade::remapParamTrack (mixer::modulatorParam (2, 20), 2, 5) == mixer::modulatorParam (5, 20));
+    CHECK (facade::remapParamTrack (mixer::modulatorParam (2, 3), 2, 5) == mixer::modulatorParam (5, 3));
+    ParameterSet small;
+    REQUIRE (mixer::addModulatorParams (small, 1, "Track 2 "));
+    CHECK (facade::instrumentParamsOfTrack (small, 1).size() == static_cast<std::size_t> (kModulators));
+}
+
+TEST_CASE ("modulators: a 32-bit mask round-trips and an old 16-bit file still reads")
+{
+    InstrumentDescription d;
+    d.trackModulators = 0x80000001u;
+    d.groups["Plein-jeu"].modulators = 0x00010000u | (1u << 31);
+    ZoneDescription z;
+    z.group = "Plein-jeu";
+    z.modulators = 1u << 20;
+    d.zones.push_back (z);
+    d.modulators[25].name = "Cornet";
+    d.modulators[25].keyswitchNote = 60;
+    const auto back = instrumentFromJson (toJson (d));
+    CHECK (back.trackModulators == 0x80000001u);
+    CHECK (back.groups.at ("Plein-jeu").modulators == (0x00010000u | (1u << 31)));
+    REQUIRE (back.zones.size() == 1);
+    CHECK (back.zones[0].modulators == (1u << 20));
+    CHECK (back.modulators[25].name == "Cornet");
+    CHECK (back.modulators[25].keyswitchNote == 60);
+
+    const auto old = instrumentFromJson ("{\"track_modulators\": 65535, \"modulators\": [{\"index\": 3, \"name\": \"Ancien\"}]}");
+    CHECK (old.trackModulators == 65535u);
+    CHECK (old.modulators[3].name == "Ancien");
+    CHECK (instrumentFromJson ("{\"track_modulators\": 99999999999}").trackModulators == 0xFFFFFFFFu);   // borné
+    CHECK (instrumentFromJson ("{\"track_modulators\": -4}").trackModulators == 0u);
+}
+
+TEST_CASE ("modulators: a group switch can be any of the 32")
+{
+    InstrumentDescription d;
+    for (int g = 0; g < 30; ++g) d.declaredGroups.push_back ("Jeu " + std::to_string (g + 1));
+    for (int g = 0; g < 30; ++g) CHECK (mapping::groupSwitch (d, "Jeu " + std::to_string (g + 1)) == g);
+    CHECK (d.modulators[29].name == "Jeu 30");
+    CHECK (d.groups.at ("Jeu 30").modulators == (1u << 29));
+    d.declaredGroups.push_back ("Jeu 31");
+    d.declaredGroups.push_back ("Jeu 32");
+    d.declaredGroups.push_back ("Jeu 33");
+    CHECK (mapping::groupSwitch (d, "Jeu 31") == 30);
+    CHECK (mapping::groupSwitch (d, "Jeu 32") == 31);
+    CHECK (mapping::groupSwitch (d, "Jeu 33") == -1);                      // les 32 sont pris
 }

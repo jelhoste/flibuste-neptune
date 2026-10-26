@@ -438,8 +438,11 @@ public:
             r.value.onDragStart = [this, i] { if (setValue) setValue (i, rows_[static_cast<std::size_t> (i)].value.getValue(), 0); };
             r.value.onValueChange = [this, i] { if (setValue && rows_[static_cast<std::size_t> (i)].value.isMouseButtonDown()) setValue (i, rows_[static_cast<std::size_t> (i)].value.getValue(), 1); };
             r.value.onDragEnd = [this, i] { if (setValue) setValue (i, rows_[static_cast<std::size_t> (i)].value.getValue(), 2); };
-            for (auto* c : std::initializer_list<juce::Component*> { &r.index, &r.name, &r.mode, &r.type, &r.key, &r.channel, &r.radio, &r.value, &r.track }) addAndMakeVisible (*c);
+            for (auto* c : std::initializer_list<juce::Component*> { &r.index, &r.name, &r.mode, &r.type, &r.key, &r.channel, &r.radio, &r.value, &r.track }) holder_.addAndMakeVisible (*c);
         }
+        viewport_.setViewedComponent (&holder_, false);   // 32 lignes : la liste défile
+        viewport_.setScrollBarsShown (true, false);
+        addAndMakeVisible (viewport_);
         setSize (900, 640);
         startTimerHz (8);
     }
@@ -463,13 +466,17 @@ public:
         r.removeFromTop (4);
         auto head = r.removeFromTop (18);
         layoutRow (head, headers_[0], headers_[1], headers_[2], headers_[3], headers_[4], headers_[5], headers_[6], headers_[7], nullptr);
+        const int hintH = 66;
+        const auto rowsArea = r.removeFromTop (juce::jmax (120, r.getHeight() - hintH - 6));
+        viewport_.setBounds (rowsArea);
+        const int rowH = 30, scrollW = viewport_.getScrollBarThickness();
+        holder_.setSize (rowsArea.getWidth() - scrollW, kModulators * rowH);
         for (int i = 0; i < kModulators; ++i)
         {
-            auto line = r.removeFromTop (28);
+            auto line = juce::Rectangle<int> (0, i * rowH, holder_.getWidth(), rowH - 2);
             auto& row = rows_[static_cast<std::size_t> (i)];
             row.index.setBounds (line.removeFromLeft (26));
             layoutRow (line, row.name, row.mode, row.type, row.key, row.channel, row.radio, row.value, row.track, nullptr);
-            r.removeFromTop (2);
         }
         r.removeFromTop (6);
         hint_.setBounds (r);
@@ -509,8 +516,8 @@ private:
         m.keyswitchNote = static_cast<int> (r.key.getValue());
         m.keyswitchChannel = std::max (0, r.channel.getSelectedId() - 1);
         m.radio = std::max (0, r.radio.getSelectedId() - 1);
-        if (r.track.getToggleState()) desc_.trackModulators = static_cast<std::uint16_t> (desc_.trackModulators | (1u << i));
-        else desc_.trackModulators = static_cast<std::uint16_t> (desc_.trackModulators & ~(1u << i));
+        if (r.track.getToggleState()) desc_.trackModulators = static_cast<ModMask> (desc_.trackModulators | (1u << i));
+        else desc_.trackModulators = static_cast<ModMask> (desc_.trackModulators & ~(1u << i));
         if (onEdit) onEdit (desc_);
     }
     void timerCallback() override
@@ -529,6 +536,8 @@ private:
     std::function<juce::String (int)> noteName_;
     juce::Label title_, hint_, headers_[8];
     juce::TextButton closeButton_;
+    juce::Component holder_;       // contient les lignes ; déclaré avant la zone de défilement qui l'affiche
+    juce::Viewport viewport_;
     std::array<Row, kModulators> rows_;
 };
 
@@ -2459,7 +2468,7 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
     {
         // modulateurs qui commandent cette zone / ce Groupe (cases à cocher)
         juce::PopupMenu sub;
-        const std::uint16_t mask = group.empty() ? d.zones[static_cast<std::size_t> (zone)].modulators : (d.groups.count (group) != 0 ? d.groups.at (group).modulators : std::uint16_t (0));
+        const ModMask mask = group.empty() ? d.zones[static_cast<std::size_t> (zone)].modulators : (d.groups.count (group) != 0 ? d.groups.at (group).modulators : ModMask (0));
         for (int i = 0; i < kModulators; ++i)
         {
             const auto& m = d.modulators[static_cast<std::size_t> (i)];
@@ -2509,16 +2518,16 @@ void NovaSamplerEditor::showSlotAssignMenu (int zone, const std::string& group)
         if (choice >= 1000 && choice < 1000 + kModulators)
         {
             auto desc = safe->proc_.instrumentDescription();
-            const std::uint16_t bit = static_cast<std::uint16_t> (1u << (choice - 1000));
+            const ModMask bit = static_cast<ModMask> (1u << (choice - 1000));
             if (group.empty())
             {
                 auto& z = desc.zones[static_cast<std::size_t> (zone)];
-                z.modulators = static_cast<std::uint16_t> (z.modulators ^ bit);
+                z.modulators = static_cast<ModMask> (z.modulators ^ bit);
             }
             else
             {
                 auto& g = desc.groups[group];
-                g.modulators = static_cast<std::uint16_t> (g.modulators ^ bit);
+                g.modulators = static_cast<ModMask> (g.modulators ^ bit);
                 if (g.isDefault()) desc.groups.erase (group);
             }
             safe->proc_.uiEditInstrument (std::move (desc), "Modulator", "modulator");

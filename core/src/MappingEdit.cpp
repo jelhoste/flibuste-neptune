@@ -221,13 +221,35 @@ std::string cleanGroupName (std::string name)
 
 namespace
 {
-// Retire ce qui visait des Groupes qui n'ont plus aucune zone.
+// Modulateurs servant à d'autres choses que `except` (zones, piste, autres Groupes).
+ModMask modulatorsUsedElsewhere (const InstrumentDescription& d)
+{
+    ModMask used = d.trackModulators;
+    for (const auto& z : d.zones) used |= z.modulators;
+    for (const auto& entry : d.groups) used |= entry.second.modulators;
+    return used;
+}
+
+// Retire ce qui visait des Groupes qui n'ont plus aucune zone. L'interrupteur dédié d'un Groupe disparu (modulateur de même nom que lui, que plus rien n'utilise) est libéré.
 void pruneGroups (InstrumentDescription& d)
 {
     const auto alive = groupNames (d);
     auto isAlive = [&alive] (const std::string& g) { return std::find (alive.begin(), alive.end(), g) != alive.end(); };
+    std::vector<std::pair<std::string, ModMask>> gone;
     for (auto it = d.groups.begin(); it != d.groups.end();)
-        it = isAlive (it->first) ? std::next (it) : d.groups.erase (it);
+    {
+        if (isAlive (it->first)) { ++it; continue; }
+        gone.emplace_back (it->first, it->second.modulators);
+        it = d.groups.erase (it);
+    }
+    const ModMask used = modulatorsUsedElsewhere (d);
+    for (const auto& [name, mask] : gone)
+        for (int i = 0; i < kModulators; ++i)
+        {
+            const auto bit = static_cast<ModMask> (1u << i);
+            auto& m = d.modulators[static_cast<std::size_t> (i)];
+            if ((mask & bit) != 0 && (used & bit) == 0 && m.name == name) m = ModulatorDescription {};
+        }
     for (auto& s : d.slots)
         if (s.isGroup && ! isAlive (s.group)) s = SlotAssignment {};
     d.unloadedGroups.erase (std::remove_if (d.unloadedGroups.begin(), d.unloadedGroups.end(), [&isAlive] (const std::string& g) { return ! isAlive (g); }),
@@ -239,9 +261,12 @@ InstrumentDescription assignGroup (const InstrumentDescription& base, const std:
 {
     InstrumentDescription d = base;
     const auto name = cleanGroupName (group);
+    const auto before = groupNames (d);
     for (const int i : zones)
         if (i >= 0 && i < static_cast<int> (d.zones.size())) d.zones[static_cast<std::size_t> (i)].group = name;
     pruneGroups (d);
+    // un Groupe créé ici reçoit tout de suite son interrupteur (un jeu d'orgue) ; s'il n'y a plus de modulateur libre, il n'en a pas
+    if (! name.empty() && std::find (before.begin(), before.end(), name) == before.end()) groupSwitch (d, name);
     return d;
 }
 
@@ -258,6 +283,8 @@ bool renameGroup (InstrumentDescription& d, const std::string& from, const std::
         if (z.group == from) z.group = name;
     if (const auto it = d.groups.find (from); it != d.groups.end())
     {
+        for (int i = 0; i < kModulators; ++i)   // l'interrupteur dédié suit le nom du Groupe
+            if ((it->second.modulators & (1u << i)) != 0 && d.modulators[static_cast<std::size_t> (i)].name == from) d.modulators[static_cast<std::size_t> (i)].name = name;
         d.groups[name] = it->second;
         d.groups.erase (from);
     }
@@ -275,6 +302,7 @@ bool addGroup (InstrumentDescription& d, const std::string& name)
     const auto names = groupNames (d);
     if (std::find (names.begin(), names.end(), clean) != names.end()) return false;
     d.declaredGroups.push_back (clean);
+    groupSwitch (d, clean);   // son interrupteur tout de suite (sans effet s'il n'y a plus de modulateur libre)
     return true;
 }
 
@@ -292,18 +320,18 @@ int groupSwitch (InstrumentDescription& d, const std::string& group)
     const auto names = groupNames (d);
     if (group.empty() || std::find (names.begin(), names.end(), group) == names.end()) return -1;
     const auto it = d.groups.find (group);
-    const std::uint16_t mask = it != d.groups.end() ? it->second.modulators : 0;
+    const ModMask mask = it != d.groups.end() ? it->second.modulators : 0;
     for (int i = 0; i < kModulators; ++i)
-        if (mask == static_cast<std::uint16_t> (1u << i)) return i;
-    std::uint16_t used = d.trackModulators;
-    for (const auto& z : d.zones) used = static_cast<std::uint16_t> (used | z.modulators);
-    for (const auto& entry : d.groups) used = static_cast<std::uint16_t> (used | entry.second.modulators);
+        if (mask == static_cast<ModMask> (1u << i)) return i;
+    ModMask used = d.trackModulators;
+    for (const auto& z : d.zones) used = static_cast<ModMask> (used | z.modulators);
+    for (const auto& entry : d.groups) used = static_cast<ModMask> (used | entry.second.modulators);
     for (int i = 0; i < kModulators; ++i)
     {
-        const auto bit = static_cast<std::uint16_t> (1u << i);
+        const auto bit = static_cast<ModMask> (1u << i);
         if ((used & bit) != 0 || ! d.modulators[static_cast<std::size_t> (i)].isDefault()) continue;
         d.modulators[static_cast<std::size_t> (i)].name = group;
-        d.groups[group].modulators = static_cast<std::uint16_t> (d.groups[group].modulators | bit);
+        d.groups[group].modulators = static_cast<ModMask> (d.groups[group].modulators | bit);
         return i;
     }
     return -1;

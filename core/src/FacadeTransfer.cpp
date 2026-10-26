@@ -40,6 +40,7 @@ ParamId remapParamTrack (ParamId id, int fromTrack, int toTrack) noexcept
     if (const ParamId r = shifted (mixer::organParamBase, probe::trackStride); r != id) return r;
     if (const ParamId r = shifted (mixer::zoneSlotBase, 16); r != id) return r;
     if (const ParamId r = shifted (mixer::modulatorBase, 16); r != id) return r;
+    if (const ParamId r = shifted (mixer::modulatorExtraBase, 16); r != id) return r;   // les modulateurs 17 à 32
     return id;
 }
 
@@ -61,6 +62,7 @@ std::vector<ParamId> instrumentParamsOfTrack (const ParameterSet& set, int track
     const ParamId organ = mixer::organParam (track, 0);
     const ParamId slots = mixer::zoneSlotParam (track, 0);
     const ParamId mods = mixer::modulatorParam (track, 0);
+    const ParamId modsExtra = mixer::modulatorParam (track, 16);
     for (std::size_t i = 0; i < set.size(); ++i)
     {
         const auto& spec = set.spec (i);
@@ -68,7 +70,7 @@ std::vector<ParamId> instrumentParamsOfTrack (const ParameterSet& set, int track
         const ParamId id = spec.id;
         const bool legacySampler = track == 0 && inRange (id, sampler::gain, kSamplerCount);
         const bool blockInstrument = inRange (id, block, probe::trackStride) && id - block >= kSamplerFirst;   // les décalages 0..29 sont ceux de la bande
-        if (legacySampler || blockInstrument || inRange (id, organ, probe::trackStride) || inRange (id, slots, 16) || inRange (id, mods, 16)) out.push_back (id);
+        if (legacySampler || blockInstrument || inRange (id, organ, probe::trackStride) || inRange (id, slots, 16) || inRange (id, mods, 16) || inRange (id, modsExtra, 16)) out.push_back (id);
     }
     return out;
 }

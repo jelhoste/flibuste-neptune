@@ -71,7 +71,7 @@ bool addZoneSlotParams (ParameterSet& set, int track, const std::string& prefix,
 
 bool addModulatorParams (ParameterSet& set, int track, const std::string& prefix, std::string* error)
 {
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < kModulators; ++i)
         if (! set.add (ParamSpec::continuous (modulatorParam (track, i), prefix + "Modulator " + std::to_string (i + 1), Unit::Percent, 0.0, 100.0, 100.0), error))
             return false;
     return true;
