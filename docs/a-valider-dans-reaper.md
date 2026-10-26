@@ -77,3 +77,11 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Voyants** : un voyant « notes jouées sur le canal 2 » dans la Façade de la piste 1 s'allume quand on joue le canal 2 (même si seule la piste 2 le joue) ; les touches d'un clavier de la Façade sur le canal 2 s'allument aussi.
 - [ ] **Piston** : « Capturer... » > « Tous les réglages de toutes les pistes » coche les réglages des pistes actives et les accouplements ; le piston les restitue d'un coup.
 - [ ] **Console** : bouton « Console » > « Verrouiller sur la Façade de la piste N » : l'interface se réduit à la Façade (+ Annuler / Rétablir, Tout arrêter, Déverrouiller) ; fermer puis rouvrir l'éditeur, ou rouvrir le projet : on retombe sur la Façade, verrouillé ; « Déverrouiller » rend tout ; « Désactiver le mode console » supprime l'ouverture automatique.
+
+## Pages de Façade et Façade globale
+- [ ] **Rangée du haut** de l'onglet FAÇADE : « Piste | Globale », l'onglet « 1 » de la page ; en mode Édition « + Page » et « Page... ».
+- [ ] **Pages d'une Façade de piste** : « + Page » crée une page vide et s'y place ; deux pages différentes (widgets, fond) par piste ; « Page... » > Renommer (le nom s'affiche dans l'onglet), Déplacer, Supprimer (jamais la dernière) ; Annuler défait chaque geste.
+- [ ] **Anciens projets** : une Façade existante est la page « 1 » de sa piste, rien n'est perdu ; enregistrer et rouvrir le projet garde toutes les pages.
+- [ ] **Façade globale** : « Globale » montre une Façade indépendante de la piste sélectionnée (la changer de piste ne change pas la page) ; ses widgets lient n'importe quel paramètre ; un clavier posé dessus (canal 1, 2, 3...) joue les pistes qui écoutent ce canal et suit le routeur ; un voyant « notes du canal » s'allume.
+- [ ] **Fichiers** : « Enregistrer » de la Façade (.neptunefacade) emporte toutes les pages ; recharger sur une autre piste les remet ; le preset global et l'export de piste emportent aussi les pages.
+- [ ] **Mode console** : « Verrouiller sur la Façade globale » : à la réouverture on tombe sur la Façade globale, sans le choix Piste | Globale, mais avec les onglets de pages.

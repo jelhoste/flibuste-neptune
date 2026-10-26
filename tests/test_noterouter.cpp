@@ -287,6 +287,42 @@ TEST_CASE ("router: a key of an interface keyboard plays its own track and goes 
     CHECK (engine.activeVoices() == 0);
 }
 
+TEST_CASE ("router: a key of the global Facade (track -1) is a MIDI note on its channel for every track that listens")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto run = [&] (int blocks) { for (int b = 0; b < blocks; ++b) engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256); };
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    d.filters.filter[0].on = false;
+    d.ampEnv.attack.ms = 0.0;
+    d.ampEnv.release.ms = 20.0;
+    for (const int t : { 0, 1 })
+    {
+        engine.setTrackActive (t, true);
+        engine.setTrackType (t, TrackType::Synth);
+        engine.publishSynth (t, std::make_shared<SynthPatch> (d));
+        mixer::StripSettings strip;
+        strip.midiChannel = t + 1;
+        engine.setTrackSettings (t, strip);
+    }
+    run (2);
+    engine.noteOnKeyboard (-1, 1, 60, 1.0f);    // la Façade globale : canal 2 = la piste 2 seule
+    run (4);
+    CHECK (engine.activeVoices() == 1);
+    engine.noteOffKeyboard (-1, 1, 60);
+    run (30);
+    CHECK (engine.activeVoices() == 0);
+}
+
 TEST_CASE ("console mode: stored in the mixer state, absent when off, track bounded")
 {
     MixerState m;

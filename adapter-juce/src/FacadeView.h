@@ -31,6 +31,10 @@ public:
 
     // « Ajouter à la Façade » (fenêtre d'un potard) : pose un widget déjà lié au paramètre, sur la Façade de la piste sélectionnée.
     void addLinked (neptune::core::facade::WidgetType, neptune::core::ParamId);
+    // Façade de la piste sélectionnée (faux) ou Façade globale (vrai).
+    void setGlobal (bool global);
+    bool isGlobal() const noexcept { return global_; }
+    void setScopeVisible (bool visible);   // le mode console masque le choix Piste / Globale
 
 private:
     class Canvas;
@@ -42,7 +46,13 @@ private:
     class ScalePanel;
     void timerCallback() override;
     void refresh();                              // relit la Façade de la piste sélectionnée si elle a changé
-    void commit (neptune::core::facade::Facade, const char* undoName);
+    void commit (neptune::core::facade::Facade, const char* undoName);   // la page affichée
+    void writeBook (neptune::core::facade::Facade book, const char* undoName);   // le livre entier (toutes les pages)
+    void setPage (int index);
+    void rebuildPageTabs();
+    void showPageMenu();
+    void renamePage();
+    bool hasTarget() const noexcept { return global_ || track_ >= 0; }
     // Comme commit, après avoir rattaché les widgets `touched` à leur zone et rangé le contenu des zones.
     void commitArranged (neptune::core::facade::Facade, std::set<int> touched, const char* undoName);
     void addWidget (neptune::core::facade::WidgetType);
@@ -87,7 +97,12 @@ private:
 
     int track_ = -1;
     std::uint32_t revision_ = 0xFFFFFFFFu;
-    neptune::core::facade::Facade facade_;       // copie de travail (celle de la piste, ou celle d'un glissement en cours)
+    neptune::core::facade::Facade facade_;       // copie de travail de la PAGE affichée (celle de la piste, ou celle d'un glissement en cours)
+    neptune::core::facade::Facade book_;         // le livre entier : toutes les pages de la Façade de la piste ou de la Façade globale
+    bool global_ = false;                        // Façade globale (track_ vaut alors -1)
+    int page_ = 0;                               // page affichée
+    juce::TextButton scopeTrackButton_, scopeGlobalButton_, addPageButton_, pageMenuButton_;
+    std::vector<std::unique_ptr<juce::TextButton>> pageTabs_;
     std::set<int> selection_;                    // widgets sélectionnés (mode Édition)
     int lastClicked_ = 0;                        // dernier widget cliqué : la référence du rangement en cercle
     bool editMode_ = false;

@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "neptune/core/Instrument.h"
+#include "neptune/core/Facade.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/NoteRouter.h"
 #include "neptune/core/FmVoices.h"
@@ -21,7 +22,7 @@ namespace neptune::core
 struct ConsoleMode
 {
     bool enabled = false;
-    int track = 0;          // 0..15
+    int track = 0;          // 0..15 ; -1 : la Façade globale
     bool operator== (const ConsoleMode& o) const noexcept { return enabled == o.enabled && track == o.track; }
 };
 
@@ -49,6 +50,7 @@ struct MixerState
     std::array<mixer::ParallelSettings, mixer::numParallels> parallels;
     std::array<mixer::StripSettings, mixer::numBuses> buses;
     mixer::MasterSettings master;
+    facade::Facade globalFacade;         // la Façade globale (pages libres, indépendantes des pistes)
     ConsoleMode console;
     router::Config router;               // routeur de notes : accouplements et divisions de clavier (voir NoteRouter.h)
     int selectedTrack = 0;
@@ -78,7 +80,7 @@ struct MixerState
 
     bool operator== (const MixerState& o) const noexcept
     {
-        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && console == o.console && selectedTrack == o.selectedTrack;
+        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && globalFacade == o.globalFacade && console == o.console && selectedTrack == o.selectedTrack;
     }
 };
 

@@ -171,7 +171,8 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     if (processor_.consoleMode().enabled)   // mode console : on s'ouvre sur la Façade de la piste choisie, interface verrouillée
     {
         consoleLocked_ = true;
-        processor_.selectTrack (processor_.consoleMode().track);
+        if (processor_.consoleMode().track >= 0) processor_.selectTrack (processor_.consoleMode().track);
+        facadeView_->setGlobal (processor_.consoleMode().track < 0);
         setView (false, false, true);
     }
     applyConsoleLock();
@@ -347,6 +348,7 @@ void NeptuneEditor::applyConsoleLock()
                                                               &profileLockButton_, &voiceCountButton_, &latencyLabel_, &profileLabel_, &trackBox_ })
         c->setVisible (visible);
     unlockButton_.setVisible (consoleLocked_);
+    facadeView_->setScopeVisible (! consoleLocked_);
 }
 
 void NeptuneEditor::showConsoleMenu()
@@ -355,16 +357,18 @@ void NeptuneEditor::showConsoleMenu()
     const int track = processor_.selectedTrack();
     juce::PopupMenu menu;
     menu.addItem (1, text ("console.enable") + " " + juce::String (track + 1));
+    menu.addItem (3, text ("console.enable_global"));
     menu.addItem (2, text ("console.disable"), mode.enabled);
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&consoleButton_), [safe, track] (int choice)
     {
         if (safe == nullptr || choice == 0) return;
-        if (choice == 1)
+        if (choice == 1 || choice == 3)
         {
-            safe->processor_.uiSetConsoleMode (true, track);
+            safe->processor_.uiSetConsoleMode (true, choice == 3 ? -1 : track);
             safe->consoleLocked_ = true;
+            safe->facadeView_->setGlobal (choice == 3);
             safe->setView (false, false, true);
             safe->applyConsoleLock();
         }
@@ -628,7 +632,7 @@ void NeptuneEditor::timerCallback()
     if (consoleLocked_)   // la console reste sur sa piste et sur sa Façade
     {
         const int track = processor_.consoleMode().track;
-        if (processor_.selectedTrack() != track) processor_.selectTrack (track);
+        if (track >= 0 && processor_.selectedTrack() != track) processor_.selectTrack (track);   // -1 : Façade globale, la piste sélectionnée ne compte pas
         if (! showFacade_) setView (false, false, true);
     }
     updateTrackBox();

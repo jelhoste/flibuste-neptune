@@ -198,6 +198,9 @@ public:
     neptune::core::router::Config routerConfig() const;
     // Mode console (voir MixerState.h) : enregistré avec le projet et les presets globaux, pas annulable.
     neptune::core::ConsoleMode consoleMode() const;
+    // Façade globale (voir MixerState.h) : un livre de pages libres, enregistré avec le projet et les presets globaux, annulable.
+    neptune::core::facade::Facade globalFacade() const;
+    void uiEditGlobalFacade (neptune::core::facade::Facade, std::string name, std::string mergeKey = {});
     void uiSetConsoleMode (bool enabled, int track);
     void uiEditRouter (neptune::core::router::Config, std::string name, std::string mergeKey = {});
     // Preset global : l'état du projet sans ce qui est propre à l'instance (identifiant, verrou de profil, assignations CC / OSC).

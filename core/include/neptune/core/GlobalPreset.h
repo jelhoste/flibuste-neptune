@@ -20,6 +20,6 @@ std::string withoutInstanceData (std::string_view stateText);
 // Applique `edit` au mixeur de l'état (relu puis réécrit par la sérialisation du mixeur). Un texte sans mixeur est rendu tel quel.
 std::string editMixer (std::string_view stateText, const std::function<void (MixerState&)>& edit);
 
-// Les Façades des pistes (les seules à porter des images).
+// Les Façades des pistes et la Façade globale (les seules à porter des images).
 void forEachFacade (MixerState&, const std::function<void (facade::Facade&)>& visit);
 } // namespace neptune::core::globalpreset

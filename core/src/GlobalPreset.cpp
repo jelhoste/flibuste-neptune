@@ -31,5 +31,6 @@ std::string editMixer (std::string_view stateText, const std::function<void (Mix
 void forEachFacade (MixerState& m, const std::function<void (facade::Facade&)>& visit)
 {
     for (auto& t : m.tracks) visit (t.strip.facade);
+    visit (m.globalFacade);
 }
 } // namespace neptune::core::globalpreset

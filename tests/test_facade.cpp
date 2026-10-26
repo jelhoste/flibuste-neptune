@@ -4,6 +4,8 @@
 
 #include "neptune/core/Engine.h"
 #include "neptune/core/Facade.h"
+#include "neptune/core/FacadeTransfer.h"
+#include "neptune/core/ProbePool.h"
 #include "neptune/core/MidiSend.h"
 #include "neptune/core/MixerState.h"
 
@@ -663,4 +665,97 @@ TEST_CASE ("facade: widget scale and free curve map the position to the paramete
     f.widgets[0].scale = 9;
     CHECK (sanitised (f).widgets.at (0).scale == numWidgetScales - 1);
     CHECK (toJson (Facade {}).find ("response") == std::string::npos);
+}
+
+TEST_CASE ("facade pages: a Facade is a book, a single unnamed page keeps the old JSON")
+{
+    facade::Facade f;
+    f.image = "fond.png";
+    const auto single = facade::toJson (f);
+    CHECK (single.find ("pages") == std::string::npos);
+    CHECK (single.find ("\"name\"") == std::string::npos);
+    CHECK (facade::pageCount (f) == 1);
+
+    f = facade::renamePage (f, 0, "Console");
+    f = facade::addPage (f, "Registrations");
+    f = facade::addPage (f, "");
+    REQUIRE (facade::pageCount (f) == 3);
+    facade::Facade second = facade::pageOf (f, 1);
+    CHECK (second.name == "Registrations");
+    facade::Widget w;
+    w.id = 1;
+    w.param = 4242;
+    second.widgets.push_back (w);
+    f = facade::withPage (f, 1, second);
+    CHECK (facade::pageOf (f, 1).widgets.size() == 1);
+    CHECK (facade::pageOf (f, 0).widgets.empty());
+    CHECK (facade::pageOf (f, 0).image == "fond.png");
+
+    const auto back = facade::fromJson (facade::toJson (f));
+    CHECK (back == f);
+    CHECK (facade::pageCount (back) == 3);
+    CHECK (facade::pageOf (back, 0).name == "Console");
+    CHECK (facade::pageOf (back, 1).widgets[0].param == 4242);
+    // pages absentes ou illisibles : une seule page
+    CHECK (facade::pageCount (facade::fromJson (R"({"pages":[1,"x"]})")) == 1);
+}
+
+TEST_CASE ("facade pages: add, remove, move and the limit of pages")
+{
+    facade::Facade f;
+    for (int i = 0; i < 25; ++i) f = facade::addPage (f, "p" + std::to_string (i));
+    CHECK (facade::pageCount (f) == facade::maxPages);
+    f = facade::renamePage (f, 0, "first");
+    f = facade::movePage (f, 0, 2);
+    CHECK (facade::pageOf (f, 2).name == "first");
+    CHECK (facade::pageOf (f, 0).name == "p0");
+    f = facade::removePage (f, 2);
+    CHECK (facade::pageCount (f) == facade::maxPages - 1);
+    CHECK (facade::pageOf (f, 2).name != "first");
+    facade::Facade one;
+    CHECK (facade::pageCount (facade::removePage (one, 0)) == 1);          // jamais la dernière
+    CHECK (facade::pageCount (facade::removePage (f, 99)) == facade::pageCount (f));
+    // un livre trop long lu depuis un JSON est borné
+    std::string json = R"({"pages":[)";
+    for (int i = 0; i < 40; ++i) json += std::string (i ? "," : "") + "{}";
+    json += "]}";
+    CHECK (facade::pageCount (facade::fromJson (json)) == facade::maxPages);
+}
+
+TEST_CASE ("facade pages: image paths and track remapping reach every page")
+{
+    facade::Facade f;
+    f.image = "a.png";
+    facade::Widget w;
+    w.id = 1;
+    w.param = probe::trackParam (2, probe::kVolume);
+    f.widgets.push_back (w);
+    f = facade::addPage (f, "deux");
+    auto page = facade::pageOf (f, 1);
+    page.image = "b.png";
+    w.id = 2;
+    page.widgets.push_back (w);
+    f = facade::withPage (f, 1, page);
+    std::vector<std::string> seen;
+    facade::forEachImagePath (f, [&seen] (std::string& p) { seen.push_back (p); });
+    CHECK (seen == std::vector<std::string> ({ "a.png", "b.png" }));
+    facade::remapTrack (f, 2, 7);
+    CHECK (facade::pageOf (f, 0).widgets[0].param == probe::trackParam (7, probe::kVolume));
+    CHECK (facade::pageOf (f, 1).widgets[0].param == probe::trackParam (7, probe::kVolume));
+}
+
+TEST_CASE ("facade pages: the global Facade lives in the mixer state, console mode may target it")
+{
+    MixerState m;
+    m.globalFacade = facade::addPage (m.globalFacade, "Console");
+    m.console.enabled = true;
+    m.console.track = -1;
+    const auto back = mixerFromJson (toJson (m));
+    CHECK (back.globalFacade == m.globalFacade);
+    CHECK (back.console.enabled);
+    CHECK (back.console.track == -1);
+    CHECK (toJson (MixerState {}).find ("global_facade") == std::string::npos);
+    // les pages d'une Façade de piste suivent la piste dans le JSON du mixeur
+    m.tracks[1].strip.facade = facade::addPage (m.tracks[1].strip.facade, "P2");
+    CHECK (mixerFromJson (toJson (m)).tracks[1].strip.facade == m.tracks[1].strip.facade);
 }

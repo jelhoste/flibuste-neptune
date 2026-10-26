@@ -152,14 +152,19 @@ struct Widget
     }
 };
 
+// Une Façade est un « livre » : la page décrite ici, plus les pages suivantes (`pages`, qui n'ont pas de pages à leur tour). Les pages ont chacune un nom
+// (vide : « 1 », « 2 »...). Tout ce qui s'applique à une Façade (JSON, chemins d'images, rebranchement sur une autre piste) vaut pour toutes ses pages.
+// La vue travaille sur une page à la fois (`pageOf` / `withPage`).
 struct Facade
 {
+    std::string name;               // nom de cette page
     std::string image;              // chemin du fichier image (PNG / JPG) ; vide : fond uni
     ImageFit fit = ImageFit::Fit;
     std::vector<Widget> widgets;    // l'ordre est l'ordre d'empilement (le dernier est dessus)
     std::vector<ImageStyle> styles; // bibliothèque de styles d'images
+    std::vector<Facade> pages;      // pages suivantes (la page 2 est pages[0]...)
 
-    bool operator== (const Facade& o) const noexcept { return image == o.image && fit == o.fit && widgets == o.widgets && styles == o.styles; }
+    bool operator== (const Facade& o) const noexcept { return name == o.name && image == o.image && fit == o.fit && widgets == o.widgets && styles == o.styles && pages == o.pages; }
     bool operator!= (const Facade& o) const noexcept { return ! (*this == o); }
 
     // Identifiant libre pour un nouveau widget.
@@ -229,7 +234,18 @@ MeterSource decodeMeterSource (int source) noexcept;
 int encodeMeterSource (const MeterSource&) noexcept;
 int sanitisedMeterSource (int source) noexcept;   // une source inconnue ou hors bornes devient 0
 
+constexpr int maxPages = 16;
 Facade sanitised (Facade f);
+// ---- Pages d'une Façade ----
+int pageCount (const Facade& book) noexcept;                       // au moins 1
+std::vector<Facade> splitPages (const Facade& book);                // chaque page seule (sans `pages`)
+Facade joinPages (std::vector<Facade> pages);
+Facade pageOf (const Facade& book, int index);                      // la page `index` (bornée), sans les autres
+Facade withPage (const Facade& book, int index, Facade page);       // remplace le contenu et le nom de la page
+Facade addPage (const Facade& book, std::string name);               // une page vide à la fin (rien si 16 pages)
+Facade removePage (const Facade& book, int index);                   // jamais la dernière
+Facade renamePage (const Facade& book, int index, std::string name);
+Facade movePage (const Facade& book, int index, int target);
 
 std::string toJson (const Facade&);
 Facade fromJson (std::string_view text); // lecture tolérante : champ invalide ou absent -> défaut ; bornes appliquées

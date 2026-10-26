@@ -503,6 +503,7 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
 
 void Engine::noteOnKeyboard (int track, int channel, int key, float velocity) noexcept
 {
+    if (track < 0) { noteOn (channel, key, velocity); return; }   // clavier de la Façade globale : comme du MIDI sur ce canal (toutes les pistes qui l'écoutent, routeur compris)
     if (router_ == nullptr || router_->rules.empty() || params_ == nullptr || key < 0 || key > 127)
     {
         noteOnTrack (track, channel, key, velocity);
@@ -530,6 +531,7 @@ void Engine::noteOnKeyboard (int track, int channel, int key, float velocity) no
 
 void Engine::noteOffKeyboard (int track, int channel, int key) noexcept
 {
+    if (track < 0) { noteOff (channel, key); return; }
     if (key >= 0 && key < 128)
     {
         const int slot = ((channel & 15) << 7) | key;
@@ -658,8 +660,8 @@ void Engine::drainUiEvents() noexcept
         {
             case UiEvent::Type::NoteOn: noteOnTrack (tr, e.channel, e.key, e.velocity); break;
             case UiEvent::Type::NoteOff: noteOffTrack (tr, e.channel, e.key); break;
-            case UiEvent::Type::KeyboardOn: noteOnKeyboard (tr, e.channel, e.key, e.velocity); break;
-            case UiEvent::Type::KeyboardOff: noteOffKeyboard (tr, e.channel, e.key); break;
+            case UiEvent::Type::KeyboardOn: noteOnKeyboard (e.track, e.channel, e.key, e.velocity); break;     // piste -1 : clavier de la Façade globale
+            case UiEvent::Type::KeyboardOff: noteOffKeyboard (e.track, e.channel, e.key); break;
             case UiEvent::Type::PreviewZone:
                 if (tracks_[static_cast<std::size_t> (tr)].type.load() == 0)
                 {

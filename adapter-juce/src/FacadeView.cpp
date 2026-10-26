@@ -2708,6 +2708,30 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     canvas_ = std::make_unique<Canvas> (*this);
     addAndMakeVisible (*canvas_);
 
+    scopeTrackButton_.setButtonText (text ("facade.scope_track"));
+    scopeTrackButton_.setTooltip (text ("facade.tip_scope_track"));
+    scopeGlobalButton_.setButtonText (text ("facade.scope_global"));
+    scopeGlobalButton_.setTooltip (text ("facade.tip_scope_global"));
+    for (auto* b : { &scopeTrackButton_, &scopeGlobalButton_ })
+    {
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (5871);
+        addAndMakeVisible (*b);
+    }
+    scopeTrackButton_.setToggleState (true, juce::dontSendNotification);
+    scopeTrackButton_.onClick = [this] { if (scopeTrackButton_.getToggleState()) setGlobal (false); };
+    scopeGlobalButton_.onClick = [this] { if (scopeGlobalButton_.getToggleState()) setGlobal (true); };
+    addPageButton_.setButtonText (text ("facade.add_page"));
+    addPageButton_.setTooltip (text ("facade.tip_add_page"));
+    addPageButton_.onClick = [this]
+    {
+        if (! hasTarget() || fc::pageCount (book_) >= fc::maxPages) return;
+        writeBook (fc::addPage (book_, ""), "Facade: add a page");
+        setPage (fc::pageCount (book_) - 1);
+    };
+    pageMenuButton_.setButtonText (text ("facade.page_menu"));
+    pageMenuButton_.setTooltip (text ("facade.tip_page_menu"));
+    pageMenuButton_.onClick = [this] { showPageMenu(); };
     editButton_.setButtonText (text ("facade.edit_layout"));
     editButton_.setClickingTogglesState (true);
     editButton_.onClick = [this]
@@ -2875,6 +2899,8 @@ void FacadeView::updateButtons()
     const auto* one = facade_.find (single());
     for (auto* b : { &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_, &sliderButton_, &stylesButton_, &imageButton_, &fitButton_, &clearImageButton_, &saveFacadeButton_, &loadFacadeButton_ }) b->setVisible (editMode_);
     relocateButton_.setVisible (missing_ > 0);
+    addPageButton_.setVisible (editMode_);
+    pageMenuButton_.setVisible (editMode_);
     const bool any = editMode_ && ! selection_.empty();
     textButton_.setVisible (editMode_ && one != nullptr);
     linkButton_.setVisible (editMode_ && one != nullptr && needsParam (one->type) && ! (one->type == fc::WidgetType::Lamp && one->source != 0));
@@ -2948,6 +2974,26 @@ void FacadeView::resized()
         if (any) area.removeFromTop (y + rowH + gap);
     };
     {
+        // rangée des pages : Piste / Globale, puis un onglet par page (à la ligne si la place manque), + Page et Page... en mode Édition
+        int x = 0, y = 0;
+        auto place = [&] (juce::Component& c, int w)
+        {
+            if (x > 0 && x + w > area.getWidth()) { x = 0; y += rowH + gap; }
+            c.setBounds (area.getX() + x, area.getY() + y, w, rowH);
+            x += w + gap;
+        };
+        if (scopeTrackButton_.isVisible())
+        {
+            place (scopeTrackButton_, fit (scopeTrackButton_));
+            place (scopeGlobalButton_, fit (scopeGlobalButton_));
+            x += 16;
+        }
+        for (auto& tab : pageTabs_) place (*tab, std::max (44, fit (*tab)));
+        if (addPageButton_.isVisible()) place (addPageButton_, fit (addPageButton_));
+        if (pageMenuButton_.isVisible()) place (pageMenuButton_, fit (pageMenuButton_));
+        area.removeFromTop (y + rowH + gap);
+    }
+    {
         auto top = area.removeFromTop (rowH);
         helpButton_.setBounds (top.removeFromRight (rowH + 8));   // « ? » à droite de la première rangée
         layoutRow (top, { &editButton_, &imageButton_, &fitButton_, &clearImageButton_, &stylesButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_ });
@@ -2997,36 +3043,156 @@ void FacadeView::timerCallback()
     canvas_->repaint();   // les valeurs peuvent changer (automation, autre vue)
 }
 
+void FacadeView::setScopeVisible (bool visible)
+{
+    scopeTrackButton_.setVisible (visible);
+    scopeGlobalButton_.setVisible (visible);
+    resized();
+}
+
+void FacadeView::setGlobal (bool global)
+{
+    if (global == global_) return;
+    global_ = global;
+    scopeTrackButton_.setToggleState (! global_, juce::dontSendNotification);
+    scopeGlobalButton_.setToggleState (global_, juce::dontSendNotification);
+    revision_ = 0xFFFFFFFFu;   // relecture
+    page_ = 0;
+    refresh();
+}
+
 void FacadeView::refresh()
 {
-    const int t = processor_.selectedTrack();
+    const int t = global_ ? -1 : processor_.selectedTrack();
     const auto rev = processor_.instrumentRevision();
     if (t == track_ && rev == revision_) return;
     if (canvas_->dragging()) return;
-    if (t != track_) { canvas_->releaseKeys(); selection_.clear(); }
+    if (t != track_) { canvas_->releaseKeys(); selection_.clear(); page_ = 0; canvas_->clearPictures(); }
     track_ = t;
     revision_ = rev;
-    facade_ = processor_.trackSettings (t).facade;
+    book_ = global_ ? processor_.globalFacade() : processor_.trackSettings (t).facade;
+    page_ = std::clamp (page_, 0, fc::pageCount (book_) - 1);
+    facade_ = fc::pageOf (book_, page_);
+    rebuildPageTabs();
     refreshMissing();
     updateButtons();
     resized();
 }
 
-void FacadeView::commit (fc::Facade f, const char* undoName)
+// Enregistre le livre entier (la Façade de la piste, ou la Façade globale) : un seul geste annulable.
+void FacadeView::writeBook (fc::Facade book, const char* undoName)
 {
-    if (track_ < 0) return;
-    f = fc::sanitised (std::move (f));
-    facade_ = f;
-    auto s = processor_.trackSettings (track_);
-    if (s.facade != f)
+    if (! hasTarget()) return;
+    book = fc::sanitised (std::move (book));
+    book_ = book;
+    page_ = std::clamp (page_, 0, fc::pageCount (book_) - 1);
+    facade_ = fc::pageOf (book_, page_);
+    if (global_) processor_.uiEditGlobalFacade (book_, undoName);
+    else
     {
-        s.facade = f;
-        processor_.uiEditTrack (track_, std::move (s), undoName);
-        revision_ = processor_.instrumentRevision();
+        auto s = processor_.trackSettings (track_);
+        if (s.facade != book_)
+        {
+            s.facade = book_;
+            processor_.uiEditTrack (track_, std::move (s), undoName);
+        }
     }
+    revision_ = processor_.instrumentRevision();
+    rebuildPageTabs();
     updateButtons();
     canvas_->syncChildren();
     canvas_->repaint();
+}
+
+void FacadeView::commit (fc::Facade f, const char* undoName)
+{
+    if (! hasTarget()) return;
+    f = fc::sanitised (std::move (f));
+    f.pages.clear();
+    const bool nameChanged = f.name != fc::pageOf (book_, page_).name;
+    writeBook (fc::withPage (book_, page_, f), undoName);
+    if (nameChanged) rebuildPageTabs();
+}
+
+void FacadeView::setPage (int index)
+{
+    if (canvas_->dragging()) return;
+    index = std::clamp (index, 0, fc::pageCount (book_) - 1);
+    if (index == page_ && facade_ == fc::pageOf (book_, page_)) { rebuildPageTabs(); return; }
+    canvas_->releaseKeys();
+    selection_.clear();
+    canvas_->clearPictures();
+    page_ = index;
+    facade_ = fc::pageOf (book_, page_);
+    rebuildPageTabs();
+    refreshMissing();
+    updateButtons();
+    resized();
+    canvas_->syncChildren();
+    canvas_->repaint();
+}
+
+// Onglets des pages : un bouton par page (nom, ou son numéro), la page affichée est allumée.
+void FacadeView::rebuildPageTabs()
+{
+    const int count = fc::pageCount (book_);
+    bool same = static_cast<int> (pageTabs_.size()) == count;
+    for (int i = 0; same && i < count; ++i)
+    {
+        const auto name = fc::pageOf (book_, i).name;
+        const auto label = name.empty() ? juce::String (i + 1) : juce::String::fromUTF8 (name.c_str());
+        same = pageTabs_[static_cast<std::size_t> (i)]->getButtonText() == label;
+    }
+    if (! same)
+    {
+        pageTabs_.clear();
+        for (int i = 0; i < count; ++i)
+        {
+            const auto name = fc::pageOf (book_, i).name;
+            auto tab = std::make_unique<juce::TextButton> (name.empty() ? juce::String (i + 1) : juce::String::fromUTF8 (name.c_str()));
+            tab->setClickingTogglesState (true);
+            tab->setRadioGroupId (5872);
+            tab->onClick = [this, i] { setPage (i); };
+            addAndMakeVisible (*tab);
+            pageTabs_.push_back (std::move (tab));
+        }
+        resized();
+    }
+    for (int i = 0; i < count; ++i) pageTabs_[static_cast<std::size_t> (i)]->setToggleState (i == page_, juce::dontSendNotification);
+    addPageButton_.setEnabled (count < fc::maxPages);
+}
+
+void FacadeView::showPageMenu()
+{
+    const int count = fc::pageCount (book_);
+    juce::PopupMenu menu;
+    menu.addItem (1, text ("facade.page_rename"));
+    menu.addItem (2, text ("facade.page_delete"), count > 1);
+    menu.addItem (3, text ("facade.page_left"), page_ > 0);
+    menu.addItem (4, text ("facade.page_right"), page_ < count - 1);
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&pageMenuButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
+    {
+        if (safe == nullptr || choice == 0) return;
+        if (choice == 1) safe->renamePage();
+        else if (choice == 2) { safe->writeBook (fc::removePage (safe->book_, safe->page_), "Facade: delete a page"); safe->setPage (safe->page_); }
+        else if (choice == 3) { const int to = safe->page_ - 1; safe->writeBook (fc::movePage (safe->book_, safe->page_, to), "Facade: move a page"); safe->setPage (to); }
+        else if (choice == 4) { const int to = safe->page_ + 1; safe->writeBook (fc::movePage (safe->book_, safe->page_, to), "Facade: move a page"); safe->setPage (to); }
+    });
+}
+
+void FacadeView::renamePage()
+{
+    if (prompt_ != nullptr || ! hasTarget()) return;
+    prompt_ = std::make_unique<TextPrompt> (*this, text ("facade.page_rename"), utf8 (facade_.name),
+        [safe = juce::Component::SafePointer<FacadeView> (this)] (const juce::String& value)
+        {
+            if (safe == nullptr) return;
+            safe->writeBook (fc::renamePage (safe->book_, safe->page_, value.toStdString()), "Facade: rename a page");
+        });
+    addAndMakeVisible (*prompt_);
+    prompt_->setBounds (getLocalBounds());
+    prompt_->toFront (true);
 }
 
 void FacadeView::commitArranged (fc::Facade f, std::set<int> touched, const char* undoName)
@@ -3200,7 +3366,7 @@ void FacadeView::addWidget (fc::WidgetType type)
 void FacadeView::addLinked (fc::WidgetType type, neptune::core::ParamId param)
 {
     refresh();
-    if (track_ < 0) return;
+    if (! hasTarget()) return;
     auto f = facade_;
     if (static_cast<int> (f.widgets.size()) >= fc::maxWidgets) return;
     const int n = static_cast<int> (f.widgets.size()) % 8;
@@ -3478,10 +3644,10 @@ void FacadeView::openNotice (const juce::String& title, const juce::String& body
 
 void FacadeView::saveFacadeFile()
 {
-    if (track_ < 0) return;
+    if (! hasTarget()) return;
     chooser_ = std::make_unique<juce::FileChooser> (text ("facade.save_title"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Facade.neptunefacade"), "*.neptunefacade");
     chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
-                           [safe = juce::Component::SafePointer<FacadeView> (this), facade = facade_, track = track_] (const juce::FileChooser& c)
+                           [safe = juce::Component::SafePointer<FacadeView> (this), facade = book_, track = track_] (const juce::FileChooser& c)
                            {
                                if (safe == nullptr || c.getResult() == juce::File()) return;
                                auto target = c.getResult();
@@ -3496,7 +3662,7 @@ void FacadeView::saveFacadeFile()
 
 void FacadeView::loadFacadeFile()
 {
-    if (track_ < 0) return;
+    if (! hasTarget()) return;
     chooser_ = std::make_unique<juce::FileChooser> (text ("facade.load_title"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.neptunefacade");
     chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                            [safe = juce::Component::SafePointer<FacadeView> (this)] (const juce::FileChooser& c)
@@ -3513,7 +3679,9 @@ void FacadeView::loadFacadeFile()
                                const int widgets = static_cast<int> (loaded.widgets.size());
                                safe->selection_.clear();
                                safe->canvas_->clearPictures();
-                               safe->commit (std::move (loaded), "Facade: load a Facade file");
+                               safe->page_ = 0;
+                               safe->writeBook (std::move (loaded), "Facade: load a Facade file");
+                               safe->setPage (0);
                                safe->openNotice (safe->text ("facade.load_title"), juce::String::fromUTF8 (safe->tr_.format ("facade.loaded", { std::to_string (widgets), std::to_string (report.images), std::to_string (report.packsInstalled) }).c_str()));
                            });
 }
@@ -3522,7 +3690,7 @@ void FacadeView::loadFacadeFile()
 void FacadeView::refreshMissing()
 {
     int missing = 0;
-    auto copy = facade_;
+    auto copy = book_;   // toutes les pages
     fc::forEachImagePath (copy, [&missing] (std::string& path) { if (! stylelib::exists (path)) ++missing; });
     if (missing != missing_) { missing_ = missing; updateButtons(); }
 }
@@ -3532,7 +3700,7 @@ void FacadeView::refreshMissing()
 void FacadeView::relocate()
 {
     std::string firstMissing;
-    auto copy = facade_;
+    auto copy = book_;
     fc::forEachImagePath (copy, [&firstMissing] (std::string& path) { if (firstMissing.empty() && ! stylelib::exists (path)) firstMissing = path; });
     if (firstMissing.empty()) return;
     const juce::File oldFile (juce::String::fromUTF8 (firstMissing.c_str()));
@@ -3546,7 +3714,7 @@ void FacadeView::relocate()
                                const bool sameName = chosen.getFileName() == oldFile.getFileName();
                                const auto oldDir = oldFile.getParentDirectory().getFullPathName() + juce::File::getSeparatorString();
                                const auto newDir = chosen.getParentDirectory();
-                               auto f = safe->facade_;
+                               auto f = safe->book_;
                                fc::forEachImagePath (f, [&] (std::string& path)
                                {
                                    if (stylelib::exists (path)) return;
@@ -3559,7 +3727,7 @@ void FacadeView::relocate()
                                    }
                                });
                                safe->canvas_->clearPictures();
-                               safe->commit (std::move (f), "Facade: relocate images");
+                               safe->writeBook (std::move (f), "Facade: relocate images");
                                safe->refreshMissing();
                            });
 }

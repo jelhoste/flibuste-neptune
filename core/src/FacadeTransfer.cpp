@@ -50,6 +50,7 @@ void remapTrack (Facade& f, int fromTrack, int toTrack)
         if (w.param != 0) w.param = remapParamTrack (w.param, fromTrack, toTrack);
         for (auto& [id, value] : w.snapshot) id = remapParamTrack (id, fromTrack, toTrack);
     }
+    for (auto& page : f.pages) remapTrack (page, fromTrack, toTrack);   // toutes les pages
 }
 
 std::vector<ParamId> instrumentParamsOfTrack (const ParameterSet& set, int track)
@@ -78,5 +79,6 @@ void forEachImagePath (Facade& f, const std::function<void (std::string&)>& visi
     for (auto& s : f.styles)
         for (const auto& role : imageRoles())
             if (! (s.*(role.field)).empty()) visit (s.*(role.field));
+    for (auto& page : f.pages) forEachImagePath (page, visit);   // toutes les pages
 }
 } // namespace neptune::core::facade

@@ -461,9 +461,32 @@ void NeptuneProcessor::uiSetConsoleMode (bool enabled, int track)
     {
         const juce::ScopedLock lock (instrumentLock_);
         mixer_.console.enabled = enabled;
-        mixer_.console.track = juce::jlimit (0, neptune::core::mixer::numTracks - 1, track);
+        mixer_.console.track = juce::jlimit (-1, neptune::core::mixer::numTracks - 1, track);   // -1 : la Façade globale
     }
     notifyStateChanged();
+}
+
+neptune::core::facade::Facade NeptuneProcessor::globalFacade() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.globalFacade;
+}
+
+void NeptuneProcessor::uiEditGlobalFacade (neptune::core::facade::Facade f, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    f = facade::sanitised (std::move (f));
+    const auto previous = globalFacade();
+    if (previous == f) return;
+    undo_.perform (std::make_unique<SnapshotCommand<facade::Facade>> (
+        previous, f,
+        [this] (const facade::Facade& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.globalFacade = v; }
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
 }
 
 neptune::core::router::Config NeptuneProcessor::routerConfig() const
@@ -1317,6 +1340,7 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
         mixer_.master = m->master;
         mixer_.router = m->router;
         mixer_.console = m->console;
+        mixer_.globalFacade = m->globalFacade;
         mixer_.selectedTrack = m->selectedTrack;
     }
     engine_.setRouter (m->router);

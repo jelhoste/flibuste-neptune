@@ -226,7 +226,9 @@ int sanitisedMeterSource (int source) noexcept
     return encodeMeterSource (m) == source ? source : 0;
 }
 
-Facade sanitised (Facade f)
+namespace
+{
+Facade sanitisedPage (Facade f)
 {
     f.image = clipped (std::move (f.image), maxImagePath);
     if (f.styles.size() > static_cast<std::size_t> (maxStyles)) f.styles.resize (maxStyles);
@@ -322,6 +324,7 @@ Facade sanitised (Facade f)
     }
     return f;
 }
+} // namespace
 
 namespace
 {
@@ -670,7 +673,9 @@ void matchSize (Facade& f, int id)
     f = sanitised (std::move (f));
 }
 
-std::string toJson (const Facade& f)
+namespace
+{
+json pageJson (const Facade& f)
 {
     json o;
     if (! f.image.empty()) o["image"] = f.image;
@@ -762,6 +767,25 @@ std::string toJson (const Facade& f)
         }
         o["styles"] = std::move (st);
     }
+    return o;
+}
+} // namespace
+
+std::string toJson (const Facade& f)
+{
+    json o = pageJson (f);
+    if (! f.name.empty()) o["name"] = f.name;
+    if (! f.pages.empty())
+    {
+        json pages = json::array();
+        for (const auto& page : f.pages)
+        {
+            json e = pageJson (page);
+            if (! page.name.empty()) e["name"] = page.name;
+            pages.push_back (std::move (e));
+        }
+        o["pages"] = std::move (pages);
+    }
     return o.dump();
 }
 
@@ -774,10 +798,11 @@ int intOf (const json& o, const char* key, int def)
 }
 } // namespace
 
-Facade fromJson (std::string_view text)
+namespace
+{
+Facade pageFromJson (const json& o)
 {
     Facade f;
-    const auto o = json::parse (text.begin(), text.end(), nullptr, false);
     if (! o.is_object()) return f;
     if (const auto it = o.find ("image"); it != o.end() && it->is_string()) f.image = it->get<std::string>();
     f.fit = static_cast<ImageFit> (intOf (o, "fit", 0));
@@ -869,6 +894,118 @@ Facade fromJson (std::string_view text)
                     }
             f.widgets.push_back (std::move (w));
         }
+    return f;
+}
+} // namespace
+
+Facade fromJson (std::string_view text)
+{
+    const auto o = json::parse (text.begin(), text.end(), nullptr, false);
+    if (! o.is_object()) return Facade();
+    Facade f = pageFromJson (o);
+    if (const auto it = o.find ("name"); it != o.end() && it->is_string()) f.name = it->get<std::string>();
+    if (const auto it = o.find ("pages"); it != o.end() && it->is_array())
+        for (const auto& e : *it)
+        {
+            if (! e.is_object() || f.pages.size() + 1 >= static_cast<std::size_t> (maxPages)) continue;
+            Facade page = pageFromJson (e);
+            if (const auto n = e.find ("name"); n != e.end() && n->is_string()) page.name = n->get<std::string>();
+            f.pages.push_back (std::move (page));
+        }
     return sanitised (std::move (f));
+}
+
+// ---- Pages ----
+Facade sanitised (Facade f)
+{
+    auto pages = std::move (f.pages);
+    f.pages.clear();
+    f.name = clipped (std::move (f.name), maxTextLength);
+    f = sanitisedPage (std::move (f));
+    for (auto& page : pages)
+    {
+        if (f.pages.size() + 1 >= static_cast<std::size_t> (maxPages)) break;
+        page.pages.clear();
+        page.name = clipped (std::move (page.name), maxTextLength);
+        f.pages.push_back (sanitisedPage (std::move (page)));
+    }
+    return f;
+}
+
+std::vector<Facade> splitPages (const Facade& book)
+{
+    std::vector<Facade> out;
+    Facade first = book;
+    first.pages.clear();
+    out.push_back (std::move (first));
+    for (const auto& page : book.pages)
+    {
+        Facade p = page;
+        p.pages.clear();
+        out.push_back (std::move (p));
+    }
+    return out;
+}
+
+Facade joinPages (std::vector<Facade> pages)
+{
+    if (pages.empty()) return Facade();
+    if (pages.size() > static_cast<std::size_t> (maxPages)) pages.resize (maxPages);
+    Facade book = std::move (pages.front());
+    book.pages.assign (std::make_move_iterator (pages.begin() + 1), std::make_move_iterator (pages.end()));
+    return book;
+}
+
+int pageCount (const Facade& book) noexcept { return 1 + static_cast<int> (book.pages.size()); }
+
+Facade pageOf (const Facade& book, int index)
+{
+    auto pages = splitPages (book);
+    return pages[static_cast<std::size_t> (std::clamp (index, 0, static_cast<int> (pages.size()) - 1))];
+}
+
+Facade withPage (const Facade& book, int index, Facade page)
+{
+    auto pages = splitPages (book);
+    page.pages.clear();
+    pages[static_cast<std::size_t> (std::clamp (index, 0, static_cast<int> (pages.size()) - 1))] = std::move (page);
+    return joinPages (std::move (pages));
+}
+
+Facade addPage (const Facade& book, std::string name)
+{
+    auto pages = splitPages (book);
+    if (pages.size() >= static_cast<std::size_t> (maxPages)) return book;
+    Facade page;
+    page.name = std::move (name);
+    pages.push_back (std::move (page));
+    return joinPages (std::move (pages));
+}
+
+Facade removePage (const Facade& book, int index)
+{
+    auto pages = splitPages (book);
+    if (pages.size() <= 1 || index < 0 || index >= static_cast<int> (pages.size())) return book;
+    pages.erase (pages.begin() + index);
+    return joinPages (std::move (pages));
+}
+
+Facade renamePage (const Facade& book, int index, std::string name)
+{
+    auto pages = splitPages (book);
+    if (index < 0 || index >= static_cast<int> (pages.size())) return book;
+    pages[static_cast<std::size_t> (index)].name = std::move (name);
+    return joinPages (std::move (pages));
+}
+
+Facade movePage (const Facade& book, int index, int target)
+{
+    auto pages = splitPages (book);
+    const int n = static_cast<int> (pages.size());
+    if (index < 0 || index >= n || target < 0 || target >= n || index == target) return book;
+    auto page = std::move (pages[static_cast<std::size_t> (index)]);
+    pages.erase (pages.begin() + index);
+    pages.insert (pages.begin() + target, std::move (page));
+    return joinPages (std::move (pages));
 }
 } // namespace neptune::core::facade
