@@ -2732,6 +2732,8 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     pageMenuButton_.setButtonText (text ("facade.page_menu"));
     pageMenuButton_.setTooltip (text ("facade.tip_page_menu"));
     pageMenuButton_.onClick = [this] { showPageMenu(); };
+    addChildComponent (addPageButton_);    // visibles seulement en mode Édition (updateButtons)
+    addChildComponent (pageMenuButton_);
     editButton_.setButtonText (text ("facade.edit_layout"));
     editButton_.setClickingTogglesState (true);
     editButton_.onClick = [this]

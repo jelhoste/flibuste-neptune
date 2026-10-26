@@ -707,7 +707,7 @@ void NeptuneEditor::resized()
         unlockButton_.setBounds (left, barY, fit (unlockButton_, 120), barH);
         trackBox_.setBounds (left, barY, 80, barH);
         left += 80 + gap + 2;
-        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_, &consoleButton_ })
+        for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_ })
         {
             const int w = fit (*b, 44);
             b->setBounds (left, barY, w, barH);
@@ -740,7 +740,9 @@ void NeptuneEditor::resized()
         undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, rowY, 64, rowH);
         const int presetW = widthOf ({ globalPresetButton_.getButtonText() });
         globalPresetButton_.setBounds (lw_ - 32 - 64 - 4 - 64 - 12 - presetW, rowY, presetW, rowH);
-        auto row = juce::Rectangle<int> (32, rowY, lw_ - 64 - 64 - 4 - 64 - 12 - presetW - 8, rowH);
+        const int consoleW = widthOf ({ consoleButton_.getButtonText() });   // le mode console est dans la barre du bas, à gauche de Preset global (la barre du haut était pleine)
+        consoleButton_.setBounds (globalPresetButton_.getX() - gap - consoleW, rowY, consoleW, rowH);
+        auto row = juce::Rectangle<int> (32, rowY, consoleButton_.getX() - 32 - 8, rowH);
         latencyLabel_.setBounds (row.removeFromLeft (widthOf ({ juce::String::fromUTF8 (tr_.format ("latency.reported", { "99999" }).c_str()) }) - pad + 12));   // la plus longue forme du texte
         row.removeFromLeft (gap);
         profileSwitchButton_.setBounds (row.removeFromLeft (widthOf ({ profileSwitchButton_.getButtonText() })));
