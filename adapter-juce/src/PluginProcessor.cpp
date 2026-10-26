@@ -513,6 +513,74 @@ void NeptuneProcessor::uiEditRouter (neptune::core::router::Config c, std::strin
         std::move (name), std::move (mergeKey)));
 }
 
+neptune::core::combi::Library NeptuneProcessor::combinations() const
+{
+    const juce::ScopedLock lock (instrumentLock_);
+    return mixer_.combinations;
+}
+
+void NeptuneProcessor::uiEditCombinations (neptune::core::combi::Library lib, std::string name, std::string mergeKey)
+{
+    using namespace neptune::core;
+    lib = combi::sanitised (std::move (lib));
+    const auto previous = combinations();
+    if (previous == lib) return;
+    undo_.perform (std::make_unique<SnapshotCommand<combi::Library>> (
+        previous, lib,
+        [this] (const combi::Library& v)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); mixer_.combinations = v; }
+            ++revision_;
+            notifyStateChanged();
+        },
+        std::move (name), std::move (mergeKey)));
+}
+
+NeptuneProcessor::CombiStatus NeptuneProcessor::combiStatus() const
+{
+    CombiStatus s;
+    s.bank = combi_.bank();
+    s.setArmed = combi_.armed();
+    s.sequencePosition = combi_.sequencePosition();
+    s.sequenceLength = static_cast<int> (combinations().sequence.size());
+    return s;
+}
+
+neptune::core::combi::Result NeptuneProcessor::uiCombiCommand (int command, int track)
+{
+    using namespace neptune::core;
+    auto lib = combinations();
+    // Les paramètres réglés par un rappel passent par la pile d'annulation et préviennent l'hôte ; le tout forme une seule entrée d'historique.
+    combi_.setWriter ([this] (ParamId id, double real)
+    {
+        const auto index = params_.indexOf (id);
+        if (index == ParameterSet::npos) return;
+        auto* hp = hostParam (index);
+        if (hp != nullptr) hp->beginChangeGesture();
+        undo_.setParameter (params_, id, real);
+        if (hp != nullptr)
+        {
+            hp->setValueNotifyingHost (static_cast<float> (params_.getNormalizedAt (index)));
+            hp->endChangeGesture();
+        }
+    });
+    undo_.beginTransaction ("Combination");
+    const auto outcome = combi_.run (command, lib, params_, juce::jlimit (0, mixer::numTracks - 1, track));
+    if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Combination: store");
+    undo_.endTransaction();
+    return outcome.result;
+}
+
+bool NeptuneProcessor::combiLit (int command, int track) const
+{
+    using namespace neptune::core;
+    if (command < combi::kCommandGeneral || command >= combi::kCommandDivisional + combi::kPistons) return false;
+    const auto lib = combinations();
+    const auto* memory = command < combi::kCommandDivisional ? lib.general (combi_.bank(), command - combi::kCommandGeneral)
+                                                              : lib.divisional (track, combi_.bank(), command - combi::kCommandDivisional);
+    return memory != nullptr && combi::matches (params_, *memory);
+}
+
 neptune::core::trackexport::Bundle NeptuneProcessor::exportTrackBundle (int track) const
 {
     using namespace neptune::core;
@@ -1339,11 +1407,13 @@ void NeptuneProcessor::adoptMixerFromState (const std::optional<neptune::core::M
         mixer_.parallels = m->parallels;
         mixer_.master = m->master;
         mixer_.router = m->router;
+        mixer_.combinations = m->combinations;
         mixer_.console = m->console;
         mixer_.globalFacade = m->globalFacade;
         mixer_.selectedTrack = m->selectedTrack;
     }
     engine_.setRouter (m->router);
+    combi_.resetSequence();
     selectedTrack_.store (m->selectedTrack);
     pushMixerSettingsToEngine();
     undo_.clear(); // l'historique pointait vers les modules et les instruments remplacés
@@ -1710,7 +1780,10 @@ void NeptuneProcessor::controlTick()
                 }
                 break;
             }
-            default: break;
+            default:
+                // CC, note ou OSC lié à une commande de combinaison : les divisionnels visent le clavier (la piste) sélectionné
+                if (const int command = neptune::core::control::combinationCommand (a); command > 0) uiCombiCommand (command, selectedTrack());
+                break;
         }
     }
     std::vector<std::size_t> changed;

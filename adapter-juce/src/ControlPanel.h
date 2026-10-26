@@ -37,6 +37,7 @@ private:
     juce::String targetLabel (const neptune::core::control::Binding&) const;
     juce::Colour colour (neptune::core::theme::Token) const;
     juce::String text (const char* key) const;
+    juce::String actionText (neptune::core::control::Action) const;   // action de base ou commande de combinaison d'orgue
 
     NeptuneProcessor& processor_;
     neptune::core::theme::Palette palette_;

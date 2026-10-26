@@ -1,4 +1,5 @@
 #include "neptune/core/Facade.h"
+#include "neptune/core/Combinations.h"
 
 #include <algorithm>
 #include <cmath>
@@ -287,7 +288,7 @@ Facade sanitisedPage (Facade f)
         w.velocity = std::clamp (w.velocity, 1, 127);
         w.vertical = w.vertical != 0 ? 1 : 0;
         w.source = w.type == WidgetType::Meter ? sanitisedMeterSource (w.source) : std::clamp (w.source, 0, 2);
-        w.actionMode = std::clamp (w.actionMode, 0, 1);
+        w.actionMode = std::clamp (w.actionMode, 0, 1 + combi::kNumCommands);
         w.midi = midisend::sanitised (std::move (w.midi));
         w.midiTarget = std::clamp (w.midiTarget, 1, 3);
         w.midiFader = w.midiFader != 0 ? 1 : 0;

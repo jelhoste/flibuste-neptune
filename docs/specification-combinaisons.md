@@ -1,6 +1,6 @@
 # Combinaisons d'orgue (palier 7) — spécification
 
-Statut : **cœur écrit et testé** (`core/include/neptune/core/Combinations.h`, `core/src/Combinations.cpp`, `tests/test_combinations.cpp`). Interface, pistons de la Façade, MIDI et OSC : **pas encore faits** (voir « Étapes suivantes »).
+Statut : **cœur écrit et testé** (`core/include/neptune/core/Combinations.h`, `core/src/Combinations.cpp`, `tests/test_combinations.cpp`) ; **branché** dans le plugin (2026-10-26, à valider dans Reaper) : processeur, couche de contrôle (CC, notes, OSC), boutons de la Façade. Pas encore fait : écran de gestion, changement de programme MIDI, divisionnels par piste via CC (voir « Étapes suivantes »).
 
 Décisions de l'utilisateur (2026-10-26, par questions à choix) : voir « Décisions ». Ce qui suit les complète par des choix de détail, signalés « à confirmer » quand ils ne viennent pas de l'utilisateur.
 
@@ -57,10 +57,18 @@ Stockage : `MixerState::combinations` (JSON `combinations`, absent si vide).
 }
 ```
 
+## Branchement (2026-10-26, à valider dans Reaper)
+
+- **Processeur** (`PluginProcessor`) : `combinations()` / `uiEditCombinations` (bibliothèque dans le projet, annulable), `uiCombiCommand (commande, piste)` (exécute une commande ; **un rappel = une seule entrée d'annulation**, les paramètres réglés passent par la pile d'annulation et préviennent l'hôte), `combiStatus`, `combiLit` (voyant d'un piston). L'état de jeu (banque, Set, séquenceur) vit dans le processeur, sur le fil de message, et n'est pas enregistré.
+- **Commandes** (`combi::kCommand...`) : 1..10 piston général, 11..20 piston divisionnel, 21 annulation générale, 22 Set, 23 / 24 pas suivant / précédent, 25 / 26 banque suivante / précédente.
+- **Couche de contrôle** : les 26 commandes sont des **actions** (menu « Actions > Combinaisons d'orgue » du panneau de contrôle). On les lie à une note ou un CC (pédalier, pistons physiques), à une adresse OSC ou à une macro, comme « Piste suivante » : un seul déclenchement par appui. Les divisionnels visent le clavier (la piste) **sélectionné** dans Neptune.
+- **Façade** : un bouton **Action** dont le menu « Mode » propose « Combinaisons d'orgue » (`Widget::actionMode = 1 + commande`). Il agit à l'appui, s'allume quand l'état courant est celui de la mémoire (généraux et divisionnels), affiche G1..G10, D1..D10, GC, Set, Next, Prev, Bank + / - (avec la banque ou le pas courant). Pour un divisionnel, la piste est celle de la Façade (ou la piste sélectionnée pour la Façade globale). La touche **Set** de la Façade (widget Set) et celle des combinaisons sont **la même** : armer l'une arme l'autre, et elle arme aussi les pistons « instantané » existants.
+- **Enregistrement** : Set puis un piston : l'état courant des généraux (jeux, tirants, transpositions) ou des jeux du clavier y est mémorisé, annulable.
+
 ## Étapes suivantes (non faites)
 
-1. **Branchement du moteur et de l'adaptateur** : `NeptuneProcessor` possède un `Controller` ; les actions s'exécutent sur le fil de message, avec une entrée d'annulation (comme `uiEditText`), pour que les rappels soient annulables.
-2. **Déclencheurs** : paramètres-impulsions « Combination General 1..10 », « Divisional 1..10 » par clavier, « Cancel », « Set », « Next », « Previous », « Bank + / − », pour qu'ils soient pilotés par CC, notes, OSC (`/neptune/combination/...`), automation et Façade. Changement de programme MIDI via `Controller::programChange`.
-3. **Façade** : widgets piston (voyant allumé quand l'état courant égale la mémoire), Set, Annulation générale, suivant / précédent, affichage de la banque et du pas.
-4. **Onglet ou fenêtre de gestion** : noms, copie, effacement, édition de la séquence.
-5. Mise à jour de `docs/passage-de-relais.md` et de la roadmap (palier 7).
+1. **Changement de programme MIDI** : `Controller::programChange` existe mais la couche de contrôle n'a pas de source « programme » ; à ajouter.
+2. **Divisionnels de tous les claviers par CC** : aujourd'hui seulement le clavier sélectionné ; des actions par clavier (16 × 10) encombreraient le menu, à trancher.
+3. **Écran de gestion** : noms des mémoires, copie, effacement, édition de la séquence (aujourd'hui la séquence ne s'édite pas depuis l'interface : la liste existe dans le projet et le cœur la parcourt, mais aucun écran ne la remplit).
+4. **Barre de banque / pas** dédiée et retour visuel du Set maintenu (`Controller::setHeld` n'est pas encore relié à l'interface).
+5. Mise à jour de la roadmap (palier 7) après validation dans Reaper.

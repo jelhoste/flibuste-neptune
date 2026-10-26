@@ -203,6 +203,24 @@ public:
     void uiEditGlobalFacade (neptune::core::facade::Facade, std::string name, std::string mergeKey = {});
     void uiSetConsoleMode (bool enabled, int track);
     void uiEditRouter (neptune::core::router::Config, std::string name, std::string mergeKey = {});
+    // Combinaisons d'orgue (voir Combinations.h) : la bibliothèque (généraux, divisionnels, séquence) est enregistrée avec le projet et annulable ;
+    // l'état de jeu (banque courante, touche Set, position du séquenceur) est propre à la session. Tout se passe sur le fil de message.
+    neptune::core::combi::Library combinations() const;
+    void uiEditCombinations (neptune::core::combi::Library, std::string name, std::string mergeKey = {});
+    struct CombiStatus
+    {
+        int bank = 0;               // 0..9
+        bool setArmed = false;
+        int sequencePosition = -1;  // -1 : avant le premier pas
+        int sequenceLength = 0;
+    };
+    CombiStatus combiStatus() const;
+    bool combiArmed() const noexcept { return combi_.armed(); }   // touche Set armée : le prochain piston mémorise (aussi pour les pistons « instantané » de la Façade)
+    void uiCombiArm (bool armed) noexcept { combi_.arm (armed); }
+    // Exécute une commande 1..26 (voir Combinations.h). `track` : le clavier visé par un divisionnel. Un rappel est une seule entrée d'annulation.
+    neptune::core::combi::Result uiCombiCommand (int command, int track);
+    // Voyant d'un piston : vrai si l'état courant est celui de la mémoire (généraux et divisionnels seulement).
+    bool combiLit (int command, int track) const;
     // Preset global : l'état du projet sans ce qui est propre à l'instance (identifiant, verrou de profil, assignations CC / OSC).
     // Le chargement remplace tout le mixeur et les valeurs des réglages (comme ouvrir un autre projet) et vide l'historique d'annulation.
     std::string globalStateText() const;
@@ -365,6 +383,7 @@ private:
     neptune::core::UndoManager undo_; // thread message uniquement
     mutable juce::CriticalSection instrumentLock_;
     neptune::core::MixerState mixer_;                                   // protégé par instrumentLock_
+    neptune::core::combi::Controller combi_;                            // état de jeu des combinaisons : fil de message seulement
     std::array<InstrumentStatus, neptune::core::mixer::numTracks> status_; // protégé par instrumentLock_
     std::atomic<int> selectedTrack_ { 0 };
     std::atomic<std::uint32_t> revision_ { 0 };

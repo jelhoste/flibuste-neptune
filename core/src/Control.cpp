@@ -6,14 +6,33 @@
 
 #include <nlohmann/json.hpp>
 
+#include "neptune/core/Combinations.h"
+
 namespace neptune::core::control
 {
 using nlohmann::json;
 
 // ---------------------------------------------------------------------------------------------------- actions, valeurs
 
+static_assert (kNumCombinationActions == combi::kNumCommands, "une action par commande de combinaison");
+
+namespace
+{
+const std::vector<std::string>& combinationKeys()
+{
+    static const std::vector<std::string> keys = []
+    {
+        std::vector<std::string> k;
+        for (int c = 1; c <= kNumCombinationActions; ++c) k.push_back (combi::commandKey (c));
+        return k;
+    }();
+    return keys;
+}
+} // namespace
+
 const char* toString (Action a) noexcept
 {
+    if (const int command = combinationCommand (a); command >= 1 && command <= kNumCombinationActions) return combinationKeys()[static_cast<std::size_t> (command - 1)].c_str();
     switch (a)
     {
         case Action::PresetNext: return "preset_next";

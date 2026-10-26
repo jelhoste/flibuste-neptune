@@ -33,9 +33,14 @@ bool addMacroParams (ParameterSet&, std::string* error = nullptr);
 bool isBandOrMacroParam (ParamId) noexcept;
 
 enum class SourceKind { CC, Osc, Macro, Nrpn };
+// Les 26 commandes de combinaisons d'orgue (voir Combinations.h) suivent les actions de base : valeur = 5 + commande (1..26).
 enum class Action { None = 0, PresetNext, PresetPrevious, Panic, TrackNext, TrackPrevious };
-constexpr int kNumActions = 6;
-const char* toString (Action) noexcept;                 // "none" / "preset_next" / "preset_previous" / "panic" / "track_next" / "track_previous"
+constexpr int kNumBaseActions = 6;
+constexpr int kNumCombinationActions = 26;
+constexpr int kNumActions = kNumBaseActions + kNumCombinationActions;
+constexpr Action combinationAction (int command) noexcept { return static_cast<Action> (kNumBaseActions - 1 + command); }
+constexpr int combinationCommand (Action a) noexcept { return static_cast<int> (a) >= kNumBaseActions ? static_cast<int> (a) - (kNumBaseActions - 1) : 0; }   // 0 : pas une commande
+const char* toString (Action) noexcept;                 // "none" / "preset_next" / "preset_previous" / "panic" / "track_next" / "track_previous" / "combi_general_1"...
 bool actionFromString (std::string_view, Action& out);
 
 struct Source

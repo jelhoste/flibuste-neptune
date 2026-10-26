@@ -194,27 +194,77 @@ Memory capture (const ParameterSet& set, const std::vector<ParamId>& ids)
 
 namespace
 {
-void apply (ParameterSet& set, ParamId id, double value, std::vector<Change>& changes)
+void apply (ParameterSet& set, ParamId id, double value, std::vector<Change>& changes, const Writer& write)
 {
     const auto index = set.indexOf (id);
     if (index == ParameterSet::npos) return;
     const double before = set.getAt (index);
-    if (set.setAt (index, value)) changes.push_back ({ id, before, set.getAt (index) });
+    const double target = set.spec (index).clamp (value);
+    if (target == before) return;
+    if (write) write (id, target);
+    else set.setAt (index, target);
+    const double after = set.getAt (index);
+    if (after != before) changes.push_back ({ id, before, after });
 }
 } // namespace
 
-std::vector<Change> recall (ParameterSet& set, const Memory& m)
+std::vector<Change> recall (ParameterSet& set, const Memory& m, const Writer& write)
 {
     std::vector<Change> changes;
-    for (const auto& [id, value] : m.values) apply (set, id, value, changes);
+    for (const auto& [id, value] : m.values) apply (set, id, value, changes, write);
     return changes;
 }
 
-std::vector<Change> cancelAll (ParameterSet& set)
+std::vector<Change> cancelAll (ParameterSet& set, const Writer& write)
 {
     std::vector<Change> changes;
-    for (const ParamId id : consoleParams (set)) apply (set, id, 0.0, changes);
+    for (const ParamId id : consoleParams (set)) apply (set, id, 0.0, changes, write);
     return changes;
+}
+
+bool matches (const ParameterSet& set, const Memory& m)
+{
+    bool any = false;
+    for (const auto& [id, value] : m.values)
+    {
+        const auto index = set.indexOf (id);
+        if (index == ParameterSet::npos) continue;
+        any = true;
+        if (set.getAt (index) != set.spec (index).clamp (value)) return false;
+    }
+    return any;
+}
+
+std::string commandKey (int command)
+{
+    if (command >= kCommandGeneral && command < kCommandGeneral + kPistons) return "combi_general_" + std::to_string (command - kCommandGeneral + 1);
+    if (command >= kCommandDivisional && command < kCommandDivisional + kPistons) return "combi_divisional_" + std::to_string (command - kCommandDivisional + 1);
+    switch (command)
+    {
+        case kCommandCancel: return "combi_cancel";
+        case kCommandSet: return "combi_set";
+        case kCommandNext: return "combi_next";
+        case kCommandPrevious: return "combi_previous";
+        case kCommandBankNext: return "combi_bank_next";
+        case kCommandBankPrevious: return "combi_bank_previous";
+        default: return {};
+    }
+}
+
+std::string commandLabel (int command)
+{
+    if (command >= kCommandGeneral && command < kCommandGeneral + kPistons) return "G" + std::to_string (command - kCommandGeneral + 1);
+    if (command >= kCommandDivisional && command < kCommandDivisional + kPistons) return "D" + std::to_string (command - kCommandDivisional + 1);
+    switch (command)
+    {
+        case kCommandCancel: return "GC";
+        case kCommandSet: return "Set";
+        case kCommandNext: return "Next";
+        case kCommandPrevious: return "Prev";
+        case kCommandBankNext: return "Bank +";
+        case kCommandBankPrevious: return "Bank -";
+        default: return {};
+    }
 }
 
 void Controller::setBank (int bank) noexcept { bank_ = std::clamp (bank, 0, kBanks - 1); }
@@ -244,7 +294,7 @@ Outcome storeInto (Memory& slot, Memory fresh)
     return out;
 }
 
-Outcome recallMemory (const Memory* m, ParameterSet& set)
+Outcome recallMemory (const Memory* m, ParameterSet& set, const Writer& write)
 {
     Outcome out;
     if (m == nullptr)
@@ -253,7 +303,7 @@ Outcome recallMemory (const Memory* m, ParameterSet& set)
         return out;
     }
     out.result = Result::Recalled;
-    out.changes = recall (set, *m);
+    out.changes = recall (set, *m, write);
     return out;
 }
 } // namespace
@@ -269,7 +319,7 @@ Outcome Controller::general (Library& lib, ParameterSet& set, int piston)
     const int key = generalKey (bank_, piston);
     const auto it = std::find (lib.sequence.begin(), lib.sequence.end(), key);
     if (it != lib.sequence.end() && lib.general (bank_, piston) != nullptr) seq_ = static_cast<int> (it - lib.sequence.begin());
-    return recallMemory (lib.general (bank_, piston), set);
+    return recallMemory (lib.general (bank_, piston), set, writer_);
 }
 
 Outcome Controller::divisional (Library& lib, ParameterSet& set, int track, int piston)
@@ -280,20 +330,20 @@ Outcome Controller::divisional (Library& lib, ParameterSet& set, int track, int 
         armed_ = false;
         return storeInto (lib.divisionals[divisionalKey (track, bank_, piston)], capture (set, stopParams (set, track)));
     }
-    return recallMemory (lib.divisional (track, bank_, piston), set);
+    return recallMemory (lib.divisional (track, bank_, piston), set, writer_);
 }
 
 Outcome Controller::cancel (ParameterSet& set)
 {
     Outcome out;
     out.result = Result::Recalled;
-    out.changes = cancelAll (set);
+    out.changes = cancelAll (set, writer_);
     return out;
 }
 
 Outcome Controller::recallKey (const Library& lib, ParameterSet& set, int key)
 {
-    return recallMemory (lib.general (key / kPistons, key % kPistons), set);
+    return recallMemory (lib.general (key / kPistons, key % kPistons), set, writer_);
 }
 
 Outcome Controller::sequenceNext (const Library& lib, ParameterSet& set)
@@ -308,6 +358,23 @@ Outcome Controller::sequencePrevious (const Library& lib, ParameterSet& set)
     if (seq_ <= 0 || lib.sequence.empty()) return {};
     seq_ = std::min (seq_, static_cast<int> (lib.sequence.size())) - 1;
     return recallKey (lib, set, lib.sequence[static_cast<std::size_t> (seq_)]);
+}
+
+Outcome Controller::run (int command, Library& lib, ParameterSet& set, int track)
+{
+    if (command >= kCommandGeneral && command < kCommandGeneral + kPistons) return general (lib, set, command - kCommandGeneral);
+    if (command >= kCommandDivisional && command < kCommandDivisional + kPistons) return divisional (lib, set, track, command - kCommandDivisional);
+    Outcome done;
+    switch (command)
+    {
+        case kCommandCancel: return cancel (set);
+        case kCommandSet: armed_ = ! armed_; done.result = Result::Done; return done;
+        case kCommandNext: return sequenceNext (lib, set);
+        case kCommandPrevious: return sequencePrevious (lib, set);
+        case kCommandBankNext: if (nextBank()) done.result = Result::Done; return done;
+        case kCommandBankPrevious: if (previousBank()) done.result = Result::Done; return done;
+        default: return done;
+    }
 }
 
 Outcome Controller::programChange (Library& lib, ParameterSet& set, int program)

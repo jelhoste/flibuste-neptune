@@ -5,6 +5,7 @@
 #include <array>
 #include <map>
 
+#include "CombiText.h"
 #include "FacadeBundle.h"
 #include "ParamFilterBar.h"
 #include "VelocityPanel.h"
@@ -401,13 +402,19 @@ public:
         }
         if (w->type == fc::WidgetType::Set)
         {
-            if (! e.mods.isPopupMenu()) { setArmed_ = ! setArmed_; repaint(); }
+            if (! e.mods.isPopupMenu()) { o.processor_.uiCombiArm (! o.processor_.combiArmed()); repaint(); }
+            return;
+        }
+        if (w->type == fc::WidgetType::Action && w->actionMode >= 2)
+        {
+            // commande de combinaison d'orgue : agit à l'appui (piston, Set, annulation, séquenceur, banque)
+            if (! e.mods.isPopupMenu()) { o.processor_.uiCombiCommand (w->actionMode - 1, combiTrack()); repaint(); }
             return;
         }
         if (w->type == fc::WidgetType::Action)
         {
             if (e.mods.isPopupMenu()) return;
-            if (setArmed_ && w->actionMode == 0) { storePiston (w->id); return; }   // « Set » armé : ce piston mémorise les valeurs courantes
+            if (o.processor_.combiArmed() && w->actionMode == 0) { storePiston (w->id); return; }   // « Set » armé : ce piston mémorise les valeurs courantes
             // le rappel a lieu au relâchement ; un appui long (0,7 s) mémorise à la place, comme « Set » + piston
             pistonId_ = w->id;
             longPress_ = false;
@@ -905,7 +912,7 @@ private:
                 if (ps.find (entry.first) != nullptr) entry.second = ps.get (entry.first);
             o.commit (std::move (f), "Facade: store piston");
         }
-        setArmed_ = false;
+        o.processor_.uiCombiArm (false);
         repaint();
     }
 
@@ -917,8 +924,31 @@ private:
         storePiston (pistonId_);
     }
 
+    // Piste visée par un divisionnel : celle de la Façade, ou la piste sélectionnée pour la Façade globale.
+    int combiTrack() const { return owner_.global_ ? owner_.processor_.selectedTrack() : owner_.track_; }
+
+    // Texte d'un bouton de combinaison : « G3 », « D3 », « GC », « Set », et la banque ou le pas courant pour les boutons qui les changent.
+    juce::String combiCaption (int command) const
+    {
+        namespace cb = neptune::core::combi;
+        juce::String label = juce::String::fromUTF8 (cb::commandLabel (command).c_str());
+        if (command == cb::kCommandBankNext || command == cb::kCommandBankPrevious)
+            label << " (" << (owner_.processor_.combiStatus().bank + 1) << ")";
+        else if (command == cb::kCommandNext || command == cb::kCommandPrevious)
+        {
+            const auto status = owner_.processor_.combiStatus();
+            if (status.sequenceLength > 0) label << " (" << (status.sequencePosition + 1) << "/" << status.sequenceLength << ")";
+        }
+        return label;
+    }
+
     bool actionIsLit (const fc::Widget& w) const
     {
+        if (w.actionMode >= 2)
+        {
+            const int command = w.actionMode - 1;
+            return command == neptune::core::combi::kCommandSet ? owner_.processor_.combiArmed() : owner_.processor_.combiLit (command, combiTrack());
+        }
         auto& ps = owner_.processor_.parameters();
         if (w.snapshot.empty()) return false;
         for (const auto& [id, value] : w.snapshot)
@@ -955,7 +985,8 @@ private:
         const bool linked = spec != nullptr;
         const juce::Rectangle<float> b (static_cast<float> (w.x), static_cast<float> (w.y), static_cast<float> (w.w), static_cast<float> (w.h));
         const juce::String caption0 = w.text.empty() ? (linked ? utf8 (spec->name) : juce::String()) : utf8 (w.text);
-        const juce::String caption = w.type == fc::WidgetType::Set && w.text.empty() ? juce::String ("Set") : caption0;
+        const bool isCombi = w.type == fc::WidgetType::Action && w.actionMode >= 2;
+        const juce::String caption = w.type == fc::WidgetType::Set && w.text.empty() ? juce::String ("Set") : isCombi && w.text.empty() ? combiCaption (w.actionMode - 1) : caption0;
         const float n = linked ? static_cast<float> (ps.getNormalized (w.param)) : 0.0f;
         const float pos = linked ? static_cast<float> (shownPosition (w)) : 0.0f;   // potard et curseur : crans et inversion compris
 
@@ -1024,8 +1055,8 @@ private:
             {
                 const bool isAction = w.type == fc::WidgetType::Action;
                 const bool isSet = w.type == fc::WidgetType::Set;
-                const bool on = isSet ? setArmed_ : isAction ? actionIsLit (w) : linked && n >= 0.5f;
-                const bool empty = isSet ? false : isAction ? w.snapshot.empty() : ! linked;
+                const bool on = isSet ? o.processor_.combiArmed() : isAction ? actionIsLit (w) : linked && n >= 0.5f;
+                const bool empty = isSet ? false : isAction ? (w.actionMode < 2 && w.snapshot.empty()) : ! linked;
                 if (const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr)
                 {
                     const bool hover = hoverId_ == w.id && ! o.editMode_;
@@ -1036,7 +1067,7 @@ private:
                     if (face.isValid())
                     {
                         g.drawImage (face, b, juce::RectanglePlacement::centred);
-                        drawStyledText (g, style, utf8 (w.text), b, 0.3f, o.colour (Token::Text));
+                        drawStyledText (g, style, isCombi ? caption : utf8 (w.text), b, 0.3f, o.colour (Token::Text));
                         break;
                     }
                 }
@@ -1364,7 +1395,6 @@ private:
     int midiId_ = 0;                          // widget « Message MIDI » en cours d'appui
     std::map<int, int> midiLast_;             // dernière valeur envoyée par chaque curseur MIDI
     std::map<int, double> midiFader_;         // position affichée de chaque curseur MIDI (0..1)
-    bool setArmed_ = false;      // la touche « Set » est enfoncée : le prochain piston cliqué mémorise
     int pistonId_ = 0;           // piston en cours d'appui (rappel au relâchement, mémorisation si l'appui est long)
     bool longPress_ = false;
     std::map<int, std::unique_ptr<VelocityPanel>> panels_;
@@ -3291,11 +3321,16 @@ void FacadeView::showActionModeMenu()
     juce::PopupMenu menu;
     menu.addItem (1, text ("facade.mode_restore"), true, a->actionMode == 0);
     menu.addItem (2, text ("facade.mode_reset"), true, a->actionMode == 1);
+    juce::PopupMenu combinations;
+    for (int c = 1; c <= neptune::core::combi::kNumCommands; ++c)
+        combinations.addItem (100 + c, combiCommandText ([this] (const char* key) { return text (key); }, c), true, a->actionMode == 1 + c);
+    menu.addSubMenu (text ("combi.menu"), combinations);
     menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&actionModeButton_), [safe = juce::Component::SafePointer<FacadeView> (this)] (int choice)
     {
         if (safe == nullptr || choice <= 0) return;
-        safe->applySingle ([choice] (fc::Widget& w) { w.actionMode = choice - 1; }, "Facade: action mode");
+        const int mode = choice > 100 ? choice - 100 + 1 : choice - 1;   // 100 + commande : une commande de combinaison (mode 1 + commande)
+        safe->applySingle ([mode] (fc::Widget& w) { w.actionMode = mode; }, "Facade: action mode");
     });
 }
 

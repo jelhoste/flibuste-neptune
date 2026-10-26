@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "CombiText.h"
 #include "neptune/core/Osc.h"
 
 using namespace neptune::core;
@@ -118,6 +119,13 @@ juce::Colour ControlPanel::colour (Token t) const
 
 juce::String ControlPanel::text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
 
+juce::String ControlPanel::actionText (ctl::Action a) const
+{
+    const int command = ctl::combinationCommand (a);
+    if (command <= 0) return text (actionKey (a));
+    return combiCommandText ([this] (const char* key) { return text (key); }, command);
+}
+
 ControlPanel::ControlPanel (NeptuneProcessor& p, const theme::Palette& palette, const i18n::Translator& tr)
     : processor_ (p), palette_ (palette), tr_ (tr), content_ (std::make_unique<Content>())
 {
@@ -151,7 +159,7 @@ const ctl::Binding* ControlPanel::at (std::size_t i) const
 
 juce::String ControlPanel::targetLabel (const ctl::Binding& b) const
 {
-    if (b.target.isAction) return text ("cpanel.action") + ": " + text (actionKey (b.target.action));
+    if (b.target.isAction) return text ("cpanel.action") + ": " + actionText (b.target.action);
     const auto* spec = processor_.parameters().find (b.target.param);
     if (spec == nullptr) return text ("cpanel.choose_target");
     const auto& address = osc::addressFor (b.target.param);
@@ -334,9 +342,10 @@ void ControlPanel::showTargetMenu (std::size_t index, juce::Component& anchor)
     }
     juce::PopupMenu menu = buildMenu (root, current.isAction ? 0 : current.param, *ids);
     menu.addSeparator();
-    juce::PopupMenu actions;
+    juce::PopupMenu actions, combinations;
     for (int a = 1; a < ctl::kNumActions; ++a)
-        actions.addItem (kActionBase + a, text (actionKey (static_cast<ctl::Action> (a))), true, current.isAction && static_cast<int> (current.action) == a);
+        (a < ctl::kNumBaseActions ? actions : combinations).addItem (kActionBase + a, actionText (static_cast<ctl::Action> (a)), true, current.isAction && static_cast<int> (current.action) == a);
+    actions.addSubMenu (text ("combi.menu"), combinations);
     menu.addSubMenu (text ("cpanel.actions"), actions);
     juce::Component::SafePointer<ControlPanel> safe (this);
     menu.setLookAndFeel (&anchor.getLookAndFeel());   // sinon le menu prend le style JUCE d'origine

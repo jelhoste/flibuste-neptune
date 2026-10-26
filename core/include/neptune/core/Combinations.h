@@ -7,6 +7,7 @@
 // `Library` est la donnée (dans le projet, voir MixerState) ; `Controller` est l'état de jeu (banque courante, touche Set, position du
 // séquenceur) et exécute les actions. Les valeurs sont des valeurs réelles de paramètres. Cœur portable, sans JUCE.
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -61,20 +62,41 @@ Library fromJson (std::string_view);          // lecture tolérante
 std::vector<ParamId> stopParams (const ParameterSet&, int track);
 std::vector<ParamId> consoleParams (const ParameterSet&);
 
+// Commandes (boutons de Façade : Widget::actionMode = 1 + commande ; actions de la couche de contrôle : CC, notes, OSC).
+//  1..10 : piston général 1..10 de la banque courante ; 11..20 : piston divisionnel 1..10 du clavier courant ;
+//  21 : annulation générale ; 22 : touche Set (arme / désarme) ; 23 / 24 : pas suivant / précédent du séquenceur ; 25 / 26 : banque suivante / précédente.
+constexpr int kCommandGeneral = 1;
+constexpr int kCommandDivisional = 11;
+constexpr int kCommandCancel = 21;
+constexpr int kCommandSet = 22;
+constexpr int kCommandNext = 23;
+constexpr int kCommandPrevious = 24;
+constexpr int kCommandBankNext = 25;
+constexpr int kCommandBankPrevious = 26;
+constexpr int kNumCommands = 26;
+std::string commandKey (int command);                       // « combi_general_3 », « combi_cancel »... (fichiers, couche de contrôle) ; vide hors 1..26
+std::string commandLabel (int command);                     // texte court d'un bouton : « G3 », « D3 », « GC », « Set », « Next »...
+
 struct Change
 {
     ParamId param = 0;
     double before = 0.0, after = 0.0;
 };
 
+// Écrit un paramètre (valeur réelle déjà bornée) : l'adaptateur y met l'annulation et la notification à l'hôte. Sans écrivain, `ParameterSet::setAt`.
+using Writer = std::function<void (ParamId, double)>;
+
+// Vrai si le jeu a déjà, pour chaque valeur connue de la mémoire, la valeur qu'elle porte (voyant d'un piston allumé). Une mémoire sans valeur connue : faux.
+bool matches (const ParameterSet&, const Memory&);
+
 // Mémorise les valeurs courantes de `ids` (ceux que le jeu ne connaît pas sont ignorés). Le nom est laissé vide.
 Memory capture (const ParameterSet&, const std::vector<ParamId>& ids);
 // Règle les paramètres de la mémoire ; rend ce qui a réellement changé (valeur bornée au paramètre ; id inconnu : ignoré).
-std::vector<Change> recall (ParameterSet&, const Memory&);
+std::vector<Change> recall (ParameterSet&, const Memory&, const Writer& write = {});
 // Annulation générale : tout repousser (valeur 0 de chaque paramètre de la console).
-std::vector<Change> cancelAll (ParameterSet&);
+std::vector<Change> cancelAll (ParameterSet&, const Writer& write = {});
 
-enum class Result { Ignored, Empty, Recalled, Stored };
+enum class Result { Ignored, Empty, Recalled, Stored, Done };   // Done : changement d'état de jeu seul (touche Set, banque)
 struct Outcome
 {
     Result result = Result::Ignored;
@@ -84,6 +106,8 @@ struct Outcome
 class Controller
 {
 public:
+    void setWriter (Writer w) { writer_ = std::move (w); }   // utilisé par recall et l'annulation générale
+
     int bank() const noexcept { return bank_; }
     void setBank (int bank) noexcept;                 // bornée 0..kBanks-1
     bool nextBank() noexcept;                         // false aux extrémités (pas de bouclage)
@@ -109,11 +133,15 @@ public:
     Outcome sequenceNext (const Library&, ParameterSet&);
     Outcome sequencePrevious (const Library&, ParameterSet&);
 
+    // Exécute une commande 1..26 (voir plus haut). `track` : le clavier des divisionnels (0..15). Set : arme ou désarme.
+    Outcome run (int command, Library&, ParameterSet&, int track);
+
     // Changement de programme MIDI : 0..9 = piston 1..10 de la banque courante (général). Au-delà : ignoré.
     Outcome programChange (Library&, ParameterSet&, int program);
 
 private:
     Outcome recallKey (const Library&, ParameterSet&, int generalKeyValue);
+    Writer writer_;
     int bank_ = 0;
     bool held_ = false, armed_ = false;
     int seq_ = -1;

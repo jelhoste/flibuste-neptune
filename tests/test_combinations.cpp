@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "neptune/core/Combinations.h"
+#include "neptune/core/Control.h"
+#include "neptune/core/Facade.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/MixerState.h"
 #include "neptune/core/NoteRouter.h"
@@ -313,4 +315,129 @@ TEST_CASE ("combinations: the library lives in the mixer state")
     MixerState other = m;
     other.combinations.generals[generalKey (0, 0)].name = "Autre";
     CHECK_FALSE (other == m);
+}
+
+TEST_CASE ("combinations: every command has a key, a label and a control action that round-trips")
+{
+    std::vector<std::string> keys;
+    for (int c = 1; c <= kNumCommands; ++c)
+    {
+        const auto key = commandKey (c);
+        CHECK_FALSE (key.empty());
+        CHECK_FALSE (commandLabel (c).empty());
+        CHECK (std::find (keys.begin(), keys.end(), key) == keys.end());
+        keys.push_back (key);
+        control::Action a = control::Action::None;
+        REQUIRE (control::actionFromString (key, a));
+        CHECK (control::combinationCommand (a) == c);
+        CHECK (control::combinationAction (c) == a);
+        CHECK (std::string (control::toString (a)) == key);
+    }
+    CHECK (commandKey (0).empty());
+    CHECK (commandKey (kNumCommands + 1).empty());
+    CHECK (control::combinationCommand (control::Action::Panic) == 0);
+    CHECK (std::string (control::toString (control::Action::Panic)) == "panic");
+    control::Action none;
+    CHECK_FALSE (control::actionFromString ("combi_general_11", none));
+    CHECK (control::kNumActions == control::kNumBaseActions + kNumCommands);
+}
+
+TEST_CASE ("combinations: run executes every kind of command")
+{
+    auto set = makeSet();
+    Library lib;
+    Controller c;
+    set.set (router::switchParam (0), 1.0);
+
+    CHECK (c.run (kCommandSet, lib, set, 0).result == Result::Done);
+    CHECK (c.armed());
+    CHECK (c.run (kCommandGeneral + 2, lib, set, 0).result == Result::Stored);
+    CHECK_FALSE (c.armed());
+    CHECK (c.run (kCommandSet, lib, set, 0).result == Result::Done);
+    CHECK (c.run (kCommandSet, lib, set, 0).result == Result::Done);   // un second appui désarme
+    CHECK_FALSE (c.armed());
+
+    set.set (router::switchParam (0), 0.0);
+    CHECK (c.run (kCommandGeneral + 2, lib, set, 0).result == Result::Recalled);
+    CHECK (set.get (router::switchParam (0)) == 1.0);
+    CHECK (c.run (kCommandCancel, lib, set, 0).result == Result::Recalled);
+    CHECK (set.get (router::switchParam (0)) == 0.0);
+
+    c.arm (true);
+    set.set (stop (2, 3), 0.0);
+    CHECK (c.run (kCommandDivisional + 4, lib, set, 2).result == Result::Stored);
+    CHECK (lib.divisional (2, 0, 4) != nullptr);
+    CHECK (c.run (kCommandDivisional + 4, lib, set, 2).result == Result::Recalled);
+
+    CHECK (c.run (kCommandBankNext, lib, set, 0).result == Result::Done);
+    CHECK (c.bank() == 1);
+    CHECK (c.run (kCommandBankPrevious, lib, set, 0).result == Result::Done);
+    CHECK (c.run (kCommandBankPrevious, lib, set, 0).result == Result::Ignored);   // déjà à la première banque
+    lib.sequence = { generalKey (0, 2) };
+    CHECK (c.run (kCommandNext, lib, set, 0).result == Result::Recalled);
+    CHECK (c.run (kCommandPrevious, lib, set, 0).result == Result::Ignored);
+    CHECK (c.run (0, lib, set, 0).result == Result::Ignored);
+    CHECK (c.run (kNumCommands + 1, lib, set, 0).result == Result::Ignored);
+}
+
+TEST_CASE ("combinations: a writer receives every value that changes, clamped, and nothing else")
+{
+    auto set = makeSet();
+    Library lib;
+    Controller c;
+    std::vector<std::pair<ParamId, double>> written;
+    c.setWriter ([&] (ParamId id, double v) { written.emplace_back (id, v); set.set (id, v); });
+
+    set.set (stop (0, 0), 0.0);
+    set.set (router::switchParam (1), 1.0);
+    c.arm (true);
+    c.general (lib, set, 0);
+    CHECK (written.empty());                             // enregistrer n'écrit aucun paramètre
+    set.set (stop (0, 0), 100.0);
+    set.set (router::switchParam (1), 0.0);
+    const auto out = c.general (lib, set, 0);
+    CHECK (out.result == Result::Recalled);
+    REQUIRE (written.size() == 2);
+    CHECK (out.changes.size() == 2);
+    CHECK (c.cancel (set).changes.size() == 48);         // les 48 modulateurs (100 % par défaut) passent à 0 ; le tirant 1 déjà à 0
+    CHECK (written.size() == 2 + 48);
+
+    Memory big;
+    big.used = true;
+    big.values = { { stop (0, 4), 1000.0 } };
+    written.clear();
+    recall (set, big, [&] (ParamId id, double v) { written.emplace_back (id, v); set.set (id, v); });
+    REQUIRE (written.size() == 1);
+    CHECK (written[0].second == 100.0);                  // bornée avant l'écriture
+}
+
+TEST_CASE ("combinations: a memory matches the console only when every known value is the current one")
+{
+    auto set = makeSet();
+    Memory m = capture (set, consoleParams (set));
+    CHECK (matches (set, m));
+    set.set (stop (1, 2), 0.0);
+    CHECK_FALSE (matches (set, m));
+    set.set (stop (1, 2), 100.0);
+    CHECK (matches (set, m));
+    Memory none;
+    none.used = true;
+    CHECK_FALSE (matches (set, none));                   // sans valeur : jamais allumée
+    none.values = { { 424242, 1.0 } };
+    CHECK_FALSE (matches (set, none));                   // seulement des paramètres inconnus
+}
+
+TEST_CASE ("combinations: a Facade button can carry a combination command")
+{
+    facade::Facade f;
+    auto w = facade::defaultWidget (facade::WidgetType::Action, f.freeId(), 10, 10);
+    w.actionMode = 1 + kCommandCancel;
+    f.widgets.push_back (w);
+    const auto back = facade::fromJson (facade::toJson (f));
+    REQUIRE (back.widgets.size() == 1);
+    CHECK (back.widgets[0].actionMode == 1 + kCommandCancel);
+    f.widgets[0].actionMode = 1 + kNumCommands;
+    CHECK (facade::fromJson (facade::toJson (f)).widgets[0].actionMode == 1 + kNumCommands);
+    f.widgets[0].actionMode = 999;
+    CHECK (facade::fromJson (facade::toJson (f)).widgets[0].actionMode == 1 + kNumCommands);   // borné
 }

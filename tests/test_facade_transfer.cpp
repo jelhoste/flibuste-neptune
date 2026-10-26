@@ -88,8 +88,10 @@ TEST_CASE ("facade: action modes and the Set key round-trip")
     f.widgets.push_back (a);
     f.widgets.push_back (facade::defaultWidget (facade::WidgetType::Set, 2, 200, 10));
     CHECK (facade::fromJson (facade::toJson (f)) == f);
-    f.widgets[0].actionMode = 9;
-    CHECK (facade::sanitised (f).widgets[0].actionMode == 1);
+    f.widgets[0].actionMode = 9;                  // 2..27 : commandes de combinaison (voir Combinations.h), valables
+    CHECK (facade::sanitised (f).widgets[0].actionMode == 9);
+    f.widgets[0].actionMode = 99;
+    CHECK (facade::sanitised (f).widgets[0].actionMode == 27);
 }
 
 TEST_CASE ("facade transfer: with Neptune's real parameter set, every track type finds its instrument settings")

@@ -138,7 +138,7 @@ struct Widget
     midisend::Message midi;         // Midi : le message (canal 1..16 dans `midi.channel`)
     int midiTarget = 1;             // Midi : 1 Neptune (comme un clavier MIDI), 2 sortie MIDI de l'hôte, 3 les deux
     int midiFader = 0;              // Midi : 1, curseur (la valeur change avec le geste) au lieu d'un bouton
-    int actionMode = 0;             // Action : 0 restaure l'instantané, 1 remet ses paramètres à leur valeur par défaut (annulation générale)
+    int actionMode = 0;             // Action : 0 restaure l'instantané, 1 remet ses paramètres à leur valeur par défaut (annulation générale), 2.. une commande de combinaison (1 + commande, voir Combinations.h)
     int source = 0;                 // Voyant : 0 paramètre, 1 notes du canal `channel`, 2 notes de la piste
     int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
     int vertical = 0;               // Curseur : 1, vertical
