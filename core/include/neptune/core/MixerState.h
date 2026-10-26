@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "neptune/core/Combinations.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/Facade.h"
 #include "neptune/core/Mixer.h"
@@ -53,6 +54,7 @@ struct MixerState
     facade::Facade globalFacade;         // la Façade globale (pages libres, indépendantes des pistes)
     ConsoleMode console;
     router::Config router;               // routeur de notes : accouplements et divisions de clavier (voir NoteRouter.h)
+    combi::Library combinations;         // combinaisons d'orgue : généraux, divisionnels, séquenceur (voir Combinations.h)
     int selectedTrack = 0;
 
     MixerState();  // canaux MIDI par défaut : piste 1 « tous », piste n : canal n ; piste 1 active (Sampler)
@@ -80,7 +82,7 @@ struct MixerState
 
     bool operator== (const MixerState& o) const noexcept
     {
-        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && globalFacade == o.globalFacade && console == o.console && selectedTrack == o.selectedTrack;
+        return tracks == o.tracks && parallels == o.parallels && buses == o.buses && master == o.master && router == o.router && combinations == o.combinations && globalFacade == o.globalFacade && console == o.console && selectedTrack == o.selectedTrack;
     }
 };
 

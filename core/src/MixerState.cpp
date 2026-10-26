@@ -304,6 +304,7 @@ std::string toJson (const MixerState& m)
     if (anyInsert (m.master.inserts)) master["inserts"] = insertsToJson (m.master.inserts);
     doc["master"] = std::move (master);
     if (! m.router.rules.empty()) doc["router"] = json::parse (router::toJson (m.router));
+    if (! m.combinations.empty()) doc["combinations"] = json::parse (combi::toJson (m.combinations));
     if (m.globalFacade != facade::Facade()) doc["global_facade"] = json::parse (facade::toJson (m.globalFacade));
     if (m.console.enabled) doc["console"] = { { "track", m.console.track } };
     return doc.dump();
@@ -369,6 +370,7 @@ MixerState mixerFromJson (std::string_view text)
         m.master = mixer::sanitised (m.master);
     }
     if (const auto rt = doc.find ("router"); rt != doc.end() && rt->is_object()) m.router = router::fromJson (rt->dump());
+    if (const auto cb = doc.find ("combinations"); cb != doc.end() && cb->is_object()) m.combinations = combi::fromJson (cb->dump());
     if (const auto gf = doc.find ("global_facade"); gf != doc.end() && gf->is_object()) m.globalFacade = facade::fromJson (gf->dump());
     if (const auto cs = doc.find ("console"); cs != doc.end() && cs->is_object())
     {

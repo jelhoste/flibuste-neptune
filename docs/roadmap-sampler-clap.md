@@ -102,7 +102,7 @@ Ces briques doivent exister *avant* de coder la moindre fonctionnalité "métier
 ## Palier 7 — Mode orgue liturgique (par-dessus l'existant, pas un module à part)
 
 - Mute de piste exposé comme paramètre MIDI/OSC standard = tirant de jeu (approche initiale). **Alternative désormais disponible** : un jeu peut aussi être représenté comme un Groupe (module Sampler) togglé par un modulateur, au sein d'une seule piste — économise le budget de slots. Les deux approches coexistent, voir `spec-modules.md`.
-- Presets filtrés (état on/off d'un groupe de pistes) = combinaisons (Set/Général/Divisional), y compris "general cancel".
+- Presets filtrés (état on/off d'un groupe de pistes) = combinaisons (Set/Général/Divisional), y compris "general cancel".  **Cœur écrit et testé le 2026-10-26** : voir `specification-combinaisons.md`.
 - **Routeur de notes centralisé** : couche entre entrée MIDI et pistes, qui duplique/redistribue le NoteOn selon l'état des tirants et accouplements actifs (condition exprimée via la logique booléenne du palier 5).
 - Bus de groupe de pistes = regroupement par manuel/clavier.
 - Tremulant = LFO pitch/volume via le système de modulation déjà existant (palier 5), rien de spécifique à coder.
