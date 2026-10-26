@@ -460,9 +460,9 @@ public:
             const int key = keyAtPoint (*w, toCanvas (e.position));
             if (key >= 0 && key != it->second.second)   // glissando : la note change quand le doigt passe sur une autre touche
             {
-                o.processor_.uiNoteOffTrack (o.track_, it->second.second, w->channel - 1);
+                o.processor_.uiKeyOff (o.track_, it->second.second, w->channel - 1);
                 it->second.second = key;
-                o.processor_.uiNoteOnTrack (o.track_, key, static_cast<float> (w->velocity) / 127.0f, w->channel - 1);
+                o.processor_.uiKeyOn (o.track_, key, static_cast<float> (w->velocity) / 127.0f, w->channel - 1);
                 repaint();
             }
             return;
@@ -536,7 +536,7 @@ public:
             const auto it = pressed_.find (e.source.getIndex());
             if (it != pressed_.end())
             {
-                if (const auto* w = o.facade_.find (it->second.first)) o.processor_.uiNoteOffTrack (o.track_, it->second.second, w->channel - 1);
+                if (const auto* w = o.facade_.find (it->second.first)) o.processor_.uiKeyOff (o.track_, it->second.second, w->channel - 1);
                 pressed_.erase (it);
             }
             if (pressed_.empty()) mode_ = Mode::None;
@@ -720,9 +720,9 @@ private:
 
     void noteOn (const fc::Widget& w, int key)
     {
-        owner_.processor_.uiNoteOnTrack (owner_.track_, key, static_cast<float> (w.velocity) / 127.0f, w.channel - 1);
+        owner_.processor_.uiKeyOn (owner_.track_, key, static_cast<float> (w.velocity) / 127.0f, w.channel - 1);
     }
-    void noteOff (const fc::Widget& w, int key) { owner_.processor_.uiNoteOffTrack (owner_.track_, key, w.channel - 1); }
+    void noteOff (const fc::Widget& w, int key) { owner_.processor_.uiKeyOff (owner_.track_, key, w.channel - 1); }
 
     // Touche cliquée : la note part sur le canal du clavier. Maintien (réglage ou Maj) : une touche reste enfoncée jusqu'au clic suivant.
     void keyDown (const juce::MouseEvent& e, const fc::Widget& w)

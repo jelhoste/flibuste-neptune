@@ -19,8 +19,8 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
     common.beginGesture = [&proc] { proc.uiBeginGesture(); };
     common.endGesture = [&proc] { proc.uiEndGesture(); };
     common.panic = [&proc] { proc.uiPanic(); };
-    common.noteOn = [&proc, track] (int key, float v) { proc.uiNoteOnTrack (track, key, v); };
-    common.noteOff = [&proc, track] (int key) { proc.uiNoteOffTrack (track, key); };
+    common.noteOn = [&proc, track] (int key, float v) { proc.uiKeyOn (track, key, v); };
+    common.noteOff = [&proc, track] (int key) { proc.uiKeyOff (track, key); };
     common.heldKeys = [&proc, track] (int word) { return proc.heldKeyWord (track, word); };
     common.track = track;
     common.outputs = { mx::samplerParam (track, mx::kGain), mx::samplerParam (track, mx::kTuneSemitones), mx::samplerParam (track, mx::kTuneCents) };
@@ -62,8 +62,8 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
         link.edit = [&proc] (organ::OrganDescription d) { proc.uiEditOrgan (std::move (d), "Organ keyboards", "organ"); };
         link.undoRevision = [&proc] { return static_cast<std::uint32_t> (proc.undoManager().revision()); };
         link.panic = [&proc] { proc.uiPanic(); };
-        link.noteOn = [&proc, track] (int channel, int key) { proc.uiNoteOnTrack (track, key, 0.8f, channel); };
-        link.noteOff = [&proc, track] (int channel, int key) { proc.uiNoteOffTrack (track, key, channel); };
+        link.noteOn = [&proc, track] (int channel, int key) { proc.uiKeyOn (track, key, 0.8f, channel); };
+        link.noteOff = [&proc, track] (int channel, int key) { proc.uiKeyOff (track, key, channel); };
         link.heldWord = [&proc, track] (int word) { return proc.heldKeyWord (track, word); };
         link.heldCount = [&proc, track]
         {

@@ -218,6 +218,7 @@ Table buildTable()
     }
     for (int m = 0; m < control::kMacros; ++m) t.add (control::macroParamId (m), "/macro/" + num (m + 1));
     for (int i = 0; i < router::kSwitches; ++i) t.add (router::switchParam (i), "/router/" + num (i + 1));
+    for (int i = 0; i < router::kMaxRules; ++i) t.add (router::transposeParam (i), "/router/rule/" + num (i + 1) + "/transpose");
     for (int b = 0; b < mixer::numBuses; ++b) addStrip (t, mixer::busParam (b, 0), "/bus/" + num (b + 1), false);
     for (int q = 0; q < mixer::numParallels; ++q) addStrip (t, mixer::parallelParam (q, 0), "/parallel/" + num (q + 1), false);
     return t;

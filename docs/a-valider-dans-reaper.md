@@ -65,3 +65,10 @@ Liste à cocher, dans l'ordre. Pour chaque point : quoi faire, ce que vous devez
 - [ ] **Division** : un clavier maître sur le canal 1, deux règles « À la place » (touches 0-59 vers le canal 2, 60-127 vers le canal 3) : la note d'origine ne joue plus.
 - [ ] **Conditions** : ET / OU / OU exclusif / NON ET / NON OU avec deux tirants ; « Inverser » ; « Autre paramètre... » (par exemple un modulateur ou un mute).
 - [ ] **Annuler** défait une modification de règle ; le routeur est enregistré avec le projet et avec un preset global.
+
+## Retours d'essai du routeur (2026-10-26)
+- [ ] **Barres** : MIDI Send et All Notes Off ne se chevauchent plus ; la barre du bas montre latence, profil, verrou, voix, texte du profil, Preset global, Annuler, Rétablir, chacun à la largeur de son texte.
+- [ ] **Fenêtres à pas** du routeur : clic sur « touche bas », « touche haut » ou « transposer » ouvre la fenêtre (−12, −1, champ, +1, +12, OK / Annuler, Entrée, Échap).
+- [ ] **Pastille Routeur** dans « Choisir le paramètre à lier » (Façade) : montre les Router Switch et les Router Rule n Transpose sans changer de portée.
+- [ ] **Transposition pilotée** : un curseur ou un menu de la Façade lié à `Router Rule 1 Transpose` change la transposition de la règle 1 en direct.
+- [ ] **Clavier de la Façade** sur le canal 2 avec une règle « du canal 2 vers canal 1 » + tirant : la piste du clavier sonne, et la piste 1 aussi quand le tirant est tiré ; le relâchement ne laisse rien bloqué.

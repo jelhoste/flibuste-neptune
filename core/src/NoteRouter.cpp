@@ -1,6 +1,7 @@
 #include "neptune/core/NoteRouter.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <nlohmann/json.hpp>
 
@@ -117,6 +118,8 @@ bool addSwitchParams (ParameterSet& set, std::string* error)
 {
     for (int i = 0; i < kSwitches; ++i)
         if (! set.add (ParamSpec::toggle (switchParam (i), "Router Switch " + std::to_string (i + 1)), error)) return false;
+    for (int i = 0; i < kMaxRules; ++i)
+        if (! set.add (ParamSpec::stepped (transposeParam (i), "Router Rule " + std::to_string (i + 1) + " Transpose", Unit::Semitones, -48, 48, 0), error)) return false;
     return true;
 }
 
@@ -124,10 +127,12 @@ std::shared_ptr<const Compiled> compile (const Config& in, const ParameterSet& s
 {
     const Config c = sanitised (in);
     auto out = std::make_shared<Compiled>();
-    for (const auto& r : c.rules)
+    for (std::size_t ruleIndex = 0; ruleIndex < c.rules.size(); ++ruleIndex)
     {
+        const auto& r = c.rules[ruleIndex];
         if (! r.on) continue;
         CompiledRule cr;
+        cr.transposeIndex = set.indexOf (transposeParam (static_cast<int> (ruleIndex)));
         cr.srcChannel = r.srcChannel - 1;   // -1 : tous
         cr.keyLo = r.keyLo;
         cr.keyHi = r.keyHi;
@@ -173,7 +178,7 @@ bool active (const CompiledRule& r, const ParameterSet& set) noexcept
 }
 } // namespace
 
-int expand (const Compiled& c, const ParameterSet& set, int channel, int key, std::array<Target, kMaxTargets>& out) noexcept
+int expand (const Compiled& c, const ParameterSet& set, int channel, int key, std::array<Target, kMaxTargets>& out, bool* originalKept) noexcept
 {
     int n = 0;
     auto add = [&] (int ch, int k)
@@ -193,9 +198,12 @@ int expand (const Compiled& c, const ParameterSet& set, int channel, int key, st
         if (key < r.keyLo || key > r.keyHi) continue;
         if (! active (r, set)) continue;
         if (r.replace) original = false;
-        if (routedCount < kMaxTargets) routed[static_cast<std::size_t> (routedCount++)] = { r.dstChannel, key + r.transpose };
+        int semitones = r.transpose;
+        if (r.transposeIndex != ParameterSet::npos) semitones += static_cast<int> (std::lround (set.effectiveAt (r.transposeIndex)));
+        if (routedCount < kMaxTargets) routed[static_cast<std::size_t> (routedCount++)] = { r.dstChannel, key + semitones };
     }
     if (original) add (channel, key);
+    if (originalKept != nullptr) *originalKept = original && n > 0;
     for (int i = 0; i < routedCount; ++i) add (routed[static_cast<std::size_t> (i)].channel, routed[static_cast<std::size_t> (i)].key);
     return n;
 }

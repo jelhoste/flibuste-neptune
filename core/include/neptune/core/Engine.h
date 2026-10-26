@@ -52,6 +52,10 @@ public:
     // Notes adressées à UNE piste (clavier de l'interface), sans filtre de canal.
     void noteOnTrack (int track, int channel, int key, float velocity) noexcept;
     void noteOffTrack (int track, int channel, int key) noexcept;
+    // Notes d'un clavier de l'interface (Façade, clavier de l'orgue) : jouées sur la piste `track` comme noteOnTrack, ET passées par le routeur comme si elles
+    // arrivaient du MIDI sur `channel` (les accouplements donnent la note à d'autres pistes).
+    void noteOnKeyboard (int track, int channel, int key, float velocity) noexcept;
+    void noteOffKeyboard (int track, int channel, int key) noexcept;
     void panic() noexcept;      // MIDI All Sound Off / bouton « tout arrêter » : toutes les pistes
     void releaseAll() noexcept; // MIDI All Notes Off
     void setParameter (std::uint32_t id, double value) noexcept;
@@ -117,7 +121,7 @@ public:
     // producteur) ; le thread audio les applique au début du bloc suivant. Rend false si la file est pleine.
     struct UiEvent
     {
-        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop, Panic, ReleaseAll, PreviewSample } type = Type::NoteOn;
+        enum class Type : std::uint8_t { NoteOn, NoteOff, PreviewZone, PreviewRelease, PreviewStop, Panic, ReleaseAll, PreviewSample, KeyboardOn, KeyboardOff } type = Type::NoteOn;
         int channel = 0, key = 0;      // NoteOn / NoteOff ; PreviewZone : `key` = indice de zone
         float velocity = 0.0f;
         int track = 0;                 // piste visée (NoteOn, NoteOff, Preview*) ; Panic / ReleaseAll : toutes
@@ -217,7 +221,8 @@ private:
     HandoffSlot<router::Compiled> routerSlot_;
     const router::Compiled* router_ = nullptr;      // thread audio
     router::Config routerConfig_;                   // thread de message : ce qui est publié
-    struct Routed { std::uint8_t count = 0; std::array<std::uint8_t, router::kMaxTargets> channel {}, key {}; };
+    // direct : la première destination est la note d'origine d'un clavier de l'interface, jouée directement sur la piste `originTrack` (sans compteur)
+    struct Routed { std::uint8_t count = 0; bool direct = false; std::int8_t originTrack = -1; std::array<std::uint8_t, router::kMaxTargets> channel {}, key {}; };
     std::array<Routed, 16 * 128> routed_ {};        // par (canal, touche) jouée
     std::array<std::uint8_t, 16 * 128> routeCount_ {};   // par (canal, touche) destinataire : nombre de sources qui la tiennent
     void dispatchNoteOn (int channel, int key, float velocity) noexcept;

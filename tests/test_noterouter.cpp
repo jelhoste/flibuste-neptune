@@ -200,6 +200,90 @@ TEST_CASE ("router: the engine plays a coupled note on both tracks and releases 
     CHECK (engine.activeVoices() == 0);
 }
 
+TEST_CASE ("router: the transposition of a rule is a parameter added to the one written in the rule")
+{
+    auto set = makeSet();
+    Config c;
+    Rule r = coupler (1, 2, 5);
+    c.rules = { coupler (1, 3, 0), r };
+    CHECK (targetsOf (c, set, 0, 60) == std::vector<Target> ({ { 0, 60 }, { 2, 60 }, { 1, 65 } }));
+    set.set (transposeParam (1), 7.0);       // la règle numéro 2
+    CHECK (targetsOf (c, set, 0, 60) == std::vector<Target> ({ { 0, 60 }, { 2, 60 }, { 1, 72 } }));
+    set.set (transposeParam (1), -48.0);
+    CHECK (targetsOf (c, set, 0, 60) == std::vector<Target> ({ { 0, 60 }, { 2, 60 }, { 1, 17 } }));
+    set.set (transposeParam (0), 12.0);      // la règle numéro 1
+    CHECK (targetsOf (c, set, 0, 60) == std::vector<Target> ({ { 0, 60 }, { 2, 72 }, { 1, 17 } }));
+    CHECK (set.spec (set.indexOf (transposeParam (0))).name == "Router Rule 1 Transpose");
+    // une règle écartée (hors service) garde le numéro de ses voisines
+    c.rules[0].on = false;
+    CHECK (targetsOf (c, set, 0, 60) == std::vector<Target> ({ { 0, 60 }, { 1, 17 } }));
+}
+
+TEST_CASE ("router: a key of an interface keyboard plays its own track and goes through the router")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto run = [&] (int blocks) { for (int b = 0; b < blocks; ++b) engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256); };
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    d.filters.filter[0].on = false;
+    d.ampEnv.attack.ms = 0.0;
+    d.ampEnv.release.ms = 20.0;
+    for (const int t : { 0, 1 })
+    {
+        engine.setTrackActive (t, true);
+        engine.setTrackType (t, TrackType::Synth);
+        engine.publishSynth (t, std::make_shared<SynthPatch> (d));
+        mixer::StripSettings strip;
+        strip.midiChannel = t + 1;
+        engine.setTrackSettings (t, strip);
+    }
+    Config config;
+    config.rules.push_back (coupler (2, 1, 0, switchParam (0)));
+    engine.setRouter (config);
+    run (2);
+
+    // le clavier de la piste 2 (canal 2) sans accouplement : seule la piste 2 sonne
+    engine.noteOnKeyboard (1, 1, 60, 1.0f);
+    run (4);
+    CHECK (engine.activeVoices() == 1);
+    engine.noteOffKeyboard (1, 1, 60);
+    run (30);
+    CHECK (engine.activeVoices() == 0);
+
+    // avec l'accouplement : la piste 1 sonne aussi, et le relâchement défait les deux même si le tirant est repoussé
+    params.set (switchParam (0), 1.0);
+    engine.noteOnKeyboard (1, 1, 60, 1.0f);
+    run (4);
+    CHECK (engine.activeVoices() == 2);
+    params.set (switchParam (0), 0.0);
+    engine.noteOffKeyboard (1, 1, 60);
+    run (30);
+    CHECK (engine.activeVoices() == 0);
+
+    // une division « à la place » : la piste du clavier ne joue plus, la note routée oui
+    Config split;
+    Rule r = coupler (2, 1, 0);
+    r.replace = true;
+    split.rules.push_back (r);
+    engine.setRouter (split);
+    run (2);
+    engine.noteOnKeyboard (1, 1, 60, 1.0f);
+    run (4);
+    CHECK (engine.activeVoices() == 1);   // seulement la piste 1
+    engine.noteOffKeyboard (1, 1, 60);
+    run (30);
+    CHECK (engine.activeVoices() == 0);
+}
+
 TEST_CASE ("router: the configuration lives in the mixer state")
 {
     MixerState m;
@@ -216,4 +300,5 @@ TEST_CASE ("router: the coupler switches are parameters of the mixer set")
     REQUIRE (probe::buildPool (params, mixer::numTracks));
     REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
     for (int i = 0; i < kSwitches; ++i) CHECK (params.indexOf (switchParam (i)) != ParameterSet::npos);
+    for (int i = 0; i < kMaxRules; ++i) CHECK (params.indexOf (transposeParam (i)) != ParameterSet::npos);
 }

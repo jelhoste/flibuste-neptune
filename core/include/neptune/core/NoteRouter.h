@@ -63,12 +63,18 @@ Config fromJson (std::string_view);      // lecture tolérante
 // Paramètres « tirants d'accouplement » : kSwitches interrupteurs automatisables (CC, OSC, macro, bouton de Façade), identifiants `15000 + i`.
 constexpr ParamId switchBase = 15000;
 constexpr ParamId switchParam (int index) { return switchBase + static_cast<ParamId> (index); }
+// Transposition automatisable d'une règle (la règle numéro i, à partir de 0) : un réglage par pas -48..+48, 0 par défaut, qui s'ajoute à la transposition
+// écrite dans la règle. Un potard ou un curseur de la Façade, un CC, l'OSC ou la matrice de modulation le pilotent. Identifiants `15100 + i`.
+constexpr ParamId transposeBase = 15100;
+constexpr ParamId transposeParam (int rule) { return transposeBase + static_cast<ParamId> (rule); }
+// Déclare les tirants et les transpositions de règles.
 bool addSwitchParams (ParameterSet&, std::string* error = nullptr);
 
 // Règles résolues : indices de paramètres dans un jeu donné.
 struct CompiledRule
 {
     int srcChannel = 0, keyLo = 0, keyHi = 127, dstChannel = 0, transpose = 0;   // canaux 0..15 (srcChannel -1 : tous)
+    std::size_t transposeIndex = ParameterSet::npos;   // paramètre de transposition de la règle (s'ajoute à `transpose`)
     bool replace = false;
     Combine combine = Combine::All;
     int termCount = 0;
@@ -89,5 +95,6 @@ struct Target
 };
 // Destinations d'une note jouée sur `channel` (0..15), touche `key` : la note d'origine (sauf si une règle en service « à la place » la
 // concerne) puis celles des règles en service dont la condition est vraie, sans doublon. Rend leur nombre (au plus kMaxTargets). Sans allocation.
-int expand (const Compiled&, const ParameterSet&, int channel, int key, std::array<Target, kMaxTargets>& out) noexcept;
+// `originalKept` (facultatif) : vrai si la première destination est la note d'origine.
+int expand (const Compiled&, const ParameterSet&, int channel, int key, std::array<Target, kMaxTargets>& out, bool* originalKept = nullptr) noexcept;
 } // namespace neptune::core::router

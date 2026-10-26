@@ -23,6 +23,8 @@ Octave aiguë du même clavier : règle « du canal 1 vers canal 1, Ajoute, Tran
 Seules les **notes** sont routées. Les CC (pédale, expression), le pitch bend et l'aftertouch restent sur leur canal d'origine. Un Note Off défait exactement ce que le Note On a fait, même si tu as repoussé un accouplement entre-temps.
 
 ## Les conditions (le bouton de la dernière colonne)
+La condition **ne regarde jamais les notes** et ne fusionne aucun canal : c'est un simple **interrupteur** de la règle, décidé par l'état de tirants (ou d'autres paramètres). Les notes du canal source sont copiées vers le canal de destination tant que la condition est vraie, et plus quand elle est fausse.
+
 Une règle **sans condition** (« Toujours ») est toujours appliquée. Avec une condition, elle ne s'applique que si la condition est **vraie**.
 
 Une condition est une liste de **1 à 4 éléments** (des paramètres à deux états : un tirant, un piston, un mute, un interrupteur d'orgue...) combinés par un **opérateur** :
@@ -36,10 +38,16 @@ Un élément est « allumé » quand la valeur du paramètre atteint la moitié 
 
 Exemple « Récit à Grand-orgue seulement si le tirant 1 est tiré et que le tirant 2 ne l'est pas » : éléments `Router Switch 1` et `Router Switch 2` inversé, opérateur ET.
 
+## Transposition pilotable d'une règle
+Chaque règle numéro n (dans l'ordre de la liste, en comptant aussi les règles mises de côté) a un réglage **« Router Rule n Transpose »** (-48 à +48 demi-tons, 0 au départ) qui **s'ajoute** à la transposition écrite dans la règle. On le lie comme n'importe quel paramètre : un potard, un curseur ou un menu de la Façade (« Lier... » > famille **Routeur**), un CC (menu Contrôle > Gérer les assignations), l'OSC `/neptune/router/rule/n/transpose`, la matrice de modulation, ou l'automation de l'hôte. Pratique pour un accouplement « à l'octave » que l'on bascule entre -12, 0 et +12 depuis un curseur.
+
+## Claviers de la Façade et claviers à l'écran
+Les touches d'un **clavier de la Façade** (et des claviers à l'écran des pistes Synthé, FM et Orgue) passent par le routeur comme du MIDI arrivant sur le **canal du clavier** : la piste du clavier joue la touche, et les règles qui partent de ce canal la donnent aussi aux autres pistes.
+
 ## Créer un tirant d'accouplement
 Un tirant est un des **32 paramètres « Router Switch 1 » à « Router Switch 32 »** (interrupteurs). Ils existent déjà : il n'y a rien à créer. Tu en choisis un dans la condition d'une règle (« Ajouter une condition » > « Router Switch n »), puis tu lui donnes une commande :
 
-1. **Dans la Façade** (la plus courante) : onglet FAÇADE, mode Modification de la mise en page, **+ Bouton** (ou **+ Voyant** pour un témoin). Sélectionne le bouton, **Lier...**, efface le filtre ou choisis la portée « Global », tape « Router », double-clique **Router Switch 1**. Le texte du bouton se change avec **Texte...** (par exemple « Récit → GO »). En mode Jeu, chaque clic tire ou repousse le tirant. Un **voyant** lié au même paramètre s'allume quand l'accouplement est tiré.
+1. **Dans la Façade** (la plus courante) : onglet FAÇADE, mode Modification de la mise en page, **+ Bouton** (ou **+ Voyant** pour un témoin). Sélectionne le bouton, **Lier...**, dans la fenêtre de choix, clique la pastille **Routeur** (elle montre les Router Switch et les transpositions de règles), double-clique **Router Switch 1**. Le texte du bouton se change avec **Texte...** (par exemple « Récit → GO »). En mode Jeu, chaque clic tire ou repousse le tirant. Un **voyant** lié au même paramètre s'allume quand l'accouplement est tiré.
 2. **Par un CC** (pédale, bouton de ta console) : menu Contrôle > Gérer les assignations... > Nouvelle assignation, bouge le contrôleur, puis choisis la cible `Router Switch n`.
 3. **Par un piston** : un bouton **Action** (piston) dont la capture contient les `Router Switch` fait tirer ou repousser les accouplements d'un coup avec les jeux : c'est la combinaison. Voir « + SET et PISTONS » dans l'aide de la Façade.
 4. Par l'automation de l'hôte, une macro, ou l'adresse OSC `/neptune/router/n`.

@@ -47,6 +47,7 @@ Family familyOfWord (std::string_view w)
     if (oneOf (w, { "Gain", "Tune", "Fine" })) return Family::Sampler;
     if (w == "Slot") return Family::Zones;
     if (w == "Modulator") return Family::Modulators;
+    if (w == "Router") return Family::Router;
     return Family::Other;
 }
 }
@@ -99,6 +100,7 @@ const char* familyKey (Family f) noexcept
         case Family::Sampler: return "pfilter.sampler";
         case Family::Zones: return "pfilter.zones";
         case Family::Modulators: return "pfilter.modulators";
+        case Family::Router: return "pfilter.router";
         case Family::Other: break;
     }
     return "pfilter.other";

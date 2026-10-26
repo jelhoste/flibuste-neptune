@@ -6,8 +6,8 @@
 namespace neptune::core::paramgroups
 {
 enum class Scope { Track, Parallel, Bus, Master, Global };
-enum class Family { Strip, Sends, Inserts, Synth, Filters, Fm, Organ, Sampler, Zones, Modulators, Other };
-constexpr int numFamilies = 11;
+enum class Family { Strip, Sends, Inserts, Synth, Filters, Fm, Organ, Sampler, Zones, Modulators, Router, Other };
+constexpr int numFamilies = 12;
 
 struct Group
 {

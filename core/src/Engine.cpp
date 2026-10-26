@@ -501,14 +501,56 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
     }
 }
 
+void Engine::noteOnKeyboard (int track, int channel, int key, float velocity) noexcept
+{
+    if (router_ == nullptr || router_->rules.empty() || params_ == nullptr || key < 0 || key > 127)
+    {
+        noteOnTrack (track, channel, key, velocity);
+        return;
+    }
+    const int slot = ((channel & 15) << 7) | key;
+    releaseRouted (slot);
+    std::array<router::Target, router::kMaxTargets> targets;
+    bool originalKept = false;
+    const int n = router::expand (*router_, *params_, channel & 15, key, targets, &originalKept);
+    auto& r = routed_[slot];
+    r.count = static_cast<std::uint8_t> (n);
+    r.direct = originalKept;
+    r.originTrack = static_cast<std::int8_t> (std::clamp (track, 0, kTracks - 1));
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& t = targets[static_cast<std::size_t> (i)];
+        r.channel[static_cast<std::size_t> (i)] = static_cast<std::uint8_t> (t.channel);
+        r.key[static_cast<std::size_t> (i)] = static_cast<std::uint8_t> (t.key);
+        if (i == 0 && originalKept) { noteOnTrack (track, channel, key, velocity); continue; }   // la touche jouée va à la piste de son clavier, quel que soit son canal d'écoute
+        auto& count = routeCount_[static_cast<std::size_t> ((t.channel << 7) | t.key)];
+        if (count++ == 0) dispatchNoteOn (t.channel, t.key, velocity);
+    }
+}
+
+void Engine::noteOffKeyboard (int track, int channel, int key) noexcept
+{
+    if (key >= 0 && key < 128)
+    {
+        const int slot = ((channel & 15) << 7) | key;
+        if (routed_[static_cast<std::size_t> (slot)].count > 0) { releaseRouted (slot); return; }
+    }
+    noteOffTrack (track, channel, key);
+}
+
 void Engine::releaseRouted (int slot) noexcept
 {
     auto& r = routed_[static_cast<std::size_t> (slot)];
     const int n = r.count;
     r.count = 0;
+    const bool direct = r.direct;
+    const int originTrack = r.originTrack;
+    r.direct = false;
+    r.originTrack = -1;
     for (int i = 0; i < n; ++i)
     {
         const int ch = r.channel[static_cast<std::size_t> (i)], k = r.key[static_cast<std::size_t> (i)];
+        if (i == 0 && direct) { noteOffTrack (originTrack, ch, k); continue; }   // la note d'origine d'un clavier de l'interface : pas de compteur
         auto& count = routeCount_[static_cast<std::size_t> ((ch << 7) | k)];
         if (count > 0 && --count == 0) dispatchNoteOff (ch, k);
     }
@@ -616,6 +658,8 @@ void Engine::drainUiEvents() noexcept
         {
             case UiEvent::Type::NoteOn: noteOnTrack (tr, e.channel, e.key, e.velocity); break;
             case UiEvent::Type::NoteOff: noteOffTrack (tr, e.channel, e.key); break;
+            case UiEvent::Type::KeyboardOn: noteOnKeyboard (tr, e.channel, e.key, e.velocity); break;
+            case UiEvent::Type::KeyboardOff: noteOffKeyboard (tr, e.channel, e.key); break;
             case UiEvent::Type::PreviewZone:
                 if (tracks_[static_cast<std::size_t> (tr)].type.load() == 0)
                 {

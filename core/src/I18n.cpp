@@ -506,6 +506,7 @@ const Entry kEntries[] = {
     { "pfilter.sampler", { "Sampler", "Sampler" } },
     { "pfilter.zones", { "Slots", "Emplacements" } },
     { "pfilter.modulators", { "Modulators", "Modulateurs" } },
+    { "pfilter.router", { "Router", "Routeur" } },
     { "pfilter.other", { "Other", "Autres" } },
     { "facade.add_zone", { "+ Zone", "+ Zone" } },
     { "facade.tip_zone", { "A container: widgets dropped inside follow it, and it can arrange them in a row, a column or a grid", "Un conteneur : les widgets posés dedans le suivent, et il peut les ranger en ligne, en colonne ou en matrice" } },

@@ -261,6 +261,9 @@ public:
     // Même chose sur une piste précise (le clavier du synthé : une touche tenue doit s'arrêter sur la piste où elle a démarré).
     void uiNoteOnTrack (int track, int key, float velocity, int channel = 0) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOn, channel, key, velocity, track }); }
     void uiNoteOffTrack (int track, int key, int channel = 0) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::NoteOff, channel, key, 0.0f, track }); }
+    // Touche d'un clavier de l'interface (Façade, clavier de l'orgue) : joue la piste ET passe par le routeur de notes (accouplements, divisions), comme du MIDI sur `channel`.
+    void uiKeyOn (int track, int key, float velocity, int channel = 0) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::KeyboardOn, channel, key, velocity, track }); }
+    void uiKeyOff (int track, int key, int channel = 0) { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::KeyboardOff, channel, key, 0.0f, track }); }
     // source : 0 zone telle quelle, 1 sample brut, 2 région START-END, 3 depuis `fromFrame`, 4 une boucle une fois, 5 une boucle telle qu'entendue (voir SamplerVoices::PreviewSpec)
     void uiPreviewZone (int zoneIndex, std::int64_t fromFrame = -1, int source = 0, int loopIndex = 0)
     {

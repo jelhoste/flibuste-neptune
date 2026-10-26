@@ -50,7 +50,7 @@ TEST_CASE ("param groups: scope and family come from the parameter name")
     CHECK (classify ("Track").scope == Scope::Global);
 }
 
-TEST_CASE ("param groups: every real parameter lands in a family, except the macros and the router switches")
+TEST_CASE ("param groups: every real parameter lands in a family, except the macros")
 {
     ParameterSet set;
     REQUIRE (probe::buildPool (set, 4));
@@ -65,8 +65,11 @@ TEST_CASE ("param groups: every real parameter lands in a family, except the mac
         if (classify (s.name).family == Family::Other)
         {
             ++others;
-            CHECK ((s.name.rfind ("Macro ", 0) == 0 || s.name.rfind ("Router Switch ", 0) == 0));
+            CHECK (s.name.rfind ("Macro ", 0) == 0);
         }
     }
-    CHECK (others == 32 + 32);   // 32 macros, 32 tirants d'accouplement
+    CHECK (others == 32);
+    CHECK (classify ("Router Switch 3").family == Family::Router);
+    CHECK (classify ("Router Rule 12 Transpose").family == Family::Router);
+    CHECK (classify ("Router Switch 3").scope == Scope::Global);
 }
