@@ -287,4 +287,25 @@ InstrumentDescription deleteGroup (const InstrumentDescription& base, const std:
     pruneGroups (d);
     return d;
 }
+int groupSwitch (InstrumentDescription& d, const std::string& group)
+{
+    const auto names = groupNames (d);
+    if (group.empty() || std::find (names.begin(), names.end(), group) == names.end()) return -1;
+    const auto it = d.groups.find (group);
+    const std::uint16_t mask = it != d.groups.end() ? it->second.modulators : 0;
+    for (int i = 0; i < kModulators; ++i)
+        if (mask == static_cast<std::uint16_t> (1u << i)) return i;
+    std::uint16_t used = d.trackModulators;
+    for (const auto& z : d.zones) used = static_cast<std::uint16_t> (used | z.modulators);
+    for (const auto& entry : d.groups) used = static_cast<std::uint16_t> (used | entry.second.modulators);
+    for (int i = 0; i < kModulators; ++i)
+    {
+        const auto bit = static_cast<std::uint16_t> (1u << i);
+        if ((used & bit) != 0 || ! d.modulators[static_cast<std::size_t> (i)].isDefault()) continue;
+        d.modulators[static_cast<std::size_t> (i)].name = group;
+        d.groups[group].modulators = static_cast<std::uint16_t> (d.groups[group].modulators | bit);
+        return i;
+    }
+    return -1;
+}
 } // namespace neptune::core::mapping

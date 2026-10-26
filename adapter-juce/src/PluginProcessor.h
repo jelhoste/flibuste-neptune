@@ -141,6 +141,10 @@ public:
     // Même chose, mais annulable : passe par l'historique (une seule entrée par geste si `mergeKey` est non vide et que
     // uiBeginGesture/uiEndGesture entourent le geste). À utiliser pour toute modification venant de l'utilisateur.
     void uiEditInstrument (neptune::core::InstrumentDescription, std::string name, std::string mergeKey = {});
+    void uiEditInstrument (int track, neptune::core::InstrumentDescription, std::string name, std::string mergeKey = {});   // une piste précise
+    // Interrupteur direct d'un Groupe du Sampler de la piste (un jeu d'orgue) : le modulateur qui le commande, trouvé ou créé (annulable). Rend son
+    // paramètre « Track n Modulator i », ou 0 si le Groupe n'existe pas ou si les 16 modulateurs sont pris. Voir mapping::groupSwitch.
+    neptune::core::ParamId ensureGroupSwitch (int track, const std::string& group);
     void uiBeginGesture() { undo_.beginGesture(); }
 
     // Pistes : type de génération (Sampler / Synthé), pistes actives, patch du synthé.

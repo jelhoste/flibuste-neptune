@@ -74,4 +74,8 @@ bool addGroup (InstrumentDescription& d, const std::string& name);
 bool renameGroup (InstrumentDescription& d, const std::string& from, const std::string& to);
 // Supprime un Groupe : ses zones n'ont plus de Groupe, ses réglages propres et ses emplacements disparaissent. Les zones restent.
 InstrumentDescription deleteGroup (const InstrumentDescription& base, const std::string& group);
+// Interrupteur direct d'un Groupe (un jeu d'orgue) : le modulateur qui le commande seul, trouvé ou créé. Si le Groupe est déjà commandé par un
+// seul modulateur, c'est lui. Sinon le premier modulateur libre (jamais utilisé, réglages d'origine) est nommé comme le Groupe et ajouté à ceux
+// du Groupe. Rend son indice 0..15, ou -1 si le Groupe n'existe pas ou si les 16 modulateurs sont pris. Modifie `d` seulement dans le second cas.
+int groupSwitch (InstrumentDescription& d, const std::string& group);
 } // namespace neptune::core::mapping

@@ -7,6 +7,7 @@
 #include "PluginEditor.h"
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/InstrumentEdit.h"
+#include "neptune/core/MappingEdit.h"
 #include "neptune/core/OrganPreset.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/ProbePool.h"
@@ -229,7 +230,22 @@ void NeptuneProcessor::setInstrumentDescription (int track, neptune::core::Instr
 
 void NeptuneProcessor::uiEditInstrument (neptune::core::InstrumentDescription d, std::string name, std::string mergeKey)
 {
-    const int track = selectedTrack();
+    uiEditInstrument (selectedTrack(), std::move (d), std::move (name), std::move (mergeKey));
+}
+
+neptune::core::ParamId NeptuneProcessor::ensureGroupSwitch (int track, const std::string& group)
+{
+    using namespace neptune::core;
+    if (track < 0 || track >= mixer::numTracks || ! trackActive (track) || trackType (track) != TrackType::Sampler) return 0;
+    auto d = instrumentDescription (track);
+    const int index = mapping::groupSwitch (d, group);
+    if (index < 0) return 0;
+    uiEditInstrument (track, std::move (d), "Group switch", {});   // sans effet si le Groupe avait déjà son interrupteur
+    return mixer::modulatorParam (track, index);
+}
+
+void NeptuneProcessor::uiEditInstrument (int track, neptune::core::InstrumentDescription d, std::string name, std::string mergeKey)
+{
     for (auto& z : d.zones) z = neptune::core::sanitised (z);
     auto previous = instrumentDescription (track);
     if (previous == d) return;

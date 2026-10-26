@@ -6,6 +6,7 @@
 #include <map>
 
 #include "CombiText.h"
+#include "neptune/core/MappingEdit.h"
 #include "FacadeBundle.h"
 #include "ParamFilterBar.h"
 #include "VelocityPanel.h"
@@ -1419,6 +1420,20 @@ public:
             const auto& s = ps.spec (i);
             if (! s.hidden) entries_.push_back ({ s.id, utf8 (s.name), neptune::core::paramgroups::classify (s.name) });
         }
+        // Les Groupes du Sampler de chaque piste (les jeux d'un orgue) : un bouton lié à l'un d'eux le met en jeu ou le coupe, sans passer par le
+        // réglage des modulateurs ; l'interrupteur est créé au choix (ensureGroupSwitch).
+        if (! capture)
+            for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+            {
+                if (! owner.processor_.trackActive (t) || owner.processor_.trackType (t) != neptune::core::TrackType::Sampler) continue;
+                const auto scope = neptune::core::paramgroups::classify ("Track " + std::to_string (t + 1) + " Modulator 1");
+                for (const auto& name : neptune::core::mapping::groupNames (owner.processor_.instrumentDescription (t)))
+                {
+                    const auto id = kGroupBase + static_cast<neptune::core::ParamId> (groupEntries_.size());
+                    groupEntries_.push_back ({ id, t, name });
+                    entries_.push_back ({ id, utf8 (owner.tr_.format ("facade.group_entry", { std::to_string (t + 1), name })), scope });
+                }
+            }
         title_.setText (owner.text (capture ? "facade.capture_title" : "facade.picker_title"), juce::dontSendNotification);
         title_.setFont (juce::FontOptions (20.0f, juce::Font::bold));
         title_.setColour (juce::Label::textColourId, owner.colour (Token::Text));
@@ -1531,6 +1546,8 @@ public:
 
 private:
     struct Entry { neptune::core::ParamId id; juce::String name; neptune::core::paramgroups::Group group; };
+    struct GroupEntry { neptune::core::ParamId id; int track; std::string name; };
+    static constexpr neptune::core::ParamId kGroupBase = 0x80000000u;   // identifiants fictifs des Groupes dans la liste (aucun vrai paramètre n'y arrive)
 
     juce::Rectangle<int> panel() const { return juce::Rectangle<int> (560, juce::jmin (700, getHeight() - 20)).withCentre (getLocalBounds().getCentre()); }
 
@@ -1567,7 +1584,18 @@ private:
     void choose (int row)
     {
         if (row < 0 || row >= static_cast<int> (shown_.size())) return;
-        const auto id = entries_[shown_[static_cast<std::size_t> (row)]].id;
+        auto id = entries_[shown_[static_cast<std::size_t> (row)]].id;
+        if (id >= kGroupBase)
+        {
+            // un Groupe : on le relie à son propre modulateur (créé au besoin), et le bouton se lie à ce modulateur
+            const auto it = std::find_if (groupEntries_.begin(), groupEntries_.end(), [id] (const GroupEntry& g) { return g.id == id; });
+            id = it != groupEntries_.end() ? owner_.processor_.ensureGroupSwitch (it->track, it->name) : 0;
+            if (id == 0)
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, owner_.text ("facade.group_switch_title"), owner_.text ("facade.group_switch_full"));
+                return;
+            }
+        }
         if (onChoose_) onChoose_ (id);
         close();
     }
@@ -1621,6 +1649,7 @@ private:
     std::function<void (neptune::core::ParamId)> onChoose_;
     std::function<void (const std::set<neptune::core::ParamId>&)> onCapture_;
     std::vector<Entry> entries_;
+    std::vector<GroupEntry> groupEntries_;
     std::vector<std::size_t> shown_;
     juce::Label title_, hint_;
     juce::TextEditor filter_;

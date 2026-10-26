@@ -309,3 +309,42 @@ TEST_CASE ("groups: a declared Group stays without zones, keeps its order, and s
     CHECK (removed.declaredGroups == std::vector<std::string> ({ "Flûte 4'" }));
     CHECK (groupNames (removed) == std::vector<std::string> ({ "Flûte 4'" }));
 }
+
+TEST_CASE ("mapping edit: a group gets its own on/off switch, found or created")
+{
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.group = "Plein-jeu";
+    d.zones.push_back (z);
+    CHECK (mapping::groupSwitch (d, "Absent") == -1);          // un Groupe qui n'existe pas
+    CHECK (mapping::groupSwitch (d, "") == -1);
+    CHECK (d.groups.empty());                                  // rien n'a changé
+
+    const int first = mapping::groupSwitch (d, "Plein-jeu");
+    CHECK (first == 0);
+    CHECK (d.modulators[0].name == "Plein-jeu");
+    CHECK (d.groups.at ("Plein-jeu").modulators == 1);
+    CHECK (mapping::groupSwitch (d, "Plein-jeu") == 0);        // le même appel retrouve le même interrupteur
+    CHECK (d.groups.at ("Plein-jeu").modulators == 1);
+
+    REQUIRE (mapping::addGroup (d, "Flûte 8"));
+    d.trackModulators = 2;                                     // le modulateur 2 (bit 1) commande déjà toute la piste : pris
+    CHECK (mapping::groupSwitch (d, "Flûte 8") == 2);
+    d.zones[0].modulators = 8;                                 // un modulateur utilisé par une zone n'est pas libre non plus
+    REQUIRE (mapping::addGroup (d, "Bourdon 16"));
+    CHECK (mapping::groupSwitch (d, "Bourdon 16") == 4);
+    d.modulators[5].momentary = true;                          // réglages personnalisés : pas libre
+    REQUIRE (mapping::addGroup (d, "Nasard"));
+    CHECK (mapping::groupSwitch (d, "Nasard") == 6);
+
+    d.groups["Nasard"].modulators = 0b1100000;                 // plusieurs modulateurs : on en ajoute un dédié
+    const int extra = mapping::groupSwitch (d, "Nasard");
+    CHECK (extra >= 0);
+    CHECK ((d.groups.at ("Nasard").modulators & (1u << extra)) != 0);
+
+    InstrumentDescription full;
+    z.group = "Seul";
+    full.zones.push_back (z);
+    full.trackModulators = 0xFFFF;                             // les 16 sont pris
+    CHECK (mapping::groupSwitch (full, "Seul") == -1);
+}
