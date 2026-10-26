@@ -1,6 +1,8 @@
 #include "RouterView.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include "neptune/core/ZoneImport.h"
 
 using neptune::core::theme::Token;
 namespace rt = neptune::core::router;
@@ -8,7 +10,7 @@ namespace rt = neptune::core::router;
 namespace
 {
 // Largeurs des colonnes d'une règle (la ligne de légende reprend les mêmes).
-constexpr int kOnW = 34, kNameW = 150, kSrcW = 76, kKeyW = 56, kDstW = 70, kTransW = 70, kModeW = 118, kRemoveW = 34, kGap = 6;
+constexpr int kOnW = 34, kNameW = 150, kSrcW = 76, kKeyW = 76, kDstW = 70, kTransW = 70, kModeW = 118, kRemoveW = 34, kGap = 6;
 }
 
 // ------------------------------------------------------------------------------------------------ une règle
@@ -35,26 +37,29 @@ public:
         for (int c = 1; c <= 16; ++c) dst_.addItem (juce::String (c), c);
         dst_.onChange = [this] { if (! updating_) { edit().dstChannel = dst_.getSelectedId(); owner_.commit(); } };
         addAndMakeVisible (dst_);
-        auto note = [this] (juce::TextEditor& e, bool low)
+        auto note = [this] (juce::TextButton& b, bool low)
         {
-            e.setFont (juce::FontOptions (15.0f));
-            e.setInputRestrictions (3, "0123456789");
-            e.setTooltip (owner_.text (low ? "router.tip_lo" : "router.tip_hi"));
-            e.onReturnKey = e.onFocusLost = [this, &e, low]
+            b.setTooltip (owner_.text (low ? "router.tip_lo" : "router.tip_hi"));
+            b.onClick = [this, low]
             {
-                if (updating_) return;
-                (low ? edit().keyLo : edit().keyHi) = e.getText().getIntValue();
-                owner_.commit();
-                refresh (edit());
+                owner_.askValue (owner_.text (low ? "router.ask_lo" : "router.ask_hi"), low ? edit().keyLo : edit().keyHi, 0, 127, true, 12,
+                                 [this, low] (int v)
+                                 {
+                                     (low ? edit().keyLo : edit().keyHi) = v;
+                                     owner_.commit();
+                                     refresh (edit());
+                                 });
             };
-            addAndMakeVisible (e);
+            addAndMakeVisible (b);
         };
         note (lo_, true);
         note (hi_, false);
-        trans_.setFont (juce::FontOptions (15.0f));
-        trans_.setInputRestrictions (4, "-+0123456789");
         trans_.setTooltip (owner.text ("router.tip_transpose"));
-        trans_.onReturnKey = trans_.onFocusLost = [this] { if (! updating_) { edit().transpose = trans_.getText().getIntValue(); owner_.commit(); refresh (edit()); } };
+        trans_.onClick = [this]
+        {
+            owner_.askValue (owner_.text ("router.ask_transpose"), edit().transpose, -48, 48, false, 12,
+                             [this] (int v) { edit().transpose = v; owner_.commit(); refresh (edit()); });
+        };
         addAndMakeVisible (trans_);
         mode_.addItem (owner.text ("router.mode_add"), 1);
         mode_.addItem (owner.text ("router.mode_replace"), 2);
@@ -101,9 +106,10 @@ public:
         name_.setText (juce::String::fromUTF8 (r.name.c_str()), false);
         src_.setSelectedId (r.srcChannel + 1, juce::dontSendNotification);
         dst_.setSelectedId (r.dstChannel, juce::dontSendNotification);
-        lo_.setText (juce::String (r.keyLo), false);
-        hi_.setText (juce::String (r.keyHi), false);
-        trans_.setText (r.transpose > 0 ? "+" + juce::String (r.transpose) : juce::String (r.transpose), false);
+        auto keyText = [] (int k) { return juce::String (k) + "  " + juce::String::fromUTF8 (neptune::core::import::midiToNoteName (k, neptune::core::import::NoteConvention {}).c_str()); };
+        lo_.setButtonText (keyText (r.keyLo));
+        hi_.setButtonText (keyText (r.keyHi));
+        trans_.setButtonText (r.transpose > 0 ? "+" + juce::String (r.transpose) : juce::String (r.transpose));
         mode_.setSelectedId (r.replace ? 2 : 1, juce::dontSendNotification);
         cond_.setButtonText (owner_.conditionSummary (r));
         updating_ = false;
@@ -115,10 +121,134 @@ private:
     RouterView& owner_;
     std::size_t index_;
     bool updating_ = false;
-    juce::TextButton on_, cond_, remove_;
-    juce::TextEditor name_, lo_, hi_, trans_;
+    juce::TextButton on_, cond_, remove_, lo_, hi_, trans_;
+    juce::TextEditor name_;
     juce::ComboBox src_, dst_, mode_;
 };
+
+// ------------------------------------------------------------------------------------------------ fenêtre de réglage d'une valeur
+
+class RouterView::StepPanel : public juce::Component
+{
+public:
+    StepPanel (RouterView& owner, const juce::String& title, int value, int lo, int hi, bool noteNames, int bigStep, std::function<void (int)> onOk)
+        : owner_ (owner), lo_ (lo), hi_ (hi), noteNames_ (noteNames), onOk_ (std::move (onOk)), value_ (std::clamp (value, lo, hi))
+    {
+        title_.setText (title, juce::dontSendNotification);
+        title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+        title_.setColour (juce::Label::textColourId, owner.colour (Token::Accent));
+        title_.setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (title_);
+        auto step = [this] (juce::TextButton& b, const juce::String& label, int delta)
+        {
+            b.setButtonText (label);
+            b.onClick = [this, delta] { set (value_ + delta); };
+            addAndMakeVisible (b);
+        };
+        step (bigDown_, "-" + juce::String (bigStep), -bigStep);
+        step (down_, "-1", -1);
+        step (up_, "+1", 1);
+        step (bigUp_, "+" + juce::String (bigStep), bigStep);
+        field_.setFont (juce::FontOptions (20.0f));
+        field_.setJustification (juce::Justification::centred);
+        field_.setInputRestrictions (4, "-+0123456789");
+        field_.onReturnKey = [this] { apply(); };
+        addAndMakeVisible (field_);
+        name_.setJustificationType (juce::Justification::centred);
+        name_.setColour (juce::Label::textColourId, owner.colour (Token::TextDim));
+        addAndMakeVisible (name_);
+        ok_.setButtonText (owner.text ("grp.ok"));
+        ok_.onClick = [this] { apply(); };
+        addAndMakeVisible (ok_);
+        cancel_.setButtonText (owner.text ("mix.cancel"));
+        cancel_.onClick = [this] { close(); };
+        addAndMakeVisible (cancel_);
+        set (value_);
+        setWantsKeyboardFocus (true);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.55f));
+        const auto box = panelBounds().toFloat();
+        g.setColour (owner_.colour (Token::BgCard));
+        g.fillRoundedRectangle (box, 8.0f);
+        g.setColour (owner_.colour (Token::Border));
+        g.drawRoundedRectangle (box.reduced (0.5f), 8.0f, 1.0f);
+    }
+    void resized() override
+    {
+        auto r = panelBounds().reduced (14);
+        title_.setBounds (r.removeFromTop (28));
+        r.removeFromTop (8);
+        auto row = r.removeFromTop (40);
+        const int w = (row.getWidth() - 4 * 6 - 96) / 4;
+        bigDown_.setBounds (row.removeFromLeft (w));
+        row.removeFromLeft (6);
+        down_.setBounds (row.removeFromLeft (w));
+        row.removeFromLeft (6);
+        field_.setBounds (row.removeFromLeft (96));
+        row.removeFromLeft (6);
+        up_.setBounds (row.removeFromLeft (w));
+        row.removeFromLeft (6);
+        bigUp_.setBounds (row);
+        name_.setBounds (r.removeFromTop (28));
+        r.removeFromTop (6);
+        auto buttons = r.removeFromTop (30);
+        cancel_.setBounds (buttons.removeFromRight (110));
+        buttons.removeFromRight (8);
+        ok_.setBounds (buttons.removeFromRight (110));
+    }
+    void mouseDown (const juce::MouseEvent& e) override { if (! panelBounds().contains (e.getPosition())) close(); }
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (k == juce::KeyPress::escapeKey) { close(); return true; }
+        if (k == juce::KeyPress::returnKey) { apply(); return true; }
+        return false;
+    }
+
+private:
+    juce::Rectangle<int> panelBounds() const { return getLocalBounds().withSizeKeepingCentre (std::min (getWidth() - 20, 420), 190); }
+    void set (int v)
+    {
+        value_ = std::clamp (v, lo_, hi_);
+        field_.setText (value_ > 0 && ! noteNames_ ? "+" + juce::String (value_) : juce::String (value_), false);
+        if (noteNames_) name_.setText (juce::String::fromUTF8 (neptune::core::import::midiToNoteName (value_, neptune::core::import::NoteConvention {}).c_str()), juce::dontSendNotification);
+        else name_.setText (value_ == 0 ? owner_.text ("router.no_transpose") : juce::String (std::abs (value_) / 12) + " " + owner_.text ("router.octaves") + " " + juce::String (std::abs (value_) % 12) + " " + owner_.text ("router.semitones")
+                                + " " + owner_.text (value_ > 0 ? "router.up" : "router.down"), juce::dontSendNotification);
+    }
+    void apply()
+    {
+        set (field_.getText().getIntValue());
+        const auto done = onOk_;
+        const int v = value_;
+        close();
+        if (done) done (v);
+    }
+    void close()
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<RouterView> (&owner_)] { if (safe != nullptr) safe->step_.reset(); });
+    }
+
+    RouterView& owner_;
+    int lo_, hi_;
+    bool noteNames_;
+    std::function<void (int)> onOk_;
+    int value_;
+    juce::Label title_, name_;
+    juce::TextButton bigDown_, down_, up_, bigUp_, ok_, cancel_;
+    juce::TextEditor field_;
+};
+
+void RouterView::askValue (const juce::String& title, int value, int lo, int hi, bool noteNames, int bigStep, std::function<void (int)> onOk)
+{
+    if (step_ != nullptr) return;
+    step_ = std::make_unique<StepPanel> (*this, title, value, lo, hi, noteNames, bigStep, std::move (onOk));
+    addAndMakeVisible (*step_);
+    step_->setBounds (getLocalBounds());
+    step_->toFront (true);
+    step_->grabKeyboardFocus();
+}
 
 // ------------------------------------------------------------------------------------------------ la vue
 
@@ -189,6 +319,7 @@ void RouterView::resized()
     legend.removeFromLeft (kGap);
     head_[7].setBounds (legend.removeFromLeft (kModeW));
     if (search_ != nullptr) search_->setBounds (getLocalBounds());
+    if (step_ != nullptr) step_->setBounds (getLocalBounds());
 }
 
 void RouterView::layoutRows()

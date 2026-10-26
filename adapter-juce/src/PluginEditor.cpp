@@ -645,9 +645,6 @@ void NeptuneEditor::resized()
         int left = 190;
         trackBox_.setBounds (left, barY, 80, barH);
         left += 80 + gap + 2;
-        const int voicesW = std::max (fit (voiceCountButton_, 60), 150);   // le texte change avec le nombre de voix : largeur stable
-        voiceCountButton_.setBounds (left, barY, voicesW, barH);
-        left += voicesW + gap;
         for (auto* b : { &midiFilterButton_, &controlButton_, &oscButton_, &midiSendButton_ })
         {
             const int w = fit (*b, 44);
@@ -668,14 +665,28 @@ void NeptuneEditor::resized()
 
     {
         // rangée du bas, sur toute la largeur : latence annoncée, profil de performance (bascule et verrou), puis annuler / rétablir ; même hauteur partout
-        const int rowY = lh_ - 30, rowH = 22;
+        // Chaque bouton est juste assez large pour son texte (le texte qui change de longueur prend la plus large de ses formes).
+        const int rowY = lh_ - 30, rowH = 22, pad = 18, gap = 6;
+        const juce::Font font (novaSkin_.font (novaLook_.buttonFontSize (rowH), true));
+        auto widthOf = [&font, pad] (std::initializer_list<juce::String> texts)
+        {
+            float w = 0.0f;
+            for (const auto& t : texts) w = std::max (w, font.getStringWidthFloat (t));
+            return juce::roundToInt (std::ceil (w)) + pad;
+        };
         redoButton_.setBounds (lw_ - 32 - 64, rowY, 64, rowH);
         undoButton_.setBounds (lw_ - 32 - 64 - 4 - 64, rowY, 64, rowH);
-        globalPresetButton_.setBounds (lw_ - 32 - 64 - 4 - 64 - 12 - 130, rowY, 130, rowH);
-        auto row = juce::Rectangle<int> (32, rowY, lw_ - 64 - 64 - 4 - 64 - 12 - 130 - 8, rowH);
-        latencyLabel_.setBounds (row.removeFromLeft (230));
-        profileSwitchButton_.setBounds (row.removeFromLeft (190).reduced (2, 0));
-        profileLockButton_.setBounds (row.removeFromLeft (190).reduced (2, 0));
+        const int presetW = widthOf ({ globalPresetButton_.getButtonText() });
+        globalPresetButton_.setBounds (lw_ - 32 - 64 - 4 - 64 - 12 - presetW, rowY, presetW, rowH);
+        auto row = juce::Rectangle<int> (32, rowY, lw_ - 64 - 64 - 4 - 64 - 12 - presetW - 8, rowH);
+        latencyLabel_.setBounds (row.removeFromLeft (widthOf ({ juce::String::fromUTF8 (tr_.format ("latency.reported", { "99999" }).c_str()) }) - pad + 12));   // la plus longue forme du texte
+        row.removeFromLeft (gap);
+        profileSwitchButton_.setBounds (row.removeFromLeft (widthOf ({ profileSwitchButton_.getButtonText() })));
+        row.removeFromLeft (gap);
+        profileLockButton_.setBounds (row.removeFromLeft (widthOf ({ text ("profile.lock"), text ("profile.unlock") })));
+        row.removeFromLeft (gap);
+        voiceCountButton_.setBounds (row.removeFromLeft (widthOf ({ text ("analog.voices") + " 1024 / 1024" })));
+        row.removeFromLeft (gap + 6);
         profileLabel_.setBounds (row);
     }
 }

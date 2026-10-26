@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
+#include <functional>
 #include <memory>
 #include <vector>
 #include "ParamSearchPanel.h"
@@ -23,6 +24,9 @@ public:
 
 private:
     class RuleRow;
+    class StepPanel;
+    // Fenêtre de réglage d'une valeur entière (touche ou transposition) : boutons à pas, champ texte, OK / Annuler.
+    void askValue (const juce::String& title, int value, int lo, int hi, bool noteNames, int bigStep, std::function<void (int)> onOk);
 
     void timerCallback() override;
     void reload();
@@ -51,6 +55,7 @@ private:
     juce::Component holder_;
     std::vector<std::unique_ptr<RuleRow>> rows_;
     std::unique_ptr<ParamSearchPanel> search_;
+    std::unique_ptr<StepPanel> step_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RouterView)
 };
