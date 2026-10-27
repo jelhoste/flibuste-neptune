@@ -178,7 +178,8 @@ private:
     void releaseZonesFor (int channel, int key) noexcept; // zones déclenchées au relâchement
     void chokeFor (const Zone& zone) noexcept;           // coupe les voix que cette zone choke (avant de démarrer les siennes)
     bool otherHeldInGroup (int groupId, int channel, int key) const noexcept; // conditions « Premier » / « Legato »
-    Instrument::HeldQuery heldQuery (int channel, int key, int velocity = 64) noexcept;
+    // `heldMs` : durée pendant laquelle la touche a été tenue, pour les zones de relâchement (-1 : non concerné, Note On).
+    Instrument::HeldQuery heldQuery (int channel, int key, int velocity = 64, int heldMs = -1) noexcept;
     void pushHeld (int channel, int key, float velocity) noexcept;
     void removeHeld (int channel, int key) noexcept;
     void discard (Voice& v) noexcept; // libère son flux disque s'il y en a un, puis remet la voix à zéro
@@ -207,11 +208,13 @@ private:
     static constexpr int kMaxDownKeys = 64;
     std::array<DownKey, kMaxDownKeys> down_ {};
     int numDown_ = 0;
-    struct QueryContext { const SamplerVoices* self; int channel, key, velocity; } queryContext_ {};
+    struct QueryContext { const SamplerVoices* self; int channel, key, velocity, heldMs; } queryContext_ {};
     void markDown (int channel, int key) noexcept;
     void markUp (int channel, int key) noexcept;
     void recordGroups (int channel, int key, const Instrument::Pick* picks, int n) noexcept;
     std::uint64_t counter_ = 0;
     std::array<float, 128> heldVelocity_ {}; // vélocité du dernier Note On par touche (zones déclenchées au relâchement)
+    std::uint64_t clockFrames_ = 0;          // horloge : échantillons rendus depuis le début (avancée par render)
+    std::array<std::uint64_t, 128> heldAtFrames_ {};   // instant du dernier Note On par touche (durée d'appui des zones de relâchement)
 };
 } // namespace neptune::core

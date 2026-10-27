@@ -242,9 +242,9 @@ bool SamplerVoices::otherHeldInGroup (int groupId, int channel, int key) const n
     return false;
 }
 
-Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key, int velocity) noexcept
+Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key, int velocity, int heldMs) noexcept
 {
-    queryContext_ = { this, channel, key, velocity };
+    queryContext_ = { this, channel, key, velocity, heldMs };
     return { [] (const void* c, int group) noexcept
              {
                  const auto* q = static_cast<const QueryContext*> (c);
@@ -256,6 +256,11 @@ Instrument::HeldQuery SamplerVoices::heldQuery (int channel, int key, int veloci
              {
                  const auto* q = static_cast<const QueryContext*> (c);
                  if (! q->self->modAllows (z.modMask)) return false;   // un modulateur qui la commande est coupé
+                 if (z.onRelease && q->heldMs >= 0)                    // durée d'appui d'une zone de relâchement
+                 {
+                     if (q->heldMs < z.heldMinMs) return false;
+                     if (z.heldMaxMs > 0 && q->heldMs > z.heldMaxMs) return false;
+                 }
                  if (z.midiCond == nullptr) return true;
                  static const midi::State empty;
                  midi::Message m;
@@ -357,6 +362,7 @@ void SamplerVoices::noteOn (int channel, int key, float velocity) noexcept
     if (key >= 0 && key < 128)
     {
         heldVelocity_[static_cast<std::size_t> (key)] = shaped;
+        heldAtFrames_[static_cast<std::size_t> (key)] = clockFrames_;
     }
     markDown (channel, key);
 
@@ -522,8 +528,12 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
         if (! v.active || v.releasing || v.stolen || v.channel != channel || v.key != key) continue;
         if (v.zone->mode == PlayMode::Loop)
         {
-            v.releasing = true;
-            releaseEnvelopes (v);
+            if (v.zone->hasTail) steal (v);   // la queue enregistrée du fichier prend le relais (zone de relâchement implicite) : la boucle s'éteint en fondu rapide
+            else
+            {
+                v.releasing = true;
+                releaseEnvelopes (v);
+            }
         }
         // one-shot : le Note Off est ignoré, le sample est joué en entier
     }
@@ -539,7 +549,9 @@ void SamplerVoices::releaseZonesFor (int channel, int key) noexcept
     const float vel = heldVelocity_[static_cast<std::size_t> (key)];
     const float v = vel > 0.0f ? vel : 0.5f;
     Instrument::Pick picks[Instrument::maxPicks];
-    const auto held = heldQuery (channel, key, std::clamp (static_cast<int> (std::lround (v * 127.0f)), 1, 127));
+    const double heldFrames = static_cast<double> (clockFrames_ - std::min (clockFrames_, heldAtFrames_[static_cast<std::size_t> (key)]));
+    const int heldMs = static_cast<int> (std::min (heldFrames * 1000.0 / std::max (1.0, sampleRate_), static_cast<double> (maxHeldMs)));   // durée d'appui de cette touche
+    const auto held = heldQuery (channel, key, std::clamp (static_cast<int> (std::lround (v * 127.0f)), 1, 127), heldMs);
     const int n = instrument_->selectLayers (key, v, /*release*/ true, picks, Instrument::maxPicks, &held);
     for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone);
     for (int i = 0; i < n; ++i)
@@ -822,6 +834,7 @@ void SamplerVoices::render (float* left, float* right, int numFrames, float gain
 {
     if (left == nullptr || numFrames <= 0) return;
     const double pitchFactor = masterTuneCents == 0.0 ? 1.0 : std::exp2 (masterTuneCents / 1200.0);
+    clockFrames_ += static_cast<std::uint64_t> (numFrames);
     for (auto& v : voices_)
         if (v.active) renderVoice (v, left, right, numFrames, gainStart, gainEnd, pitchFactor);
     // Les voix terminées rendent leur emplacement de streaming (le thread disque ferme le fichier).

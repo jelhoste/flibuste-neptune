@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "ChokePanel.h"
+#include "DragValuePill.h"
 #include "MidiFilterEditor.h"
 #include "neptune/core/MappingEdit.h"
 #include "neptune/core/Mixer.h"
@@ -144,6 +145,7 @@ public:
     std::function<void (bool)> onCompensate;
     std::function<void (double ms)> onAnalysis;
     std::function<void (bool follow, int meter, double floorDb, double curve, double offsetDb)> onRelease;
+    std::function<void (int minMs, int maxMs)> onHeld;   // durée d'appui exigée d'une zone de relâchement (0 : pas de limite de ce côté)
     std::function<void (double velPct, double dbPerOct, int center)> onTracking;
     std::function<void()> onOpenMidi;
 
@@ -171,6 +173,8 @@ public:
         floorLabel_.setText (text ("sm.lv_floor"), juce::dontSendNotification);
         curveLabel_.setText (text ("sm.lv_curve"), juce::dontSendNotification);
         offsetLabel_.setText (text ("sm.lv_offset"), juce::dontSendNotification);
+        heldMinLabel_.setText (text ("sm.lv_held_min"), juce::dontSendNotification);
+        heldMaxLabel_.setText (text ("sm.lv_held_max"), juce::dontSendNotification);
         velLabel_.setText (text ("sm.lv_veltrack"), juce::dontSendNotification);
         keyLabel_.setText (text ("sm.lv_keytrack"), juce::dontSendNotification);
         centreLabel_.setText (text ("sm.lv_keycentre"), juce::dontSendNotification);
@@ -206,6 +210,28 @@ public:
         curve_.setValue (zone != nullptr ? zone->releaseCurve : 1.0, juce::dontSendNotification);
         offset_.setValue (zone != nullptr ? zone->releaseOffsetDb : 0.0, juce::dontSendNotification);
         for (auto* c : std::initializer_list<juce::Component*> { &follow_, &meter_, &floor_, &curve_, &offset_, &meterLabel_, &floorLabel_, &curveLabel_, &offsetLabel_ }) c->setEnabled (release);
+        {
+            // durée d'appui : deux pills glissables (double-clic pour saisir), seulement pour une zone de relâchement
+            neptune::core::dragvalue::Range held;
+            held.min = 0.0; held.max = 10000.0; held.step = 10.0; held.decimals = 0; held.def = 0.0;
+            for (auto* p : { &heldMin_, &heldMax_ })
+            {
+                p->setPalette (skin_.palette());
+                p->setRange (held, "ms");
+                p->setEnabled (release);
+                p->setTooltip (text ("sm.lv_held_tip"));
+                addAndMakeVisible (*p);
+            }
+            heldMin_.setValue (zone != nullptr ? zone->heldMinMs : 0);
+            heldMax_.setValue (zone != nullptr ? zone->heldMaxMs : 0);
+            heldMinLabel_.setEnabled (release);
+            heldMaxLabel_.setEnabled (release);
+            auto heldChanged = [this] (double) { if (onHeld) onHeld (static_cast<int> (heldMin_.value()), static_cast<int> (heldMax_.value())); };
+            heldMin_.onValue = heldChanged;
+            heldMax_.onValue = heldChanged;
+            addAndMakeVisible (heldMinLabel_);
+            addAndMakeVisible (heldMaxLabel_);
+        }
         auto changed = [this] { if (onRelease) onRelease (follow_.getToggleState(), meter_.getSelectedId() - 1, floor_.getValue(), curve_.getValue(), offset_.getValue()); };
         follow_.onClick = changed;
         meter_.onChange = changed;
@@ -213,7 +239,7 @@ public:
         curve_.onValueChange = changed;
         offset_.onValueChange = changed;
         for (auto* c : std::initializer_list<juce::Component*> { &compensate_, &follow_, &meter_, &floor_, &curve_, &offset_, &meterLabel_, &floorLabel_, &curveLabel_, &offsetLabel_, &hint_ }) addAndMakeVisible (*c);
-        setSize (440, 330 + 5 * 32 + 8);
+        setSize (440, 330 + 7 * 32 + 8);
     }
     ~LevelsPanel() override { setLookAndFeel (nullptr); }
     void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
@@ -230,6 +256,8 @@ public:
         row (floorLabel_, floor_);
         row (curveLabel_, curve_);
         row (offsetLabel_, offset_);
+        row (heldMinLabel_, heldMin_);
+        row (heldMaxLabel_, heldMax_);
         r.removeFromTop (10);
         row (velLabel_, vel_);
         row (keyLabel_, keyDb_);
@@ -249,6 +277,8 @@ private:
         vel_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight }, keyDb_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight },
         keyCentre_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider analysis_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    DragValuePill heldMin_, heldMax_;
+    juce::Label heldMinLabel_, heldMaxLabel_;
     juce::Label analysisLabel_, meterLabel_, floorLabel_, curveLabel_, offsetLabel_, velLabel_, keyLabel_, centreLabel_, hint_;
     juce::TextButton midiButton_;
     bool zoneSelected_ = false;
@@ -2362,6 +2392,11 @@ void NovaSamplerEditor::openLevelsPanel (juce::Component& anchor)
     {
         if (safe == nullptr) return;
         safe->editZone ([=] (Zone& zone) { zone.releaseFollowsLevel = follow; zone.releaseMeter = meter; zone.releaseFloorDb = floorDb; zone.releaseCurve = curve; zone.releaseOffsetDb = offsetDb; });
+    };
+    panel->onHeld = [safe] (int minMs, int maxMs)
+    {
+        if (safe == nullptr) return;
+        safe->editZone ([=] (Zone& zone) { zone.heldMinMs = minMs; zone.heldMaxMs = maxMs; });
     };
     panel->onTracking = [safe] (double velPct, double dbPerOct, int center)
     {

@@ -82,6 +82,14 @@ ZoneDescription sanitised (ZoneDescription z)
     z.chokeCutBy = std::clamp (z.chokeCutBy, 0, maxChokeGroup);
     z.filters = sanitised (std::move (z.filters));
     if (z.onRelease) z.trigger = TriggerCondition::Always; // la condition ne concerne que les zones d'attaque
+    if (z.onRelease)
+    {
+        z.heldMinMs = std::clamp (z.heldMinMs, 0, maxHeldMs);
+        z.heldMaxMs = std::clamp (z.heldMaxMs, 0, maxHeldMs);
+        if (z.heldMaxMs > 0 && z.heldMaxMs < z.heldMinMs) z.heldMaxMs = z.heldMinMs;
+    }
+    else
+        z.heldMinMs = z.heldMaxMs = 0;   // la durée d'appui ne concerne que les zones de relâchement
     if (z.loopStart < 0) z.loopStart = 0;
     if (z.loopEnd >= 0 && z.loopEnd <= z.loopStart) z.loopEnd = -1; // incohérent : tout le fichier
     if (z.startFrame < 0) z.startFrame = 0;
@@ -101,6 +109,7 @@ ZoneDescription sanitised (ZoneDescription z)
     z.releaseFloorDb = std::isfinite (z.releaseFloorDb) ? std::clamp (z.releaseFloorDb, -96.0, -6.0) : -48.0;
     z.releaseCurve = std::isfinite (z.releaseCurve) ? std::clamp (z.releaseCurve, 0.25, 4.0) : 1.0;
     if (z.releaseRefFrame < -1) z.releaseRefFrame = -1;
+    if (z.onRelease || z.mode != PlayMode::Loop || z.releaseStart <= z.startFrame) z.releaseStart = -1;   // une queue n'a de sens que pour une boucle qui se relâche
     z.releaseOffsetDb = std::isfinite (z.releaseOffsetDb) ? std::clamp (z.releaseOffsetDb, -24.0, 24.0) : 0.0;
     z.loopRepeats = std::clamp (z.loopRepeats, 0, 1000);
     if (z.extraLoops.size() > ZoneDescription::maxExtraLoops) z.extraLoops.resize (ZoneDescription::maxExtraLoops);
@@ -239,6 +248,7 @@ std::string toJson (const InstrumentDescription& d)
         if (z.keyTrackDbPerOct != 0.0) o["key_track_db_per_oct"] = z.keyTrackDbPerOct;
         if (z.keyTrackCenter != 60) o["key_track_center"] = z.keyTrackCenter;
         if (z.midiCondition.enabled) o["midi_condition"] = nlohmann::json::parse (midi::toJson (z.midiCondition), nullptr, false);
+        if (z.releaseStart >= 0) o["release_start"] = z.releaseStart;
         if (z.releaseRefFrame >= 0) o["release_ref_frame"] = z.releaseRefFrame;   // propriété du sample : posée même sur une zone d'attaque (ignorée tant qu'elle n'est pas de relâchement)
         if (z.releaseFollowsLevel)
         {
@@ -266,6 +276,8 @@ std::string toJson (const InstrumentDescription& d)
         if (z.roundRobin != 0) o["round_robin"] = z.roundRobin;
         if (! z.group.empty()) o["group"] = z.group;
         if (z.onRelease) o["on_release"] = true;
+        if (z.onRelease && z.heldMinMs > 0) o["held_min_ms"] = z.heldMinMs;
+        if (z.onRelease && z.heldMaxMs > 0) o["held_max_ms"] = z.heldMaxMs;
         if (z.trigger != TriggerCondition::Always) o["trigger"] = toString (z.trigger);
         if (z.chokeCuts != 0) o["choke_cuts"] = z.chokeCuts;
         if (z.chokeCutBy != 0) o["choke_cut_by"] = z.chokeCutBy;
@@ -456,6 +468,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.releaseFloorDb = readNum (o, "release_floor_db", z.releaseFloorDb);
     z.releaseCurve = readNum (o, "release_curve", z.releaseCurve);
     z.releaseRefFrame = readI64 (o, "release_ref_frame", z.releaseRefFrame);
+    z.releaseStart = readI64 (o, "release_start", -1);
     z.releaseOffsetDb = readNum (o, "release_offset_db", z.releaseOffsetDb);
     z.loopRepeats = readInt (o, "loop_repeats", z.loopRepeats);
     if (const auto it = o.find ("extra_loops"); it != o.end() && it->is_array())
@@ -472,6 +485,8 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.roundRobin = readInt (o, "round_robin", 0);
     if (const auto it = o.find ("group"); it != o.end() && it->is_string()) z.group = it->get<std::string>();
     if (const auto it = o.find ("on_release"); it != o.end() && it->is_boolean()) z.onRelease = it->get<bool>();
+    z.heldMinMs = std::clamp (readInt (o, "held_min_ms", 0), 0, maxHeldMs);
+    z.heldMaxMs = std::clamp (readInt (o, "held_max_ms", 0), 0, maxHeldMs);
     if (const auto it = o.find ("trigger"); it != o.end() && it->is_string())
     {
         if (it->get<std::string>() == "first") z.trigger = TriggerCondition::First;
@@ -871,6 +886,7 @@ std::int64_t residentFramesNeeded (const InstrumentDescription& d, const ZoneDes
 {
     if (! d.streamFromDisk || totalFrames <= 0) return totalFrames;
     if (zone.reverse) return totalFrames;   // lue à l'envers : tout doit être en mémoire
+    if (zone.releaseStart >= 0 && zone.mode == PlayMode::Loop && ! zone.onRelease) return totalFrames;   // la queue de relâchement est jouée depuis la mémoire
     if (zone.mode == PlayMode::Loop)
     {
         // Même règle de bornage que buildInstrument : la boucle lit jusqu'à loopEnd (+ 4 pour l'interpolation).
@@ -1014,6 +1030,9 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         const auto frames = z.sample->frames;
         z.roundRobin = zd.roundRobin;
         z.onRelease = zd.onRelease;
+        z.heldMinMs = zd.onRelease ? zd.heldMinMs : 0;
+        z.heldMaxMs = zd.onRelease ? zd.heldMaxMs : 0;
+        z.releaseStart = zd.mode == PlayMode::Loop && ! zd.onRelease && zd.releaseStart > zd.startFrame && zd.releaseStart < z.sample->frames ? zd.releaseStart : -1;
         z.sourceIndex = static_cast<int> (zi);
         {
             // filtres : la zone personnalisée > le Groupe personnalisé > l'instrument
@@ -1089,6 +1108,28 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         }
         inst->zones.push_back (std::move (z));
     }
+    // Queues de relâchement enregistrées dans le fichier : une zone de relâchement implicite par zone en boucle qui en a une. Elle joue le fichier en entier à partir du repère,
+    // pour la même touche, le même Groupe et les mêmes modulateurs ; la voix en boucle, elle, s'éteint en fondu rapide au Note Off (voir SamplerVoices::noteOff).
+    if (description.loadReleaseSamples)
+        for (std::size_t i = 0, n = inst->zones.size(); i < n; ++i)
+        {
+            if (inst->zones[i].releaseStart < 0 || inst->zones[i].onRelease || inst->zones[i].mode != PlayMode::Loop) continue;
+            Zone tail = inst->zones[i];
+            tail.onRelease = true;
+            tail.mode = PlayMode::OneShot;
+            tail.startFrame = tail.releaseStart;
+            tail.trigger = TriggerCondition::Always;
+            tail.releaseFollowsLevel = false;
+            tail.heldMinMs = tail.heldMaxMs = 0;
+            tail.env = EnvelopeRuntime {};            // la queue enregistrée garde sa propre extinction : pas d'enveloppe de zone
+            tail.fadeInMs = std::max (tail.fadeInMs, 5.0);
+            tail.releaseStart = -1;
+            tail.hasTail = false;
+            tail.chokeCuts = 0;
+            tail.chokeCutBy = 0;
+            inst->zones[i].hasTail = true;
+            inst->zones.push_back (std::move (tail));
+        }
     for (std::size_t i = 0; i < description.slots.size(); ++i)
     {
         const auto& a = description.slots[i];

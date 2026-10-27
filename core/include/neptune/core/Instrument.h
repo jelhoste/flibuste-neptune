@@ -49,6 +49,7 @@ const char* toString (TriggerCondition) noexcept;
 // Groupes de choke : une zone qui se déclenche coupe les voix des zones dont `chokeCutBy` égale son `chokeCuts` (0 = aucun).
 // Un seul numéro N sur les deux champs = groupe symétrique (les zones du groupe se coupent entre elles).
 constexpr int maxChokeGroup = 32;
+constexpr int maxHeldMs = 600000;   // durée d'appui maximale réglable d'une zone de relâchement (10 minutes)
 
 // Boucle supplémentaire d'une zone (spec §13.5 : jusqu'à 4 boucles par zone, jouées à la suite). La première boucle reste loopStart / loopEnd / loopCrossfade.
 struct LoopRegion
@@ -78,6 +79,9 @@ struct ZoneDescription
     std::string group;             // nom de Groupe (micro, articulation...) ; vide = aucun
     bool onRelease = false;        // déclenchée au Note Off (bruits de mécanique, fins de note), pas au Note On
     TriggerCondition trigger = TriggerCondition::Always; // condition d'une zone d'attaque (ignorée si onRelease)
+    // Zone de relâchement seulement : elle ne se déclenche que si la touche a été tenue au moins `heldMinMs` et au plus `heldMaxMs` millisecondes (0 : pas de limite de ce côté).
+    // Un jeu de zones de relâchement qui se suivent (court, moyen, long) donne le bruit juste selon la durée d'appui, sans script.
+    int heldMinMs = 0, heldMaxMs = 0;
     // Filtres par voie : faux = la zone hérite des filtres de l'instrument (InstrumentDescription::defaultFilters) ; vrai = les siens.
     bool filterOverride = false;
     FilterBlock filters;
@@ -108,6 +112,10 @@ struct ZoneDescription
     // de relâchement, à ce marqueur, ait le niveau entendu de la voix d'attaque (plus `releaseOffsetDb`) ; le seuil de silence reste une porte, la courbe n'est plus utilisée.
     std::int64_t releaseRefFrame = -1;
     double releaseOffsetDb = 0.0;
+    // Queue de relâchement enregistrée dans le même fichier (orgues : le tuyau, sa boucle, puis son extinction dans la salle) : zone en boucle seulement.
+    // >= 0 : au Note Off, la boucle s'éteint en fondu rapide et le fichier est joué en entier à partir de cette image (une zone de relâchement implicite,
+    // même touche, même Groupe, mêmes modulateurs, est ajoutée à la construction). -1 : le relâchement habituel par l'enveloppe.
+    std::int64_t releaseStart = -1;
     // Volume : suivi de la vélocité (indépendant du choix de la couche : -100..+100 %, 100 = le volume suit la vélocité comme avant, 0 = volume constant, négatif =
     // plus fort quand on joue doucement) et suivi du clavier (dB par octave autour de `keyTrackCenter`, 0 = aucun).
     double velTrackPct = 100.0;
@@ -128,13 +136,13 @@ struct ZoneDescription
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
             && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && envelopeOverride == o.envelopeOverride && modulators == o.modulators && rrMode == o.rrMode && tuneCents == o.tuneCents && gainDb == o.gainDb
             && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
-            && trigger == o.trigger && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
+            && trigger == o.trigger && heldMinMs == o.heldMinMs && heldMaxMs == o.heldMaxMs && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
             && filterOverride == o.filterOverride && filters == o.filters
             && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
             && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
             && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
-            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb
+            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb && releaseStart == o.releaseStart
             && humanizePct == o.humanizePct && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition;
     }
 };
@@ -316,6 +324,9 @@ struct Zone
     int rrMode = -1;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
     bool onRelease = false;
+    int heldMinMs = 0, heldMaxMs = 0;   // durée d'appui exigée d'une zone de relâchement (voir ZoneDescription)
+    std::int64_t releaseStart = -1;     // zone en boucle : début de la queue de relâchement du fichier (-1 : aucune)
+    bool hasTail = false;               // zone en boucle dont la queue est jouée par une zone de relâchement implicite : son Note Off est un fondu rapide
     TriggerCondition trigger = TriggerCondition::Always;
     int chokeCuts = 0, chokeCutBy = 0;
     std::shared_ptr<const FilterRuntimeBlock> filters; // nul : aucun filtre

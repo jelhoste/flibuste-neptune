@@ -945,3 +945,143 @@ TEST_CASE ("a free preview plays a sample that belongs to no zone, once or in a 
     }
     CHECK (makePreviewSample (nullptr) == nullptr);
 }
+
+TEST_CASE ("release zones are chosen by how long the key was held")
+{
+    // trois bruits de relâchement pour la même touche : court (jusqu'à 300 ms), moyen (301 ms à 1,5 s), long (plus de 1,5 s)
+    auto run = [] (int holdMs)
+    {
+        auto inst = std::make_shared<Instrument>();
+        auto attack = makeFullKeyboardZone (makeConstant (96000, 0.0f), 60, PlayMode::Loop);
+        inst->zones.push_back (std::move (attack));
+        const struct { float level; int minMs, maxMs; } releases[] = { { 0.2f, 0, 300 }, { 0.5f, 301, 1500 }, { 0.9f, 1501, 0 } };
+        for (const auto& r : releases)
+        {
+            auto z = makeFullKeyboardZone (makeConstant (96000, r.level), 60, PlayMode::OneShot);
+            z.onRelease = true; z.panL = 0.0f; z.panR = 1.0f;   // le relâchement sort à droite seulement
+            z.heldMinMs = r.minMs; z.heldMaxMs = r.maxMs;
+            inst->zones.push_back (std::move (z));
+        }
+        inst->finalize();
+        SamplerVoices v;
+        v.prepare (48000.0);
+        v.setInstrument (inst.get());
+        v.noteOn (0, 60, 1.0f);
+        std::vector<float> l (4096, 0.0f), r (4096, 0.0f);
+        for (int done = 0; done < holdMs * 48; done += 256)
+        {
+            const int n = std::min (256, holdMs * 48 - done);
+            if (n > 0) v.render (l.data(), r.data(), n, 1.0f, 1.0f, 0.0);
+        }
+        v.noteOff (0, 60);
+        std::fill (r.begin(), r.end(), 0.0f);
+        v.render (l.data(), r.data(), 2048, 1.0f, 1.0f, 0.0);
+        return r[1500];
+    };
+    CHECK_THAT (run (100), WithinAbs (0.2, 0.02));
+    CHECK_THAT (run (299), WithinAbs (0.2, 0.02));
+    CHECK_THAT (run (800), WithinAbs (0.5, 0.02));
+    CHECK_THAT (run (1500), WithinAbs (0.5, 0.02));
+    CHECK_THAT (run (3000), WithinAbs (0.9, 0.02));
+    CHECK_THAT (run (20000), WithinAbs (0.9, 0.02));
+}
+
+TEST_CASE ("a release zone with a held-time window that no press fits stays silent, and the window survives JSON")
+{
+    auto inst = std::make_shared<Instrument>();
+    inst->zones.push_back (makeFullKeyboardZone (makeConstant (96000, 0.0f), 60, PlayMode::Loop));
+    auto z = makeFullKeyboardZone (makeConstant (96000, 1.0f), 60, PlayMode::OneShot);
+    z.onRelease = true; z.panL = 0.0f; z.panR = 1.0f; z.heldMinMs = 2000;   // seulement après 2 s d'appui
+    inst->zones.push_back (std::move (z));
+    inst->finalize();
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    v.noteOn (0, 60, 1.0f);
+    std::vector<float> l (4096, 0.0f), r (4096, 0.0f);
+    for (int done = 0; done < 24000; done += 256) v.render (l.data(), r.data(), 256, 1.0f, 1.0f, 0.0);   // 0,5 s
+    v.noteOff (0, 60);
+    std::fill (r.begin(), r.end(), 0.0f);
+    v.render (l.data(), r.data(), 2048, 1.0f, 1.0f, 0.0);
+    CHECK_THAT (r[1500], WithinAbs (0.0, 1e-6));
+
+    InstrumentDescription d;
+    ZoneDescription rel;
+    rel.samplePath = "/x/rel.wav";
+    rel.onRelease = true;
+    rel.heldMinMs = 200;
+    rel.heldMaxMs = 1000;
+    ZoneDescription attackZone;
+    attackZone.samplePath = "/x/att.wav";
+    attackZone.heldMinMs = 500;   // sans effet sur une zone d'attaque
+    ZoneDescription swapped = rel;
+    swapped.heldMinMs = 900;
+    swapped.heldMaxMs = 100;      // fenêtre à l'envers : la borne haute remonte au minimum
+    d.zones = { rel, attackZone, swapped };
+    const auto back = instrumentFromJson (toJson (d));
+    REQUIRE (back.zones.size() == 3);
+    CHECK (back.zones[0].heldMinMs == 200);
+    CHECK (back.zones[0].heldMaxMs == 1000);
+    CHECK (back.zones[1].heldMinMs == 0);
+    CHECK (back.zones[1].heldMaxMs == 0);
+    CHECK (back.zones[2].heldMinMs == 900);
+    CHECK (back.zones[2].heldMaxMs == 900);
+    CHECK (instrumentFromJson ("{\"zones\":[{\"sample\":\"/a.wav\",\"on_release\":true,\"held_min_ms\":99999999}]}").zones[0].heldMinMs == maxHeldMs);
+}
+
+TEST_CASE ("a looped zone with a recorded release tail plays the tail from the marker after Note Off")
+{
+    // un fichier de 2 s : la partie tenue (0,3) jusqu'à 1 s, puis la queue enregistrée (0,8) de 1 s à 2 s
+    const auto path = std::filesystem::temp_directory_path() / "neptune-release-tail.wav";
+    {
+        SF_INFO info {};
+        info.samplerate = 48000; info.channels = 1; info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+        SNDFILE* f = sf_open (path.string().c_str(), SFM_WRITE, &info);
+        REQUIRE (f != nullptr);
+        std::vector<float> data (96000, 0.3f);
+        std::fill (data.begin() + 48000, data.end(), 0.8f);
+        sf_writef_float (f, data.data(), static_cast<sf_count_t> (data.size()));
+        sf_close (f);
+    }
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = path.string();
+    z.mode = PlayMode::Loop;
+    z.rootNote = 60;
+    z.loopStart = 1000; z.loopEnd = 40000;
+    z.releaseStart = 48000;
+    d.zones.push_back (z);
+    CHECK (instrumentFromJson (toJson (d)).zones[0].releaseStart == 48000);   // la queue passe par le JSON
+    const auto inst = buildInstrument (d);
+    REQUIRE (inst != nullptr);
+    REQUIRE (inst->zones.size() == 2);                                         // la zone en boucle + sa zone de relâchement implicite
+    CHECK (inst->zones[0].hasTail);
+    CHECK (inst->zones[1].onRelease);
+    CHECK (inst->zones[1].startFrame == 48000);
+
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    v.noteOn (0, 60, 1.0f);
+    std::vector<float> l (96000, 0.0f), r (96000, 0.0f);
+    int pos = 0;
+    auto run = [&] (int frames) { for (int done = 0; done < frames; done += 256) { const int n = std::min (256, frames - done); v.render (l.data() + pos, r.data() + pos, n, 1.0f, 1.0f, 0.0); pos += n; } };
+    run (24000);                                                               // 0,5 s tenue : la boucle sonne
+    CHECK_THAT (l[20000], WithinAbs (0.3, 0.02));
+    v.noteOff (0, 60);
+    run (4800);                                                                // 0,1 s après : la queue (0,8) a pris le relais, la boucle est éteinte
+    CHECK_THAT (l[24000 + 4000], WithinAbs (0.8, 0.02));
+    run (24000);
+    CHECK_THAT (l[24000 + 20000], WithinAbs (0.8, 0.02));                      // la queue joue encore (elle dure 1 s)
+    run (30000);                                                               // au-delà de la fin du fichier : silence, la voix est terminée
+    CHECK_THAT (l[pos - 100], WithinAbs (0.0, 1e-4));
+    CHECK (v.activeVoices() == 0);
+
+    // une zone sans queue garde le relâchement par l'enveloppe, et sans « charger les relâchements » il n'y a pas de zone de queue
+    d.zones[0].releaseStart = -1;
+    CHECK (buildInstrument (d)->zones.size() == 1);
+    d.zones[0].releaseStart = 48000;
+    d.loadReleaseSamples = false;
+    CHECK (buildInstrument (d)->zones.size() == 1);
+    std::filesystem::remove (path);
+}
