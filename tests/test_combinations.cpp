@@ -516,3 +516,58 @@ TEST_CASE ("modulators: a group switch can be any of the 32")
     CHECK (mapping::groupSwitch (d, "Jeu 32") == 31);
     CHECK (mapping::groupSwitch (d, "Jeu 33") == -1);                      // les 32 sont pris
 }
+
+TEST_CASE ("combinations: the sequence and the generals can be edited from the screen")
+{
+    Library lib;
+    CHECK_FALSE (sequenceAdd (lib, -1));
+    CHECK_FALSE (sequenceAdd (lib, numGeneralKeys));
+    CHECK (sequenceAdd (lib, generalKey (0, 1)));
+    CHECK (sequenceAdd (lib, generalKey (2, 5)));
+    CHECK (sequenceAdd (lib, generalKey (0, 1)));                      // le même général peut revenir plusieurs fois
+    CHECK (lib.sequence == std::vector<int> ({ generalKey (0, 1), generalKey (2, 5), generalKey (0, 1) }));
+
+    CHECK (sequenceMove (lib, 0, 1));
+    CHECK (lib.sequence == std::vector<int> ({ generalKey (2, 5), generalKey (0, 1), generalKey (0, 1) }));
+    CHECK_FALSE (sequenceMove (lib, 0, -1));                           // déjà en tête
+    CHECK_FALSE (sequenceMove (lib, 2, 1));                            // déjà à la fin
+    CHECK_FALSE (sequenceMove (lib, 5, -1));
+    CHECK_FALSE (sequenceMove (lib, 1, 0));
+    CHECK (sequenceRemove (lib, 1));
+    CHECK_FALSE (sequenceRemove (lib, 2));
+    CHECK_FALSE (sequenceRemove (lib, -1));
+    CHECK (lib.sequence.size() == 2);
+
+    while (sequenceAdd (lib, generalKey (1, 1))) {}
+    CHECK (lib.sequence.size() == static_cast<std::size_t> (kMaxSequence));   // la liste est bornée
+
+    Memory m;
+    m.used = true;
+    lib.generals[generalKey (0, 1)] = m;
+    CHECK_FALSE (renameGeneral (lib, generalKey (0, 2), "Absent"));    // pas de mémoire à renommer
+    CHECK (renameGeneral (lib, generalKey (0, 1), "   Plein-jeu  "));
+    CHECK (lib.generals.at (generalKey (0, 1)).name == "Plein-jeu");
+    CHECK (renameGeneral (lib, generalKey (0, 1), std::string (300, 'x')));
+    CHECK (lib.generals.at (generalKey (0, 1)).name.size() == kMaxName);
+    CHECK (renameGeneral (lib, generalKey (0, 1), "   "));
+    CHECK (lib.generals.at (generalKey (0, 1)).name.empty());
+
+    CHECK (eraseGeneral (lib, generalKey (0, 1)));
+    CHECK_FALSE (eraseGeneral (lib, generalKey (0, 1)));
+    CHECK (lib.general (0, 1) == nullptr);
+    CHECK (lib.sequence.size() == static_cast<std::size_t> (kMaxSequence));   // les pas qui la visaient restent
+
+    Controller c;
+    auto set = makeSet();
+    lib.sequence = { generalKey (0, 0), generalKey (0, 1), generalKey (0, 2) };
+    c.sequenceNext (lib, set);
+    c.sequenceNext (lib, set);
+    c.sequenceNext (lib, set);
+    CHECK (c.sequencePosition() == 2);
+    c.clampSequence (2);
+    CHECK (c.sequencePosition() == 1);                                 // la liste a raccourci : la position suit
+    c.clampSequence (0);
+    CHECK (c.sequencePosition() == -1);
+    c.clampSequence (5);
+    CHECK (c.sequencePosition() == -1);
+}

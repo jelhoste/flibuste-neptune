@@ -1,10 +1,14 @@
 # Méthode de travail : compiler sans geler l'ordinateur, et passer par GitHub Actions
 
+**Version à jour et générale : `Methode-compilation-Claude-Code.md` (dossier Bureau de l'utilisateur) : limites 3 cœurs / 7 Go sous Linux, file d'attente `claude-build`, compilation Windows par SSH. Ce document-ci en est la première version.**
+
 Document de référence, à coller au début d'une nouvelle conversation (ou à donner à Claude Code) pour qu'il travaille de la même façon sur tous les projets. Rédigé le 2026-10-26 sur Linux (Ubuntu récent, 4 cœurs, 11 Go de RAM), à partir de la reprise du projet Neptune.
 
 ## 1. Le principe en une phrase
 
-**Le code du cœur (C++ sans interface) se teste en local, avec des limites de ressources ; le plugin complet (interface JUCE, trois systèmes) est compilé par GitHub Actions, et Claude surveille, corrige et installe le résultat.**
+**Tout se compile et se teste d'abord en local (cœur, tests et plugin complet), avec des limites de ressources et une seule compilation à la fois ; GitHub Actions (trois systèmes) ne se lance qu'après une confirmation de l'utilisateur, car le quota gratuit est limité ; Claude surveille alors la CI, corrige et installe le résultat.**
+
+*Mise à jour du 2026-10-26 (soir)* : l'utilisateur a atteint la limite gratuite de GitHub Actions. Les règles ci-dessous remplacent donc la version du matin (« plugin compilé seulement par la CI ») : on compile le plugin complet en local, limité à **2 cœurs et 8 Go**, et l'utilisateur ne lance qu'une compilation à la fois sur sa machine. Claude **demande confirmation avant chaque `git push`** (un push lance la CI), et ne relance pas la CI de lui-même.
 
 ## 2. Pourquoi cette règle : l'ordinateur gelait
 
@@ -12,7 +16,9 @@ Constat du 2026-10-26 : l'ordinateur a gelé ou planté plusieurs fois pendant d
 
 Règle : **jamais deux compilations lourdes en même temps**, et jamais de compilation du plugin complet en local sauf demande explicite de l'utilisateur (après avoir vérifié qu'aucun autre projet ne compile).
 
-## 3. Ce qui se fait en local (léger, avec limites)
+## 3. Ce qui se fait en local (avec limites)
+
+Depuis le soir du 2026-10-26 : le **plugin complet** se compile aussi en local (`cmake --build <dossier> --target Neptune_CLAP -- -j2`), dossier `~/Bureau/FlibusteSuite/build-local`, avec `-p MemoryMax=8G` au lieu de 3 Go et `-j2`. Les tests du cœur restent à 3 Go. Une seule compilation à la fois.
 
 Les **tests du cœur** (logique, sans JUCE, sans fenêtre) : ils vérifient le modèle de données, les règles, le JSON, les conversions. Ils sont légers.
 
@@ -30,7 +36,7 @@ $LIM ~/Bureau/FlibusteSuite/build-core/tests/neptune_core_tests
 - **Dossier de build permanent**, pas dans `/tmp` (qui est vidé à chaque redémarrage) : par exemple `~/Bureau/<Suite>/build-core`, hors du dépôt git.
 - Tout ce qui est dans `core/` et `tests/` se vérifie ainsi. L'interface (`adapter-juce/`) **n'est pas** compilée en local.
 
-## 4. Ce que fait GitHub Actions
+## 4. Ce que fait GitHub Actions (après confirmation de l'utilisateur)
 
 À chaque `git push`, la CI compile le cœur, les tests et le plugin pour **Linux, Windows et macOS** (35 à 40 minutes). Elle produit les binaires dans les « artefacts » du run.
 
@@ -40,7 +46,8 @@ Avantage : l'ordinateur ne travaille pas. Inconvénient : une erreur de compilat
 
 1. **Coder** : modifier le cœur et l'interface. Mettre à jour la documentation (`docs/`) et les textes de traduction (`I18n`).
 2. **Tester en local** (section 3) : les tests du cœur doivent tous passer.
-3. **Commiter et pousser** sur `main`. (Chaque projet a ses règles : confirmer d'abord ce qui sort de la machine, sauf consigne contraire durable de l'utilisateur.) Message de commit court, en anglais, avec la ligne de co-auteur.
+3. **Compiler le plugin en local** (section 3) : zéro erreur avant d'aller plus loin.
+3 bis. **Demander confirmation** à l'utilisateur, puis commiter et pousser sur `main`. Message de commit court, en anglais, avec la ligne de co-auteur.
 4. **Surveiller la CI** : une seule commande de fond, jamais plusieurs boucles, un contrôle toutes les 5 minutes au plus (l'API GitHub est limitée, la limite a déjà été atteinte) :
 
    ```bash

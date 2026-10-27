@@ -56,6 +56,13 @@ Library sanitised (Library);                  // bornes, noms et listes tronqué
 std::string toJson (const Library&);
 Library fromJson (std::string_view);          // lecture tolérante
 
+// Édition des généraux et de la séquence (écran Combinaisons). Les clefs sont celles de `generalKey`. Chaque fonction rend faux, sans rien changer, quand elle ne peut pas agir.
+bool sequenceAdd (Library&, int generalKeyValue);                 // ajoute un pas à la fin (la mémoire peut être vide pour l'instant) ; faux si la liste est pleine ou la clef invalide
+bool sequenceRemove (Library&, int index);
+bool sequenceMove (Library&, int index, int delta);               // échange le pas avec son voisin (delta -1 ou +1) ; faux hors de la liste
+bool eraseGeneral (Library&, int generalKeyValue);                // efface la mémoire (les pas de la séquence qui la visent restent, ils sont « vides »)
+bool renameGeneral (Library&, int generalKeyValue, std::string name);   // la mémoire doit exister ; nom nettoyé et tronqué
+
 // Paramètres concernés, ceux que le jeu connaît.
 //  stopParams : les jeux d'un clavier (les 16 modulateurs de la piste `track`, 0..15).
 //  consoleParams : les jeux de tous les claviers, les 32 tirants du routeur et les transpositions de règles.
@@ -129,6 +136,7 @@ public:
     // Séquenceur : -1 avant le premier pas. Aux extrémités la position reste en place (Ignored). Un général rappelé directement
     // qui figure dans la liste cale la position sur lui.
     int sequencePosition() const noexcept { return seq_; }
+    void clampSequence (int length) noexcept { if (seq_ >= length) seq_ = length - 1; }   // après un changement de la liste
     void resetSequence() noexcept { seq_ = -1; }
     Outcome sequenceNext (const Library&, ParameterSet&);
     Outcome sequencePrevious (const Library&, ParameterSet&);

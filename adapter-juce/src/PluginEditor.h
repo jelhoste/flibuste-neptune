@@ -1,5 +1,6 @@
 #pragma once
 #include "PluginProcessor.h"
+#include "CombinationsPanel.h"
 #include "ControlPanel.h"
 #include "AudioInView.h"
 #include "MixerView.h"
@@ -38,6 +39,9 @@ private:
     juce::TextButton oscButton_;        // serveur OSC : interrupteur, réseau local, port
     juce::TextButton midiSendButton_;   // fenêtre d'envoi de messages MIDI à la main (CC, notes, SysEx...)
     std::unique_ptr<MidiMessagePanel> midiSendPanel_;
+    juce::TextButton combiButton_;      // écran des combinaisons d'orgue : généraux de la banque et séquence
+    std::unique_ptr<CombinationsPanel> combiPanel_;
+    void openCombinations();
     void openMidiSend();
     void showControlMenu();
     void showGlobalPresetMenu();                       // presets globaux : enregistrer, charger, supprimer

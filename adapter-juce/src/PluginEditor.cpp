@@ -90,6 +90,10 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     modButton_.setButtonText (text ("mod.tab"));
     modButton_.onClick = [this] { setView (false, false, false, true); };
     addAndMakeVisible (modButton_);
+    combiButton_.setButtonText (text ("comb.button"));
+    combiButton_.setTooltip (text ("comb.tip"));
+    combiButton_.onClick = [this] { openCombinations(); };
+    addAndMakeVisible (combiButton_);
     consoleButton_.setButtonText (text ("console.button"));
     consoleButton_.setTooltip (text ("console.tip"));
     consoleButton_.onClick = [this] { showConsoleMenu(); };
@@ -233,6 +237,25 @@ void NeptuneEditor::openMidiSend()
     midiSendPanel_->toFront (true);
 }
 
+void NeptuneEditor::openCombinations()
+{
+    if (combiPanel_ || modal_ || insertOverlay_ || midiFilterEditor_ || midiSendPanel_) return;
+    combiPanel_ = std::make_unique<CombinationsPanel> (processor_, palette_, tr_);
+    combiPanel_->onClose = [safe = juce::Component::SafePointer<NeptuneEditor> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe == nullptr) return;
+            safe->combiPanel_.reset();
+            safe->grabKeyboardFocus();
+        });
+    };
+    root_.addAndMakeVisible (*combiPanel_);
+    combiPanel_->setBounds (rootBounds());
+    combiPanel_->toFront (true);
+    combiPanel_->grabKeyboardFocus();
+}
+
 void NeptuneEditor::openMidiFilter()
 {
     if (midiFilterEditor_ || modal_ || insertOverlay_) return;
@@ -360,7 +383,7 @@ void NeptuneEditor::applyConsoleLock()
 {
     const bool visible = ! consoleLocked_;
     for (auto* c : std::initializer_list<juce::Component*> { &viewButton_, &routerButton_, &modButton_, &facadeButton_, &mappingButton_, &mixerButton_, &midiFilterButton_,
-                                                              &controlButton_, &oscButton_, &midiSendButton_, &consoleButton_, &splitButton_, &globalPresetButton_, &profileSwitchButton_,
+                                                              &controlButton_, &oscButton_, &midiSendButton_, &combiButton_, &consoleButton_, &splitButton_, &globalPresetButton_, &profileSwitchButton_,
                                                               &profileLockButton_, &voiceCountButton_, &latencyLabel_, &profileLabel_, &trackBox_ })
         c->setVisible (visible);
     unlockButton_.setVisible (consoleLocked_);
@@ -760,6 +783,7 @@ void NeptuneEditor::resized()
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (midiSendPanel_) midiSendPanel_->setBounds (rootBounds());
+    if (combiPanel_) combiPanel_->setBounds (rootBounds());
     if (instrumentPanel_ != nullptr)
         instrumentPanel_->setBounds (juce::Rectangle<int> (32, 80, lw_ - 64, juce::jmax (300, lh_ - 40 - 80 - (recoveryShown_ ? 40 : 0))));   // jusqu'à la rangée du bas (et au-dessus du bandeau de récupération)
     audioInView_->setBounds ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)) });
@@ -784,7 +808,9 @@ void NeptuneEditor::resized()
         consoleButton_.setBounds (globalPresetButton_.getX() - gap - consoleW, rowY, consoleW, rowH);
         const int splitW = widthOf ({ splitButton_.getButtonText() });
         splitButton_.setBounds (consoleButton_.getX() - gap - splitW, rowY, splitW, rowH);
-        auto row = juce::Rectangle<int> (32, rowY, splitButton_.getX() - 32 - 8, rowH);
+        const int combiW = widthOf ({ combiButton_.getButtonText() });
+        combiButton_.setBounds (splitButton_.getX() - gap - combiW, rowY, combiW, rowH);
+        auto row = juce::Rectangle<int> (32, rowY, combiButton_.getX() - 32 - 8, rowH);
         latencyLabel_.setBounds (row.removeFromLeft (widthOf ({ juce::String::fromUTF8 (tr_.format ("latency.reported", { "99999" }).c_str()) }) - pad + 12));   // la plus longue forme du texte
         row.removeFromLeft (gap);
         profileSwitchButton_.setBounds (row.removeFromLeft (widthOf ({ profileSwitchButton_.getButtonText() })));

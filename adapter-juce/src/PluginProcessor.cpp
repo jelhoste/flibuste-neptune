@@ -546,6 +546,7 @@ void NeptuneProcessor::uiEditCombinations (neptune::core::combi::Library lib, st
         [this] (const combi::Library& v)
         {
             { const juce::ScopedLock lock (instrumentLock_); mixer_.combinations = v; }
+            combi_.clampSequence (static_cast<int> (v.sequence.size()));   // la position du séquenceur suit une liste raccourcie (aussi à l'annulation)
             ++revision_;
             notifyStateChanged();
         },

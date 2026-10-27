@@ -153,6 +153,45 @@ Library fromJson (std::string_view text)
     return lib;
 }
 
+bool sequenceAdd (Library& lib, int key)
+{
+    if (key < 0 || key >= numGeneralKeys || lib.sequence.size() >= static_cast<std::size_t> (kMaxSequence)) return false;
+    lib.sequence.push_back (key);
+    return true;
+}
+
+bool sequenceRemove (Library& lib, int index)
+{
+    if (index < 0 || index >= static_cast<int> (lib.sequence.size())) return false;
+    lib.sequence.erase (lib.sequence.begin() + index);
+    return true;
+}
+
+bool sequenceMove (Library& lib, int index, int delta)
+{
+    const int other = index + delta;
+    const int n = static_cast<int> (lib.sequence.size());
+    if (delta == 0 || index < 0 || index >= n || other < 0 || other >= n) return false;
+    std::swap (lib.sequence[static_cast<std::size_t> (index)], lib.sequence[static_cast<std::size_t> (other)]);
+    return true;
+}
+
+bool eraseGeneral (Library& lib, int key)
+{
+    return lib.generals.erase (key) > 0;
+}
+
+bool renameGeneral (Library& lib, int key, std::string name)
+{
+    const auto it = lib.generals.find (key);
+    if (it == lib.generals.end() || ! it->second.used) return false;
+    const auto first = name.find_first_not_of (" \t\r\n");
+    name = first == std::string::npos ? std::string() : name.substr (first, name.find_last_not_of (" \t\r\n") - first + 1);
+    if (name.size() > kMaxName) name.resize (kMaxName);
+    it->second.name = std::move (name);
+    return true;
+}
+
 std::vector<ParamId> stopParams (const ParameterSet& set, int track)
 {
     std::vector<ParamId> ids;
