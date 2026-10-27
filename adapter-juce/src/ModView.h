@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include "DragValuePill.h"
 #include "EnvelopeEditor.h"
 #include "ParamSearchPanel.h"
 #include "PluginProcessor.h"
@@ -24,7 +25,7 @@ public:
 
 private:
     class RouteRow;
-    struct LfoRow { juce::Label label; juce::ComboBox shape; juce::TextEditor rate, phase; };
+    struct LfoRow { juce::Label label; juce::ComboBox shape; DragValuePill rate, phase; };
 
     void timerCallback() override;
     void reload();                // relit la matrice de la piste sélectionnée

@@ -12,7 +12,6 @@ namespace
 {
 // Largeurs des colonnes d'une route (la ligne de légende au-dessus de la liste reprend les mêmes).
 constexpr int kRemoveW = 34, kDestW = 300, kKindW = 150, kIndexW = 90, kChannelW = 90, kRangeW = 84, kGapS = 6, kGapL = 10;
-juce::String num (double v, int decimals) { return juce::String (v, decimals); }
 }
 
 // ------------------------------------------------------------------------------------------------ une route
@@ -33,12 +32,16 @@ public:
         for (int c = 1; c <= 16; ++c) channel_.addItem (juce::String (c), c + 1);
         channel_.onChange = [this] { if (! updating_) { edit().source.channel = channel_.getSelectedId() - 1; owner_.commit(); } };
         addAndMakeVisible (channel_);
-        amount_.setSliderStyle (juce::Slider::LinearHorizontal);
-        amount_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 22);
-        amount_.setRange (-100.0, 100.0, 1.0);
-        amount_.setTextValueSuffix (" %");
-        amount_.setDoubleClickReturnValue (true, 0.0);
-        amount_.onValueChange = [this] { if (! updating_) { edit().amount = amount_.getValue() / 100.0; owner_.commit(); } };
+        amount_.setPalette (owner.palette_);
+        {
+            neptune::core::dragvalue::Range range;
+            range.min = -100.0; range.max = 100.0; range.step = 1.0; range.decimals = 0; range.def = 0.0;
+            amount_.setRange (range, "%");
+        }
+        amount_.setTooltip (owner.text ("mod.tip_amount"));
+        amount_.onGestureBegin = [this] { owner_.processor_.uiBeginGesture(); };
+        amount_.onGestureEnd = [this] { owner_.processor_.uiEndGesture(); };
+        amount_.onValue = [this] (double v) { if (! updating_) { edit().amount = v / 100.0; owner_.commit(); } };
         addAndMakeVisible (amount_);
         centred_.setTooltip (owner.text ("mod.tip_centred"));
         centred_.setClickingTogglesState (true);
@@ -90,7 +93,7 @@ public:
         fillIndex (r.source.kind);
         indexBox_.setSelectedId (r.source.index + 1, juce::dontSendNotification);
         channel_.setSelectedId (r.source.channel + 1, juce::dontSendNotification);
-        amount_.setValue (r.amount * 100.0, juce::dontSendNotification);
+        amount_.setValue (r.amount * 100.0);
         // plage de la source : 0..1 (n'ajoute que vers le haut) ou -1..+1 (centrée) ; LFO et pitch bend sont toujours -1..+1
         const bool bipolar = mod::isBipolar (r.source.kind);
         centred_.setToggleState (bipolar || r.centred, juce::dontSendNotification);
@@ -132,7 +135,7 @@ private:
     std::size_t index_;
     bool updating_ = false;
     juce::ComboBox kind_, indexBox_, channel_;
-    juce::Slider amount_;
+    DragValuePill amount_;
     juce::TextButton centred_;
     juce::TextButton dest_, remove_;
 };
@@ -170,13 +173,6 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
     const char* routeKeys[6] = { "mod.head_source", "mod.head_number", "mod.head_channel", "mod.head_amount", "mod.head_range", "mod.head_dest" };
     for (int i = 0; i < 6; ++i) legend (routeHead_[static_cast<std::size_t> (i)], routeKeys[i]);
 
-    auto field = [this] (juce::TextEditor& e, const char* tooltip)
-    {
-        e.setFont (juce::FontOptions (16.0f));
-        e.setInputRestrictions (8, "-0123456789.");
-        e.setTooltip (text (tooltip));
-        addAndMakeVisible (e);
-    };
     const char* shapes[mod::numLfoShapes] = { "mod.shape_sine", "mod.shape_triangle", "mod.shape_saw_up", "mod.shape_saw_down", "mod.shape_square", "mod.shape_sh" };
     for (int i = 0; i < mod::kLfos; ++i)
     {
@@ -187,10 +183,24 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
         for (int s = 0; s < mod::numLfoShapes; ++s) row.shape.addItem (text (shapes[s]), s + 1);
         row.shape.onChange = [this, i] { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].shape = static_cast<mod::LfoShape> (lfoRows_[static_cast<std::size_t> (i)].shape.getSelectedId() - 1); commit(); } };
         addAndMakeVisible (row.shape);
-        field (row.rate, "mod.tip_rate");
-        field (row.phase, "mod.tip_phase");
-        row.rate.onReturnKey = row.rate.onFocusLost = [this, i] { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].rateHz = lfoRows_[static_cast<std::size_t> (i)].rate.getText().getDoubleValue(); commit(); } };
-        row.phase.onReturnKey = row.phase.onFocusLost = [this, i] { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].phase = lfoRows_[static_cast<std::size_t> (i)].phase.getText().getDoubleValue() / 100.0; commit(); } };
+        for (auto* pill : { &row.rate, &row.phase })
+        {
+            pill->setPalette (palette_);
+            pill->onGestureBegin = [this] { processor_.uiBeginGesture(); };
+            pill->onGestureEnd = [this] { processor_.uiEndGesture(); };
+            addAndMakeVisible (*pill);
+        }
+        {
+            neptune::core::dragvalue::Range rateRange, phaseRange;
+            rateRange.min = 0.01; rateRange.max = 50.0; rateRange.log = true; rateRange.decimals = 2; rateRange.def = 1.0;   // glissé régulier sur toute l'étendue
+            phaseRange.min = 0.0; phaseRange.max = 100.0; phaseRange.step = 1.0; phaseRange.decimals = 0;
+            row.rate.setRange (rateRange, "Hz");
+            row.phase.setRange (phaseRange, "%");
+        }
+        row.rate.setTooltip (text ("mod.tip_rate"));
+        row.phase.setTooltip (text ("mod.tip_phase"));
+        row.rate.onValue = [this, i] (double v) { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].rateHz = v; commit(); } };
+        row.phase.onValue = [this, i] (double v) { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].phase = v / 100.0; commit(); } };
     }
     envEditor_ = std::make_unique<EnvelopeEditor> (palette_, tr_);
     envEditor_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
@@ -250,9 +260,9 @@ void ModView::resized()
         head.removeFromLeft (60);
         lfoHead_[0].setBounds (head.removeFromLeft (150));
         head.removeFromLeft (8);
-        lfoHead_[1].setBounds (head.removeFromLeft (80));
+        lfoHead_[1].setBounds (head.removeFromLeft (96));
         head.removeFromLeft (8);
-        lfoHead_[2].setBounds (head.removeFromLeft (70));
+        lfoHead_[2].setBounds (head.removeFromLeft (80));
     }
     for (int i = 0; i < mod::kLfos; ++i)
     {
@@ -261,9 +271,9 @@ void ModView::resized()
         l.label.setBounds (row.removeFromLeft (60));
         l.shape.setBounds (row.removeFromLeft (150).reduced (0, 2));
         row.removeFromLeft (8);
-        l.rate.setBounds (row.removeFromLeft (80).reduced (0, 2));
+        l.rate.setBounds (row.removeFromLeft (96).reduced (0, 2));
         row.removeFromLeft (8);
-        l.phase.setBounds (row.removeFromLeft (70).reduced (0, 2));
+        l.phase.setBounds (row.removeFromLeft (80).reduced (0, 2));
     }
     auto selector = top.removeFromTop (30);
     for (auto& b : envButtons_) { b.setBounds (selector.removeFromLeft (80).reduced (2)); }
@@ -316,8 +326,8 @@ void ModView::reload()
         const auto& d = matrix_.lfos[static_cast<std::size_t> (i)];
         auto& row = lfoRows_[static_cast<std::size_t> (i)];
         row.shape.setSelectedId (static_cast<int> (d.shape) + 1, juce::dontSendNotification);
-        row.rate.setText (num (d.rateHz, 2), false);
-        row.phase.setText (num (d.phase * 100.0, 0), false);
+        row.rate.setValue (d.rateHz);
+        row.phase.setValue (d.phase * 100.0);
     }
     envEditor_->setEnvelope (matrix_.envelopes[static_cast<std::size_t> (envSel_)].env);
     updating_ = false;
