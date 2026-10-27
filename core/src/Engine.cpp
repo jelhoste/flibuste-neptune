@@ -478,8 +478,72 @@ void Engine::noteOffTrack (int track, int channel, int key) noexcept
 
 // Une note entrante est distribuée aux pistes dont le canal convient ET dont le filtre MIDI avancé laisse passer le message.
 // Un Note Off suit toujours le sort de son Note On (sinon une note resterait bloquée si la règle dépend de la vélocité).
+void Engine::trackSource (int channel, int key, float velocity, bool down) noexcept
+{
+    if (key < 0 || key > 127) return;
+    auto& bits = sourceHeld_[static_cast<std::size_t> (channel & 15)];
+    const std::uint64_t mask = std::uint64_t (1) << (key & 63);
+    auto& word = bits[static_cast<std::size_t> (key >> 6)];
+    if (down) { word |= mask; sourceVelocity_[static_cast<std::size_t> (((channel & 15) << 7) | key)] = velocity; }
+    else word &= ~mask;
+    refreshDynamic();
+}
+
+void Engine::refreshDynamic() noexcept
+{
+    if (router_ == nullptr || params_ == nullptr || router_->dynamic.empty()) return;
+    for (std::size_t d = 0; d < router_->dynamic.size() && d < dynamic_.size(); ++d)
+    {
+        const auto& r = router_->rules[static_cast<std::size_t> (router_->dynamic[d])];
+        int bestKey = -1, bestChannel = 0;
+        if (router::isActive (r, *params_))
+        {
+            std::uint64_t w0 = 0, w1 = 0;   // touches tenues par les canaux que la règle écoute, toutes réunies
+            for (int ch = 0; ch < 16; ++ch)
+                if (r.srcChannel < 0 || r.srcChannel == ch) { w0 |= sourceHeld_[static_cast<std::size_t> (ch)][0]; w1 |= sourceHeld_[static_cast<std::size_t> (ch)][1]; }
+            auto held = [&] (int k) { return ((k < 64 ? w0 : w1) >> (k & 63)) & 1u; };
+            if (r.select == router::Select::Lowest) { for (int k = r.keyLo; k <= r.keyHi; ++k) if (held (k)) { bestKey = k; break; } }
+            else { for (int k = r.keyHi; k >= r.keyLo; --k) if (held (k)) { bestKey = k; break; } }
+            if (bestKey >= 0)
+                for (int ch = 0; ch < 16; ++ch)
+                    if ((r.srcChannel < 0 || r.srcChannel == ch) && ((sourceHeld_[static_cast<std::size_t> (ch)][static_cast<std::size_t> (bestKey >> 6)] >> (bestKey & 63)) & 1u)) { bestChannel = ch; break; }
+        }
+        const int wantKey = bestKey >= 0 ? bestKey + router::semitonesOf (r, *params_) : -1;
+        const bool valid = wantKey >= 0 && wantKey <= 127;
+        auto& state = dynamic_[d];
+        const int wantChannel = valid ? r.dstChannel : -1;
+        if (state.channel == wantChannel && state.key == (valid ? wantKey : -1)) continue;
+        if (state.key >= 0)   // l'ancienne note accouplée est relâchée (si une autre source ne la tient pas)
+        {
+            auto& count = routeCount_[static_cast<std::size_t> ((state.channel << 7) | state.key)];
+            if (count > 0 && --count == 0) dispatchNoteOff (state.channel, state.key);
+        }
+        state = {};
+        if (valid)
+        {
+            state = { wantChannel, wantKey };
+            auto& count = routeCount_[static_cast<std::size_t> ((wantChannel << 7) | wantKey)];
+            if (count++ == 0) dispatchNoteOn (wantChannel, wantKey, sourceVelocity_[static_cast<std::size_t> ((bestChannel << 7) | bestKey)]);
+        }
+    }
+}
+
+void Engine::releaseDynamic() noexcept
+{
+    for (auto& state : dynamic_)
+    {
+        if (state.key >= 0)
+        {
+            auto& count = routeCount_[static_cast<std::size_t> ((state.channel << 7) | state.key)];
+            if (count > 0 && --count == 0) dispatchNoteOff (state.channel, state.key);
+        }
+        state = {};
+    }
+}
+
 void Engine::noteOn (int channel, int key, float velocity) noexcept
 {
+    trackSource (channel, key, velocity, true);
     if (router_ == nullptr || router_->rules.empty() || params_ == nullptr || key < 0 || key > 127)
     {
         dispatchNoteOn (channel, key, velocity);
@@ -504,6 +568,7 @@ void Engine::noteOn (int channel, int key, float velocity) noexcept
 void Engine::noteOnKeyboard (int track, int channel, int key, float velocity) noexcept
 {
     if (track < 0) { noteOn (channel, key, velocity); return; }   // clavier de la Façade globale : comme du MIDI sur ce canal (toutes les pistes qui l'écoutent, routeur compris)
+    trackSource (channel, key, velocity, true);
     if (router_ == nullptr || router_->rules.empty() || params_ == nullptr || key < 0 || key > 127)
     {
         noteOnTrack (track, channel, key, velocity);
@@ -532,6 +597,7 @@ void Engine::noteOnKeyboard (int track, int channel, int key, float velocity) no
 void Engine::noteOffKeyboard (int track, int channel, int key) noexcept
 {
     if (track < 0) { noteOff (channel, key); return; }
+    trackSource (channel, key, 0.0f, false);
     if (key >= 0 && key < 128)
     {
         const int slot = ((channel & 15) << 7) | key;
@@ -581,6 +647,7 @@ void Engine::dispatchNoteOn (int channel, int key, float velocity) noexcept
 
 void Engine::noteOff (int channel, int key) noexcept
 {
+    trackSource (channel, key, 0.0f, false);
     if (key >= 0 && key < 128)
     {
         const int slot = ((channel & 15) << 7) | key;
@@ -696,7 +763,12 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     for (int c = 0; c < numChannels; ++c)
         if (out[c] != nullptr) std::fill (out[c], out[c] + numFrames, 0.0f);
 
-    if (routerSlot_.adoptPending()) router_ = routerSlot_.current();
+    if (routerSlot_.adoptPending())
+    {
+        releaseDynamic();   // les règles changent : les notes accouplées de l'ancien jeu de règles sont relâchées, le nouveau jeu recalcule les siennes
+        router_ = routerSlot_.current();
+    }
+    refreshDynamic();       // un tirant d'accouplement a pu changer depuis le dernier bloc
     for (auto& t : tracks_)
     {
         if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());

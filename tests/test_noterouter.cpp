@@ -354,3 +354,119 @@ TEST_CASE ("router: the coupler switches are parameters of the mixer set")
     for (int i = 0; i < kSwitches; ++i) CHECK (params.indexOf (switchParam (i)) != ParameterSet::npos);
     for (int i = 0; i < kMaxRules; ++i) CHECK (params.indexOf (transposeParam (i)) != ParameterSet::npos);
 }
+
+TEST_CASE ("router: bass and melody couplers are saved, never replace the note, and are left to the engine")
+{
+    auto set = makeSet();
+    Config c;
+    Rule bass = coupler (1, 2, 0);
+    bass.select = Select::Lowest;
+    bass.replace = true;                       // incompatible : une règle de basse ajoute toujours
+    Rule melody = coupler (1, 3, 12);
+    melody.select = Select::Highest;
+    c.rules = { bass, melody };
+    const auto back = fromJson (toJson (c));
+    REQUIRE (back.rules.size() == 2);
+    CHECK (back.rules[0].select == Select::Lowest);
+    CHECK_FALSE (back.rules[0].replace);
+    CHECK (back.rules[1].select == Select::Highest);
+    CHECK (back == sanitised (c));
+    CHECK (fromJson ("{\"rules\":[{\"select\":\"nonsense\"}]}").rules[0].select == Select::All);
+    CHECK (toJson (Config { { coupler (1, 2, 0) } }).find ("select") == std::string::npos);   // « toutes » est le défaut : pas écrit
+    // expand() ne les voit pas : seule la note jouée reste
+    CHECK (targetsOf (c, set, 0, 60) == std::vector<Target> ({ { 0, 60 } }));
+    const auto compiled = compile (c, set);
+    CHECK (compiled->dynamic == std::vector<int> ({ 0, 1 }));
+}
+
+TEST_CASE ("router: a bass coupler follows the lowest held key and a melody coupler the highest")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto run = [&] (int blocks) { for (int b = 0; b < blocks; ++b) engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256); };
+    SynthDescription d;
+    d.osc[0].wave = kWaveSine;
+    d.filters.filter[0].on = false;
+    d.ampEnv.attack.ms = 0.0;
+    d.ampEnv.release.ms = 20.0;
+    for (const int t : { 0, 1, 2 })
+    {
+        engine.setTrackActive (t, true);
+        engine.setTrackType (t, TrackType::Synth);
+        engine.publishSynth (t, std::make_shared<SynthPatch> (d));
+        mixer::StripSettings strip;
+        strip.midiChannel = t + 1;
+        engine.setTrackSettings (t, strip);
+    }
+    auto held = [&] (int track) { return engine.heldKeyWord (track, 0); };
+    auto bit = [] (int key) { return std::uint64_t (1) << key; };
+
+    Rule bass = coupler (1, 2, 0, switchParam (0));
+    bass.select = Select::Lowest;
+    Rule melody = coupler (1, 3, 0);
+    melody.select = Select::Highest;
+    Config config;
+    config.rules = { bass, melody };
+    engine.setRouter (config);
+    run (2);
+
+    params.set (switchParam (0), 1.0);        // le tirant de la basse est tiré ; la mélodie n'a pas de condition
+    engine.noteOn (0, 60, 1.0f);
+    run (4);
+    CHECK (held (0) == bit (60));
+    CHECK (held (1) == bit (60));             // basse : la seule touche tenue
+    CHECK (held (2) == bit (60));             // mélodie : idem
+
+    engine.noteOn (0, 64, 1.0f);
+    run (4);
+    CHECK (held (0) == (bit (60) | bit (64)));
+    CHECK (held (1) == bit (60));             // la basse reste la plus grave
+    CHECK (held (2) == bit (64));             // la mélodie passe à la plus aiguë (60 relâchée, 64 jouée)
+
+    engine.noteOn (0, 57, 1.0f);
+    run (4);
+    CHECK (held (1) == bit (57));             // une touche plus grave : la basse la suit
+    CHECK (held (2) == bit (64));
+
+    engine.noteOff (0, 57);
+    run (4);
+    CHECK (held (1) == bit (60));             // la plus grave relâchée : la suivante reprend
+    engine.noteOff (0, 64);
+    run (4);
+    CHECK (held (2) == bit (60));             // idem pour la mélodie
+
+    params.set (switchParam (0), 0.0);        // le tirant est repoussé pendant que 60 est tenue : la basse se tait au bloc suivant
+    run (2);
+    CHECK (held (1) == 0);
+    CHECK (held (2) == bit (60));
+    params.set (switchParam (0), 1.0);        // et revient quand on le tire de nouveau
+    run (2);
+    CHECK (held (1) == bit (60));
+
+    engine.noteOff (0, 60);
+    run (4);
+    CHECK (held (0) == 0);
+    CHECK (held (1) == 0);
+    CHECK (held (2) == 0);
+    run (30);
+    CHECK (engine.activeVoices() == 0);
+
+    // changer les règles pendant qu'une touche est tenue ne laisse aucune note accouplée bloquée
+    engine.noteOn (0, 62, 1.0f);
+    run (4);
+    CHECK (held (1) == bit (62));
+    engine.setRouter (Config {});
+    run (4);
+    CHECK (held (1) == 0);
+    engine.noteOff (0, 62);
+    run (30);
+    CHECK (engine.activeVoices() == 0);
+}

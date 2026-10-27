@@ -236,7 +236,18 @@ private:
     void dispatchNoteOn (int channel, int key, float velocity) noexcept;
     void dispatchNoteOff (int channel, int key) noexcept;
     void releaseRouted (int slot) noexcept;
-    void clearRouted() noexcept { routed_.fill (Routed {}); routeCount_.fill (0); }
+    void clearRouted() noexcept { routed_.fill (Routed {}); routeCount_.fill (0); clearDynamic(); }
+
+    // Accouplements de basse et de mélodie : la note accouplée est celle de la touche tenue la plus grave (ou la plus aiguë) du clavier source, et change au fil des notes.
+    // `sourceHeld_` : les touches tenues de chaque canal (bit de la touche) ; `dynamic_` : par règle dynamique, la destination actuellement tenue (-1 : aucune).
+    struct DynamicTarget { int channel = -1, key = -1; };
+    std::array<std::array<std::uint64_t, 2>, 16> sourceHeld_ {};
+    std::array<float, 16 * 128> sourceVelocity_ {};
+    std::array<DynamicTarget, router::kMaxRules> dynamic_ {};
+    void trackSource (int channel, int key, float velocity, bool down) noexcept;   // note la touche tenue ou relâchée, puis met les accouplements à jour
+    void refreshDynamic() noexcept;                                               // recalcule la note accouplée de chaque règle de basse / mélodie
+    void releaseDynamic() noexcept;                                               // relâche toutes les notes accouplées (changement de règles)
+    void clearDynamic() noexcept { sourceHeld_ = {}; dynamic_.fill (DynamicTarget {}); }   // panique / tout relâcher : les voix sont déjà coupées
 
     struct Track
     {

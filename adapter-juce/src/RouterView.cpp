@@ -10,7 +10,7 @@ namespace rt = neptune::core::router;
 namespace
 {
 // Largeurs des colonnes d'une règle (la ligne de légende reprend les mêmes).
-constexpr int kOnW = 34, kNameW = 150, kSrcW = 76, kKeyW = 76, kDstW = 70, kTransW = 70, kModeW = 118, kRemoveW = 34, kGap = 6;
+constexpr int kOnW = 34, kNameW = 150, kSrcW = 76, kKeyW = 76, kDstW = 70, kTransW = 70, kModeW = 150, kRemoveW = 34, kGap = 6;
 }
 
 // ------------------------------------------------------------------------------------------------ une règle
@@ -63,8 +63,17 @@ public:
         addAndMakeVisible (trans_);
         mode_.addItem (owner.text ("router.mode_add"), 1);
         mode_.addItem (owner.text ("router.mode_replace"), 2);
+        mode_.addItem (owner.text ("router.mode_bass"), 3);
+        mode_.addItem (owner.text ("router.mode_melody"), 4);
         mode_.setTooltip (owner.text ("router.tip_mode"));
-        mode_.onChange = [this] { if (! updating_) { edit().replace = mode_.getSelectedId() == 2; owner_.commit(); } };
+        mode_.onChange = [this]
+        {
+            if (updating_) return;
+            const int id = mode_.getSelectedId();
+            edit().replace = id == 2;
+            edit().select = id == 3 ? neptune::core::router::Select::Lowest : id == 4 ? neptune::core::router::Select::Highest : neptune::core::router::Select::All;
+            owner_.commit();
+        };
         addAndMakeVisible (mode_);
         cond_.onClick = [this] { owner_.editCondition (index_, cond_); };
         addAndMakeVisible (cond_);
@@ -110,7 +119,7 @@ public:
         lo_.setButtonText (keyText (r.keyLo));
         hi_.setButtonText (keyText (r.keyHi));
         trans_.setButtonText (r.transpose > 0 ? "+" + juce::String (r.transpose) : juce::String (r.transpose));
-        mode_.setSelectedId (r.replace ? 2 : 1, juce::dontSendNotification);
+        mode_.setSelectedId (r.select == neptune::core::router::Select::Lowest ? 3 : r.select == neptune::core::router::Select::Highest ? 4 : r.replace ? 2 : 1, juce::dontSendNotification);
         cond_.setButtonText (owner_.conditionSummary (r));
         updating_ = false;
     }

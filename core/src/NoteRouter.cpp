@@ -22,8 +22,26 @@ const char* toString (Combine c) noexcept
     return "and";
 }
 
+const char* toString (Select s) noexcept
+{
+    switch (s)
+    {
+        case Select::All: return "all";
+        case Select::Lowest: return "lowest";
+        case Select::Highest: return "highest";
+    }
+    return "all";
+}
+
 namespace
 {
+Select selectFrom (const std::string& s) noexcept
+{
+    for (int i = 0; i < numSelects; ++i)
+        if (s == toString (static_cast<Select> (i))) return static_cast<Select> (i);
+    return Select::All;
+}
+
 Combine combineFrom (const std::string& s) noexcept
 {
     for (int i = 0; i < numCombines; ++i)
@@ -44,6 +62,7 @@ Config sanitised (Config c)
         r.keyHi = std::clamp (r.keyHi, 0, 127);
         if (r.keyHi < r.keyLo) std::swap (r.keyLo, r.keyHi);
         r.transpose = std::clamp (r.transpose, -48, 48);
+        if (r.select != Select::All) r.replace = false;   // basse et mélodie ajoutent toujours
         if (r.terms.size() > static_cast<std::size_t> (kMaxTerms)) r.terms.resize (kMaxTerms);
         r.terms.erase (std::remove_if (r.terms.begin(), r.terms.end(), [] (const Term& t) { return t.param == 0; }), r.terms.end());
     }
@@ -65,6 +84,7 @@ std::string toJson (const Config& in)
         o["dst"] = r.dstChannel;
         o["transpose"] = r.transpose;
         o["replace"] = r.replace;
+        if (r.select != Select::All) o["select"] = toString (r.select);
         o["combine"] = toString (r.combine);
         json terms = json::array();
         for (const auto& t : r.terms) terms.push_back ({ { "param", t.param }, { "not", t.negate } });
@@ -97,6 +117,8 @@ Config fromJson (std::string_view text)
         r.dstChannel = num (o, "dst", 1);
         r.transpose = num (o, "transpose", 0);
         r.replace = flag (o, "replace", false);
+        if (const auto f = o.find ("select"); f != o.end() && f->is_string()) r.select = selectFrom (f->get<std::string>());
+        if (r.select != Select::All) r.replace = false;
         if (const auto f = o.find ("combine"); f != o.end() && f->is_string()) r.combine = combineFrom (f->get<std::string>());
         if (const auto f = o.find ("terms"); f != o.end() && f->is_array())
             for (const auto& t : *f)
@@ -139,6 +161,7 @@ std::shared_ptr<const Compiled> compile (const Config& in, const ParameterSet& s
         cr.dstChannel = r.dstChannel - 1;
         cr.transpose = r.transpose;
         cr.replace = r.replace;
+        cr.select = r.select;
         cr.combine = r.combine;
         bool usable = true;
         for (const auto& t : r.terms)
@@ -149,7 +172,11 @@ std::shared_ptr<const Compiled> compile (const Config& in, const ParameterSet& s
             cr.negate[static_cast<std::size_t> (cr.termCount)] = t.negate;
             ++cr.termCount;
         }
-        if (usable) out->rules.push_back (cr);
+        if (usable)
+        {
+            if (cr.select != Select::All) out->dynamic.push_back (static_cast<int> (out->rules.size()));
+            out->rules.push_back (cr);
+        }
     }
     return out;
 }
@@ -178,6 +205,15 @@ bool active (const CompiledRule& r, const ParameterSet& set) noexcept
 }
 } // namespace
 
+bool isActive (const CompiledRule& r, const ParameterSet& set) noexcept { return active (r, set); }
+
+int semitonesOf (const CompiledRule& r, const ParameterSet& set) noexcept
+{
+    int semitones = r.transpose;
+    if (r.transposeIndex != ParameterSet::npos) semitones += static_cast<int> (std::lround (set.effectiveAt (r.transposeIndex)));
+    return semitones;
+}
+
 int expand (const Compiled& c, const ParameterSet& set, int channel, int key, std::array<Target, kMaxTargets>& out, bool* originalKept) noexcept
 {
     int n = 0;
@@ -194,6 +230,7 @@ int expand (const Compiled& c, const ParameterSet& set, int channel, int key, st
     int routedCount = 0;
     for (const auto& r : c.rules)
     {
+        if (r.select != Select::All) continue;   // basse et mélodie : suivies par le moteur (note accouplée dynamique)
         if (r.srcChannel >= 0 && r.srcChannel != channel) continue;
         if (key < r.keyLo || key > r.keyHi) continue;
         if (! active (r, set)) continue;
