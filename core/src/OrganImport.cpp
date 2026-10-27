@@ -427,7 +427,9 @@ private:
             if (! attackWarned && ini_.getInt (sec, numbered ("Pipe", pipe) + "AttackCount", 1) > 1)
             {
                 attackWarned = true;
-                warn ("stop \"" + name + "\": attack variants of the pipes are not imported (only the main sample)");
+                ++attackStops_;
+                if (attackStops_ == 1) attackWarningIndex_ = result_.warnings.size(), warn ("attack variants of the pipes are not imported (only the main sample)");
+                else result_.warnings[attackWarningIndex_] = "attack variants of the pipes are not imported (only the main sample) in " + std::to_string (attackStops_) + " stops";
             }
         };
         if (nRanks > 0)
@@ -625,6 +627,8 @@ private:
     const IniFile& ini_;
     Options opt_;
     Result result_;
+    int attackStops_ = 0;
+    std::size_t attackWarningIndex_ = 0;
     int organAmp_ = 100;
     double organTuning_ = 0.0, organGain_ = 0.0;
     std::map<int, int> channelOf_;
