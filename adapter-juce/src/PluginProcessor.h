@@ -224,6 +224,10 @@ public:
     void uiCombiSetBank (int bank) noexcept { combi_.setBank (bank); }   // banque courante 0..9 (commune aux généraux et aux divisionnels)
     // Exécute une commande 1..26 (voir Combinations.h). `track` : le clavier visé par un divisionnel. Un rappel est une seule entrée d'annulation.
     neptune::core::combi::Result uiCombiCommand (int command, int track);
+    // Changement de programme MIDI (voir Combinations.h) : 0..9 général, 10..19 divisionnel du clavier `track`, 20..29 banque.
+    neptune::core::combi::Result uiCombiProgramChange (int program, int track);
+    // La piste active qui écoute le canal MIDI `channel` (0..15) : celle dont l'écoute est la plus étroite ; -1 si aucune.
+    int trackForMidiChannel (int channel) const;
     // Voyant d'un piston : vrai si l'état courant est celui de la mémoire (généraux et divisionnels seulement).
     bool combiLit (int command, int track) const;
     // Preset global : l'état du projet sans ce qui est propre à l'instance (identifiant, verrou de profil, assignations CC / OSC).
@@ -389,6 +393,11 @@ private:
     mutable juce::CriticalSection instrumentLock_;
     neptune::core::MixerState mixer_;                                   // protégé par instrumentLock_
     neptune::core::combi::Controller combi_;                            // état de jeu des combinaisons : fil de message seulement
+    neptune::core::combi::Result combiExecute (const std::function<neptune::core::combi::Outcome (neptune::core::combi::Library&)>&);
+    // Changements de programme MIDI reçus par le fil audio (canal << 8 | programme), consommés sur le fil de message (voir controlTick).
+    juce::AbstractFifo combiProgramFifo_ { 64 };
+    std::array<std::atomic<int>, 64> combiPrograms_ {};
+    void drainCombinationPrograms();
     std::array<InstrumentStatus, neptune::core::mixer::numTracks> status_; // protégé par instrumentLock_
     std::atomic<int> selectedTrack_ { 0 };
     std::atomic<std::uint32_t> revision_ { 0 };

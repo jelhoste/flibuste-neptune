@@ -563,7 +563,7 @@ NeptuneProcessor::CombiStatus NeptuneProcessor::combiStatus() const
     return s;
 }
 
-neptune::core::combi::Result NeptuneProcessor::uiCombiCommand (int command, int track)
+neptune::core::combi::Result NeptuneProcessor::combiExecute (const std::function<neptune::core::combi::Outcome (neptune::core::combi::Library&)>& action)
 {
     using namespace neptune::core;
     auto lib = combinations();
@@ -582,10 +582,53 @@ neptune::core::combi::Result NeptuneProcessor::uiCombiCommand (int command, int 
         }
     });
     undo_.beginTransaction ("Combination");
-    const auto outcome = combi_.run (command, lib, params_, juce::jlimit (0, mixer::numTracks - 1, track));
+    const auto outcome = action (lib);
     if (outcome.result == combi::Result::Stored) uiEditCombinations (std::move (lib), "Combination: store");
     undo_.endTransaction();
     return outcome.result;
+}
+
+neptune::core::combi::Result NeptuneProcessor::uiCombiCommand (int command, int track)
+{
+    using namespace neptune::core;
+    const int t = juce::jlimit (0, mixer::numTracks - 1, track);
+    return combiExecute ([this, command, t] (combi::Library& lib) { return combi_.run (command, lib, params_, t); });
+}
+
+neptune::core::combi::Result NeptuneProcessor::uiCombiProgramChange (int program, int track)
+{
+    return combiExecute ([this, program, track] (neptune::core::combi::Library& lib) { return combi_.programChange (lib, params_, program, track); });
+}
+
+int NeptuneProcessor::trackForMidiChannel (int channel) const
+{
+    using namespace neptune::core;
+    int best = -1, bestCount = 99;
+    for (int t = 0; t < mixer::numTracks; ++t)
+    {
+        if (! trackActive (t)) continue;
+        const unsigned mask = mixer::midiChannelsOf (trackSettings (t));
+        if ((mask & (1u << channel)) == 0) continue;
+        int count = 0;
+        for (unsigned m = mask; m != 0; m &= m - 1) ++count;
+        if (count < bestCount) { best = t; bestCount = count; }
+    }
+    return best;
+}
+
+void NeptuneProcessor::drainCombinationPrograms()
+{
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    combiProgramFifo_.prepareToRead (combiProgramFifo_.getNumReady(), start1, size1, start2, size2);
+    std::vector<int> items;
+    for (int i = 0; i < size1; ++i) items.push_back (combiPrograms_[static_cast<std::size_t> (start1 + i)].load (std::memory_order_relaxed));
+    for (int i = 0; i < size2; ++i) items.push_back (combiPrograms_[static_cast<std::size_t> (start2 + i)].load (std::memory_order_relaxed));
+    combiProgramFifo_.finishedRead (size1 + size2);
+    for (const int item : items)
+    {
+        const int channel = (item >> 8) & 15, program = item & 127;
+        uiCombiProgramChange (program, trackForMidiChannel (channel));
+    }
 }
 
 bool NeptuneProcessor::combiLit (int command, int track) const
@@ -1778,6 +1821,7 @@ void NeptuneProcessor::controlTick()
     control_.collectGarbage();
     syncOsc();   // un état chargé par l'hôte peut avoir activé ou arrêté le serveur
     feedbackTick();
+    drainCombinationPrograms();
     for (Action a = Action::None; control_.popAction (a);)
     {
         switch (a)
@@ -2076,6 +2120,17 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             engine_.noteOff (msg.getChannel() - 1, msg.getNoteNumber());
         else if (msg.isController())
             control_.controlChange (msg.getChannel() - 1, msg.getControllerNumber(), msg.getControllerValue(), params_); // désactivé par défaut
+        else if (msg.isProgramChange())
+        {
+            // les combinaisons d'orgue (général / divisionnel / banque) : exécutées sur le fil de message, par controlTick
+            int s1 = 0, z1 = 0, s2 = 0, z2 = 0;
+            combiProgramFifo_.prepareToWrite (1, s1, z1, s2, z2);
+            if (z1 + z2 >= 1)
+            {
+                combiPrograms_[static_cast<std::size_t> (z1 > 0 ? s1 : s2)].store (((msg.getChannel() - 1) & 15) << 8 | (msg.getProgramChangeNumber() & 127), std::memory_order_relaxed);
+                combiProgramFifo_.finishedWrite (1);
+            }
+        }
 
         // dernier état des contrôleurs de chaque canal : jugé par les conditions MIDI des zones au moment où une note se déclenche
         {

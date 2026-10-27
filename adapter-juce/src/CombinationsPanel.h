@@ -9,7 +9,8 @@
 #include "neptune/core/Theme.h"
 
 // Écran des combinaisons d'orgue (voir docs/specification-combinaisons.md) : à gauche les 10 généraux de la banque courante (rappeler, renommer, effacer,
-// les mettre dans la séquence), à droite la séquence des généraux (monter, descendre, retirer, vider) avec le pas courant marqué. Chaque changement est un
+// les mettre dans la séquence) ou, dans l'onglet DIVISIONNELS, les 10 divisionnels du clavier choisi ; à droite la séquence des généraux (monter,
+// descendre, retirer, vider) avec le pas courant marqué. Chaque changement est un
 // geste annulable (la bibliothèque est dans le projet). On enregistre un général depuis la Façade (touche Set puis un piston) ou par un CC, pas ici.
 class CombinationsPanel : public juce::Component, private juce::Timer
 {
@@ -37,6 +38,33 @@ public:
             l->setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Text));
         }
         for (auto* l : std::initializer_list<juce::Label*> { &title_, &hint_, &bankLabel_, &generalsTitle_, &sequenceTitle_ }) addAndMakeVisible (*l);
+
+        generalsTab_.setButtonText (text ("comb.tab_generals"));
+        divisionalsTab_.setButtonText (text ("comb.tab_divisionals"));
+        for (auto* b : { &generalsTab_, &divisionalsTab_ })
+        {
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (7421);
+            b->setColour (juce::TextButton::buttonOnColourId, colour (neptune::core::theme::Token::Accent));
+        }
+        generalsTab_.setToggleState (true, juce::dontSendNotification);
+        generalsTab_.onClick = [this] { if (generalsTab_.getToggleState()) setDivisional (false); };
+        divisionalsTab_.onClick = [this] { if (divisionalsTab_.getToggleState()) setDivisional (true); };
+        keyboardLabel_.setText (text ("comb.keyboard"), juce::dontSendNotification);
+        keyboardLabel_.setColour (juce::Label::textColourId, colour (neptune::core::theme::Token::Text));
+        for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+        {
+            if (! processor_.trackActive (t)) continue;
+            const auto name = processor_.trackSettings (t).name;
+            keyboardBox_.addItem (text ("comb.track") + " " + juce::String (t + 1) + (name.empty() ? juce::String() : " - " + utf8 (name)), t + 1);
+        }
+        keyboardBox_.setSelectedId (processor_.selectedTrack() + 1, juce::dontSendNotification);
+        if (keyboardBox_.getSelectedId() == 0 && keyboardBox_.getNumItems() > 0) keyboardBox_.setSelectedItemIndex (0, juce::dontSendNotification);
+        track_ = juce::jmax (0, keyboardBox_.getSelectedId() - 1);
+        keyboardBox_.onChange = [this] { track_ = juce::jmax (0, keyboardBox_.getSelectedId() - 1); refresh (true); };
+        for (auto* c : std::initializer_list<juce::Component*> { &generalsTab_, &divisionalsTab_, &keyboardLabel_, &keyboardBox_ }) addAndMakeVisible (*c);
+        keyboardLabel_.setVisible (false);
+        keyboardBox_.setVisible (false);
 
         prevBank_.setButtonText ("<");
         nextBank_.setButtonText (">");
@@ -92,12 +120,21 @@ public:
     {
         auto r = panel().reduced (18);
         title_.setBounds (r.removeFromTop (32));
-        hint_.setBounds (r.removeFromTop (44));
+        hint_.setBounds (r.removeFromTop (60));
         auto bank = r.removeFromTop (34);
         prevBank_.setBounds (bank.removeFromLeft (48));
         bankLabel_.setBounds (bank.removeFromLeft (200));
         nextBank_.setBounds (bank.removeFromLeft (48));
-        r.removeFromTop (8);
+        bank.removeFromLeft (24);
+        generalsTab_.setBounds (bank.removeFromLeft (140).reduced (2, 0));
+        divisionalsTab_.setBounds (bank.removeFromLeft (150).reduced (2, 0));
+        r.removeFromTop (6);
+        {
+            auto keyboardRow = r.removeFromTop (divisional_ ? 34 : 0);
+            keyboardLabel_.setBounds (keyboardRow.removeFromLeft (90));
+            keyboardBox_.setBounds (keyboardRow.removeFromLeft (320));
+        }
+        r.removeFromTop (divisional_ ? 6 : 2);
         close_.setBounds (r.removeFromBottom (36).removeFromRight (140));
         r.removeFromBottom (8);
         auto left = r.removeFromLeft (r.getWidth() / 2 - 8);
@@ -140,11 +177,17 @@ private:
 
     static juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
-    // « G3  Plein-jeu » ou « G3  (vide) » pour un piston de la banque courante.
+    // La mémoire du piston `piston` de la banque courante : un général, ou un divisionnel du clavier choisi.
+    const neptune::core::combi::Memory* memoryAt (int piston) const
+    {
+        return divisional_ ? lib_.divisional (track_, status_.bank, piston) : lib_.general (status_.bank, piston);
+    }
+
+    // « G3  Plein-jeu » ou « G3  (vide) » pour un piston de la banque courante (« D3 » pour un divisionnel).
     juce::String generalText (int piston) const
     {
-        const auto* m = lib_.general (status_.bank, piston);
-        juce::String t = "G" + juce::String (piston + 1) + "   ";
+        const auto* m = memoryAt (piston);
+        juce::String t = juce::String (divisional_ ? "D" : "G") + juce::String (piston + 1) + "   ";
         if (m == nullptr) return t + text ("comb.empty");
         return t + (m->name.empty() ? juce::String ("-") : utf8 (m->name));
     }
@@ -162,10 +205,21 @@ private:
         return t + (m->name.empty() ? juce::String ("-") : utf8 (m->name));
     }
 
-    int selectedKey() const
+    int selectedKey() const   // la clef de la mémoire choisie (général ou divisionnel selon l'onglet)
     {
         const int row = generals_.getSelectedRow();
-        return row < 0 ? -1 : neptune::core::combi::generalKey (status_.bank, row);
+        if (row < 0) return -1;
+        return divisional_ ? neptune::core::combi::divisionalKey (track_, status_.bank, row) : neptune::core::combi::generalKey (status_.bank, row);
+    }
+
+    void setDivisional (bool divisional)
+    {
+        divisional_ = divisional;
+        keyboardLabel_.setVisible (divisional);
+        keyboardBox_.setVisible (divisional);
+        generalsTitle_.setText (text (divisional ? "comb.divisionals" : "comb.generals"), juce::dontSendNotification);
+        resized();
+        refresh (true);
     }
 
     void edit (neptune::core::combi::Library lib, const char* name)
@@ -178,7 +232,7 @@ private:
     {
         const int row = generals_.getSelectedRow();
         if (row < 0) return;
-        processor_.uiCombiCommand (neptune::core::combi::kCommandGeneral + row, 0);
+        processor_.uiCombiCommand ((divisional_ ? neptune::core::combi::kCommandDivisional : neptune::core::combi::kCommandGeneral) + row, track_);
         refresh (true);
     }
 
@@ -186,17 +240,19 @@ private:
     {
         namespace cb = neptune::core::combi;
         const int key = selectedKey();
-        const auto* m = key < 0 ? nullptr : lib_.general (status_.bank, key % cb::kPistons);
+        const auto* m = key < 0 ? nullptr : memoryAt (key % cb::kPistons);
         if (m == nullptr) return;
+        const bool divisional = divisional_;
         auto* w = new juce::AlertWindow (text ("comb.rename"), text ("comb.rename_prompt"), juce::MessageBoxIconType::NoIcon, this);
         w->addTextEditor ("name", utf8 (m->name));
         w->addButton (text ("grp.ok"), 1, juce::KeyPress (juce::KeyPress::returnKey));
         w->addButton (text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-        w->enterModalState (true, juce::ModalCallbackFunction::create ([w, key, safe = juce::Component::SafePointer<CombinationsPanel> (this)] (int result)
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([w, key, divisional, safe = juce::Component::SafePointer<CombinationsPanel> (this)] (int result)
         {
             if (result != 1 || safe == nullptr) return;
             auto lib = safe->lib_;
-            if (cb::renameGeneral (lib, key, w->getTextEditorContents ("name").toStdString())) safe->edit (std::move (lib), "Combination: rename");
+            const auto typed = w->getTextEditorContents ("name").toStdString();
+            if (divisional ? cb::renameDivisional (lib, key, typed) : cb::renameGeneral (lib, key, typed)) safe->edit (std::move (lib), "Combination: rename");
         }), true);
     }
 
@@ -205,7 +261,7 @@ private:
         const int key = selectedKey();
         if (key < 0) return;
         auto lib = lib_;
-        if (neptune::core::combi::eraseGeneral (lib, key)) edit (std::move (lib), "Combination: erase");
+        if (divisional_ ? neptune::core::combi::eraseDivisional (lib, key) : neptune::core::combi::eraseGeneral (lib, key)) edit (std::move (lib), "Combination: erase");
     }
 
     void addSelectedToSequence()
@@ -249,11 +305,11 @@ private:
     {
         namespace cb = neptune::core::combi;
         const int row = generals_.getSelectedRow();
-        const bool filled = row >= 0 && lib_.general (status_.bank, row) != nullptr;
+        const bool filled = row >= 0 && memoryAt (row) != nullptr;
         recall_.setEnabled (filled);
         rename_.setEnabled (filled);
         erase_.setEnabled (filled);
-        addToSequence_.setEnabled (row >= 0 && lib_.sequence.size() < static_cast<std::size_t> (cb::kMaxSequence));
+        addToSequence_.setEnabled (! divisional_ && row >= 0 && lib_.sequence.size() < static_cast<std::size_t> (cb::kMaxSequence));   // la séquence ne contient que des généraux
         const int step = sequence_.getSelectedRow();
         const int n = static_cast<int> (lib_.sequence.size());
         up_.setEnabled (step > 0 && step < n);
@@ -292,7 +348,7 @@ private:
         {
             using neptune::core::theme::Token;
             if (selected) { g.setColour (owner.colour (Token::Accent).withAlpha (0.35f)); g.fillRect (0, 0, w, h); }
-            const bool filled = owner.lib_.general (owner.status_.bank, row) != nullptr;
+            const bool filled = owner.memoryAt (row) != nullptr;
             g.setColour (filled ? owner.colour (Token::Text) : owner.colour (Token::TextDim));
             g.setFont (juce::FontOptions (16.0f));
             g.drawText (owner.generalText (row), 10, 0, w - 20, h, juce::Justification::centredLeft);
@@ -326,6 +382,11 @@ private:
     NeptuneProcessor::CombiStatus status_;
     GeneralsModel generalsModel_;
     SequenceModel sequenceModel_;
+    bool divisional_ = false;      // onglet DIVISIONNELS : les mémoires montrées sont celles du clavier `track_`
+    int track_ = 0;
+    juce::TextButton generalsTab_, divisionalsTab_;
+    juce::Label keyboardLabel_;
+    juce::ComboBox keyboardBox_;
     juce::Label title_, hint_, bankLabel_, generalsTitle_, sequenceTitle_;
     juce::TextButton prevBank_, nextBank_, recall_, rename_, erase_, addToSequence_, up_, down_, remove_, clear_, close_;
     juce::ListBox generals_, sequence_;

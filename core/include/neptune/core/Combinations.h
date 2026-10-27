@@ -62,6 +62,8 @@ bool sequenceRemove (Library&, int index);
 bool sequenceMove (Library&, int index, int delta);               // échange le pas avec son voisin (delta -1 ou +1) ; faux hors de la liste
 bool eraseGeneral (Library&, int generalKeyValue);                // efface la mémoire (les pas de la séquence qui la visent restent, ils sont « vides »)
 bool renameGeneral (Library&, int generalKeyValue, std::string name);   // la mémoire doit exister ; nom nettoyé et tronqué
+bool eraseDivisional (Library&, int divisionalKeyValue);                // les mêmes gestes pour les divisionnels (clef = divisionalKey)
+bool renameDivisional (Library&, int divisionalKeyValue, std::string name);
 
 // Paramètres concernés, ceux que le jeu connaît.
 //  stopParams : les jeux d'un clavier (les 16 modulateurs de la piste `track`, 0..15).
@@ -144,8 +146,12 @@ public:
     // Exécute une commande 1..26 (voir plus haut). `track` : le clavier des divisionnels (0..15). Set : arme ou désarme.
     Outcome run (int command, Library&, ParameterSet&, int track);
 
-    // Changement de programme MIDI : 0..9 = piston 1..10 de la banque courante (général). Au-delà : ignoré.
-    Outcome programChange (Library&, ParameterSet&, int program);
+    // Changement de programme MIDI (0..127) :
+    //   0..9   piston général 1..10 de la banque courante ;
+    //   10..19 piston divisionnel 1..10 du clavier `track` (la piste dont le canal MIDI est celui du message ; -1 : aucune, ignoré) ;
+    //   20..29 choix de la banque 1..10.
+    // Le reste est ignoré.
+    Outcome programChange (Library&, ParameterSet&, int program, int track = -1);
 
 private:
     Outcome recallKey (const Library&, ParameterSet&, int generalKeyValue);

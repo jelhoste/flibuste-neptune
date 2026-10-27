@@ -181,16 +181,23 @@ bool eraseGeneral (Library& lib, int key)
     return lib.generals.erase (key) > 0;
 }
 
-bool renameGeneral (Library& lib, int key, std::string name)
+namespace
 {
-    const auto it = lib.generals.find (key);
-    if (it == lib.generals.end() || ! it->second.used) return false;
+bool renameIn (std::map<int, Memory>& memories, int key, std::string name)
+{
+    const auto it = memories.find (key);
+    if (it == memories.end() || ! it->second.used) return false;
     const auto first = name.find_first_not_of (" \t\r\n");
     name = first == std::string::npos ? std::string() : name.substr (first, name.find_last_not_of (" \t\r\n") - first + 1);
     if (name.size() > kMaxName) name.resize (kMaxName);
     it->second.name = std::move (name);
     return true;
 }
+} // namespace
+
+bool renameGeneral (Library& lib, int key, std::string name) { return renameIn (lib.generals, key, std::move (name)); }
+bool renameDivisional (Library& lib, int key, std::string name) { return renameIn (lib.divisionals, key, std::move (name)); }
+bool eraseDivisional (Library& lib, int key) { return lib.divisionals.erase (key) > 0; }
 
 std::vector<ParamId> stopParams (const ParameterSet& set, int track)
 {
@@ -416,9 +423,18 @@ Outcome Controller::run (int command, Library& lib, ParameterSet& set, int track
     }
 }
 
-Outcome Controller::programChange (Library& lib, ParameterSet& set, int program)
+Outcome Controller::programChange (Library& lib, ParameterSet& set, int program, int track)
 {
-    if (program < 0 || program >= kPistons) return {};
-    return general (lib, set, program);
+    if (program >= 0 && program < kPistons) return general (lib, set, program);
+    if (program >= kPistons && program < 2 * kPistons) return divisional (lib, set, track, program - kPistons);   // piste invalide : ignoré
+    if (program >= 2 * kPistons && program < 2 * kPistons + kBanks)
+    {
+        Outcome out;
+        const int bank = program - 2 * kPistons;
+        if (bank != bank_) out.result = Result::Done;
+        setBank (bank);
+        return out;
+    }
+    return {};
 }
 } // namespace neptune::core::combi

@@ -241,7 +241,7 @@ TEST_CASE ("combinations: the sequencer steps through the generals without wrapp
     CHECK (c.sequenceNext (Library(), set).result == Result::Ignored);   // liste vide
 }
 
-TEST_CASE ("combinations: a program change is a piston of the current bank")
+TEST_CASE ("combinations: a program change is a general piston, a divisional piston or a bank")
 {
     auto set = makeSet();
     Library lib;
@@ -249,11 +249,28 @@ TEST_CASE ("combinations: a program change is a piston of the current bank")
     set.set (router::switchParam (7), 1.0);
     c.arm (true);
     c.general (lib, set, 2);
+    set.set (stop (1, 4), 0.0);
+    c.arm (true);
+    c.divisional (lib, set, 1, 3);
     set.set (router::switchParam (7), 0.0);
-    CHECK (c.programChange (lib, set, 2).result == Result::Recalled);
+    set.set (stop (1, 4), 100.0);
+
+    CHECK (c.programChange (lib, set, 2).result == Result::Recalled);            // 0..9 : général de la banque courante
     CHECK (set.get (router::switchParam (7)) == 1.0);
     CHECK (c.programChange (lib, set, 5).result == Result::Empty);
-    CHECK (c.programChange (lib, set, 10).result == Result::Ignored);
+    CHECK (c.programChange (lib, set, 13, 1).result == Result::Recalled);        // 10..19 : divisionnel 4 du clavier (piste) 1
+    CHECK (set.get (stop (1, 4)) == 0.0);
+    CHECK (c.programChange (lib, set, 13, 2).result == Result::Empty);           // un autre clavier n'a rien à cet endroit
+    CHECK (c.programChange (lib, set, 13).result == Result::Ignored);            // aucune piste sur ce canal : ignoré
+    CHECK (c.programChange (lib, set, 13, 99).result == Result::Ignored);
+    CHECK (c.bank() == 0);
+    CHECK (c.programChange (lib, set, 23).result == Result::Done);               // 20..29 : banque 4
+    CHECK (c.bank() == 3);
+    CHECK (c.programChange (lib, set, 23).result == Result::Ignored);            // déjà dans cette banque : rien ne change
+    CHECK (c.programChange (lib, set, 20).result == Result::Done);
+    CHECK (c.bank() == 0);
+    CHECK (c.programChange (lib, set, 30).result == Result::Ignored);            // le reste est ignoré
+    CHECK (c.programChange (lib, set, 127).result == Result::Ignored);
     CHECK (c.programChange (lib, set, -1).result == Result::Ignored);
 }
 
@@ -570,4 +587,19 @@ TEST_CASE ("combinations: the sequence and the generals can be edited from the s
     CHECK (c.sequencePosition() == -1);
     c.clampSequence (5);
     CHECK (c.sequencePosition() == -1);
+}
+
+TEST_CASE ("combinations: divisionals can be renamed and erased like generals")
+{
+    Library lib;
+    Memory m;
+    m.used = true;
+    lib.divisionals[divisionalKey (2, 1, 4)] = m;
+    CHECK_FALSE (renameDivisional (lib, divisionalKey (2, 1, 5), "Absent"));
+    CHECK (renameDivisional (lib, divisionalKey (2, 1, 4), "  Fonds 8  "));
+    CHECK (lib.divisional (2, 1, 4)->name == "Fonds 8");
+    CHECK_FALSE (eraseDivisional (lib, divisionalKey (2, 1, 5)));
+    CHECK (eraseDivisional (lib, divisionalKey (2, 1, 4)));
+    CHECK (lib.divisional (2, 1, 4) == nullptr);
+    CHECK (lib.divisionals.empty());
 }
