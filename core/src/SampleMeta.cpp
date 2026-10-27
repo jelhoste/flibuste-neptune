@@ -272,6 +272,34 @@ bool writeSampleMeta (const std::filesystem::path& path, const SampleMeta& meta,
     return true;
 }
 
+bool readReleaseMarker (const std::filesystem::path& path, std::int64_t& frame)
+{
+    if (isWavPackFile (path))
+    {
+        const auto marks = readWavPackMarks (path);
+        if (marks.cues.empty()) return false;
+        frame = *std::max_element (marks.cues.begin(), marks.cues.end());
+        return true;
+    }
+    SF_INFO info {};
+   #if defined (_WIN32)
+    SNDFILE* f = sf_wchar_open (path.c_str(), SFM_READ, &info);
+   #else
+    SNDFILE* f = sf_open (path.c_str(), SFM_READ, &info);
+   #endif
+    if (f == nullptr) return false;
+    bool found = false;
+    SF_CUES cues {};
+    if (sf_command (f, SFC_GET_CUE, &cues, sizeof cues) == SF_TRUE)
+        for (std::uint32_t i = 0; i < cues.cue_count && i < 100; ++i)
+        {
+            const auto position = static_cast<std::int64_t> (cues.cue_points[i].sample_offset);
+            if (! found || position > frame) { frame = position; found = true; }
+        }
+    sf_close (f);
+    return found;
+}
+
 bool readFileMarks (const std::filesystem::path& path, SampleMeta& out)
 {
     out = {};

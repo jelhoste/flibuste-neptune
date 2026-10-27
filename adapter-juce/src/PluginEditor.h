@@ -44,6 +44,7 @@ private:
     void openCombinations();
     void openMidiSend();
     void showControlMenu();
+    void importOrgan();                                // importer un orgue GrandOrgue (.organ ou paquet .orgue)
     void showGlobalPresetMenu();                       // presets globaux : enregistrer, charger, supprimer
     void saveGlobalPreset (const juce::String& name);
     void loadGlobalPreset (const juce::File&);

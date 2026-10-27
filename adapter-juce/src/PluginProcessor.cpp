@@ -706,6 +706,91 @@ int NeptuneProcessor::uiImportTrack (neptune::core::trackexport::Bundle b)
     return index;
 }
 
+neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::filesystem::path& organFile)
+{
+    using namespace neptune::core;
+    namespace mx = neptune::core::mixer;
+    int first = -1;
+    int wanted = 0;
+    {
+        // le nombre de claviers n'est connu qu'après lecture : une première lecture sans fichiers d'échantillons sert à le compter
+        organimport::Options probe;
+        probe.baseDir = organFile.parent_path();
+        probe.readSampleMarks = false;
+        const auto counted = organimport::importOrganFile (organFile, probe);
+        if (! counted.ok) return counted;
+        wanted = static_cast<int> (counted.keyboards.size());
+        const juce::ScopedLock lock (instrumentLock_);
+        for (int start = 0; start + wanted <= mx::numTracks && first < 0; ++start)
+        {
+            bool free = true;
+            for (int k = 0; k < wanted && free; ++k) free = ! mixer_.tracks[static_cast<std::size_t> (start + k)].active;
+            if (free) first = start;
+        }
+    }
+    if (first < 0)
+    {
+        organimport::Result r;
+        r.error = "Not enough free tracks (" + std::to_string (wanted) + " needed)";
+        return r;
+    }
+    organimport::Options opt;
+    opt.baseDir = organFile.parent_path();
+    opt.firstTrack = first;
+    opt.firstChannel = 1;
+    auto result = organimport::importOrganFile (organFile, opt);
+    if (! result.ok) return result;
+
+    for (std::size_t k = 0; k < result.keyboards.size(); ++k)
+    {
+        const int index = first + static_cast<int> (k);
+        const auto& kb = result.keyboards[k];
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            mixer_.resetTrack (index);
+            auto& t = mixer_.tracks[static_cast<std::size_t> (index)];
+            t.active = true;
+            t.type = TrackType::Sampler;
+            t.instrument = kb.instrument;
+            t.strip.name = kb.name;
+            t.strip.midiChannel = kb.midiChannel;
+            t.strip.midiChannelMask = 0;
+            t.strip = mx::sanitisedStrip (std::move (t.strip), false, index);
+        }
+        for (int s = 0; s < mx::numInserts; ++s)
+        {
+            { const juce::ScopedLock lock (instrumentLock_); insertInstances_[static_cast<std::size_t> (index)][static_cast<std::size_t> (s)] = nullptr; }
+            engine_.setInsert (StripKind::Track, index, s, nullptr);
+        }
+        resetTrackParameters (index, true);
+        engine_.setTrackSettings (index, trackSettings (index));
+        engine_.setTrackType (index, TrackType::Sampler);
+        engine_.setTrackActive (index, true);
+        publishSynthPatch (index, SynthDescription {});
+        publishFmDescription (index, fm::FmDescription {});
+        publishOrganDescription (index, organ::OrganDescription {});
+        InstrumentDescription description;
+        { const juce::ScopedLock lock (instrumentLock_); description = mixer_.tracks[static_cast<std::size_t> (index)].instrument; }
+        loader_->request (index, description, false);
+    }
+    {
+        const juce::ScopedLock lock (instrumentLock_);
+        for (auto& rule : result.router.rules) mixer_.router.rules.push_back (rule);
+        mixer_.router = router::sanitised (std::move (mixer_.router));
+        for (auto& [key, memory] : result.combinations.generals) mixer_.combinations.generals[key] = memory;
+        for (auto& [key, memory] : result.combinations.divisionals) mixer_.combinations.divisionals[key] = memory;
+        if (mixer_.combinations.sequence.empty()) mixer_.combinations.sequence = result.combinations.sequence;
+        mixer_.combinations = combi::sanitised (std::move (mixer_.combinations));
+        engine_.setRouter (mixer_.router);
+    }
+    seedHostParameters (result.initialValues);
+    selectTrack (first);
+    undo_.clear();
+    ++revision_;
+    notifyStateChanged();
+    return result;
+}
+
 bool NeptuneProcessor::uiRemoveTrack (int track)
 {
     using namespace neptune::core;

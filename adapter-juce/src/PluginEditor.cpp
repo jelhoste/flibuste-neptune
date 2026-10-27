@@ -511,6 +511,8 @@ void NeptuneEditor::showGlobalPresetMenu()
     for (int i = 0; i < files.size(); ++i) del.addItem (1000 + i, files[i].getFileNameWithoutExtension());
     menu.addSubMenu (text ("gpreset.delete"), del, ! files.isEmpty());
     menu.addItem (3, text ("gpreset.open_folder"));
+    menu.addSeparator();
+    menu.addItem (4, text ("organ.import"));
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&globalPresetButton_), [safe, files] (int choice)
@@ -529,6 +531,7 @@ void NeptuneEditor::showGlobalPresetMenu()
             }), true);
         }
         else if (choice == 3) global_presets::folder (safe->settingsDir()).revealToUser();
+        else if (choice == 4) safe->importOrgan();
         else if (choice >= 100 && choice < 1000 && choice - 100 < files.size()) safe->loadGlobalPreset (files[choice - 100]);
         else if (choice >= 1000 && choice - 1000 < files.size())
         {
@@ -538,6 +541,66 @@ void NeptuneEditor::showGlobalPresetMenu()
                                                                                          safe->text ("gpreset.delete"), safe->text ("mix.cancel"), safe.getComponent()),
                                           [file] (int result) { if (result == 1) juce::ignoreUnused (file.moveToTrash()); });
         }
+    });
+}
+
+void NeptuneEditor::importOrgan()
+{
+    auto chooser = std::make_shared<juce::FileChooser> (text ("organ.import"), juce::File::getSpecialLocation (juce::File::userHomeDirectory), "*.organ;*.orgue;*.Organ");
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe, chooser] (const juce::FileChooser& fc)
+    {
+        const auto picked = fc.getResult();
+        if (safe == nullptr || ! picked.existsAsFile()) return;
+        juce::File organFile = picked;
+        if (picked.hasFileExtension ("orgue"))
+        {
+            // paquet zip : extrait une fois dans la bibliothèque d'orgues, puis cherche le fichier de définition
+            const auto target = safe->settingsDir().getChildFile ("Organs").getChildFile (picked.getFileNameWithoutExtension());
+            if (! target.isDirectory())
+            {
+                juce::ZipFile zip (picked);
+                const auto r = zip.uncompressTo (target, true);
+                if (! r.wasOk())
+                {
+                    target.deleteRecursively();
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), r.getErrorMessage());
+                    return;
+                }
+            }
+            organFile = juce::File();
+            for (const auto& f : target.findChildFiles (juce::File::findFiles, true, "*.organ"))
+            {
+                organFile = f;
+                break;
+            }
+            if (! organFile.existsAsFile())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), safe->text ("organ.no_odf"));
+                return;
+            }
+        }
+        const auto result = safe->processor_.uiImportOrgan (std::filesystem::path (organFile.getFullPathName().toStdString()));
+        juce::String message;
+        if (! result.ok) message = juce::String::fromUTF8 (result.error.c_str());
+        else
+        {
+            int stops = 0, pipes = 0;
+            for (const auto& k : result.keyboards) { stops += k.stops; pipes += k.pipes; }
+            message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (static_cast<int> (result.keyboards.size())) + " " + safe->text ("organ.imp_keyboards")
+                    + ", " + juce::String (stops) + " " + safe->text ("organ.stops") + ", " + juce::String (pipes) + " " + safe->text ("organ.pipes");
+            if (! result.warnings.empty())
+            {
+                message += "\n\n" + safe->text ("organ.warnings") + "\n";
+                int shown = 0;
+                for (const auto& w : result.warnings)
+                {
+                    if (++shown > 12) { message += "..."; break; }
+                    message += "- " + juce::String::fromUTF8 (w.c_str()) + "\n";
+                }
+            }
+        }
+        juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), message);
     });
 }
 

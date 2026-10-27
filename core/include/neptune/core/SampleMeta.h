@@ -52,6 +52,10 @@ bool writeSampleMeta (const std::filesystem::path&, const SampleMeta& meta, Meta
 // Faux si le fichier ne porte rien d'utile.
 bool readFileMarks (const std::filesystem::path&, SampleMeta& out);
 
+// Repère de relâchement enregistré dans le fichier (orgues : début de la queue du tuyau) : la position la plus grande des repères `cue ` d'un WAV, ou de l'enveloppe
+// RIFF d'un WavPack. Faux si le fichier n'en porte pas. Position en échantillons du fichier.
+bool readReleaseMarker (const std::filesystem::path&, std::int64_t& frame);
+
 // Document JSON <-> SampleMeta (exposés pour les tests).
 std::string sampleMetaToJson (const SampleMeta&);
 bool sampleMetaFromJson (const std::string& text, SampleMeta& out);

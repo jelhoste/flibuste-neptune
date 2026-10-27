@@ -15,6 +15,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "HostProbe.h"
 #include "ParamHost.h"
 #include "PresetHost.h"
+#include "neptune/core/OrganImport.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/AudioRecorder.h"
@@ -235,6 +236,8 @@ public:
     std::string globalStateText() const;
     bool uiLoadGlobalState (const std::string& stateText, std::string* error = nullptr);
     int uiImportTrack (neptune::core::trackexport::Bundle);
+    // Importe un orgue GrandOrgue (fichier .organ déjà sur disque) : un clavier = une piste Sampler sur des pistes libres consécutives, routeur et combinaisons fusionnés.
+    neptune::core::organimport::Result uiImportOrgan (const std::filesystem::path& organFile);
     // Retire une piste (remise à l'état d'origine). Faux s'il n'en reste qu'une. Vide l'historique d'annulation.
     bool uiRemoveTrack (int track);
 
