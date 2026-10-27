@@ -1,4 +1,5 @@
 #include "neptune/core/SampleMeta.h"
+#include "neptune/core/WavPackFile.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -279,40 +280,70 @@ bool readFileMarks (const std::filesystem::path& path, SampleMeta& out)
     if (haveOurs) out = ours;
 
     // chunk d'instrument standard (smpl d'un WAV, instrument d'un AIFF) : ce que Neptune n'a pas écrit
-    SF_INFO info {};
-   #if defined (_WIN32)
-    SNDFILE* f = sf_wchar_open (path.c_str(), SFM_READ, &info);
-   #else
-    SNDFILE* f = sf_open (path.c_str(), SFM_READ, &info);
-   #endif
     double fileRate = 0.0;
-    if (f != nullptr)
+    if (isWavPackFile (path))
     {
-        fileRate = static_cast<double> (info.samplerate);
-        SF_INSTRUMENT inst {};
-        if (sf_command (f, SFC_GET_INSTRUMENT, &inst, sizeof inst) == SF_TRUE)
+        // WavPack : le chunk smpl du WAV d'origine est gardé dans l'enveloppe RIFF du fichier
+        const auto info = probeWavPackFile (path);
+        if (! info.ok) { if (! haveOurs) return false; }
+        else
         {
-            if (! out.hasRoot && inst.basenote >= 0 && inst.basenote <= 127)
+            fileRate = static_cast<double> (info.sampleRate);
+            const auto marks = readWavPackMarks (path);
+            if (! out.hasRoot && marks.hasRoot)
             {
                 out.hasRoot = true;
-                out.rootNote = inst.basenote;
-                out.tuneCents = std::clamp (static_cast<double> (inst.detune), -50.0, 50.0);
+                out.rootNote = marks.rootNote;
+                out.tuneCents = std::clamp (marks.detuneCents, -50.0, 50.0);
             }
             if (out.loops.empty())
-                for (int i = 0; i < inst.loop_count && i < 16 && out.loops.size() < 4; ++i)
+                for (const auto& lp : marks.loops)
                 {
-                    const auto& lp = inst.loops[i];
-                    if (lp.mode == SF_LOOP_NONE || lp.end <= lp.start) continue;
+                    if (out.loops.size() >= 4 || lp.second <= lp.first) continue;
                     MetaLoop l;
-                    l.start = static_cast<std::int64_t> (lp.start);
-                    l.end = static_cast<std::int64_t> (lp.end) + 1;   // smpl : le dernier échantillon de la boucle est inclus ; Neptune : fin exclusive
-                    if (! out.loops.empty() && (l.end <= (out.loops.back().end < 0 ? l.end : out.loops.back().end))) continue;   // les boucles se suivent dans le fichier
+                    l.start = lp.first;
+                    l.end = lp.second + 1;   // smpl : le dernier échantillon de la boucle est inclus ; Neptune : fin exclusive
+                    if (! out.loops.empty() && (l.end <= (out.loops.back().end < 0 ? l.end : out.loops.back().end))) continue;
                     out.loops.push_back (l);
                 }
         }
-        sf_close (f);
     }
-    else if (! haveOurs) return false;
+    else
+    {
+        SF_INFO info {};
+       #if defined (_WIN32)
+        SNDFILE* f = sf_wchar_open (path.c_str(), SFM_READ, &info);
+       #else
+        SNDFILE* f = sf_open (path.c_str(), SFM_READ, &info);
+       #endif
+        if (f != nullptr)
+        {
+            fileRate = static_cast<double> (info.samplerate);
+            SF_INSTRUMENT inst {};
+            if (sf_command (f, SFC_GET_INSTRUMENT, &inst, sizeof inst) == SF_TRUE)
+            {
+                if (! out.hasRoot && inst.basenote >= 0 && inst.basenote <= 127)
+                {
+                    out.hasRoot = true;
+                    out.rootNote = inst.basenote;
+                    out.tuneCents = std::clamp (static_cast<double> (inst.detune), -50.0, 50.0);
+                }
+                if (out.loops.empty())
+                    for (int i = 0; i < inst.loop_count && i < 16 && out.loops.size() < 4; ++i)
+                    {
+                        const auto& lp = inst.loops[i];
+                        if (lp.mode == SF_LOOP_NONE || lp.end <= lp.start) continue;
+                        MetaLoop l;
+                        l.start = static_cast<std::int64_t> (lp.start);
+                        l.end = static_cast<std::int64_t> (lp.end) + 1;   // smpl : le dernier échantillon de la boucle est inclus ; Neptune : fin exclusive
+                        if (! out.loops.empty() && (l.end <= (out.loops.back().end < 0 ? l.end : out.loops.back().end))) continue;   // les boucles se suivent dans le fichier
+                        out.loops.push_back (l);
+                    }
+            }
+            sf_close (f);
+        }
+        else if (! haveOurs) return false;
+    }
     // les positions écrites pour une autre fréquence suivent le fichier tel qu'il est maintenant
     if (haveOurs && ours.sampleRate > 0.0 && fileRate > 0.0 && std::abs (ours.sampleRate - fileRate) > 0.5)
     {

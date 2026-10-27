@@ -1,9 +1,11 @@
 #include "neptune/core/SampleLoader.h"
 
 #include "neptune/core/OpusFile.h"
+#include "neptune/core/WavPackFile.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -45,6 +47,12 @@ std::int64_t residentCount (std::int64_t frames, std::int64_t maxResident, const
 bool isOpusPath (const std::filesystem::path& p)
 {
     return (hasExtension (p, ".opus") || hasExtension (p, ".ogg") || hasExtension (p, ".oga")) && isOpusFile (p);
+}
+
+// WavPack : détecté par la signature « wvpk » pour .wv et .wav (les échantillons d'orgue de GrandOrgue sont des WavPack nommés .wav).
+bool isWavPackPath (const std::filesystem::path& p)
+{
+    return (hasExtension (p, ".wv") || hasExtension (p, ".wav")) && isWavPackFile (p);
 }
 
 std::string fileName (const std::filesystem::path& p) { return p.filename().string(); }
@@ -225,6 +233,59 @@ AudioFileInfo probeOpus (const std::filesystem::path& path)
     return r;
 }
 
+// WavPack décodé en entier ; 16 bits gardés en int16 comme les autres formats, le reste en float32.
+SampleLoadResult loadWavPack (const std::filesystem::path& path)
+{
+    auto d = decodeWavPackFile (path);
+    if (! d.info.ok) return fail (d.info.error);
+    auto data = std::make_shared<SampleData>();
+    const int ch = d.info.channels;
+    const std::int64_t frames = d.info.frames;
+    data->channels = ch;
+    data->frames = frames;
+    data->residentFrames = frames;   // pas de lecture depuis le disque en cours de jeu pour l'instant
+    data->path = path.u8string();
+    data->sampleRate = static_cast<double> (d.info.sampleRate);
+    data->name = fileName (path);
+    data->sourceBitDepth = d.info.isFloat ? 32 : d.info.bitsPerSample;
+    const auto count = static_cast<std::size_t> (frames);
+    if (! d.info.isFloat && d.info.bitsPerSample <= 16)
+    {
+        data->pcm16.resize (count * static_cast<std::size_t> (ch));
+        const float up = static_cast<float> (1 << (15));
+        for (std::size_t i = 0; i < count; ++i)
+            for (int c = 0; c < ch; ++c)
+            {
+                const float v = d.samples[i * static_cast<std::size_t> (ch) + static_cast<std::size_t> (c)] * up;
+                data->pcm16[static_cast<std::size_t> (c) * count + i] = static_cast<std::int16_t> (std::clamp (std::lround (v), -32768L, 32767L));
+            }
+    }
+    else
+    {
+        data->pcm32.resize (count * static_cast<std::size_t> (ch));
+        for (std::size_t i = 0; i < count; ++i)
+            for (int c = 0; c < ch; ++c)
+                data->pcm32[static_cast<std::size_t> (c) * count + i] = d.samples[i * static_cast<std::size_t> (ch) + static_cast<std::size_t> (c)];
+    }
+    SampleLoadResult r;
+    r.sample = std::move (data);
+    return r;
+}
+
+AudioFileInfo probeWavPack (const std::filesystem::path& path)
+{
+    const auto w = probeWavPackFile (path);
+    AudioFileInfo r;
+    if (! w.ok) { r.error = w.error; return r; }
+    r.ok = true;
+    r.channels = w.channels;
+    r.frames = w.frames;
+    r.sampleRate = static_cast<double> (w.sampleRate);
+    r.bitDepth = w.isFloat ? 32 : w.bitsPerSample;
+    r.keptAsInt16 = ! w.isFloat && w.bitsPerSample <= 16;
+    return r;
+}
+
 AudioFileInfo probeFailure (std::string msg)
 {
     AudioFileInfo i;
@@ -287,7 +348,7 @@ AudioFileInfo probeAudioFile (const std::filesystem::path& path)
 {
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return probeFailure ("file not found: " + path.string());
-    AudioFileInfo r = isOpusPath (path) ? probeOpus (path) : hasExtension (path, ".flac") ? probeFlac (path) : probeWithSndfile (path);
+    AudioFileInfo r = isOpusPath (path) ? probeOpus (path) : isWavPackPath (path) ? probeWavPack (path) : hasExtension (path, ".flac") ? probeFlac (path) : probeWithSndfile (path);
     if (r.ok)
         r.ramBytes = static_cast<std::uint64_t> (r.frames) * static_cast<std::uint64_t> (r.channels) * (r.keptAsInt16 ? 2u : 4u);
     return r;
@@ -298,6 +359,7 @@ SampleLoadResult loadSampleFile (const std::filesystem::path& path, std::int64_t
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return fail ("file not found: " + path.string());
     if (isOpusPath (path)) return loadOpus (path);
+    if (isWavPackPath (path)) return loadWavPack (path);
     return hasExtension (path, ".flac") ? loadFlac (path, maxResidentFrames) : loadWithSndfile (path, maxResidentFrames);
 }
 
@@ -306,23 +368,23 @@ struct AudioStreamReader::Impl
 {
     SNDFILE* sf = nullptr;
     drflac* flac = nullptr;
-    std::vector<float> opus;   // Opus : fichier décodé en entier à l'ouverture
-    std::int64_t opusPos = 0;
-    bool isOpus = false;
+    std::vector<float> memory;   // Opus et WavPack : fichier décodé en entier à l'ouverture
+    std::int64_t memoryPos = 0;
+    bool inMemory = false;
 };
 
 AudioStreamReader::AudioStreamReader() : impl_ (new Impl) {}
 AudioStreamReader::~AudioStreamReader() { close(); delete impl_; }
-bool AudioStreamReader::isOpen() const noexcept { return impl_->sf != nullptr || impl_->flac != nullptr || impl_->isOpus; }
+bool AudioStreamReader::isOpen() const noexcept { return impl_->sf != nullptr || impl_->flac != nullptr || impl_->inMemory; }
 
 void AudioStreamReader::close()
 {
     if (impl_->sf != nullptr) { sf_close (impl_->sf); impl_->sf = nullptr; }
     if (impl_->flac != nullptr) { drflac_close (impl_->flac); impl_->flac = nullptr; }
-    impl_->opus.clear();
-    impl_->opus.shrink_to_fit();
-    impl_->opusPos = 0;
-    impl_->isOpus = false;
+    impl_->memory.clear();
+    impl_->memory.shrink_to_fit();
+    impl_->memoryPos = 0;
+    impl_->inMemory = false;
     channels_ = 0;
     totalFrames_ = 0;
 }
@@ -335,9 +397,19 @@ bool AudioStreamReader::open (const std::filesystem::path& path, std::string* er
     {
         auto d = decodeOpusFile (path);
         if (! d.info.ok) { if (error != nullptr) *error = d.info.error; return false; }
-        impl_->opus = std::move (d.samples);
-        impl_->opusPos = 0;
-        impl_->isOpus = true;
+        impl_->memory = std::move (d.samples);
+        impl_->memoryPos = 0;
+        impl_->inMemory = true;
+        channels_ = d.info.channels;
+        totalFrames_ = d.info.frames;
+    }
+    else if (isWavPackPath (path))
+    {
+        auto d = decodeWavPackFile (path);
+        if (! d.info.ok) { if (error != nullptr) *error = d.info.error; return false; }
+        impl_->memory = std::move (d.samples);
+        impl_->memoryPos = 0;
+        impl_->inMemory = true;
         channels_ = d.info.channels;
         totalFrames_ = d.info.frames;
     }
@@ -370,10 +442,10 @@ bool AudioStreamReader::open (const std::filesystem::path& path, std::string* er
 
 bool AudioStreamReader::seek (std::int64_t frame)
 {
-    if (impl_->isOpus)
+    if (impl_->inMemory)
     {
         if (frame < 0 || frame > totalFrames_) return false;
-        impl_->opusPos = frame;
+        impl_->memoryPos = frame;
         return true;
     }
     if (impl_->sf != nullptr) return sf_seek (impl_->sf, frame, SEEK_SET) >= 0;
@@ -384,11 +456,11 @@ bool AudioStreamReader::seek (std::int64_t frame)
 std::int64_t AudioStreamReader::read (float* interleaved, std::int64_t frames)
 {
     if (frames <= 0) return 0;
-    if (impl_->isOpus)
+    if (impl_->inMemory)
     {
-        const auto n = std::max<std::int64_t> (0, std::min (frames, totalFrames_ - impl_->opusPos));
-        std::copy_n (impl_->opus.begin() + static_cast<std::ptrdiff_t> (impl_->opusPos * channels_), static_cast<std::ptrdiff_t> (n * channels_), interleaved);
-        impl_->opusPos += n;
+        const auto n = std::max<std::int64_t> (0, std::min (frames, totalFrames_ - impl_->memoryPos));
+        std::copy_n (impl_->memory.begin() + static_cast<std::ptrdiff_t> (impl_->memoryPos * channels_), static_cast<std::ptrdiff_t> (n * channels_), interleaved);
+        impl_->memoryPos += n;
         return n;
     }
     if (impl_->sf != nullptr) return static_cast<std::int64_t> (sf_readf_float (impl_->sf, interleaved, frames));

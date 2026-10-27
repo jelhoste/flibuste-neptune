@@ -93,6 +93,26 @@ if(NEPTUNE_WITH_OPUS)
   FetchContent_MakeAvailable(opus)
 endif()
 
+# --- WavPack : libwavpack 5.8.1 (BSD 3 clauses, compatible AGPLv3), compilée avec ses sources C ---
+# Lecture seule des fichiers .wv (sans perte ; les échantillons d'orgue GrandOrgue sont des WavPack, souvent nommés .wav), décodés en mémoire.
+# Désactiver avec -DNEPTUNE_WITH_WAVPACK=OFF.
+option(NEPTUNE_WITH_WAVPACK "Lire les fichiers WavPack (libwavpack)" ON)
+if(NEPTUNE_WITH_WAVPACK)
+  set(WAVPACK_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+  set(WAVPACK_INSTALL_CMAKE_MODULE OFF CACHE BOOL "" FORCE)
+  set(WAVPACK_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+  set(WAVPACK_INSTALL_PKGCONFIG_MODULE OFF CACHE BOOL "" FORCE)
+  set(WAVPACK_ENABLE_LEGACY OFF CACHE BOOL "" FORCE)
+  set(WAVPACK_ENABLE_THREADS OFF CACHE BOOL "" FORCE)
+  set(WAVPACK_ENABLE_DSD OFF CACHE BOOL "" FORCE)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+  FetchContent_Declare(wavpack
+    GIT_REPOSITORY https://github.com/dbry/WavPack.git
+    GIT_TAG        5.8.1
+    GIT_SHALLOW    TRUE)
+  FetchContent_MakeAvailable(wavpack)
+endif()
+
 # --- Analyse de niveau : LUFS du Master (EBU R128 / ITU BS.1770) ---
 # libebur128 v1.2.6 (MIT). Désactiver avec -DNEPTUNE_WITH_EBUR128=OFF (le compteur affiche alors « -inf »).
 option(NEPTUNE_WITH_EBUR128 "Activer libebur128 (LUFS du Master)" ON)
