@@ -838,6 +838,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 }
 
 // Valeurs effectives des modulateurs : les valeurs réglées, avec le tremblant (volume qui oscille) pour ceux qui en ont un et dont l'interrupteur est actif.
+// Pour un tremblant, la valeur réglée (0..100 %) est sa PROFONDEUR : elle ne coupe jamais le son (0 = pas d'oscillation).
 void SamplerVoices::updateModulators (int numFrames) noexcept
 {
     tremTime_ = std::fmod (tremTime_ + static_cast<double> (numFrames) / std::max (sampleRate_, 1.0), 1000.0);
@@ -847,11 +848,15 @@ void SamplerVoices::updateModulators (int numFrames) noexcept
         if (instrument_ != nullptr)
         {
             const auto& r = instrument_->modulators[static_cast<std::size_t> (i)];
-            if (r.continuous && r.tremPeriodMs > 0.0) v = 1.0f;   // un tremblant ne coupe jamais le son : sa valeur réglée est sans effet, seul son interrupteur compte
-            if (r.continuous && r.tremPeriodMs > 0.0 && (r.tremGate < 0 || modValues_[static_cast<std::size_t> (r.tremGate)] >= 0.5f))
+            if (r.continuous && r.tremPeriodMs > 0.0)
             {
-                const double phase = std::fmod (tremTime_ / (r.tremPeriodMs * 0.001), 1.0);
-                v *= 1.0f - r.tremDepth * 0.5f * static_cast<float> (1.0 - std::cos (6.283185307179586 * phase));
+                const float depth = std::clamp (v, 0.0f, 1.0f);
+                v = 1.0f;
+                if (r.tremGate < 0 || modValues_[static_cast<std::size_t> (r.tremGate)] >= 0.5f)
+                {
+                    const double phase = std::fmod (tremTime_ / (r.tremPeriodMs * 0.001), 1.0);
+                    v *= 1.0f - depth * 0.5f * static_cast<float> (1.0 - std::cos (6.283185307179586 * phase));
+                }
             }
         }
         modEff_[static_cast<std::size_t> (i)] = v;

@@ -24,7 +24,7 @@ struct ModulatorDescription
     // Orgue (boîte expressive, tremblant), modulateur continu seulement :
     double floorLevel = 0.0;   // niveau minimal (0..1) : le volume va de `floorLevel` (valeur 0) à 1 (valeur 100 %) ; une boîte fermée garde du son
     double tremPeriodMs = 0.0; // > 0 : tremblant, le volume oscille avec cette période tant que le modulateur `tremGate` est actif
-    double tremDepth = 0.0;    // profondeur du tremblant, 0..1 (part du volume)
+    double tremDepth = 0.0;    // profondeur du tremblant (0..1) dans l'orgue d'origine : valeur de départ du curseur ; en jeu, la valeur du modulateur (0..100 %) fait foi
     int tremGate = -1;         // modulateur qui allume le tremblant ; -1 : toujours
     bool operator== (const ModulatorDescription& o) const noexcept
     {

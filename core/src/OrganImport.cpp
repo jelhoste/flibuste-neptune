@@ -241,7 +241,8 @@ public:
         for (const auto& [key, ids] : params_)
         {
             const bool on = initial_.count (key) != 0 && initial_.at (key);
-            for (const ParamId id : ids) r.initialValues.emplace_back (id, valueFor (id, on));
+            const auto level = levelOf_.find (key);
+            for (const ParamId id : ids) r.initialValues.emplace_back (id, level != levelOf_.end() ? level->second : valueFor (id, on));
         }
         r.ok = true;
         return r;
@@ -571,6 +572,9 @@ private:
             m.tremDepth = std::clamp (ini_.getDouble (section, "AmpModDepth", 10.0) / 100.0, 0.0, 1.0);
             m.tremGate = gate;
             noteInitial (key, true);
+            levelOf_[key] = std::clamp (ini_.getDouble (section, "AmpModDepth", 10.0), 0.0, 100.0);   // le curseur de profondeur part de la valeur de l'orgue
+            if (boxKeys_.insert ({ keyboard, key }).second) boxControls_.push_back ({ keyboard, "Depth " + name, index, key });
+            ++boxUse_[{ keyboard, key }];
             usedTremulants_.insert (number);
             mask |= static_cast<ModMask> (1u) << index;
         }
@@ -842,6 +846,7 @@ private:
     std::set<std::pair<std::size_t, std::string>> boxKeys_;
     std::map<std::pair<std::size_t, std::string>, int> boxUse_;   // jeux de ce clavier qui dépendent de cette boîte
     std::set<int> usedEnclosures_, usedTremulants_;
+    std::map<std::string, double> levelOf_;   // valeur de départ d'un réglage continu (profondeur d'un tremblant)
     std::set<std::string> couplerControlKeys_;
     std::vector<std::pair<std::string, ParamId>> couplerControls_;
     int attackStops_ = 0;

@@ -756,7 +756,12 @@ neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::f
         for (int start = 0; start + wanted <= mx::numTracks && first < 0; ++start)
         {
             bool free = true;
-            for (int k = 0; k < wanted && free; ++k) free = ! mixer_.tracks[static_cast<std::size_t> (start + k)].active;
+            for (int k = 0; k < wanted && free; ++k)
+            {
+                const auto& candidate = mixer_.tracks[static_cast<std::size_t> (start + k)];
+                const bool pristine = start + k == 0 && candidate.active && ! trackHasContent (0);   // la piste de départ, restée vide : l'orgue la remplace
+                free = ! candidate.active || pristine;
+            }
             if (free) first = start;
         }
     }
