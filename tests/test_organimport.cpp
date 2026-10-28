@@ -889,3 +889,38 @@ TEST_CASE ("continuous zone: an idle Sampler track still plays it through the en
     peak (200);
     CHECK (peak (4) == 0.0f);
 }
+
+TEST_CASE ("organ import: separate release samples are chosen by how long the key was held")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Releases\nNumberOfManuals=1\nHasPedals=N\n"
+        "[Manual001]\nName=Great\nNumberOfStops=1\nStop001=1\nNumberOfLogicalKeys=2\nNumberOfAccessibleKeys=2\nFirstAccessibleKeyMIDINoteNumber=60\n"
+        "[Stop001]\nName=Pipes\nNumberOfLogicalPipes=2\nNumberOfAccessiblePipes=2\n"
+        "Pipe001=main.wav\nPipe001ReleaseCount=4\nPipe001Release001=r60.wav\nPipe001Release001MaxKeyPressTime=60\n"
+        "Pipe001Release002=r280.wav\nPipe001Release002MaxKeyPressTime=280\nPipe001Release003=rall.wav\nPipe001Release003MaxKeyPressTime=-1\n"
+        "Pipe001Release004=rtrem.wav\nPipe001Release004IsTremulant=1\n"
+        "Pipe002=other.wav\nPipe002ReleaseCount=2\nPipe002Release001=a.wav\nPipe002Release001MaxKeyPressTime=100\nPipe002Release002=b.wav\nPipe002Release002MaxKeyPressTime=500\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    const auto& zones = r.keyboards[0].instrument.zones;
+    // touche 60 : 1 attaque + 3 relâchements (le relâchement enregistré avec un tremblant est ignoré) ; touche 61 : 1 attaque + 2 relâchements
+    REQUIRE (zones.size() == 7);
+    auto bounds = [&] (int key)
+    {
+        std::vector<std::pair<int, int>> out;
+        for (const auto& z : zones)
+            if (z.keyLow == key && z.onRelease) out.emplace_back (z.heldMinMs, z.heldMaxMs);
+        std::sort (out.begin(), out.end());
+        return out;
+    };
+    CHECK (bounds (60) == std::vector<std::pair<int, int>> { { 0, 60 }, { 61, 280 }, { 281, 0 } });
+    // aucun relâchement sans limite : le plus long vaut pour le reste de la durée d'appui
+    CHECK (bounds (61) == std::vector<std::pair<int, int>> { { 0, 100 }, { 101, 0 } });
+    // l'attaque reste jouée au Note On
+    int attacks = 0;
+    for (const auto& z : zones) attacks += ! z.onRelease;
+    CHECK (attacks == 2);
+}

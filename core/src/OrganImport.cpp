@@ -506,6 +506,21 @@ private:
             if (ini_.getInt (section, prefix + "IsTremulant", -1) == 1) continue;   // enregistrée avec un tremblant d'échantillons, non importé
             variants.push_back ({ attackFile, std::clamp (ini_.getInt (section, prefix + "AttackVelocity", 0), 0, 127) });
         }
+        // Les relâchements enregistrés à part : `PipeNNNReleaseMMM`, choisis selon la durée d'appui (`MaxKeyPressTime`, -1 : sans limite). Comme GrandOrgue, c'est le plus court qui
+        // convient à la durée d'appui qui est joué ; chaque durée maximale ouvre donc une tranche (tranche précédente + 1 ms .. durée maximale). Quand un tuyau en a, la queue
+        // du fichier d'attaque ne joue plus (sinon deux relâchements à chaque note).
+        struct Release { std::string file; int maxMs = -1; std::int64_t cue = -1; };
+        std::vector<Release> releases;
+        const int releaseCount = std::clamp (ini_.getInt (section, p + "ReleaseCount", 0), 0, 100);
+        for (int r = 1; r <= releaseCount; ++r)
+        {
+            const std::string prefix = p + numbered ("Release", r);
+            const std::string releaseFile = ini_.get (section, prefix);
+            if (releaseFile.empty() || lowered (releaseFile) == "dummy") continue;
+            if (ini_.getInt (section, prefix + "IsTremulant", -1) == 1) continue;   // enregistré avec un tremblant d'échantillons, non importé
+            releases.push_back ({ releaseFile, ini_.getInt (section, prefix + "MaxKeyPressTime", -1), ini_.getInt (section, prefix + "CuePoint", -1) });
+        }
+        const bool ownRelease = ! releases.empty();
         std::vector<int> cuts;
         for (const auto& v : variants) if (v.minVelocity > 0) cuts.push_back (v.minVelocity);
         std::sort (cuts.begin(), cuts.end());
@@ -540,7 +555,7 @@ private:
                         for (std::size_t i = 1; i < marks.loops.size() && z.extraLoops.size() < ZoneDescription::maxExtraLoops; ++i)
                             z.extraLoops.push_back ({ marks.loops[i].start, marks.loops[i].end, marks.loops[i].crossfade, marks.loops[i].repeats });
                         const std::int64_t lastEnd = marks.loops.back().end;
-                        if (marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd) z.releaseStart = marks.releaseMarker;
+                        if (! ownRelease && marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd) z.releaseStart = marks.releaseMarker;
                     }
                 }
                 members.push_back (kb.instrument.zones.size());
@@ -553,6 +568,54 @@ private:
                     z.roundRobin = ++rank;
                     z.rrMode = index == members.front() ? static_cast<int> (RoundRobinMode::Random) : -1;
                 }
+        }
+        if (ownRelease)
+        {
+            // durée maximale effective : sans aucune « sans limite », la plus longue en tient lieu (GrandOrgue se tairait au-delà ; un tuyau qui se tait d'un coup serait pire)
+            int longest = -1;
+            bool unbounded = false;
+            for (const auto& r : releases) { if (r.maxMs < 0) unbounded = true; else longest = std::max (longest, r.maxMs); }
+            for (auto& r : releases) if (! unbounded && r.maxMs == longest) r.maxMs = -1;
+            std::vector<int> tops;
+            for (const auto& r : releases) if (r.maxMs >= 0) tops.push_back (r.maxMs);
+            std::sort (tops.begin(), tops.end());
+            tops.erase (std::unique (tops.begin(), tops.end()), tops.end());
+            if (std::any_of (releases.begin(), releases.end(), [] (const Release& r) { return r.maxMs < 0; })) tops.push_back (-1);
+            int previous = -1;
+            for (const int top : tops)
+            {
+                int rank = 0;
+                std::vector<std::size_t> members;
+                for (const auto& r : releases)
+                {
+                    if (r.maxMs != top) continue;
+                    ZoneDescription z;
+                    const fs::path path = resolvePath (opt_.baseDir, r.file);
+                    z.samplePath = path.u8string();
+                    z.keyLow = z.keyHigh = note;
+                    z.rootNote = note;
+                    z.tuneCents = tuneCents;
+                    z.gainDb = gainTotal;
+                    z.group = group;
+                    z.mode = PlayMode::OneShot;
+                    z.onRelease = true;
+                    z.heldMinMs = previous < 0 ? 0 : previous + 1;
+                    z.heldMaxMs = top < 0 ? 0 : std::max (top, 1);
+                    const auto& marks = marksOf (path);
+                    const std::int64_t cue = r.cue >= 0 ? r.cue : (marks.exists && marks.releaseMarker > 0 ? marks.releaseMarker : 0);
+                    if (cue > 0) z.startFrame = cue;
+                    members.push_back (kb.instrument.zones.size());
+                    kb.instrument.zones.push_back (std::move (z));
+                }
+                if (members.size() > 1)
+                    for (const std::size_t index : members)
+                    {
+                        auto& z = kb.instrument.zones[index];
+                        z.roundRobin = ++rank;
+                        z.rrMode = index == members.front() ? static_cast<int> (RoundRobinMode::Random) : -1;
+                    }
+                if (top >= 0) previous = top;
+            }
         }
         ++kb.pipes;
     }
