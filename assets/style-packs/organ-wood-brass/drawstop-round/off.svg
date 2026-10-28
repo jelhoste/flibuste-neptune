@@ -2,7 +2,7 @@
 <defs>
 <radialGradient id="wood" cx="0.4" cy="0.35" r="0.8"><stop offset="0" stop-color="#7a4e2c"/><stop offset="1" stop-color="#2e1a0b"/></radialGradient>
 <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6e2a0"/><stop offset="0.35" stop-color="#d4ab52"/><stop offset="0.7" stop-color="#a37d2c"/><stop offset="1" stop-color="#6e5218"/></linearGradient>
-<radialGradient id="face" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="#e9dfc0"/><stop offset="1" stop-color="#cdbf98"/></radialGradient>
+<radialGradient id="face" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="#b3a888"/><stop offset="1" stop-color="#928763"/></radialGradient>
 </defs>
 <circle cx="50" cy="50" r="46" fill="url(#wood)" stroke="#170c04" stroke-width="2"/>
 <circle cx="50" cy="50" r="40" fill="none" stroke="url(#brass)" stroke-width="5"/>

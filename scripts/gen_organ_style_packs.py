@@ -64,6 +64,10 @@ WOOD = [(0, '#5a361c'), (0.5, '#43280f'), (1, '#2e1a0b')]
 WOOD_LIT = [(0, '#74492a'), (0.5, '#5a3820'), (1, '#40260f')]
 IVORY = [(0, '#e9dfc0'), (1, '#cdbf98')]
 IVORY_LIT = [(0, '#fff8e0'), (1, '#efe2b8')]
+IVORY_DIM = [(0, '#b3a888'), (1, '#928763')]      # jeu éteint : plaque assombrie
+IVORY_GLOW = [(0, '#f6a07a'), (1, '#d2653a')]     # jeu activé : plaque en cuivre rouge (teinte franche, texte sombre lisible)
+COPPER = '#8f3516'                                 # liseré cuivre foncé des jeux activés
+COPPER_RING = [(0, '#ffc4a0'), (0.4, '#e2764a'), (0.75, '#b24a22'), (1, '#6e2a10')]
 AMBER = '#ffb347'
 
 
@@ -73,17 +77,17 @@ def wood_brass():
     # --- plaquette de tirant (3:1)
     def tablet(on):
         w, h = 180, 60
-        defs = (lg('wood', 0, 0, 0, 1, WOOD_LIT if on else WOOD) + lg('brass', 0, 0, 0, 1, BRASS_BRIGHT if on else BRASS)
-                + lg('plate', 0, 0, 0, 1, IVORY_LIT if on else IVORY))
+        defs = (lg('wood', 0, 0, 0, 1, WOOD_LIT if on else WOOD) + lg('brass', 0, 0, 0, 1, COPPER_RING if on else BRASS)
+                + lg('plate', 0, 0, 0, 1, IVORY_GLOW if on else IVORY_DIM))
         shadow = '<rect x="5" y="6" width="174" height="52" rx="9" fill="#000000" opacity="0.4"/>\n' if on else ''
         top = 1 if on else 2
         body = (shadow
-                + f'<rect x="2" y="{top}" width="176" height="56" rx="9" fill="url(#wood)" stroke="#170c04" stroke-width="2"/>\n'
+                + f'<rect x="2" y="{top}" width="176" height="56" rx="9" fill="url(#wood)" stroke="{COPPER if on else '#170c04'}" stroke-width="{4 if on else 2}"/>\n'
                 + grain(168, 52, 7, '#150a03', 0.35, 2, 6).replace('<path', f'<path transform="translate(0 {top + 2})"')
                 + f'<rect x="8" y="{top + 6}" width="164" height="44" rx="5" fill="none" stroke="url(#brass)" stroke-width="3"/>\n'
                 + f'<rect x="14" y="{top + 11}" width="152" height="34" rx="3" fill="url(#plate)" stroke="#6b5a36" stroke-width="1"/>\n'
                 + f'<rect x="15" y="{top + 12}" width="150" height="3" rx="1.5" fill="#ffffff" opacity="{0.55 if on else 0.3}"/>\n'
-                + (f'<rect x="20" y="{top + 41}" width="140" height="2" rx="1" fill="{AMBER}"/>\n' if on else '')
+                + (f'<rect x="20" y="{top + 39}" width="140" height="4" rx="2" fill="{COPPER}"/>\n' if on else '')
                 + ''.join(f'<circle cx="{cx}" cy="{top + 28}" r="3.5" fill="url(#brass)" stroke="#4a3610" stroke-width="0.8"/>'
                           f'<line x1="{cx - 2}" y1="{top + 28 - 1}" x2="{cx + 2}" y2="{top + 28 + 1}" stroke="#3a2a0c" stroke-width="1"/>\n' for cx in (7, 173)))
         return svg(w, h, body, defs)
@@ -92,28 +96,28 @@ def wood_brass():
 
     # --- tirant rond (1:1)
     def knob(on):
-        defs = (rg('wood', 0.4, 0.35, 0.8, [(0, '#7a4e2c'), (1, '#2e1a0b')]) + lg('brass', 0, 0, 1, 1, BRASS_BRIGHT if on else BRASS)
-                + rg('face', 0.4, 0.3, 0.8, IVORY_LIT if on else IVORY))
+        defs = (rg('wood', 0.4, 0.35, 0.8, [(0, '#7a4e2c'), (1, '#2e1a0b')]) + lg('brass', 0, 0, 1, 1, COPPER_RING if on else BRASS)
+                + rg('face', 0.4, 0.3, 0.8, IVORY_GLOW if on else IVORY_DIM))
         sh = '<circle cx="54" cy="56" r="45" fill="#000000" opacity="0.4"/>\n' if on else ''
-        body = (sh + '<circle cx="50" cy="50" r="46" fill="url(#wood)" stroke="#170c04" stroke-width="2"/>\n'
+        body = (sh + f'<circle cx="50" cy="50" r="46" fill="url(#wood)" stroke="{COPPER if on else '#170c04'}" stroke-width="{5 if on else 2}"/>\n'
                 + '<circle cx="50" cy="50" r="40" fill="none" stroke="url(#brass)" stroke-width="5"/>\n'
                 + '<circle cx="50" cy="50" r="32" fill="url(#face)" stroke="#6b5a36" stroke-width="1"/>\n'
                 + '<path d="M26 40 Q50 22 74 40" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.4"/>\n'
-                + (f'<circle cx="50" cy="50" r="35.5" fill="none" stroke="{AMBER}" stroke-width="1.6"/>\n' if on else ''))
+                + (f'<circle cx="50" cy="50" r="35.5" fill="none" stroke="{COPPER}" stroke-width="3.5"/>\n' if on else ''))
         return svg(100, 100, body, defs)
     P['drawstop-round'] = ({'off.svg': knob(False), 'on.svg': knob(True)},
                            {'name': 'Round drawstop (wood and brass)', 'text': {'colour': '#2b1b0b', 'size': 22, 'position': 'center', 'bold': True}})
 
     # --- piston (1:1)
     def piston(on):
-        defs = (rg('dome', 0.38, 0.3, 0.85, [(0, '#fff3c0'), (0.5, '#e0b650'), (1, '#8a6a20')] if on else [(0, '#e8d08a'), (0.5, '#b58e3c'), (1, '#6a4f18')])
-                + lg('ring', 0, 0, 0, 1, [(0, '#8a6a20'), (1, '#f0d27a')]))
+        defs = (rg('dome', 0.38, 0.3, 0.85, [(0, '#ffc4a0'), (0.5, '#d2653a'), (1, '#7a2c10')] if on else [(0, '#e8d08a'), (0.5, '#b58e3c'), (1, '#6a4f18')])
+                + lg('ring', 0, 0, 0, 1, [(0, '#6e2a10'), (1, '#e2764a')] if on else [(0, '#8a6a20'), (1, '#f0d27a')]))
         dy = 2 if on else 0
-        body = ('<circle cx="50" cy="50" r="47" fill="#2a1809" stroke="#170c04" stroke-width="2"/>\n'
+        body = (f'<circle cx="50" cy="50" r="47" fill="#2a1809" stroke="{COPPER if on else '#170c04'}" stroke-width="{4 if on else 2}"/>\n'
                 + '<circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring)" stroke-width="3"/>\n'
                 + f'<circle cx="50" cy="{50 + dy}" r="35" fill="url(#dome)" stroke="#5a4210" stroke-width="1.5"/>\n'
                 + f'<ellipse cx="42" cy="{38 + dy}" rx="14" ry="7" fill="#ffffff" opacity="{0.5 if on else 0.28}"/>\n'
-                + (f'<circle cx="50" cy="50" r="46" fill="none" stroke="{AMBER}" stroke-width="2" opacity="0.7"/>\n' if on else ''))
+                + (f'<circle cx="50" cy="50" r="40" fill="none" stroke="{COPPER}" stroke-width="3" opacity="0.9"/>\n' if on else ''))
         return svg(100, 100, body, defs)
     P['piston'] = ({'off.svg': piston(False), 'on.svg': piston(True)},
                    {'name': 'Brass piston', 'text': {'colour': '#2b1b0b', 'size': 30, 'position': 'center', 'bold': True}})

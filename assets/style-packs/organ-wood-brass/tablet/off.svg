@@ -2,7 +2,7 @@
 <defs>
 <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a361c"/><stop offset="0.5" stop-color="#43280f"/><stop offset="1" stop-color="#2e1a0b"/></linearGradient>
 <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6e2a0"/><stop offset="0.35" stop-color="#d4ab52"/><stop offset="0.7" stop-color="#a37d2c"/><stop offset="1" stop-color="#6e5218"/></linearGradient>
-<linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9dfc0"/><stop offset="1" stop-color="#cdbf98"/></linearGradient>
+<linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b3a888"/><stop offset="1" stop-color="#928763"/></linearGradient>
 </defs>
 <rect x="2" y="2" width="176" height="56" rx="9" fill="url(#wood)" stroke="#170c04" stroke-width="2"/>
 <path transform="translate(0 4)" d="M6 3.7 Q20.0 5.0 34.0 3.7 Q48.0 2.4 62.0 3.7 Q76.0 5.0 90.0 3.7 Q104.0 2.4 118.0 3.7 Q132.0 5.0 146.0 3.7 Q160.0 2.4 174.0 3.7" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
