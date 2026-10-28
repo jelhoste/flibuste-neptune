@@ -289,6 +289,7 @@ Facade sanitisedPage (Facade f)
         w.vertical = w.vertical != 0 ? 1 : 0;
         w.source = w.type == WidgetType::Meter ? sanitisedMeterSource (w.source) : std::clamp (w.source, 0, 2);
         w.actionMode = std::clamp (w.actionMode, 0, 1 + combi::kNumCommands);
+        if (w.mirror.size() > 16) w.mirror.resize (16);
         w.midi = midisend::sanitised (std::move (w.midi));
         w.midiTarget = std::clamp (w.midiTarget, 1, 3);
         w.midiFader = w.midiFader != 0 ? 1 : 0;
@@ -707,6 +708,7 @@ json pageJson (const Facade& f)
         if (w.type == WidgetType::Lamp) { e["source"] = w.source; e["ch"] = w.channel; }
         if (w.type == WidgetType::Meter) e["source"] = w.source;
         if (w.type == WidgetType::Action && w.actionMode != 0) e["mode"] = w.actionMode;
+        if (! w.mirror.empty()) e["mirror"] = w.mirror;
         if (w.type == WidgetType::Midi)
         {
             json m;
@@ -866,6 +868,9 @@ Facade pageFromJson (const json& o)
             w.vertical = intOf (e, "vertical", 0);
             w.source = intOf (e, "source", 0);
             w.actionMode = intOf (e, "mode", 0);
+            if (const auto m = e.find ("mirror"); m != e.end() && m->is_array())
+                for (const auto& v : *m)
+                    if (v.is_number_unsigned() && w.mirror.size() < 16) w.mirror.push_back (v.get<ParamId>());
             w.midiTarget = intOf (e, "target", 1);
             w.midiFader = intOf (e, "fader", 0);
             if (const auto m = e.find ("midi"); m != e.end() && m->is_object())

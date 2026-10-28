@@ -498,6 +498,15 @@ TEST_CASE ("organ import: dump of the demo organ (only with NEPTUNE_DUMP_ORGAN=1
             const auto it = k.instrument.groups.find (name);
             std::printf ("GRP %s | %s zones=%d gain=%.1f..%.1f zoneMask=%x groupMask=%x\n", k.name.c_str(), name.c_str(), static_cast<int> (g[0]), g[1], g[2], static_cast<unsigned> (g[3]), it == k.instrument.groups.end() ? 0u : static_cast<unsigned> (it->second.modulators));
         }
+        for (const auto& [name, g] : perGroup)
+        {
+            const auto it = k.instrument.groups.find (name);
+            if (it == k.instrument.groups.end()) continue;
+            std::printf ("MASK %s | %s :", k.name.c_str(), name.c_str());
+            for (int i = 0; i < kModulators; ++i)
+                if (((it->second.modulators >> i) & 1u) != 0) std::printf (" [%d %s%s]", i, k.instrument.modulators[static_cast<std::size_t> (i)].name.c_str(), k.instrument.modulators[static_cast<std::size_t> (i)].continuous ? " cont" : "");
+            std::printf ("\n");
+        }
         std::printf ("TRACKMASK %s %x\n", k.name.c_str(), static_cast<unsigned> (k.instrument.trackModulators));
     }
     for (const auto& rule : r.router.rules)
@@ -613,6 +622,8 @@ TEST_CASE ("organ import: expression boxes and tremulants become continuous modu
     bool slider = false;
     for (const auto& w : r.facade.widgets) if (w.type == facade::WidgetType::Slider && w.param == mixer::modulatorParam (0, boxIndex)) slider = true;
     CHECK (slider);
+    for (const auto& w : r.facade.widgets)   // la boîte est un curseur, jamais un bouton marche/arrêt, et un tremblant n'a pas de bouton propre
+        if (w.type == facade::WidgetType::Button) CHECK (w.param != mixer::modulatorParam (0, boxIndex));
     CHECK_FALSE (hasWarning (r, "expression box"));
 }
 

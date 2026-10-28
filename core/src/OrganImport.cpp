@@ -278,6 +278,9 @@ private:
                 auto& s = add (page, fc::WidgetType::Slider, 330 + (boxes++) * 330, 4, 320, 32);
                 s.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), box.index);
                 s.text = box.name;
+                // la même boîte sur les autres claviers (un sommier peut servir plusieurs claviers, le pédalier notamment) suit ce curseur
+                for (const auto& other : boxControls_)
+                    if (other.key == box.key && other.keyboard != k) s.mirror.push_back (mixer::modulatorParam (opt_.firstTrack + static_cast<int> (other.keyboard), other.index));
             }
             int n = 0;
             std::vector<int> order;
@@ -285,6 +288,7 @@ private:
             std::sort (order.begin(), order.end());
             for (const int index : order)
             {
+                if (kb.instrument.modulators[static_cast<std::size_t> (index)].continuous) continue;   // boîtes (curseurs) et tremblants (via leur interrupteur) : pas de bouton marche/arrêt
                 auto& b = add (page, fc::WidgetType::Button, left + (n % cols) * (bw + gap), top + (n / cols) * (bh + gap), bw, bh);
                 b.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), index);
                 b.text = kb.instrument.modulators[static_cast<std::size_t> (index)].name;
@@ -498,7 +502,7 @@ private:
             m.continuous = true;
             m.floorLevel = std::clamp (ini_.getInt (section, "AmpMinimumLevel", 0) / 100.0, 0.0, 1.0);
             noteInitial (key, true);   // ouverte au départ
-            if (boxKeys_.insert ({ keyboard, key }).second) boxControls_.push_back ({ keyboard, "Box " + name, index });
+            if (boxKeys_.insert ({ keyboard, key }).second) boxControls_.push_back ({ keyboard, "Box " + name, index, key });
             usedEnclosures_.insert (number);
             mask |= static_cast<ModMask> (1u) << index;
         }
@@ -793,7 +797,7 @@ private:
     const IniFile& ini_;
     Options opt_;
     Result result_;
-    struct BoxControl { std::size_t keyboard; std::string name; int index; };
+    struct BoxControl { std::size_t keyboard; std::string name; int index; std::string key; };
     std::vector<BoxControl> boxControls_;
     std::set<std::pair<std::size_t, std::string>> boxKeys_;
     std::set<int> usedEnclosures_, usedTremulants_;

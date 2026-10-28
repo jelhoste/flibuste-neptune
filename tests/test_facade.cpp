@@ -759,3 +759,20 @@ TEST_CASE ("facade pages: the global Facade lives in the mixer state, console mo
     m.tracks[1].strip.facade = facade::addPage (m.tracks[1].strip.facade, "P2");
     CHECK (mixerFromJson (toJson (m)).tracks[1].strip.facade == m.tracks[1].strip.facade);
 }
+
+TEST_CASE ("facade: a slider can mirror its position onto other parameters (saved and bounded)")
+{
+    using namespace neptune::core::facade;
+    Facade f;
+    auto w = defaultWidget (WidgetType::Slider, f.freeId(), 10, 10);
+    w.param = 14040;
+    for (ParamId id = 14100; id < 14130; ++id) w.mirror.push_back (id);   // trop : borné à 16
+    f.widgets.push_back (w);
+    const auto clean = sanitised (f);
+    REQUIRE (clean.widgets.size() == 1);
+    CHECK (clean.widgets[0].mirror.size() == 16);
+    const auto back = fromJson (toJson (clean));
+    REQUIRE (back.widgets.size() == 1);
+    CHECK (back.widgets[0].mirror == clean.widgets[0].mirror);
+    CHECK (back == clean);
+}

@@ -615,7 +615,9 @@ public:
         const double cran = custom ? 1.0 / static_cast<double> (w->notches.size() - 1) : spec != nullptr && spec->max > spec->min ? 1.0 / (spec->max - spec->min) : 0.1;
         const double delta = stepped ? (wheel.deltaY > 0 ? 1.0 : -1.0) * cran : wheel.deltaY * 0.1;   // un cran par molette quand le widget a des crans
         o.processor_.uiBeginEdit (w->param);
-        o.processor_.uiSetNormalised (w->param, normalisedFor (*w, juce::jlimit (0.0, 1.0, shownPosition (*w) + delta), w->type == fc::WidgetType::Slider));
+        const double wheelNorm = normalisedFor (*w, juce::jlimit (0.0, 1.0, shownPosition (*w) + delta), w->type == fc::WidgetType::Slider);
+        o.processor_.uiSetNormalised (w->param, wheelNorm);
+        for (const auto id : w->mirror) o.processor_.uiSetNormalised (id, wheelNorm);
         o.processor_.uiEndEdit (w->param);
     }
 
@@ -722,7 +724,9 @@ private:
         double t = ((vertical ? p.y : p.x) - start) / travel;
         if (vertical) t = 1.0 - t;
         t = std::clamp (t, 0.0, 1.0);   // position d'écran ; normalisedFor applique l'inversion
-        o.processor_.uiSetNormalised (w.param, normalisedFor (w, t, true));
+        const double dragNorm = normalisedFor (w, t, true);
+        o.processor_.uiSetNormalised (w.param, dragNorm);
+        for (const auto id : w.mirror) o.processor_.uiSetNormalised (id, dragNorm);
         repaint();
     }
 

@@ -142,13 +142,14 @@ struct Widget
     int source = 0;                 // Voyant : 0 paramètre, 1 notes du canal `channel`, 2 notes de la piste
     int style = 0;                  // identifiant d'un ImageStyle de la Façade, 0 : aucun
     int vertical = 0;               // Curseur : 1, vertical
+    std::vector<ParamId> mirror;    // Curseur, potard : autres paramètres qui reçoivent la même position (une boîte expressive qui commande plusieurs claviers)
 
     bool operator== (const Widget& o) const noexcept
     {
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
             && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
-            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches;
+            && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && mirror == o.mirror && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches;
     }
 };
 

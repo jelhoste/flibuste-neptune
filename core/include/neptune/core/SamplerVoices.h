@@ -36,7 +36,11 @@ public:
         int on = 0;
         for (int i = 0; i < kModulators; ++i) { modValues_[static_cast<std::size_t> (i)] = values[i]; if (values[i] >= 0.5f) ++on; }
         modsOn_.store (on, std::memory_order_relaxed);
-        modEff_ = modValues_;   // au repos (render pas appelé) : la prochaine note voit les valeurs réglées ; render y ajoute le tremblant
+        modEff_ = modValues_;
+        if (instrument_ != nullptr)
+            for (int i = 0; i < kModulators; ++i)
+                if (instrument_->modulators[static_cast<std::size_t> (i)].continuous && instrument_->modulators[static_cast<std::size_t> (i)].tremPeriodMs > 0.0) modEff_[static_cast<std::size_t> (i)] = 1.0f;
+        // au repos (render pas appelé) : la prochaine note voit les valeurs réglées ; render y ajoute le tremblant
     }
     // Diagnostic (lu depuis le fil de message) : modulateurs à 50 % ou plus, et pour la dernière note : zones choisies / zones qui couvrent sa touche.
     int modsOn() const noexcept { return modsOn_.load (std::memory_order_relaxed); }

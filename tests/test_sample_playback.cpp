@@ -1129,6 +1129,7 @@ TEST_CASE ("organ modulators: a box keeps its floor level, a tremulant makes the
         float off[kModulators], on[kModulators];
         for (int i = 0; i < kModulators; ++i) off[i] = on[i] = 1.0f;
         off[2] = 0.0f;
+        off[1] = 0.0f;   // la valeur réglée du tremblant ne coupe pas le son
         rig.voices.setModulators (off);
         std::vector<float> out;
         renderBlocks (rig, out, 1);

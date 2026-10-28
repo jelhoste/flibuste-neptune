@@ -847,6 +847,7 @@ void SamplerVoices::updateModulators (int numFrames) noexcept
         if (instrument_ != nullptr)
         {
             const auto& r = instrument_->modulators[static_cast<std::size_t> (i)];
+            if (r.continuous && r.tremPeriodMs > 0.0) v = 1.0f;   // un tremblant ne coupe jamais le son : sa valeur réglée est sans effet, seul son interrupteur compte
             if (r.continuous && r.tremPeriodMs > 0.0 && (r.tremGate < 0 || modValues_[static_cast<std::size_t> (r.tremGate)] >= 0.5f))
             {
                 const double phase = std::fmod (tremTime_ / (r.tremPeriodMs * 0.001), 1.0);
