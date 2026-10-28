@@ -438,7 +438,7 @@ public:
         }
         else if (w->type == fc::WidgetType::Button)
         {
-            toggle (w->param);
+            toggle (w->param, w->mirror);
             playId_ = 0;
         }
         else if (w->type == fc::WidgetType::Menu)
@@ -841,7 +841,7 @@ private:
         repaint();
     }
 
-    void toggle (neptune::core::ParamId id)
+    void toggle (neptune::core::ParamId id, const std::vector<neptune::core::ParamId>& mirror = {})
     {
         auto& o = owner_;
         auto& ps = o.processor_.parameters();
@@ -855,6 +855,7 @@ private:
             next = ps.getNormalized (id) >= 0.5 ? spec->min : spec->max;
         o.processor_.uiBeginEdit (id);
         o.processor_.uiSetNormalised (id, spec->toNormalized (next));
+        for (const auto other : mirror) o.processor_.uiSetNormalised (other, spec->toNormalized (next));   // mêmes bornes : un réglage partagé entre claviers
         o.processor_.uiEndEdit (id);
     }
 

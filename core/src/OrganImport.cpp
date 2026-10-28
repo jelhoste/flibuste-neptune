@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -250,6 +251,40 @@ private:
     struct ManualInfo { int firstMidi = 36, accessible = 61, firstLogical = 1; std::size_t keyboard = 0; };
 
 
+    // Le clavier qui porte le contrôle d'un réglage partagé : pour une boîte, le manuel dont le plus de jeux en dépendent ; sinon le premier manuel qui le porte ;
+    // le pédalier seulement s'il est le seul.
+    bool manualListsSwitch (int odfIndex, int number) const
+    {
+        const std::string section = numbered ("Manual", odfIndex);
+        const int count = ini_.getInt (section, "NumberOfSwitches", 0);
+        for (int j = 1; j <= count; ++j)
+            if (ini_.getInt (section, numbered ("Switch", j), 0) == number) return true;
+        return false;
+    }
+
+    std::size_t ownerOf (const std::string& key, bool box) const
+    {
+        std::size_t best = result_.keyboards.size();
+        int bestScore = -1;
+        for (std::size_t k = 0; k < modulators_.size(); ++k)
+        {
+            if (modulators_[k].find (key) == modulators_[k].end()) continue;
+            int score = result_.keyboards[k].odfIndex != 0 ? 1000 : 0;   // un manuel prime sur le pédalier
+            if (box)
+            {
+                const auto use = boxUse_.find ({ k, key });
+                score += use != boxUse_.end() ? use->second : 0;
+            }
+            else
+            {
+                score -= static_cast<int> (k);
+                if (key.rfind ("sw", 0) == 0 && manualListsSwitch (result_.keyboards[k].odfIndex, std::atoi (key.c_str() + 2))) score += 5000;   // le clavier dont le tirant fait partie
+            }
+            if (score > bestScore) { bestScore = score; best = k; }
+        }
+        return best;
+    }
+
     // Une Façade sommaire : une page par clavier (ses jeux en boutons, le clavier en bas), puis une page des accouplements et des combinaisons.
     void buildFacade()
     {
@@ -271,27 +306,31 @@ private:
             fc::Facade page;
             page.name = kb.name.substr (0, 24);
             add (page, fc::WidgetType::Label, left, 4, 300, 32).text = kb.name;
+            // Un réglage que plusieurs claviers portent (une boîte, le tirant du tremblant, « All Sounds ») n'a qu'un contrôle : sur le clavier qui l'« habite », les autres le suivent.
             int boxes = 0;
             for (const auto& box : boxControls_)
             {
-                if (box.keyboard != k) continue;
+                if (box.keyboard != k || ownerOf (box.key, true) != k) continue;
                 auto& s = add (page, fc::WidgetType::Slider, 330 + (boxes++) * 330, 4, 320, 32);
                 s.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), box.index);
                 s.text = box.name;
-                // la même boîte sur les autres claviers (un sommier peut servir plusieurs claviers, le pédalier notamment) suit ce curseur
                 for (const auto& other : boxControls_)
                     if (other.key == box.key && other.keyboard != k) s.mirror.push_back (mixer::modulatorParam (opt_.firstTrack + static_cast<int> (other.keyboard), other.index));
             }
             int n = 0;
-            std::vector<int> order;
-            for (const auto& entry : modulators_[k]) order.push_back (entry.second);
+            std::vector<std::pair<int, std::string>> order;
+            for (const auto& entry : modulators_[k]) order.emplace_back (entry.second, entry.first);
             std::sort (order.begin(), order.end());
-            for (const int index : order)
+            for (const auto& [index, key] : order)
             {
                 if (kb.instrument.modulators[static_cast<std::size_t> (index)].continuous) continue;   // boîtes (curseurs) et tremblants (via leur interrupteur) : pas de bouton marche/arrêt
+                if (ownerOf (key, false) != k) continue;
                 auto& b = add (page, fc::WidgetType::Button, left + (n % cols) * (bw + gap), top + (n / cols) * (bh + gap), bw, bh);
                 b.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), index);
                 b.text = kb.instrument.modulators[static_cast<std::size_t> (index)].name;
+                for (std::size_t other = 0; other < modulators_.size(); ++other)
+                    if (other != k)
+                        if (const auto it = modulators_[other].find (key); it != modulators_[other].end()) b.mirror.push_back (mixer::modulatorParam (opt_.firstTrack + static_cast<int> (other), it->second));
                 ++n;
             }
             auto& keys = add (page, fc::WidgetType::Keyboard, left, 440, 976, 140);
@@ -503,6 +542,7 @@ private:
             m.floorLevel = std::clamp (ini_.getInt (section, "AmpMinimumLevel", 0) / 100.0, 0.0, 1.0);
             noteInitial (key, true);   // ouverte au départ
             if (boxKeys_.insert ({ keyboard, key }).second) boxControls_.push_back ({ keyboard, "Box " + name, index, key });
+            ++boxUse_[{ keyboard, key }];
             usedEnclosures_.insert (number);
             mask |= static_cast<ModMask> (1u) << index;
         }
@@ -800,6 +840,7 @@ private:
     struct BoxControl { std::size_t keyboard; std::string name; int index; std::string key; };
     std::vector<BoxControl> boxControls_;
     std::set<std::pair<std::size_t, std::string>> boxKeys_;
+    std::map<std::pair<std::size_t, std::string>, int> boxUse_;   // jeux de ce clavier qui dépendent de cette boîte
     std::set<int> usedEnclosures_, usedTremulants_;
     std::set<std::string> couplerControlKeys_;
     std::vector<std::pair<std::string, ParamId>> couplerControls_;

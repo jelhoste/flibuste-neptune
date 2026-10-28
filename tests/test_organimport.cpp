@@ -509,6 +509,17 @@ TEST_CASE ("organ import: dump of the demo organ (only with NEPTUNE_DUMP_ORGAN=1
         }
         std::printf ("TRACKMASK %s %x\n", k.name.c_str(), static_cast<unsigned> (k.instrument.trackModulators));
     }
+    {
+        std::vector<const facade::Facade*> pages { &r.facade };
+        for (const auto& p : r.facade.pages) pages.push_back (&p);
+        for (const auto* page : pages)
+        {
+            std::printf ("PAGE %s:", page->name.c_str());
+            for (const auto& w : page->widgets)
+                if (w.type == facade::WidgetType::Slider || w.type == facade::WidgetType::Button) std::printf (" %s%s(m%zu)", w.type == facade::WidgetType::Slider ? "SLIDER:" : "", w.text.c_str(), w.mirror.size());
+            std::printf ("\n");
+        }
+    }
     for (const auto& rule : r.router.rules)
         std::printf ("RULE %s src=%d dst=%d keys=%d..%d replace=%d sel=%d terms=%zu\n", rule.name.c_str(), rule.srcChannel, rule.dstChannel, rule.keyLo, rule.keyHi, rule.replace ? 1 : 0, static_cast<int>(rule.select), rule.terms.size());
 }
@@ -758,4 +769,38 @@ TEST_CASE ("organ import: the first note after idle only plays the stops that ar
     run (4);
     engine.noteOn (0, 60, 1.0f);
     CHECK (engine.lastPicks (0) == 1);   // seul « On » est choisi dès la première note
+}
+
+TEST_CASE ("organ import: a box or a switch shared by the pedal and a manual has one control, on the manual, mirrored onto the pedal")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Shared\nNumberOfManuals=1\nHasPedals=Y\nNumberOfEnclosures=1\nNumberOfTremulants=1\nNumberOfWindchestGroups=1\n"
+        "[Manual000]\nName=Pedal\nNumberOfStops=1\nStop001=1\nNumberOfLogicalKeys=1\nNumberOfAccessibleKeys=1\nFirstAccessibleKeyMIDINoteNumber=36\n"
+        "[Manual001]\nName=Swell\nNumberOfStops=1\nStop001=2\nNumberOfLogicalKeys=1\nNumberOfAccessibleKeys=1\nFirstAccessibleKeyMIDINoteNumber=60\n"
+        "[Stop001]\nName=Ped flute\nWindchestGroup=1\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\nSwitchCount=1\nSwitch001=2\n"
+        "[Stop002]\nName=Swell flute\nWindchestGroup=1\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\nSwitchCount=1\nSwitch001=2\n"
+        "[WindchestGroup001]\nNumberOfEnclosures=1\nEnclosure001=1\nNumberOfTremulants=1\nTremulant001=1\n"
+        "[Enclosure001]\nName=Swell\nAmpMinimumLevel=20\n"
+        "[Tremulant001]\nName=Trem\nPeriod=200\nAmpModDepth=15\nSwitchCount=1\nSwitch001=1\n"
+        "[Switch001]\nName=Tremblant\n[Switch002]\nName=Flutes\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 4;
+    const auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    REQUIRE (r.keyboards.size() == 2);
+    // pages : pédalier (page principale), puis le manuel
+    REQUIRE (r.facade.pages.size() >= 1);
+    const auto count = [] (const facade::Facade& page, facade::WidgetType type) { int n = 0; for (const auto& w : page.widgets) if (w.type == type) ++n; return n; };
+    CHECK (count (r.facade, facade::WidgetType::Slider) == 0);               // pas de boîte sur la page du pédalier
+    CHECK (count (r.facade.pages[0], facade::WidgetType::Slider) == 1);      // elle est sur le manuel
+    for (const auto& w : r.facade.pages[0].widgets)
+        if (w.type == facade::WidgetType::Slider) CHECK (w.mirror.size() == 1);
+    // « Tremblant » et « Flutes » : un seul bouton chacun (sur le manuel), qui commande aussi le pédalier
+    int pedalButtons = 0, manualButtons = 0, mirrored = 0;
+    for (const auto& w : r.facade.widgets) if (w.type == facade::WidgetType::Button) ++pedalButtons;
+    for (const auto& w : r.facade.pages[0].widgets) if (w.type == facade::WidgetType::Button) { ++manualButtons; if (w.mirror.size() == 1) ++mirrored; }
+    CHECK (pedalButtons == 0);
+    CHECK (manualButtons == 2);
+    CHECK (mirrored == 2);
 }
