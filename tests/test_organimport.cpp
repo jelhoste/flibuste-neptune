@@ -1075,3 +1075,26 @@ TEST_CASE ("organ import: a panel that is only partly positioned is left to the 
     CHECK (r.facade.widgets.back().type == fc::WidgetType::Keyboard);   // le clavier est dessiné en dernier, donc dessus
     CHECK (hasWarning (r, "place their elements automatically"));
 }
+
+TEST_CASE ("organ import: a manual whose element gives the width of only one key still gets a playable keyboard")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Narrow\nNumberOfManuals=1\nHasPedals=N\nNumberOfPanels=0\n"
+        "[Manual001]\nName=Great\nNumberOfStops=2\nStop001=1\nStop002=2\nNumberOfLogicalKeys=61\nNumberOfAccessibleKeys=61\nFirstAccessibleKeyMIDINoteNumber=36\n"
+        "[Stop001]\nName=One\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\n"
+        "[Stop002]\nName=Two\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\n"
+        "[Panel000]\nName=Console\nDispScreenSizeHoriz=1000\nDispScreenSizeVert=600\nNumberOfGUIElements=3\n"
+        "[Panel000Element001]\nType=Manual\nManual=1\nPositionX=100\nPositionY=300\nKey001Width=16\n"
+        "[Panel000Element002]\nType=Stop\nStop=1\nPositionX=10\nPositionY=10\n"
+        "[Panel000Element003]\nType=Stop\nStop=2\nPositionX=60\nPositionY=10\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    namespace fc = neptune::core::facade;
+    const fc::Widget* keys = nullptr;
+    for (const auto& w : r.facade.widgets) if (w.type == fc::WidgetType::Keyboard) keys = &w;
+    REQUIRE (keys != nullptr);
+    CHECK (keys->w >= 400);
+}

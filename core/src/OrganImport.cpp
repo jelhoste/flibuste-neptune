@@ -546,14 +546,18 @@ private:
                     std::size_t index = result_.keyboards.size();
                     for (std::size_t k = 0; k < result_.keyboards.size(); ++k) if (result_.keyboards[k].odfIndex == manual) index = k;
                     if (index >= result_.keyboards.size()) { ++unresolved; continue; }
-                    int keysWidth = 0, keysHeight = 0;
-                    for (int k = 1, n = ini_.getInt (ms, "NumberOfAccessibleKeys", ini_.getInt (ms, "NumberOfLogicalKeys", 0)); k <= std::max (n, 1) + 24 && ini_.has (es, numbered ("Key", k) + "Width") ; ++k)
+                    int keysWidth = 0, keysHeight = 0, widths = 0;
+                    const int keyCount = ini_.getInt (ms, "NumberOfAccessibleKeys", ini_.getInt (ms, "NumberOfLogicalKeys", 0));
+                    for (int k = 1; k <= std::max (keyCount, 1) + 24 && ini_.has (es, numbered ("Key", k) + "Width") ; ++k)
                     {
                         keysWidth += ini_.getInt (es, numbered ("Key", k) + "Width", 0);
+                        ++widths;
                         int kw = 0, kh = 0;
                         sizeOf (ini_.get (es, numbered ("Key", k) + "ImageOff"), kw, kh, 0, 0);
                         keysHeight = std::max (keysHeight, kh);
                     }
+                    // des largeurs données pour quelques touches seulement (le reste vient des images) ne disent pas la largeur du clavier : une largeur ordinaire
+                    if (widths * 2 < keyCount) keysWidth = 0;
                     auto* widget = addWidget (fc::WidgetType::Keyboard, x, y, keysWidth > 0 ? keysWidth : 600, keysHeight > 0 ? keysHeight : 100);
                     if (widget == nullptr) continue;
                     widget->channel = result_.keyboards[index].midiChannel;
