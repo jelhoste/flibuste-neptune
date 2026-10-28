@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "neptune/core/Combinations.h"
+#include "neptune/core/Facade.h"
 #include "neptune/core/Instrument.h"
 #include "neptune/core/NoteRouter.h"
 #include "neptune/core/Parameter.h"
@@ -71,6 +72,7 @@ struct Result
     std::vector<Keyboard> keyboards;                    // dans l'ordre du fichier (pédalier d'abord) : le clavier i va à la piste firstTrack + i
     router::Config router;
     combi::Library combinations;
+    facade::Facade facade;                              // Façade sommaire : une page par clavier (jeux et clavier), puis accouplements et combinaisons
     std::vector<std::pair<ParamId, double>> initialValues;   // état initial des interrupteurs (valeurs réelles)
     std::vector<std::string> warnings;
 };

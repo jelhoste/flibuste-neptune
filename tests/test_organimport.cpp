@@ -237,6 +237,20 @@ TEST_CASE ("organ import: keyboards, stops, pipes, switches, couplers and combin
     REQUIRE (r.ok);
     CHECK (r.name == "Test Organ");
 
+    // Façade sommaire : une page par clavier (au moins un bouton de jeu lié à un paramètre, un clavier sur le bon canal), plus une page finale
+    REQUIRE (r.facade.pages.size() == 3);
+    {
+        const auto& page = r.facade.pages[0];   // pages[0] = deuxième page = Great
+        int buttons = 0, keyboards = 0;
+        for (const auto& w : page.widgets)
+        {
+            if (w.type == facade::WidgetType::Button && w.param != 0) ++buttons;
+            if (w.type == facade::WidgetType::Keyboard && w.channel == 1) ++keyboards;
+        }
+        CHECK (buttons > 0);
+        CHECK (keyboards == 1);
+    }
+
     // trois claviers, le pédalier d'abord ; canaux : les manuels à la suite, le pédalier après
     REQUIRE (r.keyboards.size() == 3);
     CHECK (r.keyboards[0].name == "Pedal");

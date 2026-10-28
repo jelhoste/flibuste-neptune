@@ -236,6 +236,7 @@ public:
         buildCouplers();
         buildCombinations();
         otherThings();
+        buildFacade();
         for (const auto& [key, ids] : params_)
         {
             const bool on = initial_.count (key) != 0 && initial_.at (key);
@@ -247,6 +248,83 @@ public:
 
 private:
     struct ManualInfo { int firstMidi = 36, accessible = 61, firstLogical = 1; std::size_t keyboard = 0; };
+
+
+    // Une Façade sommaire : une page par clavier (ses jeux en boutons, le clavier en bas), puis une page des accouplements et des combinaisons.
+    void buildFacade()
+    {
+        namespace fc = neptune::core::facade;
+        constexpr int cols = 6, bw = 156, bh = 40, gap = 8, left = 12, top = 44;
+        fc::Facade main;
+        std::vector<fc::Facade> pages;
+        auto add = [] (fc::Facade& f, fc::WidgetType type, int x, int y, int w, int h) -> fc::Widget&
+        {
+            f.widgets.push_back (fc::defaultWidget (type, f.freeId(), x, y));
+            auto& widget = f.widgets.back();
+            widget.w = w;
+            widget.h = h;
+            return widget;
+        };
+        for (std::size_t k = 0; k < result_.keyboards.size(); ++k)
+        {
+            const auto& kb = result_.keyboards[k];
+            fc::Facade page;
+            page.name = kb.name.substr (0, 24);
+            add (page, fc::WidgetType::Label, left, 4, 500, 32).text = kb.name;
+            int n = 0;
+            std::vector<int> order;
+            for (const auto& entry : modulators_[k]) order.push_back (entry.second);
+            std::sort (order.begin(), order.end());
+            for (const int index : order)
+            {
+                auto& b = add (page, fc::WidgetType::Button, left + (n % cols) * (bw + gap), top + (n / cols) * (bh + gap), bw, bh);
+                b.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), index);
+                b.text = kb.instrument.modulators[static_cast<std::size_t> (index)].name;
+                ++n;
+            }
+            auto& keys = add (page, fc::WidgetType::Keyboard, left, 440, 976, 140);
+            keys.channel = kb.midiChannel;
+            keys.firstNote = 36;
+            keys.hold = 0;
+            (k == 0 ? main : pages.emplace_back()) = std::move (page);
+        }
+        fc::Facade last;
+        last.name = "Couplers";
+        add (last, fc::WidgetType::Label, left, 4, 500, 32).text = "Couplers";
+        int n = 0;
+        for (const auto& [label, id] : couplerControls_)
+        {
+            auto& b = add (last, fc::WidgetType::Button, left + (n % cols) * (bw + gap), top + (n / cols) * (bh + gap), bw, bh);
+            b.param = id;
+            b.text = label.substr (0, 40);
+            ++n;
+        }
+        int y = 300;
+        add (last, fc::WidgetType::Label, left, y - 40, 500, 32).text = "Generals / Divisionals";
+        auto command = [&] (int x, int row, int cmd)
+        {
+            auto& b = add (last, fc::WidgetType::Action, x, y + row * (bh + gap), 100, bh);
+            b.actionMode = 1 + cmd;
+        };
+        int g = 0;
+        for (int piston = 0; piston < combi::kPistons; ++piston)
+            if (result_.combinations.general (0, piston) != nullptr) command (left + (g++) * 108, 0, combi::kCommandGeneral + piston);
+        command (left, 1, combi::kCommandCancel);
+        command (left + 108, 1, combi::kCommandPrevious);
+        command (left + 216, 1, combi::kCommandNext);
+        int d = 0;
+        for (int piston = 0; piston < combi::kPistons; ++piston)
+        {
+            bool any = false;
+            for (std::size_t k = 0; k < result_.keyboards.size(); ++k)
+                if (result_.combinations.divisional (opt_.firstTrack + static_cast<int> (k), 0, piston) != nullptr) any = true;
+            if (any) command (left + (d++) * 108, 2, combi::kCommandDivisional + piston);
+        }
+        if (result_.keyboards.empty()) main = std::move (last);
+        else pages.push_back (std::move (last));
+        main.pages = std::move (pages);
+        result_.facade = std::move (main);
+    }
 
     void warn (std::string text) { if (result_.warnings.size() < 200) result_.warnings.push_back (std::move (text)); }
 
@@ -536,7 +614,11 @@ private:
                 {
                     if (key.rfind ("sw", 0) == 0) noteInitial (key, ini_.getBool (numbered ("Switch", std::atoi (key.c_str() + 2)), "DefaultToEngaged", false));
                     if (rule.terms.size() >= static_cast<std::size_t> (router::kMaxTerms)) { warn ("coupler \"" + name + "\": more than " + std::to_string (router::kMaxTerms) + " switches, the extra ones are ignored"); break; }
-                    if (const ParamId id = paramFor (key); id != 0) rule.terms.push_back ({ id, false });
+                    if (const ParamId id = paramFor (key); id != 0)
+                    {
+                        rule.terms.push_back ({ id, false });
+                        if (couplerControlKeys_.insert (key).second) couplerControls_.emplace_back (keys.size() == 1 ? name : switchName (key, name), id);
+                    }
                     else warn ("coupler \"" + name + "\": no free router switch left for one of its switches");
                 }
                 result_.router.rules.push_back (std::move (rule));
@@ -627,6 +709,8 @@ private:
     const IniFile& ini_;
     Options opt_;
     Result result_;
+    std::set<std::string> couplerControlKeys_;
+    std::vector<std::pair<std::string, ParamId>> couplerControls_;
     int attackStops_ = 0;
     std::size_t attackWarningIndex_ = 0;
     int organAmp_ = 100;

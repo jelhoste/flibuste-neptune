@@ -782,6 +782,16 @@ neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::f
         if (mixer_.combinations.sequence.empty()) mixer_.combinations.sequence = result.combinations.sequence;
         mixer_.combinations = combi::sanitised (std::move (mixer_.combinations));
         engine_.setRouter (mixer_.router);
+        // la Façade de l'orgue : remplace une Façade globale vide, sinon s'ajoute à la suite de ses pages
+        if (mixer_.globalFacade.widgets.empty() && mixer_.globalFacade.pages.empty()) mixer_.globalFacade = result.facade;
+        else
+        {
+            auto first = result.facade;
+            first.pages.clear();
+            mixer_.globalFacade.pages.push_back (std::move (first));
+            for (const auto& page : result.facade.pages) mixer_.globalFacade.pages.push_back (page);
+        }
+        mixer_.globalFacade = facade::sanitised (std::move (mixer_.globalFacade));
     }
     seedHostParameters (result.initialValues);
     selectTrack (first);
