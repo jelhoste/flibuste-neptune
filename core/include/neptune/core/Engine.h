@@ -179,6 +179,9 @@ public:
     }
     int totalActiveVoices() const noexcept { return totalVoices_.load (std::memory_order_relaxed); }
     std::uint32_t notesIn (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].notesIn.load (std::memory_order_relaxed); }
+    int modsOn (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].voices.modsOn(); }
+    int lastPicks (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].voices.lastPicks(); }
+    int lastKeyZones (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].voices.lastKeyZones(); }
     int adoptedZones (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].zones.load (std::memory_order_relaxed); }
     int activeVoices (int track) const noexcept
     {

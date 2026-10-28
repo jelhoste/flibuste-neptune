@@ -74,6 +74,7 @@ private:
 
     juce::TextButton voiceCountButton_; // « Voix : n / limite » ; un clic règle la limite globale de voix
     int lastVoiceCount_ = -1;
+    int diagH_ = 0;   // hauteur des lignes de diagnostic des pistes (chargement, activité) : les vues se placent dessous
     juce::TextButton viewButton_; // bascule entre la vue Mapping et la vue Sonde (texte de diagnostic de l'hôte)
     juce::TextButton panicButton_;
     bool showProbe_ = false;

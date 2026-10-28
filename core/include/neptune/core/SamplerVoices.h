@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 // Voix du Sampler (palier 1) : lecture polyphonique de zones avec transposition (interpolation de Hermite), modes
 // one-shot / boucle, fondu de relâchement, vol de voix. Aucune allocation : tout est dimensionné à la construction.
 #include <array>
@@ -30,7 +31,16 @@ public:
     // Valeurs des 16 emplacements assignables (-1..+1, voir ZoneSlots.h), lues une fois par bloc. Prises au début de chaque note.
     // Valeurs des modulateurs (0..1, kModulators), une fois par bloc, avant render() et avant les notes du bloc.
     const Instrument* instrumentPtr() const noexcept { return instrument_; }
-    void setModulators (const float* values) noexcept { for (int i = 0; i < kModulators; ++i) modValues_[static_cast<std::size_t> (i)] = values[i]; }
+    void setModulators (const float* values) noexcept
+    {
+        int on = 0;
+        for (int i = 0; i < kModulators; ++i) { modValues_[static_cast<std::size_t> (i)] = values[i]; if (values[i] >= 0.5f) ++on; }
+        modsOn_.store (on, std::memory_order_relaxed);
+    }
+    // Diagnostic (lu depuis le fil de message) : modulateurs à 50 % ou plus, et pour la dernière note : zones choisies / zones qui couvrent sa touche.
+    int modsOn() const noexcept { return modsOn_.load (std::memory_order_relaxed); }
+    int lastPicks() const noexcept { return lastPicks_.load (std::memory_order_relaxed); }
+    int lastKeyZones() const noexcept { return lastKeyZones_.load (std::memory_order_relaxed); }
     // La note est-elle une touche de keyswitch de cette piste (elle ne joue alors aucun son) ?
     bool isKeyswitch (int channel, int key) const noexcept
     {
@@ -193,6 +203,7 @@ private:
     // Sur le tas : 320 voix avec leurs états de filtre pèsent plusieurs centaines de Ko (pile de 1 Mo sous Windows).
     std::vector<Voice> voices_ = std::vector<Voice> (kMaxVoices + kFadeSlots);
     const Instrument* instrument_ = nullptr;
+    std::atomic<int> modsOn_ { 0 }, lastPicks_ { -1 }, lastKeyZones_ { 0 };
     DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;
     double stealFadeSeconds_ = kStealFadeSeconds;

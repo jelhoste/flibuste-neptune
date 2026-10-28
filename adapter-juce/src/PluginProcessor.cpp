@@ -233,7 +233,8 @@ std::string NeptuneProcessor::activitySummary() const
         if (! track.active || track.type != neptune::core::TrackType::Sampler || track.instrument.empty()) continue;
         const std::string name = track.strip.name.empty() ? "T" + std::to_string (t + 1) : track.strip.name;
         out += (out.empty() ? "" : "  |  ") + name + " ch" + std::to_string (track.strip.midiChannel) + ": " + std::to_string (engine_.adoptedZones (t)) + " zones, "
-             + std::to_string (engine_.notesIn (t)) + " notes, " + std::to_string (engine_.activeVoices (t)) + " voices";
+             + std::to_string (engine_.notesIn (t)) + " notes, " + std::to_string (engine_.activeVoices (t)) + " voices, "
+             + std::to_string (engine_.modsOn (t)) + " mods on, last note " + std::to_string (engine_.lastPicks (t)) + "/" + std::to_string (engine_.lastKeyZones (t));
     }
     return out;
 }

@@ -826,23 +826,24 @@ void NeptuneEditor::resized()
             b->setBounds (left, barY, w, barH);
             left += w + gap;
         }
-        const int areaH = juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0));
+        const int top = 80 + diagH_;   // sous les lignes de chargement et d'activité des pistes
+        const int areaH = juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0));
         if (showSplit_)
         {
             // Mixeur à gauche (réduit pour tenir), Façade à droite, barre de séparation entre les deux
             const int total = lw_ - 64, barW = 10;
             const int leftW = juce::jlimit (160, juce::jmax (160, total - 160 - barW), juce::roundToInt (total * splitRatio_));
-            mixerView_->placeScaled ({ 32, 80, leftW, areaH });
-            splitBar_.setBounds (32 + leftW, 80, barW, areaH);
-            facadeView_->setBounds (32 + leftW + barW, 80, total - leftW - barW, areaH);
+            mixerView_->placeScaled ({ 32, top, leftW, areaH });
+            splitBar_.setBounds (32 + leftW, top, barW, areaH);
+            facadeView_->setBounds (32 + leftW + barW, top, total - leftW - barW, areaH);
         }
         else
         {
-            mixerView_->placeScaled ({ 32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40) });
-            facadeView_->setBounds (32, 80, lw_ - 64, areaH);
+            mixerView_->placeScaled ({ 32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40) });
+            facadeView_->setBounds (32, top, lw_ - 64, areaH);
         }
-        modView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
-        routerView_->setBounds (32, 80, lw_ - 64, juce::jmax (200, lh_ - 80 - 40 - (recoveryShown_ ? 40 : 0)));
+        modView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
+        routerView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (midiSendPanel_) midiSendPanel_->setBounds (rootBounds());
@@ -898,6 +899,14 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     g.setColour (colour (Token::TextDim));   // numéro de version de développement, sous le titre : pour vérifier quelle version tourne
     g.setFont (juce::FontOptions (10.0f));
     g.drawText (neptune::core::version::kString, juce::Rectangle<int> (32, 66, 330, 12), juce::Justification::centredLeft);
+    {
+        const int needed = (processor_.loadSummary().empty() ? 0 : 18) + (processor_.activitySummary().empty() ? 0 : 16);
+        if (needed != diagH_)
+        {
+            diagH_ = needed;
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<NeptuneEditor> (this)] { if (safe != nullptr) safe->resized(); });
+        }
+    }
     if (const auto loading = processor_.loadSummary(); ! loading.empty())   // chargement des échantillons en cours (ou raté) : par piste, pour ne pas jouer trop tôt
     {
         g.setColour (colour (Token::Accent));
@@ -908,7 +917,7 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     {
         g.setColour (colour (Token::TextDim));
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (juce::String::fromUTF8 (activity.c_str()), juce::Rectangle<int> (32, 98, lw_ - 64, 14), juce::Justification::centredLeft, true);
+        g.drawText (juce::String::fromUTF8 (activity.c_str()), juce::Rectangle<int> (32, 80 + (processor_.loadSummary().empty() ? 0 : 18), lw_ - 64, 14), juce::Justification::centredLeft, true);
     }
 
     if (showProbe_)

@@ -291,6 +291,11 @@ void SamplerVoices::startNote (int channel, int key, float velocity) noexcept
     Instrument::Pick picks[Instrument::maxPicks];
     const auto held = heldQuery (channel, key, std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 1, 127));
     const int n = instrument_->selectLayers (key, velocity, /*release*/ false, picks, Instrument::maxPicks, &held);
+    lastPicks_.store (n, std::memory_order_relaxed);
+    int covering = 0;
+    for (const auto& z : instrument_->zones)
+        if (! z.onRelease && key >= z.keyLow && key <= z.keyHigh) ++covering;
+    lastKeyZones_.store (covering, std::memory_order_relaxed);
     recordGroups (channel, key, picks, n);
     for (int i = 0; i < n; ++i) chokeFor (*picks[i].zone); // avant de démarrer : les nouvelles voix du même coup ne sont pas coupées
     for (int i = 0; i < n; ++i) startVoice (channel, key, velocity, *picks[i].zone, picks[i].gain);
