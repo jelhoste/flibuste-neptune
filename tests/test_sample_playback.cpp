@@ -1144,4 +1144,33 @@ TEST_CASE ("organ modulators: a box keeps its floor level, a tremulant makes the
         CHECK (*std::min_element (moving.begin(), moving.end()) < 0.65f);
         CHECK (*std::max_element (moving.begin(), moving.end()) > 0.95f);
     }
+    SECTION ("tremulant speed: 50 % is the organ's period, 100 % is four times faster")
+    {
+        auto crossings = [&] (float speed)
+        {
+            Rig rig (makeConstant (480000, 1.0f), PlayMode::OneShot, [] (Zone& z) { z.modMask = 2u; });
+            rig.inst->modulators[1].continuous = true;
+            rig.inst->modulators[1].tremPeriodMs = 100.0;
+            rig.inst->modulators[1].tremDepth = 0.5f;
+            rig.inst->modulators[1].tremSpeed = 3;
+            float v[kModulators];
+            for (int i = 0; i < kModulators; ++i) v[i] = 1.0f;
+            v[3] = speed;
+            rig.voices.setModulators (v);
+            std::vector<float> out;
+            std::vector<float> l (256), r (256);
+            auto block = [&] { std::fill (l.begin(), l.end(), 0.0f); std::fill (r.begin(), r.end(), 0.0f); rig.voices.render (l.data(), r.data(), 256, 1.0f, 1.0f, 0.0); out.insert (out.end(), l.begin(), l.end()); };
+            block();
+            rig.voices.noteOn (0, 60, 1.0f);
+            for (int b = 0; b < 40; ++b) block();
+            out.clear();
+            for (int b = 0; b < 75; ++b) block();   // 0,4 s
+            int n = 0;
+            for (std::size_t i = 1; i < out.size(); ++i) if ((out[i - 1] < 0.75f) != (out[i] < 0.75f)) ++n;
+            return n;
+        };
+        const int normal = crossings (0.5f), fast = crossings (1.0f), slow = crossings (0.0f);
+        CHECK (fast > normal * 2);
+        CHECK (slow < normal);
+    }
 }

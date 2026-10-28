@@ -838,10 +838,11 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
 }
 
 // Valeurs effectives des modulateurs : les valeurs réglées, avec le tremblant (volume qui oscille) pour ceux qui en ont un et dont l'interrupteur est actif.
-// Pour un tremblant, la valeur réglée (0..100 %) est sa PROFONDEUR : elle ne coupe jamais le son (0 = pas d'oscillation).
+// Pour un tremblant, la valeur réglée (0..100 %) est sa PROFONDEUR : elle ne coupe jamais le son (0 = pas d'oscillation). Son modulateur de vitesse (s'il en a un)
+// multiplie la cadence : 50 % = celle de l'orgue, de 4 fois plus lent (0) à 4 fois plus vite (100 %).
 void SamplerVoices::updateModulators (int numFrames) noexcept
 {
-    tremTime_ = std::fmod (tremTime_ + static_cast<double> (numFrames) / std::max (sampleRate_, 1.0), 1000.0);
+    const double seconds = static_cast<double> (numFrames) / std::max (sampleRate_, 1.0);
     for (int i = 0; i < kModulators; ++i)
     {
         float v = modValues_[static_cast<std::size_t> (i)];
@@ -854,7 +855,9 @@ void SamplerVoices::updateModulators (int numFrames) noexcept
                 v = 1.0f;
                 if (r.tremGate < 0 || modValues_[static_cast<std::size_t> (r.tremGate)] >= 0.5f)
                 {
-                    const double phase = std::fmod (tremTime_ / (r.tremPeriodMs * 0.001), 1.0);
+                    const double speed = r.tremSpeed >= 0 ? std::exp2 ((static_cast<double> (modValues_[static_cast<std::size_t> (r.tremSpeed)]) * 100.0 - 50.0) / 25.0) : 1.0;
+                    auto& phase = tremPhase_[static_cast<std::size_t> (i)];
+                    phase = std::fmod (phase + seconds * speed / (r.tremPeriodMs * 0.001), 1.0);
                     v *= 1.0f - depth * 0.5f * static_cast<float> (1.0 - std::cos (6.283185307179586 * phase));
                 }
             }

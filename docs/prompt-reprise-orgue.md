@@ -1,0 +1,37 @@
+# Prompt de reprise : import d'orgues GrandOrgue dans Neptune
+
+À coller au début d'une nouvelle discussion Claude Code (dossier de travail : `~/Bureau/FlibusteSuite`).
+
+---
+
+Tu reprends le développement de **Neptune** (instrument CLAP de la Flibuste Suite : C++17 / JUCE / CMake, licence AGPLv3). Dépôt : `~/Bureau/FlibusteSuite/flibuste-neptune` (GitHub `jelhoste/flibuste-neptune`). Jean parle français, ne lit pas le code : décris-lui ce qu'il verra dans Reaper, en phrases simples. Lis d'abord ta mémoire (`MEMORY.md` : limites de compilation, machine Windows, pills glissables) et `docs/passage-de-relais.md`, `docs/etude-import-grandorgue.md`, `docs/specification-combinaisons.md`, `docs/methode-de-travail-compilation.md`.
+
+## Règles de travail (impératives)
+- **Ne jamais lancer la CI GitHub** ni pousser sans demande explicite de Jean (quota épuisé) ; les commits restent locaux. Message de commit terminé par la ligne de co-auteur demandée par le système.
+- **Compiler d'abord en local** via la file : `~/.local/bin/claude-build linux cmake --build ~/Bureau/FlibusteSuite/build-local --target Neptune_CLAP -- -j3` (plugin) et `~/Bureau/FlibusteSuite/build-core` (cible `neptune_core_tests`, lancer `build-core/tests/neptune_core_tests`). Linux : 3 cœurs, 7 Go max, un seul build à la fois. Windows : `claude-build windows ssh neptune-win 'C:\Users\lcj\neptune-build\build_neptune.cmd'` après envoi des sources par `tar | ssh` ; installation avec `install.ps1`.
+- **Installer le plugin seulement quand Reaper est fermé** (vérifier avec `pgrep -xa reaper` sous Linux, `tasklist` sous Windows) ; ancien fichier rangé dans `~/neptune-anciens/<horodatage>/`, empreinte SHA256 contrôlée. Jean quitte et relance Reaper pour charger la nouvelle version.
+- Règle d'interface : tout champ numérique est une « pill » glissable avec saisie au double-clic.
+- Les clés de textes sont dans `core/src/I18n.cpp` (vérifier l'absence de doublons : `grep -o '^    { "[^"]*"' core/src/I18n.cpp | sort | uniq -d`).
+- Les nouvelles fonctions importantes ont des tests dans le cœur (`tests/`), pas de JUCE dans `core/`.
+
+## État actuel (dernier commit local : voir `git log`)
+Fait et installé sous **Linux** (Windows n'est PAS à jour depuis l'import d'orgues ; à faire sur demande, Reaper fermé) :
+- **WavPack natif** en lecture (libwavpack, repères de boucle `smpl` / `cue` lus), relâchement selon la durée d'appui, queue de relâchement enregistrée, accouplements basse / mélodie.
+- **Importeur GrandOrgue** (`core/src/OrganImport.cpp`, menu « Preset global » > « Importer un orgue GrandOrgue... », `.organ` ou paquet `.orgue` extrait dans `~/.config/Neptune/Organs/`) : un clavier = une piste Sampler (manuels sur les canaux 1..n, pédalier sur le suivant) ; un jeu = un Groupe commandé par un modulateur ; accouplements = règles du routeur ; généraux / divisionnels = combinaisons ; **boîtes expressives** (modulateur continu avec niveau minimal) et **tremblants** (profondeur et vitesse réglables, oscillation du volume tant que leur tirant est tiré) appliqués **par sommier et par rang** ; réglages partagés entre claviers (une boîte, le tirant du tremblant) = **un seul contrôle sur le manuel concerné**, reporté (champ `mirror` des widgets Façade) sur les autres claviers ; Façade générée (une page par clavier avec ses jeux, curseurs de boîte / profondeur / vitesse, clavier à l'écran ; page « Couplers » avec accouplements, généraux, divisionnels) ; la piste de synthé de départ est remplacée si elle est vide.
+- Lignes de diagnostic sous le numéro de version : chargement par piste, puis par piste Sampler « zones, notes, voices, mods on, last note a/b ».
+- Corrigé : une piste Sampler au repos garde ses modulateurs à jour (la première note jouait tous les jeux).
+- Tout est décodé en RAM (pas de streaming disque pour le WavPack).
+
+## À faire ensuite (ordre suggéré)
+1. Jean valide dans Reaper (réimporter l'orgue de démonstration : `~/Bureau/FlibusteSuite/ref-grandorgue/demo-orgue/extracted`) : jeux de la pédale, boîtes Récit / Grandorgue, tremblant (profondeur, vitesse), pages Façade. Corriger ce qu'il signale ; les lignes de diagnostic aident.
+2. **Bruits de jeux et de moteur** (variantes d'attaque `AttackNNN` : seul l'échantillon principal est joué aujourd'hui).
+3. **Façade reconstruite d'après les panneaux de l'orgue** (images, positions) ; masquer par défaut les lignes de diagnostic (option pour les réactiver).
+4. Export de paquets de presets avec échantillons compressés en **WavPack** (sans perte par défaut, mode avec perte en option) : demande de Jean, « plus tard ».
+5. **Streaming WavPack** (début + boucle résidents, queue lue à la demande avec positionnement WavPack) : seulement utile pour les gros orgues ; à faire quand Jean en essaiera un.
+6. Option « tous les sons » sur les claviers de Façade (envoi à toutes les pistes sans passer par les canaux) : pas demandée pour l'instant, par canal reste le comportement.
+7. Mettre Windows à jour (compilation SSH + installation) quand Jean le demande.
+
+## À savoir
+- La version affichée vient du hash git lu à la configuration CMake : relancer `cmake -S . -B <build>` avant le build pour la rafraîchir.
+- Modulateurs : 32 par piste (`mixer::modulatorParam`), valeurs 0..100 ; pour un tremblant la valeur est sa profondeur (%) et un autre modulateur (« Speed ») règle sa vitesse (50 % = période de l'orgue, 0 = 4 fois plus lent, 100 = 4 fois plus vite) ; une boîte a un `floorLevel`.
+- Tremblants de type `Wave` (enregistrés) : non importés (avertissement).

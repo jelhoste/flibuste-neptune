@@ -802,7 +802,7 @@ TEST_CASE ("organ import: a box or a switch shared by the pedal and a manual has
     REQUIRE (r.facade.pages.size() >= 1);
     const auto count = [] (const facade::Facade& page, facade::WidgetType type) { int n = 0; for (const auto& w : page.widgets) if (w.type == type) ++n; return n; };
     CHECK (count (r.facade, facade::WidgetType::Slider) == 0);               // pas de boîte sur la page du pédalier
-    CHECK (count (r.facade.pages[0], facade::WidgetType::Slider) == 2);      // la boîte et la profondeur du tremblant sont sur le manuel
+    CHECK (count (r.facade.pages[0], facade::WidgetType::Slider) == 3);      // la boîte, la profondeur et la vitesse du tremblant sont sur le manuel
     for (const auto& w : r.facade.pages[0].widgets)
         if (w.type == facade::WidgetType::Slider) CHECK (w.mirror.size() == 1);
     // « Tremblant » et « Flutes » : un seul bouton chacun (sur le manuel), qui commande aussi le pédalier

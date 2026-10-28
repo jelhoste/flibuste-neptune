@@ -337,6 +337,7 @@ std::string toJson (const InstrumentDescription& d)
             if (m.floorLevel != 0.0) mo["floor"] = m.floorLevel;
             if (m.tremPeriodMs != 0.0) { mo["trem_period_ms"] = m.tremPeriodMs; mo["trem_depth"] = m.tremDepth; }
             if (m.tremGate >= 0) mo["trem_gate"] = m.tremGate;
+            if (m.tremSpeed >= 0) mo["trem_speed"] = m.tremSpeed;
             mods.push_back (mo);
         }
         if (! mods.empty()) doc["modulators"] = mods;
@@ -587,6 +588,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
             if (const auto v = mo.find ("trem_period_ms"); v != mo.end() && v->is_number()) md.tremPeriodMs = std::clamp (v->get<double>(), 0.0, 10000.0);
             if (const auto v = mo.find ("trem_depth"); v != mo.end() && v->is_number()) md.tremDepth = std::clamp (v->get<double>(), 0.0, 1.0);
             md.tremGate = std::clamp (readInt (mo, "trem_gate", -1), -1, kModulators - 1);
+            md.tremSpeed = std::clamp (readInt (mo, "trem_speed", -1), -1, kModulators - 1);
         }
     if (const auto m = doc.find ("groups"); m != doc.end() && m->is_array())
         for (const auto& go : *m)
@@ -929,6 +931,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         r.tremPeriodMs = std::clamp (m.tremPeriodMs, 0.0, 10000.0);
         r.tremDepth = static_cast<float> (std::clamp (m.tremDepth, 0.0, 1.0));
         r.tremGate = std::clamp (m.tremGate, -1, kModulators - 1);
+        r.tremSpeed = std::clamp (m.tremSpeed, -1, kModulators - 1);
         r.note = std::clamp (m.keyswitchNote, -1, 127); r.channel = std::clamp (m.keyswitchChannel, 0, 16); r.radio = std::clamp (m.radio, 0, 8);
     }
     inst->velocityLut = buildLut (description.velocityCurve);

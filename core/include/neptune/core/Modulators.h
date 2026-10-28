@@ -26,11 +26,12 @@ struct ModulatorDescription
     double tremPeriodMs = 0.0; // > 0 : tremblant, le volume oscille avec cette période tant que le modulateur `tremGate` est actif
     double tremDepth = 0.0;    // profondeur du tremblant (0..1) dans l'orgue d'origine : valeur de départ du curseur ; en jeu, la valeur du modulateur (0..100 %) fait foi
     int tremGate = -1;         // modulateur qui allume le tremblant ; -1 : toujours
+    int tremSpeed = -1;        // modulateur qui règle la vitesse du tremblant (50 % = la période de l'orgue, 0 = 4 fois plus lent, 100 % = 4 fois plus vite) ; -1 : période fixe
     bool operator== (const ModulatorDescription& o) const noexcept
     {
         return name == o.name && momentary == o.momentary && continuous == o.continuous && keyswitchNote == o.keyswitchNote
             && keyswitchChannel == o.keyswitchChannel && radio == o.radio && floorLevel == o.floorLevel && tremPeriodMs == o.tremPeriodMs
-            && tremDepth == o.tremDepth && tremGate == o.tremGate;
+            && tremDepth == o.tremDepth && tremGate == o.tremGate && tremSpeed == o.tremSpeed;
     }
     bool isDefault() const noexcept { return *this == ModulatorDescription {}; }
 };
@@ -46,6 +47,7 @@ struct ModulatorRuntime
     double tremPeriodMs = 0.0;
     float tremDepth = 0.0f;
     int tremGate = -1;
+    int tremSpeed = -1;
 };
 using ModulatorRuntimes = std::array<ModulatorRuntime, kModulators>;
 } // namespace neptune::core

@@ -312,12 +312,14 @@ private:
             for (const auto& box : boxControls_)
             {
                 if (box.keyboard != k || ownerOf (box.key, true) != k) continue;
-                auto& s = add (page, fc::WidgetType::Slider, 330 + (boxes++) * 330, 4, 320, 32);
+                auto& s = add (page, fc::WidgetType::Slider, left + (boxes % 3) * 326, 44 + (boxes / 3) * 36, 316, 32);
+                ++boxes;
                 s.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), box.index);
                 s.text = box.name;
                 for (const auto& other : boxControls_)
                     if (other.key == box.key && other.keyboard != k) s.mirror.push_back (mixer::modulatorParam (opt_.firstTrack + static_cast<int> (other.keyboard), other.index));
             }
+            const int buttonTop = top + ((boxes + 2) / 3) * 36;   // les boutons des jeux sous les curseurs
             int n = 0;
             std::vector<std::pair<int, std::string>> order;
             for (const auto& entry : modulators_[k]) order.emplace_back (entry.second, entry.first);
@@ -326,7 +328,7 @@ private:
             {
                 if (kb.instrument.modulators[static_cast<std::size_t> (index)].continuous) continue;   // boîtes (curseurs) et tremblants (via leur interrupteur) : pas de bouton marche/arrêt
                 if (ownerOf (key, false) != k) continue;
-                auto& b = add (page, fc::WidgetType::Button, left + (n % cols) * (bw + gap), top + (n / cols) * (bh + gap), bw, bh);
+                auto& b = add (page, fc::WidgetType::Button, left + (n % cols) * (bw + gap), buttonTop + (n / cols) * (bh + gap), bw, bh);
                 b.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), index);
                 b.text = kb.instrument.modulators[static_cast<std::size_t> (index)].name;
                 for (std::size_t other = 0; other < modulators_.size(); ++other)
@@ -553,6 +555,11 @@ private:
             const int number = ini_.getInt (wc, numbered ("Tremulant", j), 0);
             const std::string section = numbered ("Tremulant", number);
             if (number <= 0 || ! ini_.hasSection (section)) continue;
+            if (lowered (ini_.get (section, "TremulantType", "Synth")) == "wave")   // tremblant enregistré : ses échantillons ne sont pas lus, un tremblant de synthèse sonnerait autrement
+            {
+                waveTremulants_.insert (number);
+                continue;
+            }
             const std::string key = "tr" + std::to_string (number);
             const std::string name = ini_.get (section, "Name", section);
             // l'interrupteur du tremblant : le premier de sa liste, sinon le tremblant est son propre tirant
@@ -571,6 +578,15 @@ private:
             m.tremPeriodMs = std::clamp (ini_.getDouble (section, "Period", 200.0), 20.0, 5000.0);
             m.tremDepth = std::clamp (ini_.getDouble (section, "AmpModDepth", 10.0) / 100.0, 0.0, 1.0);
             m.tremGate = gate;
+            // vitesse : un modulateur de plus, à 50 % au départ (la période de l'orgue)
+            const std::string speedKey = "ts" + std::to_string (number);
+            const int speed = modulatorFor (keyboard, speedKey, "Speed " + name);
+            if (speed < 0) return false;
+            kb.instrument.modulators[static_cast<std::size_t> (speed)].continuous = true;
+            m.tremSpeed = speed;
+            levelOf_[speedKey] = 50.0;
+            if (boxKeys_.insert ({ keyboard, speedKey }).second) boxControls_.push_back ({ keyboard, "Speed " + name, speed, speedKey });
+            ++boxUse_[{ keyboard, speedKey }];
             noteInitial (key, true);
             levelOf_[key] = std::clamp (ini_.getDouble (section, "AmpModDepth", 10.0), 0.0, 100.0);   // le curseur de profondeur part de la valeur de l'orgue
             if (boxKeys_.insert ({ keyboard, key }).second) boxControls_.push_back ({ keyboard, "Depth " + name, index, key });
@@ -829,7 +845,8 @@ private:
     {
         const int tremulants = ini_.getInt ("Organ", "NumberOfTremulants", 0);
         for (int t = 1; t <= tremulants; ++t)
-            if (usedTremulants_.count (t) == 0) warn ("tremulant \"" + ini_.get (numbered ("Tremulant", t), "Name", numbered ("Tremulant", t)) + "\" acts on no stop: not imported");
+            if (waveTremulants_.count (t) != 0) warn ("tremulant \"" + ini_.get (numbered ("Tremulant", t), "Name", numbered ("Tremulant", t)) + "\" is recorded (wave type): not imported");
+            else if (usedTremulants_.count (t) == 0) warn ("tremulant \"" + ini_.get (numbered ("Tremulant", t), "Name", numbered ("Tremulant", t)) + "\" acts on no stop: not imported");
         const int enclosures = ini_.getInt ("Organ", "NumberOfEnclosures", 0);
         for (int e = 1; e <= enclosures; ++e)
             if (usedEnclosures_.count (e) == 0) warn ("expression box \"" + ini_.get (numbered ("Enclosure", e), "Name", numbered ("Enclosure", e)) + "\" acts on no stop: not imported");
@@ -845,7 +862,7 @@ private:
     std::vector<BoxControl> boxControls_;
     std::set<std::pair<std::size_t, std::string>> boxKeys_;
     std::map<std::pair<std::size_t, std::string>, int> boxUse_;   // jeux de ce clavier qui dépendent de cette boîte
-    std::set<int> usedEnclosures_, usedTremulants_;
+    std::set<int> usedEnclosures_, usedTremulants_, waveTremulants_;
     std::map<std::string, double> levelOf_;   // valeur de départ d'un réglage continu (profondeur d'un tremblant)
     std::set<std::string> couplerControlKeys_;
     std::vector<std::pair<std::string, ParamId>> couplerControls_;
