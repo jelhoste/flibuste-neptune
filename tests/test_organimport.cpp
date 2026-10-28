@@ -565,3 +565,53 @@ TEST_CASE ("organ import: engine playback of the demo organ (only with NEPTUNE_D
         run (200);
     }
 }
+
+TEST_CASE ("organ import: expression boxes and tremulants become continuous modulators on the stops of their windchest")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Box\nNumberOfManuals=1\nHasPedals=N\nNumberOfEnclosures=1\nNumberOfTremulants=1\nNumberOfWindchestGroups=2\n"
+        "[Manual001]\nName=Great\nNumberOfStops=2\nStop001=1\nStop002=2\nNumberOfLogicalKeys=2\nNumberOfAccessibleKeys=2\nFirstAccessibleKeyMIDINoteNumber=60\n"
+        "[Stop001]\nName=Open\nWindchestGroup=1\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\n"
+        "[Stop002]\nName=Swell flute\nWindchestGroup=2\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\n"
+        "[WindchestGroup001]\nNumberOfEnclosures=0\nNumberOfTremulants=0\n"
+        "[WindchestGroup002]\nNumberOfEnclosures=1\nEnclosure001=1\nNumberOfTremulants=1\nTremulant001=1\n"
+        "[Enclosure001]\nName=Swell\nAmpMinimumLevel=25\n"
+        "[Tremulant001]\nName=Trem\nPeriod=200\nAmpModDepth=40\nSwitchCount=1\nSwitch001=1\n"
+        "[Switch001]\nName=Tremblant\nDefaultToEngaged=Y\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    const auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    REQUIRE (r.keyboards.size() == 1);
+    const auto& mods = r.keyboards[0].instrument.modulators;
+    int boxIndex = -1, tremIndex = -1, gateIndex = -1;
+    for (int i = 0; i < kModulators; ++i)
+    {
+        if (mods[static_cast<std::size_t> (i)].name == "Box Swell") boxIndex = i;
+        if (mods[static_cast<std::size_t> (i)].name == "Vibrato Trem") tremIndex = i;
+        if (mods[static_cast<std::size_t> (i)].name == "Tremblant") gateIndex = i;
+    }
+    REQUIRE (boxIndex >= 0);
+    REQUIRE (tremIndex >= 0);
+    REQUIRE (gateIndex >= 0);
+    CHECK (mods[static_cast<std::size_t> (boxIndex)].continuous);
+    CHECK (mods[static_cast<std::size_t> (boxIndex)].floorLevel == Approx (0.25));
+    CHECK (mods[static_cast<std::size_t> (tremIndex)].tremPeriodMs == Approx (200.0));
+    CHECK (mods[static_cast<std::size_t> (tremIndex)].tremDepth == Approx (0.4));
+    CHECK (mods[static_cast<std::size_t> (tremIndex)].tremGate == gateIndex);
+    // le jeu du sommier sans boîte reste sans ces modulateurs ; celui du sommier avec boîte les porte
+    const auto& groups = r.keyboards[0].instrument.groups;
+    REQUIRE (groups.count ("Open") == 1);
+    REQUIRE (groups.count ("Swell flute") == 1);
+    CHECK ((groups.at ("Open").modulators & ((1u << boxIndex) | (1u << tremIndex))) == 0u);
+    CHECK ((groups.at ("Swell flute").modulators & (1u << boxIndex)) != 0u);
+    CHECK ((groups.at ("Swell flute").modulators & (1u << tremIndex)) != 0u);
+    // la boîte est ouverte au départ ; la Façade lui donne un curseur
+    bool opened = false;
+    for (const auto& [id, v] : r.initialValues) if (id == mixer::modulatorParam (0, boxIndex)) opened = v == 100.0;
+    CHECK (opened);
+    bool slider = false;
+    for (const auto& w : r.facade.widgets) if (w.type == facade::WidgetType::Slider && w.param == mixer::modulatorParam (0, boxIndex)) slider = true;
+    CHECK (slider);
+    CHECK_FALSE (hasWarning (r, "expression box"));
+}

@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -1084,4 +1085,62 @@ TEST_CASE ("a looped zone with a recorded release tail plays the tail from the m
     d.loadReleaseSamples = false;
     CHECK (buildInstrument (d)->zones.size() == 1);
     std::filesystem::remove (path);
+}
+
+TEST_CASE ("organ modulators: a box keeps its floor level, a tremulant makes the volume oscillate only while its gate is on")
+{
+    auto renderBlocks = [] (Rig& rig, std::vector<float>& out, int blocks)
+    {
+        std::vector<float> l (256), r (256);
+        for (int b = 0; b < blocks; ++b)
+        {
+            std::fill (l.begin(), l.end(), 0.0f);
+            std::fill (r.begin(), r.end(), 0.0f);
+            rig.voices.render (l.data(), r.data(), 256, 1.0f, 1.0f, 0.0);
+            out.insert (out.end(), l.begin(), l.end());
+        }
+    };
+    auto tail = [] (const std::vector<float>& v, std::size_t n) { return std::vector<float> (v.end() - static_cast<std::ptrdiff_t> (n), v.end()); };
+    SECTION ("expression box: closed = the floor, open = full")
+    {
+        Rig rig (makeConstant (480000, 1.0f), PlayMode::OneShot, [] (Zone& z) { z.modMask = 1u; });
+        rig.inst->modulators[0].continuous = true;
+        rig.inst->modulators[0].floorLevel = 0.25f;
+        float closed[kModulators], open[kModulators];
+        for (int i = 0; i < kModulators; ++i) closed[i] = open[i] = 1.0f;
+        closed[0] = 0.0f;
+        rig.voices.setModulators (closed);
+        std::vector<float> out;
+        renderBlocks (rig, out, 1);
+        rig.voices.noteOn (0, 60, 1.0f);
+        renderBlocks (rig, out, 20);
+        CHECK_THAT (out.back(), WithinAbs (0.25, 0.01));
+        rig.voices.setModulators (open);
+        renderBlocks (rig, out, 20);
+        CHECK_THAT (out.back(), WithinAbs (1.0, 0.01));
+    }
+    SECTION ("tremulant")
+    {
+        Rig rig (makeConstant (480000, 1.0f), PlayMode::OneShot, [] (Zone& z) { z.modMask = 2u; });
+        rig.inst->modulators[1].continuous = true;
+        rig.inst->modulators[1].tremPeriodMs = 100.0;
+        rig.inst->modulators[1].tremDepth = 0.5f;
+        rig.inst->modulators[1].tremGate = 2;
+        float off[kModulators], on[kModulators];
+        for (int i = 0; i < kModulators; ++i) off[i] = on[i] = 1.0f;
+        off[2] = 0.0f;
+        rig.voices.setModulators (off);
+        std::vector<float> out;
+        renderBlocks (rig, out, 1);
+        rig.voices.noteOn (0, 60, 1.0f);
+        renderBlocks (rig, out, 40);
+        const auto still = tail (out, 4800);
+        CHECK (*std::min_element (still.begin(), still.end()) > 0.99f);   // interrupteur coupé : pas d'oscillation
+        rig.voices.setModulators (on);
+        out.clear();
+        renderBlocks (rig, out, 60);
+        const auto moving = tail (out, 4800);
+        CHECK (*std::min_element (moving.begin(), moving.end()) < 0.65f);
+        CHECK (*std::max_element (moving.begin(), moving.end()) > 0.95f);
+    }
 }

@@ -76,8 +76,9 @@ bool SamplerVoices::modAllows (ModMask mask) const noexcept
     for (int i = 0; i < kModulators; ++i)
     {
         if ((mask & (1u << i)) == 0) continue;
-        const float v = modValues_[static_cast<std::size_t> (i)];
-        if (instrument_->modulators[static_cast<std::size_t> (i)].continuous ? v <= 0.001f : v < 0.5f) return false;
+        const float v = modEff_[static_cast<std::size_t> (i)];
+        const auto& r = instrument_->modulators[static_cast<std::size_t> (i)];
+        if (r.continuous ? (r.floorLevel <= 0.0f && v <= 0.001f) : v < 0.5f) return false;
     }
     return true;
 }
@@ -89,8 +90,9 @@ float SamplerVoices::modFactor (ModMask mask) const noexcept
     for (int i = 0; i < kModulators; ++i)
     {
         if ((mask & (1u << i)) == 0) continue;
-        const float v = modValues_[static_cast<std::size_t> (i)];
-        f *= instrument_->modulators[static_cast<std::size_t> (i)].continuous ? v : (v >= 0.5f ? 1.0f : 0.0f);
+        const float v = modEff_[static_cast<std::size_t> (i)];
+        const auto& r = instrument_->modulators[static_cast<std::size_t> (i)];
+        f *= r.continuous ? r.floorLevel + (1.0f - r.floorLevel) * v : (v >= 0.5f ? 1.0f : 0.0f);
     }
     return f;
 }
@@ -835,11 +837,32 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     v.level = v.ampVel * z.gain * v.mods.gain * v.layerGain * lastEnv; // pour le vol de la voix la plus faible
 }
 
+// Valeurs effectives des modulateurs : les valeurs réglées, avec le tremblant (volume qui oscille) pour ceux qui en ont un et dont l'interrupteur est actif.
+void SamplerVoices::updateModulators (int numFrames) noexcept
+{
+    tremTime_ = std::fmod (tremTime_ + static_cast<double> (numFrames) / std::max (sampleRate_, 1.0), 1000.0);
+    for (int i = 0; i < kModulators; ++i)
+    {
+        float v = modValues_[static_cast<std::size_t> (i)];
+        if (instrument_ != nullptr)
+        {
+            const auto& r = instrument_->modulators[static_cast<std::size_t> (i)];
+            if (r.continuous && r.tremPeriodMs > 0.0 && (r.tremGate < 0 || modValues_[static_cast<std::size_t> (r.tremGate)] >= 0.5f))
+            {
+                const double phase = std::fmod (tremTime_ / (r.tremPeriodMs * 0.001), 1.0);
+                v *= 1.0f - r.tremDepth * 0.5f * static_cast<float> (1.0 - std::cos (6.283185307179586 * phase));
+            }
+        }
+        modEff_[static_cast<std::size_t> (i)] = v;
+    }
+}
+
 void SamplerVoices::render (float* left, float* right, int numFrames, float gainStart, float gainEnd, double masterTuneCents) noexcept
 {
     if (left == nullptr || numFrames <= 0) return;
     const double pitchFactor = masterTuneCents == 0.0 ? 1.0 : std::exp2 (masterTuneCents / 1200.0);
     clockFrames_ += static_cast<std::uint64_t> (numFrames);
+    updateModulators (numFrames);
     for (auto& v : voices_)
         if (v.active) renderVoice (v, left, right, numFrames, gainStart, gainEnd, pitchFactor);
     // Les voix terminées rendent leur emplacement de streaming (le thread disque ferme le fichier).

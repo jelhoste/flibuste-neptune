@@ -334,6 +334,9 @@ std::string toJson (const InstrumentDescription& d)
             if (m.keyswitchNote >= 0) mo["keyswitch_note"] = m.keyswitchNote;
             if (m.keyswitchChannel != 0) mo["keyswitch_channel"] = m.keyswitchChannel;
             if (m.radio != 0) mo["radio"] = m.radio;
+            if (m.floorLevel != 0.0) mo["floor"] = m.floorLevel;
+            if (m.tremPeriodMs != 0.0) { mo["trem_period_ms"] = m.tremPeriodMs; mo["trem_depth"] = m.tremDepth; }
+            if (m.tremGate >= 0) mo["trem_gate"] = m.tremGate;
             mods.push_back (mo);
         }
         if (! mods.empty()) doc["modulators"] = mods;
@@ -580,6 +583,10 @@ InstrumentDescription instrumentFromJson (std::string_view text)
             md.keyswitchNote = std::clamp (readInt (mo, "keyswitch_note", -1), -1, 127);
             md.keyswitchChannel = std::clamp (readInt (mo, "keyswitch_channel", 0), 0, 16);
             md.radio = std::clamp (readInt (mo, "radio", 0), 0, 8);
+            if (const auto v = mo.find ("floor"); v != mo.end() && v->is_number()) md.floorLevel = std::clamp (v->get<double>(), 0.0, 1.0);
+            if (const auto v = mo.find ("trem_period_ms"); v != mo.end() && v->is_number()) md.tremPeriodMs = std::clamp (v->get<double>(), 0.0, 10000.0);
+            if (const auto v = mo.find ("trem_depth"); v != mo.end() && v->is_number()) md.tremDepth = std::clamp (v->get<double>(), 0.0, 1.0);
+            md.tremGate = std::clamp (readInt (mo, "trem_gate", -1), -1, kModulators - 1);
         }
     if (const auto m = doc.find ("groups"); m != doc.end() && m->is_array())
         for (const auto& go : *m)
@@ -918,6 +925,10 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         auto& r = inst->modulators[static_cast<std::size_t> (i)];
         r.used = m.keyswitchNote >= 0;
         r.momentary = m.momentary; r.continuous = m.continuous;
+        r.floorLevel = static_cast<float> (std::clamp (m.floorLevel, 0.0, 1.0));
+        r.tremPeriodMs = std::clamp (m.tremPeriodMs, 0.0, 10000.0);
+        r.tremDepth = static_cast<float> (std::clamp (m.tremDepth, 0.0, 1.0));
+        r.tremGate = std::clamp (m.tremGate, -1, kModulators - 1);
         r.note = std::clamp (m.keyswitchNote, -1, 127); r.channel = std::clamp (m.keyswitchChannel, 0, 16); r.radio = std::clamp (m.radio, 0, 8);
     }
     inst->velocityLut = buildLut (description.velocityCurve);

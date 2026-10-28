@@ -21,10 +21,16 @@ struct ModulatorDescription
     int keyswitchNote = -1;    // -1 : aucune touche ; sinon 0..127 (cette note ne joue pas de son)
     int keyswitchChannel = 0;  // 0 : tous les canaux, 1..16
     int radio = 0;             // 0 : aucun ; sinon groupe d'exclusion : allumer l'un éteint les autres du même groupe (articulations)
+    // Orgue (boîte expressive, tremblant), modulateur continu seulement :
+    double floorLevel = 0.0;   // niveau minimal (0..1) : le volume va de `floorLevel` (valeur 0) à 1 (valeur 100 %) ; une boîte fermée garde du son
+    double tremPeriodMs = 0.0; // > 0 : tremblant, le volume oscille avec cette période tant que le modulateur `tremGate` est actif
+    double tremDepth = 0.0;    // profondeur du tremblant, 0..1 (part du volume)
+    int tremGate = -1;         // modulateur qui allume le tremblant ; -1 : toujours
     bool operator== (const ModulatorDescription& o) const noexcept
     {
         return name == o.name && momentary == o.momentary && continuous == o.continuous && keyswitchNote == o.keyswitchNote
-            && keyswitchChannel == o.keyswitchChannel && radio == o.radio;
+            && keyswitchChannel == o.keyswitchChannel && radio == o.radio && floorLevel == o.floorLevel && tremPeriodMs == o.tremPeriodMs
+            && tremDepth == o.tremDepth && tremGate == o.tremGate;
     }
     bool isDefault() const noexcept { return *this == ModulatorDescription {}; }
 };
@@ -36,6 +42,10 @@ struct ModulatorRuntime
     bool used = false;         // a une touche de keyswitch ou commande quelque chose
     bool momentary = false, continuous = false;
     int note = -1, channel = 0, radio = 0;
+    float floorLevel = 0.0f;
+    double tremPeriodMs = 0.0;
+    float tremDepth = 0.0f;
+    int tremGate = -1;
 };
 using ModulatorRuntimes = std::array<ModulatorRuntime, kModulators>;
 } // namespace neptune::core

@@ -203,6 +203,9 @@ private:
     // Sur le tas : 320 voix avec leurs états de filtre pèsent plusieurs centaines de Ko (pile de 1 Mo sous Windows).
     std::vector<Voice> voices_ = std::vector<Voice> (kMaxVoices + kFadeSlots);
     const Instrument* instrument_ = nullptr;
+    std::array<float, kModulators> modEff_ = [] { std::array<float, kModulators> a {}; a.fill (1.0f); return a; }();   // valeurs effectives (tremblant compris)
+    double tremTime_ = 0.0;
+    void updateModulators (int numFrames) noexcept;
     std::atomic<int> modsOn_ { 0 }, lastPicks_ { -1 }, lastKeyZones_ { 0 };
     DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;

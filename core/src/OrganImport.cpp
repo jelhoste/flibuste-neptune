@@ -270,7 +270,15 @@ private:
             const auto& kb = result_.keyboards[k];
             fc::Facade page;
             page.name = kb.name.substr (0, 24);
-            add (page, fc::WidgetType::Label, left, 4, 500, 32).text = kb.name;
+            add (page, fc::WidgetType::Label, left, 4, 300, 32).text = kb.name;
+            int boxes = 0;
+            for (const auto& box : boxControls_)
+            {
+                if (box.keyboard != k) continue;
+                auto& s = add (page, fc::WidgetType::Slider, 330 + (boxes++) * 330, 4, 320, 32);
+                s.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), box.index);
+                s.text = box.name;
+            }
             int n = 0;
             std::vector<int> order;
             for (const auto& entry : modulators_[k]) order.push_back (entry.second);
@@ -461,6 +469,70 @@ private:
         ++kb.pipes;
     }
 
+    // Le sommier d'un jeu : sa clef `WindchestGroup`, sinon celle de son premier rang.
+    int windchestOf (const std::string& stopSection)
+    {
+        if (ini_.has (stopSection, "WindchestGroup")) return ini_.getInt (stopSection, "WindchestGroup", 0);
+        if (ini_.getInt (stopSection, "NumberOfRanks", 0) > 0)
+            return ini_.getInt (numbered ("Rank", ini_.getInt (stopSection, numbered ("Rank", 1), 0)), "WindchestGroup", 0);
+        return 0;
+    }
+
+    // Les modulateurs que le sommier impose à ses jeux : ses boîtes expressives (volume réglable, niveau minimal) et ses tremblants (volume qui oscille tant que
+    // leur interrupteur est tiré). Renvoie le masque à ajouter au Groupe du jeu ; -1 : plus de modulateur libre.
+    bool windchestMask (std::size_t keyboard, Keyboard& kb, int windchest, ModMask& mask)
+    {
+        const std::string wc = numbered ("WindchestGroup", windchest);
+        if (windchest <= 0 || ! ini_.hasSection (wc)) return true;
+        const int enclosures = ini_.getInt (wc, "NumberOfEnclosures", 0);
+        for (int j = 1; j <= enclosures; ++j)
+        {
+            const int number = ini_.getInt (wc, numbered ("Enclosure", j), 0);
+            const std::string section = numbered ("Enclosure", number);
+            if (number <= 0 || ! ini_.hasSection (section)) continue;
+            const std::string key = "en" + std::to_string (number);
+            const std::string name = ini_.get (section, "Name", section);
+            const int index = modulatorFor (keyboard, key, "Box " + name);
+            if (index < 0) return false;
+            auto& m = kb.instrument.modulators[static_cast<std::size_t> (index)];
+            m.continuous = true;
+            m.floorLevel = std::clamp (ini_.getInt (section, "AmpMinimumLevel", 0) / 100.0, 0.0, 1.0);
+            noteInitial (key, true);   // ouverte au départ
+            if (boxKeys_.insert ({ keyboard, key }).second) boxControls_.push_back ({ keyboard, "Box " + name, index });
+            usedEnclosures_.insert (number);
+            mask |= static_cast<ModMask> (1u) << index;
+        }
+        const int tremulants = ini_.getInt (wc, "NumberOfTremulants", 0);
+        for (int j = 1; j <= tremulants; ++j)
+        {
+            const int number = ini_.getInt (wc, numbered ("Tremulant", j), 0);
+            const std::string section = numbered ("Tremulant", number);
+            if (number <= 0 || ! ini_.hasSection (section)) continue;
+            const std::string key = "tr" + std::to_string (number);
+            const std::string name = ini_.get (section, "Name", section);
+            // l'interrupteur du tremblant : le premier de sa liste, sinon le tremblant est son propre tirant
+            std::string gateKey = "tm" + std::to_string (number);
+            if (const int sw = ini_.getInt (section, "Switch001", 0); ini_.getInt (section, "SwitchCount", 0) > 0 && sw > 0)
+            {
+                gateKey = switchKey (sw);
+                noteInitial (gateKey, ini_.getBool (numbered ("Switch", sw), "DefaultToEngaged", false));
+            }
+            else noteInitial (gateKey, ini_.getBool (section, "DefaultToEngaged", false));
+            const int gate = modulatorFor (keyboard, gateKey, switchName (gateKey, name));
+            const int index = modulatorFor (keyboard, key, "Vibrato " + name);
+            if (gate < 0 || index < 0) return false;
+            auto& m = kb.instrument.modulators[static_cast<std::size_t> (index)];
+            m.continuous = true;
+            m.tremPeriodMs = std::clamp (ini_.getDouble (section, "Period", 200.0), 20.0, 5000.0);
+            m.tremDepth = std::clamp (ini_.getDouble (section, "AmpModDepth", 10.0) / 100.0, 0.0, 1.0);
+            m.tremGate = gate;
+            noteInitial (key, true);
+            usedTremulants_.insert (number);
+            mask |= static_cast<ModMask> (1u) << index;
+        }
+        return true;
+    }
+
     void buildStop (Keyboard& kb, std::size_t keyboard, const ManualInfo& info, int stopNumber)
     {
         const std::string section = numbered ("Stop", stopNumber);
@@ -488,6 +560,7 @@ private:
             if (index < 0) { warn ("keyboard \"" + kb.name + "\": more than " + std::to_string (kModulators) + " switches, stop \"" + name + "\" not imported"); return; }
             mask |= static_cast<ModMask> (1u) << index;
         }
+        if (! windchestMask (keyboard, kb, windchestOf (section), mask)) { warn ("keyboard \"" + kb.name + "\": more than " + std::to_string (kModulators) + " switches, stop \"" + name + "\" not imported"); return; }
         std::string group = name;
         for (int n = 2; usedGroups_[keyboard].count (group) != 0; ++n) group = name + " (" + std::to_string (n) + ")";
         usedGroups_[keyboard].insert (group);
@@ -698,9 +771,10 @@ private:
     {
         const int tremulants = ini_.getInt ("Organ", "NumberOfTremulants", 0);
         for (int t = 1; t <= tremulants; ++t)
-            warn ("tremulant \"" + ini_.get (numbered ("Tremulant", t), "Name", numbered ("Tremulant", t)) + "\" is not imported");
+            if (usedTremulants_.count (t) == 0) warn ("tremulant \"" + ini_.get (numbered ("Tremulant", t), "Name", numbered ("Tremulant", t)) + "\" acts on no stop: not imported");
         const int enclosures = ini_.getInt ("Organ", "NumberOfEnclosures", 0);
-        if (enclosures > 0) warn (std::to_string (enclosures) + " expression box(es) are not imported");
+        for (int e = 1; e <= enclosures; ++e)
+            if (usedEnclosures_.count (e) == 0) warn ("expression box \"" + ini_.get (numbered ("Enclosure", e), "Name", numbered ("Enclosure", e)) + "\" acts on no stop: not imported");
         if (ini_.getInt ("Organ", "NumberOfPanels", 0) > 0) warn ("the graphical panels are not imported");
         if (ini_.getInt ("Organ", "NumberOfReversiblePistons", 0) > 0) warn ("reversible pistons are not imported");
         if (ini_.getInt ("Organ", "NumberOfDivisionalCouplers", 0) > 0) warn ("divisional couplers are not imported");
@@ -709,6 +783,10 @@ private:
     const IniFile& ini_;
     Options opt_;
     Result result_;
+    struct BoxControl { std::size_t keyboard; std::string name; int index; };
+    std::vector<BoxControl> boxControls_;
+    std::set<std::pair<std::size_t, std::string>> boxKeys_;
+    std::set<int> usedEnclosures_, usedTremulants_;
     std::set<std::string> couplerControlKeys_;
     std::vector<std::pair<std::string, ParamId>> couplerControls_;
     int attackStops_ = 0;
