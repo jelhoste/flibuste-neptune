@@ -54,7 +54,8 @@ InstrumentDescription assignToView (const InstrumentDescription& base, const std
         z.velLow = 1;
         z.velHigh = 127;
         z.onRelease = view.category == View::Category::Release;
-        z.trigger = view.category == View::Category::First ? TriggerCondition::First : view.category == View::Category::Legato ? TriggerCondition::Legato : TriggerCondition::Always;
+        if (z.trigger != TriggerCondition::Continuous || z.onRelease)   // un son continu garde son type (la vue Attaque le montre avec les attaques)
+            z.trigger = view.category == View::Category::First ? TriggerCondition::First : view.category == View::Category::Legato ? TriggerCondition::Legato : TriggerCondition::Always;
         z.group = view.group;
         ++offset;
     }

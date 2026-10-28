@@ -58,6 +58,7 @@ void SamplerVoices::setInstrument (const Instrument* instrument) noexcept
         else discard (v);
     }
     instrument_ = instrument;
+    droneOn_.fill (false);
     stealFadeSeconds_ = instrument != nullptr ? static_cast<double> (std::clamp (instrument->cutFadeMs, 1, InstrumentDescription::maxCutFadeMs)) / 1000.0
                                               : kStealFadeSeconds;
     numHeld_ = 0;
@@ -332,7 +333,7 @@ void SamplerVoices::cutKey (int channel, int key) noexcept
 void SamplerVoices::cutAll() noexcept
 {
     for (auto& v : voices_)
-        if (v.active && ! v.stolen) steal (v);
+        if (v.active && ! v.stolen && v.channel != kDroneChannel) steal (v);   // un son continu ne se coupe pas à chaque note (mono)
 }
 
 bool SamplerVoices::retargetHeld (int newKey) noexcept
@@ -866,12 +867,43 @@ void SamplerVoices::updateModulators (int numFrames) noexcept
     }
 }
 
+// Sons continus : une zone « Continuous » démarre dès que ses modulateurs la laissent sonner (ou tout de suite, sans modulateur) et se relâche quand ils se
+// coupent. Une boucle qui a disparu (voix volée, tout coupé) repart au bloc suivant ; un one-shot ne repart qu'au rallumage.
+void SamplerVoices::updateDrones() noexcept
+{
+    if (instrument_ == nullptr) return;
+    const auto& drones = instrument_->droneZones();
+    for (std::size_t k = 0; k < drones.size(); ++k)
+    {
+        const int zi = drones[k];
+        const Zone& z = instrument_->zones[static_cast<std::size_t> (zi)];
+        const bool allowed = modAllows (z.modMask);
+        bool live = false, any = false;
+        for (auto& v : voices_)
+        {
+            if (! v.active || v.channel != kDroneChannel || v.zoneIndex != zi) continue;
+            any = true;
+            if (v.stolen) continue;
+            if (! allowed && ! v.releasing && z.mode == PlayMode::Loop)
+            {
+                v.releasing = true;
+                releaseEnvelopes (v);
+            }
+            if (! v.releasing) live = true;
+        }
+        if (allowed && ! live && (z.mode == PlayMode::Loop ? true : ! droneOn_[k] && ! any))
+            startVoice (kDroneChannel, z.rootNote, 1.0f, z, 1.0f);
+        droneOn_[k] = allowed;
+    }
+}
+
 void SamplerVoices::render (float* left, float* right, int numFrames, float gainStart, float gainEnd, double masterTuneCents) noexcept
 {
     if (left == nullptr || numFrames <= 0) return;
     const double pitchFactor = masterTuneCents == 0.0 ? 1.0 : std::exp2 (masterTuneCents / 1200.0);
     clockFrames_ += static_cast<std::uint64_t> (numFrames);
     updateModulators (numFrames);
+    updateDrones();
     for (auto& v : voices_)
         if (v.active) renderVoice (v, left, right, numFrames, gainStart, gainEnd, pitchFactor);
     // Les voix terminées rendent leur emplacement de streaming (le thread disque ferme le fichier).
@@ -926,7 +958,7 @@ void SamplerVoices::releaseAll() noexcept
 {
     for (auto& v : voices_)
     {
-        if (! v.active || v.releasing || v.stolen || v.zone == nullptr || v.channel == kPreviewChannel) continue;
+        if (! v.active || v.releasing || v.stolen || v.zone == nullptr || v.channel == kPreviewChannel || v.channel == kDroneChannel) continue;
         if (v.zone->mode == PlayMode::Loop)
         {
             v.releasing = true;

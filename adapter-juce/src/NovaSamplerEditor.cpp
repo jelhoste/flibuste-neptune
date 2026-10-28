@@ -695,19 +695,19 @@ void NovaSamplerEditor::buildZonesPage()
         choices_.push_back (std::move (c));
         return raw;
     };
-    triggerChoice_ = choice (0, tx ("trig.label").toUpperCase(), { tx ("trig.attack"), tx ("trig.release"), tx ("trig.first"), tx ("trig.legato") },
+    triggerChoice_ = choice (0, tx ("trig.label").toUpperCase(), { tx ("trig.attack"), tx ("trig.release"), tx ("trig.first"), tx ("trig.legato"), tx ("trig.continuous") },
         [this]
         {
             const auto* z = shownZone();
             if (z == nullptr) return 0;
-            return z->onRelease ? 1 : z->trigger == TriggerCondition::First ? 2 : z->trigger == TriggerCondition::Legato ? 3 : 0;
+            return z->onRelease ? 1 : z->trigger == TriggerCondition::First ? 2 : z->trigger == TriggerCondition::Legato ? 3 : z->trigger == TriggerCondition::Continuous ? 4 : 0;
         },
         [this] (int i)
         {
             editZone ([i] (Zone& z)
             {
                 z.onRelease = i == 1;
-                z.trigger = i == 2 ? TriggerCondition::First : i == 3 ? TriggerCondition::Legato : TriggerCondition::Always;
+                z.trigger = i == 2 ? TriggerCondition::First : i == 3 ? TriggerCondition::Legato : i == 4 ? TriggerCondition::Continuous : TriggerCondition::Always;
             });
         });
     std::vector<juce::String> chokes { tx ("choke.none") };
@@ -770,7 +770,7 @@ void NovaSamplerEditor::buildZonesPage()
             if (column == 7)
             {
                 z.onRelease = value == 2;
-                z.trigger = value == 3 ? TriggerCondition::First : value == 4 ? TriggerCondition::Legato : TriggerCondition::Always;
+                z.trigger = value == 3 ? TriggerCondition::First : value == 4 ? TriggerCondition::Legato : value == 5 ? TriggerCondition::Continuous : TriggerCondition::Always;
             }
             else if (column == 8) z.chokeCuts = value;
             else if (column == 9) z.chokeCutBy = value;
@@ -2878,7 +2878,7 @@ void NovaSamplerEditor::updateVoices()
         r.zone = juce::String (v.track + 1) + ":" + (known ? juce::String (v.sourceIndex) : juce::String ("-"));
         if (z != nullptr)
         {
-            r.trigger = tx (z->onRelease ? "trig.release" : z->trigger == TriggerCondition::First ? "trig.first" : z->trigger == TriggerCondition::Legato ? "trig.legato" : "trig.attack");
+            r.trigger = tx (z->onRelease ? "trig.release" : z->trigger == TriggerCondition::First ? "trig.first" : z->trigger == TriggerCondition::Legato ? "trig.legato" : z->trigger == TriggerCondition::Continuous ? "trig.continuous" : "trig.attack");
             r.group = U (z->group);
             r.choke = z->chokeCuts == 0 && z->chokeCutBy == 0 ? juce::String() : z->chokeCuts == z->chokeCutBy ? juce::String (z->chokeCuts) : juce::String (z->chokeCuts) + ">" + juce::String (z->chokeCutBy);
         }

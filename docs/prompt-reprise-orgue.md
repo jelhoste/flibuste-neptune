@@ -31,6 +31,9 @@ Fait et installé sous **Linux** (Windows n'est PAS à jour depuis l'import d'or
 6. Option « tous les sons » sur les claviers de Façade (envoi à toutes les pistes sans passer par les canaux) : pas demandée pour l'instant, par canal reste le comportement.
 7. Mettre Windows à jour (compilation SSH + installation) quand Jean le demande.
 
+## Son continu (2026-10-28, à valider dans Reaper)
+Fonction du Sampler de Neptune (pas de l'import) : déclenchement de zone **« Continu (interrupteur) »** (`TriggerCondition::Continuous`, JSON `"trigger":"continuous"`, liste « Déclenchement » de l'éditeur de zones et colonne du tableau). Aucune note ne la joue : `SamplerVoices::updateDrones` (une fois par bloc) la démarre quand les modulateurs qui la commandent sont actifs (sans modulateur : tout de suite) et relâche la boucle quand ils se coupent ; un one-shot ne repart qu'au rallumage. Note Off, « tout relâcher » et le mode mono ne la coupent pas (canal interne `kDroneChannel`). Une piste Sampler dont l'instrument en a n'est jamais « au repos ». Au plus 32 zones continues par instrument. L'interrupteur se pilote comme les autres (Façade, CC, automation) ; valeur par défaut d'un modulateur = allumé, donc le son démarre à l'ouverture du projet. Pas de détection automatique côté GrandOrgue (l'ODF ne dit pas qu'un jeu est un bruit de fond). Tests : `test_sample_playback.cpp`, `test_organimport.cpp` (« continuous zone »).
+
 ## À savoir
 - La version affichée vient du hash git lu à la configuration CMake : relancer `cmake -S . -B <build>` avant le build pour la rafraîchir.
 - Modulateurs : 32 par piste (`mixer::modulatorParam`), valeurs 0..100 ; pour un tremblant la valeur est sa profondeur (%) et un autre modulateur (« Speed ») règle sa vitesse (50 % = période de l'orgue, 0 = 4 fois plus lent, 100 = 4 fois plus vite) ; une boîte a un `floorLevel`.

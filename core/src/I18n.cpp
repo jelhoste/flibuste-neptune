@@ -2514,6 +2514,7 @@ const Entry kEntries[] = {
     { "trig.release", { "Release", "Relâchement" } },
     { "trig.first", { "First", "Premier" } },
     { "trig.legato", { "Legato (transition)", "Legato (transition)" } },
+    { "trig.continuous", { "Continuous (switch)", "Continu (interrupteur)" } },
     { "choke.label", { "Choke", "Choke" } },
     { "choke.none", { "None", "Aucun" } },
     { "choke.advanced", { "Advanced", "Avancé" } },

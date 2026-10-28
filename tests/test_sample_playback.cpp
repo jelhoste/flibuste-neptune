@@ -1174,3 +1174,77 @@ TEST_CASE ("organ modulators: a box keeps its floor level, a tremulant makes the
         CHECK (slow < normal);
     }
 }
+
+TEST_CASE ("continuous zone: a looped sound plays by itself while its switch is on, stops with it and starts again, no note involved")
+{
+    auto inst = std::make_shared<Instrument>();
+    auto drone = makeFullKeyboardZone (makeConstant (48000, 0.5f), 60, PlayMode::Loop);
+    drone.trigger = TriggerCondition::Continuous;
+    drone.modMask = 1u;
+    inst->zones.push_back (std::move (drone));
+    auto note = makeFullKeyboardZone (makeConstant (48000, 0.25f), 60, PlayMode::Loop);
+    inst->zones.push_back (std::move (note));
+    inst->finalize();
+    REQUIRE (inst->droneZones().size() == 1);
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    REQUIRE (v.hasDrones());
+    float values[kModulators] {};
+    auto block = [&] (int frames)
+    {
+        v.setModulators (values);
+        std::vector<float> l (static_cast<std::size_t> (frames), 0.0f), r (static_cast<std::size_t> (frames), 0.0f);
+        v.render (l.data(), r.data(), frames, 1.0f, 1.0f, 0.0);
+        return l.back();
+    };
+    // interrupteur coupé : silence, malgré le sampler au repos
+    for (int i = 0; i < 4; ++i) CHECK (block (512) == 0.0f);
+    // interrupteur allumé : le son arrive tout seul, sans note
+    values[0] = 1.0f;
+    float level = 0.0f;
+    for (int i = 0; i < 40; ++i) level = block (512);
+    CHECK (level > 0.1f);
+    CHECK (v.activeVoices() == 1);
+    // une touche jouée n'a rien à voir avec lui (la zone continue n'est pas choisie par les notes) et Note Off / « tout relâcher » ne le coupent pas
+    v.noteOn (0, 60, 1.0f);
+    v.noteOff (0, 60);
+    v.releaseAll();
+    for (int i = 0; i < 40; ++i) level = block (512);
+    CHECK (level > 0.1f);
+    // interrupteur coupé : le son se relâche puis s'éteint
+    values[0] = 0.0f;
+    for (int i = 0; i < 200; ++i) level = block (512);
+    CHECK (level == 0.0f);
+    CHECK (v.activeVoices() == 0);
+    // rallumé : il repart, une seule voix
+    values[0] = 1.0f;
+    for (int i = 0; i < 40; ++i) level = block (512);
+    CHECK (level > 0.1f);
+    CHECK (v.activeVoices() == 1);
+}
+
+TEST_CASE ("continuous zone: without any modulator it sounds at once, and it survives JSON")
+{
+    auto inst = std::make_shared<Instrument>();
+    auto drone = makeFullKeyboardZone (makeConstant (48000, 0.5f), 60, PlayMode::Loop);
+    drone.trigger = TriggerCondition::Continuous;
+    inst->zones.push_back (std::move (drone));
+    inst->finalize();
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (inst.get());
+    float values[kModulators] {};
+    v.setModulators (values);
+    std::vector<float> l (512, 0.0f), r (512, 0.0f);
+    for (int i = 0; i < 20; ++i) v.render (l.data(), r.data(), 512, 1.0f, 1.0f, 0.0);
+    CHECK (l.back() > 0.1f);
+    CHECK (v.activeVoices() == 1);
+
+    InstrumentDescription d;
+    ZoneDescription z;
+    z.samplePath = "a.wav";
+    z.trigger = TriggerCondition::Continuous;
+    d.zones.push_back (z);
+    CHECK (instrumentFromJson (toJson (d)).zones[0].trigger == TriggerCondition::Continuous);
+}

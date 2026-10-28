@@ -1162,7 +1162,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         const bool idle = audioInTrack ? (! trackHasInput_[static_cast<std::size_t> (ti)] && ! hostFeeds)
                         : organTrack ? t.organ.heldKeys() == 0
                         : fmTrack ? t.fm.activeVoices() == 0
-                        : synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
+                        : synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || (t.voices.activeVoices() == 0 && ! t.voices.hasDrones()));
         if (! audioInTrack && ! synthTrack && ! fmTrack && ! organTrack && idle)
         {
             // une piste Sampler au repos garde ses modulateurs à jour : la prochaine note (jeux tirés d'un orgue) les juge sur leur valeur actuelle, pas sur celle du dernier bloc joué

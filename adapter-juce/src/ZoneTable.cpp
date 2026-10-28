@@ -46,7 +46,8 @@ void ZoneTable::updateDetail()
     const auto& z = zones_[static_cast<std::size_t> (sel[0])];
     using neptune::core::PlayMode;
     juce::String trigger = tx (z.onRelease ? "trig.release" : z.trigger == neptune::core::TriggerCondition::First ? "trig.first"
-                                          : z.trigger == neptune::core::TriggerCondition::Legato ? "trig.legato" : "trig.attack");
+                                          : z.trigger == neptune::core::TriggerCondition::Legato ? "trig.legato"
+                                          : z.trigger == neptune::core::TriggerCondition::Continuous ? "trig.continuous" : "trig.attack");
     juce::String t;
     const juce::String sep = "    ";
     t << tx ("import.col_file") << ":  " << juce::File (juce::String::fromUTF8 (z.samplePath.c_str())).getFileName() << "\n"
@@ -80,6 +81,7 @@ public:
             box_.addItem (name ("trig.release"), 2);
             box_.addItem (name ("trig.first"), 3);
             box_.addItem (name ("trig.legato"), 4);
+            box_.addItem (name ("trig.continuous"), 5);
         }
         else
         {
@@ -100,7 +102,7 @@ public:
         updating_ = true;
         int id = 1;
         if (column_ == 7)
-            id = z.onRelease ? 2 : z.trigger == neptune::core::TriggerCondition::First ? 3 : z.trigger == neptune::core::TriggerCondition::Legato ? 4 : 1;
+            id = z.onRelease ? 2 : z.trigger == neptune::core::TriggerCondition::First ? 3 : z.trigger == neptune::core::TriggerCondition::Legato ? 4 : z.trigger == neptune::core::TriggerCondition::Continuous ? 5 : 1;
         else
             id = (column_ == 8 ? z.chokeCuts : z.chokeCutBy) + 1;
         box_.setSelectedId (id, juce::dontSendNotification);

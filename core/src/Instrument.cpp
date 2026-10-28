@@ -52,7 +52,7 @@ const char* toString (SameKeyMode m) noexcept { return m == SameKeyMode::Cut ? "
 
 const char* toString (TriggerCondition t) noexcept
 {
-    switch (t) { case TriggerCondition::First: return "first"; case TriggerCondition::Legato: return "legato"; default: return "always"; }
+    switch (t) { case TriggerCondition::First: return "first"; case TriggerCondition::Legato: return "legato"; case TriggerCondition::Continuous: return "continuous"; default: return "always"; }
 }
 
 const char* toString (PlayMode m) noexcept { return m == PlayMode::Loop ? "loop" : "one_shot"; }
@@ -495,6 +495,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     {
         if (it->get<std::string>() == "first") z.trigger = TriggerCondition::First;
         else if (it->get<std::string>() == "legato") z.trigger = TriggerCondition::Legato;
+        else if (it->get<std::string>() == "continuous") z.trigger = TriggerCondition::Continuous;
     }
     if (const auto it = o.find ("filters"); it != o.end() && it->is_object()) { z.filterOverride = true; z.filters = filterBlockFromJson (*it); }
     z.chokeCuts = readInt (o, "choke_cuts", 0);
@@ -677,7 +678,7 @@ const Zone* Instrument::find (int key, float velocity) const noexcept
 {
     const int v = std::clamp (static_cast<int> (std::lround (velocity * 127.0f)), 1, 127);
     for (const auto& z : zones)
-        if (z.sample && ! z.onRelease && key >= z.keyLow && key <= z.keyHigh && v >= z.velLow && v <= z.velHigh) return &z;
+        if (z.sample && ! z.onRelease && z.trigger != TriggerCondition::Continuous && key >= z.keyLow && key <= z.keyHigh && v >= z.velLow && v <= z.velHigh) return &z;
     return nullptr;
 }
 
@@ -690,6 +691,9 @@ void Instrument::finalize()
     zoneFamily_.assign (zones.size(), -1);
     familySets_.clear();
     for (auto& k : keyZones_) k.clear();
+    droneZones_.clear();
+    for (std::size_t i = 0; i < zones.size() && droneZones_.size() < static_cast<std::size_t> (kMaxDrones); ++i)
+        if (zones[i].sample && ! zones[i].onRelease && zones[i].trigger == TriggerCondition::Continuous) droneZones_.push_back (static_cast<int> (i));
 
     using PlaceKey = std::tuple<int, int, int, int, int, bool, int>;
     using FamilyKey = std::tuple<int, int, int, bool, int>;
@@ -796,7 +800,7 @@ const Zone* Instrument::select (int key, float velocity, bool release) const noe
     for (std::size_t i = 0; i < zones.size(); ++i)
     {
         const Zone& z = zones[i];
-        if (! z.sample || z.onRelease != release || key < z.keyLow || key > z.keyHigh || v < z.velLow || v > z.velHigh) continue;
+        if (! z.sample || z.onRelease != release || z.trigger == TriggerCondition::Continuous || key < z.keyLow || key > z.keyHigh || v < z.velLow || v > z.velHigh) continue;
         if (zoneSet_.size() != zones.size()) return &z; // finalize() non appelé : première zone
         return pickFromSet (static_cast<std::size_t> (zoneSet_[i]));
     }
@@ -1046,7 +1050,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.onRelease = zd.onRelease;
         z.heldMinMs = zd.onRelease ? zd.heldMinMs : 0;
         z.heldMaxMs = zd.onRelease ? zd.heldMaxMs : 0;
-        z.releaseStart = zd.mode == PlayMode::Loop && ! zd.onRelease && zd.releaseStart > zd.startFrame && zd.releaseStart < z.sample->frames ? zd.releaseStart : -1;
+        z.releaseStart = zd.mode == PlayMode::Loop && ! zd.onRelease && zd.trigger != TriggerCondition::Continuous && zd.releaseStart > zd.startFrame && zd.releaseStart < z.sample->frames ? zd.releaseStart : -1;
         z.sourceIndex = static_cast<int> (zi);
         {
             // filtres : la zone personnalisée > le Groupe personnalisé > l'instrument

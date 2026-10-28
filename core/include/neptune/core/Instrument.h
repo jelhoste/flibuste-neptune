@@ -43,7 +43,9 @@ bool roundRobinModeFromString (std::string_view s, RoundRobinMode& out);
 // Condition de déclenchement d'une zone d'attaque (spec §zone « type de déclenchement » ; le relâchement est `onRelease`) :
 //  Always : à chaque Note On ; First : seulement si aucune autre note du Groupe n'est tenue ; Legato : seulement si une
 //  autre note du Groupe est déjà tenue (transitions liées). Le « Groupe » est celui de la zone (vide = toutes les zones sans Groupe).
-enum class TriggerCondition { Always, First, Legato };
+//  Continuous : aucune note ne la joue ; elle sonne seule tant que les modulateurs qui la commandent (interrupteur du Groupe...) sont actifs (bruit de fond, soufflerie) ;
+//  sans modulateur, elle sonne toujours. Une boucle se relâche quand l'interrupteur est coupé, un one-shot va au bout et ne repart qu'au rallumage.
+enum class TriggerCondition { Always, First, Legato, Continuous };
 const char* toString (TriggerCondition) noexcept;
 
 // Groupes de choke : une zone qui se déclenche coupe les voix des zones dont `chokeCutBy` égale son `chokeCuts` (0 = aucun).
@@ -347,6 +349,10 @@ struct Instrument
     // les zones déclenchées au relâchement.
     const Zone* find (int key, float velocity) const noexcept;
 
+    // Zones « Continuous » (indices dans `zones`, au plus kMaxDrones) : rempli par finalize().
+    static constexpr int kMaxDrones = 32;
+    const std::vector<int>& droneZones() const noexcept { return droneZones_; }
+
     // Zone à jouer : comme find(), puis choix dans le jeu round-robin de cette place selon `roundRobinMode`.
     // `release` : cherche parmi les zones déclenchées au Note Off. Thread audio uniquement (les compteurs sont modifiés).
     const Zone* select (int key, float velocity, bool release) const noexcept;
@@ -396,6 +402,7 @@ private:
     struct RrSet { std::vector<int> members; std::vector<Borrowed> borrowed; }; // indices de zones, dans l'ordre des indices round-robin
     std::vector<RrSet> rrSets_;
     std::vector<int> zoneSet_;
+    std::vector<int> droneZones_;
     std::vector<LayerFade> fades_;                  // par zone
     std::vector<std::vector<int>> familySets_;      // par famille : indices de jeux round-robin (une couche chacun)
     std::vector<int> zoneFamily_;                   // par zone

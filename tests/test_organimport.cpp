@@ -848,3 +848,44 @@ TEST_CASE ("organ import: attack variants become random alternatives, cut by the
     CHECK (hasWarning (r, "MaxTimeSinceLastRelease"));
     CHECK_FALSE (hasWarning (r, "not imported (only the main sample)"));
 }
+
+TEST_CASE ("continuous zone: an idle Sampler track still plays it through the engine, and its switch silences it")
+{
+    auto sine = std::make_shared<SampleData>();
+    sine->channels = 1; sine->frames = 48000; sine->sampleRate = 48000.0;
+    sine->pcm32.assign (48000, 0.5f);
+    auto instrument = std::make_shared<Instrument>();
+    auto z = makeFullKeyboardZone (sine, 60, PlayMode::Loop);
+    z.trigger = TriggerCondition::Continuous;
+    z.modMask = 1u;
+    instrument->zones.push_back (std::move (z));
+    instrument->finalize();
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    engine.setTrackActive (0, true);
+    engine.setTrackType (0, TrackType::Sampler);
+    engine.publishInstrument (0, instrument);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto peak = [&] (int blocks)
+    {
+        float p = 0.0f;
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256);
+            for (const float s : bufs[0]) p = std::max (p, std::fabs (s));
+        }
+        return p;
+    };
+    params.set (mixer::modulatorParam (0, 0), 100.0);   // interrupteur allumé : aucune note, le son vient seul
+    CHECK (peak (80) > 0.01f);
+    params.set (mixer::modulatorParam (0, 0), 0.0);
+    peak (200);
+    CHECK (peak (4) == 0.0f);
+}

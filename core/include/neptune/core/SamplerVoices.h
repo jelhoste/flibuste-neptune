@@ -72,6 +72,8 @@ public:
     // Écoute d'une zone (bouton de lecture de la liste) : démarre une voix de CETTE zone à sa note racine, sans passer par la
     // sélection des couches ni le choke. Le canal est hors de la plage MIDI : aucune confusion avec les notes de l'hôte.
     static constexpr int kPreviewChannel = 1000;
+    static constexpr int kDroneChannel = 1001;   // voix des zones « Continuous » : aucune touche, aucun Note Off ne les touche
+    bool hasDrones() const noexcept { return instrument_ != nullptr && ! instrument_->droneZones().empty(); }
     // Ce que l'écoute joue : la zone telle quelle (région, boucle, comme au clavier), le sample brut en entier, la région START-END une fois, depuis un point (jusqu'à END),
     // une boucle une seule fois, ou une boucle telle qu'on l'entend (avec ses retours, jusqu'à l'arrêt).
     struct PreviewSpec
@@ -211,6 +213,8 @@ private:
     std::array<float, kModulators> modEff_ = [] { std::array<float, kModulators> a {}; a.fill (1.0f); return a; }();   // valeurs effectives (tremblant compris)
     std::array<double, kModulators> tremPhase_ {};   // phase (0..1) de chaque tremblant
     void updateModulators (int numFrames) noexcept;
+    void updateDrones() noexcept;   // démarre / relâche les voix des zones « Continuous » selon leurs modulateurs (une fois par bloc)
+    std::array<bool, Instrument::kMaxDrones> droneOn_ {};   // le(s) modulateur(s) de la zone étaient actifs au bloc précédent
     std::atomic<int> modsOn_ { 0 }, lastPicks_ { -1 }, lastKeyZones_ { 0 };
     DiskStreamer* streamer_ = nullptr;
     double sampleRate_ = 48000.0;
