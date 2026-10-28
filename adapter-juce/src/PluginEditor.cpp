@@ -569,11 +569,20 @@ void NeptuneEditor::importOrgan()
                 }
             }
             organFile = juce::File();
-            for (const auto& f : target.findChildFiles (juce::File::findFiles, true, "*.organ"))
+            // un paquet peut contenir plusieurs orgues (version simple, version étendue...) : `organindex.ini` les liste, le premier est celui d'origine
+            for (const auto& line : juce::StringArray::fromLines (target.getChildFile ("organindex.ini").loadFileAsString()))
             {
-                organFile = f;
-                break;
+                const auto t = line.trim();
+                if (! t.startsWithIgnoreCase ("Filename=")) continue;
+                const auto candidate = target.getChildFile (t.fromFirstOccurrenceOf ("=", false, false).trim().replaceCharacter ('\\', '/'));
+                if (candidate.existsAsFile()) { organFile = candidate; break; }
             }
+            if (! organFile.existsAsFile())
+                for (const auto& f : target.findChildFiles (juce::File::findFiles, true, "*.organ"))
+                {
+                    organFile = f;
+                    break;
+                }
             if (! organFile.existsAsFile())
             {
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), safe->text ("organ.no_odf"));

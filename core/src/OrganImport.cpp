@@ -494,8 +494,8 @@ private:
         // Les variantes d'attaque : le fichier du tuyau (vélocité minimale 0) puis `PipeNNNAttackMMM`. Comme GrandOrgue, une variante est possible quand la vélocité
         // atteint sa vélocité minimale, et le choix parmi les possibles est au hasard ; la plage de vélocité 1..127 est donc coupée aux vélocités minimales, chaque
         // tranche ayant son jeu de variantes tirées au hasard (round-robin aléatoire).
-        struct Variant { std::string file; int minVelocity = 0; };
-        std::vector<Variant> variants { { file, 0 } };
+        struct Variant { std::string file; int minVelocity = 0; std::string prefix; };
+        std::vector<Variant> variants { { file, 0, p } };
         const int attackCount = std::clamp (ini_.getInt (section, p + "AttackCount", 0), 0, 100);
         for (int a = 1; a <= attackCount; ++a)
         {
@@ -504,7 +504,7 @@ private:
             if (attackFile.empty() || lowered (attackFile) == "dummy") continue;
             if (ini_.getInt (section, prefix + "MaxTimeSinceLastRelease", -1) >= 0) { ++repeatAttacksSkipped_; continue; }   // attaque d'un tuyau qui vient d'être relâché : pas de mesure de ce délai
             if (ini_.getInt (section, prefix + "IsTremulant", -1) == 1) continue;   // enregistrée avec un tremblant d'échantillons, non importé
-            variants.push_back ({ attackFile, std::clamp (ini_.getInt (section, prefix + "AttackVelocity", 0), 0, 127) });
+            variants.push_back ({ attackFile, std::clamp (ini_.getInt (section, prefix + "AttackVelocity", 0), 0, 127), prefix });
         }
         // Les relâchements enregistrés à part : `PipeNNNReleaseMMM`, choisis selon la durée d'appui (`MaxKeyPressTime`, -1 : sans limite). Comme GrandOrgue, c'est le plus court qui
         // convient à la durée d'appui qui est joué ; chaque durée maximale ouvre donc une tranche (tranche précédente + 1 ms .. durée maximale). Quand un tuyau en a, la queue
@@ -545,16 +545,29 @@ private:
                 z.velLow = velLow;
                 z.velHigh = velHigh;
                 const auto& marks = marksOf (path);
-                if (! opt_.readSampleMarks || (marks.exists && ! marks.loops.empty()))   // sans lecture des fichiers : un tuyau d'orgue se tient (boucle)
+                // les boucles écrites dans le fichier d'orgue (`PipeNNNLoopCount`, `LoopMMMStart` / `End`) priment sur celles du fichier d'échantillon
+                std::vector<MetaLoop> odfLoops;
+                for (int l = 1, n = std::clamp (ini_.getInt (section, variant.prefix + "LoopCount", 0), 0, 100); l <= n; ++l)
+                {
+                    const std::string lp = variant.prefix + numbered ("Loop", l);
+                    MetaLoop loop;
+                    loop.start = ini_.getInt (section, lp + "Start", 0);
+                    loop.end = ini_.getInt (section, lp + "End", -1);
+                    if (loop.end > loop.start) odfLoops.push_back (loop);
+                }
+                const auto& loops = odfLoops.empty() ? marks.loops : odfLoops;
+                if (! opt_.readSampleMarks || ! odfLoops.empty() || (marks.exists && ! marks.loops.empty()))   // sans lecture des fichiers : un tuyau d'orgue se tient (boucle)
                 {
                     z.mode = PlayMode::Loop;
-                    if (! marks.loops.empty())
+                    if (! loops.empty())
                     {
-                        z.loopStart = marks.loops[0].start;
-                        z.loopEnd = marks.loops[0].end;
-                        for (std::size_t i = 1; i < marks.loops.size() && z.extraLoops.size() < ZoneDescription::maxExtraLoops; ++i)
-                            z.extraLoops.push_back ({ marks.loops[i].start, marks.loops[i].end, marks.loops[i].crossfade, marks.loops[i].repeats });
-                        const std::int64_t lastEnd = marks.loops.back().end;
+                        z.loopStart = loops[0].start;
+                        z.loopEnd = loops[0].end;
+                        if (! odfLoops.empty()) z.loopCrossfade = std::max (0, ini_.getInt (section, variant.prefix + "LoopCrossfadeLength", 0));
+                        else z.loopCrossfade = loops[0].crossfade;
+                        for (std::size_t i = 1; i < loops.size() && z.extraLoops.size() < ZoneDescription::maxExtraLoops; ++i)
+                            z.extraLoops.push_back ({ loops[i].start, loops[i].end, loops[i].crossfade, loops[i].repeats });
+                        const std::int64_t lastEnd = loops.back().end;
                         if (! ownRelease && marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd) z.releaseStart = marks.releaseMarker;
                     }
                 }

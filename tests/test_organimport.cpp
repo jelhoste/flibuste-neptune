@@ -924,3 +924,45 @@ TEST_CASE ("organ import: separate release samples are chosen by how long the ke
     for (const auto& z : zones) attacks += ! z.onRelease;
     CHECK (attacks == 2);
 }
+
+TEST_CASE ("organ import: loops written in the organ file replace those of the sample file")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Loops\nNumberOfManuals=1\nHasPedals=N\n"
+        "[Manual001]\nName=Great\nNumberOfStops=1\nStop001=1\nNumberOfLogicalKeys=1\nNumberOfAccessibleKeys=1\nFirstAccessibleKeyMIDINoteNumber=60\n"
+        "[Stop001]\nName=Looped\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\n"
+        "Pipe001=a.wav\nPipe001LoopCount=2\nPipe001Loop001Start=1000\nPipe001Loop001End=5000\nPipe001Loop002Start=6000\nPipe001Loop002End=9000\nPipe001LoopCrossfadeLength=200\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    const auto& z = r.keyboards[0].instrument.zones.at (0);
+    CHECK (z.mode == PlayMode::Loop);
+    CHECK (z.loopStart == 1000);
+    CHECK (z.loopEnd == 5000);
+    CHECK (z.loopCrossfade == 200);
+    REQUIRE (z.extraLoops.size() == 1);
+    CHECK (z.extraLoops[0].start == 6000);
+    CHECK (z.extraLoops[0].end == 9000);
+}
+
+TEST_CASE ("organ import: DIAG dry read of an organ file without samples (NEPTUNE_DIAG_ORGAN)", "[.diag]")
+{
+    const char* path = std::getenv ("NEPTUNE_DIAG_ORGAN");
+    if (path == nullptr) { SUCCEED ("skipped"); return; }
+    std::ifstream in (path, std::ios::binary);
+    std::string text ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (text, opt);
+    std::fprintf (stderr, "DIAG ok=%d err=%s name=%s keyboards=%zu\n", r.ok, r.error.c_str(), r.name.c_str(), r.keyboards.size());
+    for (const auto& kb : r.keyboards)
+    {
+        std::size_t rel = 0, loops = 0, attacks = 0;
+        for (const auto& z : kb.instrument.zones) { rel += z.onRelease; loops += z.mode == PlayMode::Loop; attacks += ! z.onRelease; }
+        std::fprintf (stderr, "DIAG kb %s stops %d pipes %d zones %zu (attacks %zu, releases %zu, loops %zu)\n", kb.name.c_str(), kb.stops, kb.pipes, kb.instrument.zones.size(), attacks, rel, loops);
+    }
+    for (const auto& w : r.warnings) std::fprintf (stderr, "DIAG warning: %s\n", w.c_str());
+}
