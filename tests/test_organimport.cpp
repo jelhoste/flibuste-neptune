@@ -1,7 +1,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
+#include "neptune/core/Engine.h"
+#include "neptune/core/Mixer.h"
+#include "neptune/core/ProbePool.h"
+#include "neptune/core/SamplerParams.h"
+#include <map>
+#include <set>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -456,4 +463,105 @@ TEST_CASE ("organ import: the GrandOrgue demo organ (optional, NEPTUNE_DEMO_ORGA
     REQUIRE (built != nullptr);
     CHECK (buildWarnings.empty());
     CHECK (built->zones.size() > r.keyboards[1].instrument.zones.size());   // + les zones de queue implicites
+}
+
+TEST_CASE ("organ import: dump of the demo organ (only with NEPTUNE_DUMP_ORGAN=1 and NEPTUNE_DEMO_ORGAN_DIR)", "[.dump]")
+{
+    const char* dir = std::getenv ("NEPTUNE_DEMO_ORGAN_DIR");
+    if (dir == nullptr) return;
+    std::filesystem::path odf;
+    for (const auto& e : std::filesystem::recursive_directory_iterator (dir))
+        if (e.path().extension() == ".organ") { odf = e.path(); break; }
+    Options opt;
+    const auto r = importOrganFile (odf, opt);
+    REQUIRE (r.ok);
+    for (const auto& k : r.keyboards)
+    {
+        int lo = 999, hi = -1;
+        std::set<std::string> groups;
+        for (const auto& z : k.instrument.zones) { lo = std::min (lo, z.keyLow); hi = std::max (hi, z.keyHigh); groups.insert (z.group); }
+        std::printf ("KB %s ch=%d zones=%zu keys=%d..%d groups=%zu mods:", k.name.c_str(), k.midiChannel, k.instrument.zones.size(), lo, hi, groups.size());
+        int named = 0;
+        for (const auto& m : k.instrument.modulators) if (! m.name.empty()) ++named;
+        std::printf ("%d\n", named);
+    }
+    for (const auto& k : r.keyboards)
+    {
+        std::map<std::string, std::array<double, 4>> perGroup;   // zones, min gain, max gain, mask
+        for (const auto& z : k.instrument.zones)
+        {
+            auto& g = perGroup.try_emplace (z.group, std::array<double, 4> { 0, 1e9, -1e9, 0 }).first->second;
+            g[0] += 1; g[1] = std::min (g[1], z.gainDb); g[2] = std::max (g[2], z.gainDb); g[3] = static_cast<double> (z.modulators);
+        }
+        for (const auto& [name, g] : perGroup)
+        {
+            const auto it = k.instrument.groups.find (name);
+            std::printf ("GRP %s | %s zones=%d gain=%.1f..%.1f zoneMask=%x groupMask=%x\n", k.name.c_str(), name.c_str(), static_cast<int> (g[0]), g[1], g[2], static_cast<unsigned> (g[3]), it == k.instrument.groups.end() ? 0u : static_cast<unsigned> (it->second.modulators));
+        }
+        std::printf ("TRACKMASK %s %x\n", k.name.c_str(), static_cast<unsigned> (k.instrument.trackModulators));
+    }
+    for (const auto& rule : r.router.rules)
+        std::printf ("RULE %s src=%d dst=%d keys=%d..%d replace=%d sel=%d terms=%zu\n", rule.name.c_str(), rule.srcChannel, rule.dstChannel, rule.keyLo, rule.keyHi, rule.replace ? 1 : 0, static_cast<int>(rule.select), rule.terms.size());
+}
+
+TEST_CASE ("organ import: engine playback of the demo organ (only with NEPTUNE_DEMO_ORGAN_DIR)", "[.dump]")
+{
+    const char* dir = std::getenv ("NEPTUNE_DEMO_ORGAN_DIR");
+    if (dir == nullptr) return;
+    std::filesystem::path odf;
+    for (const auto& e : std::filesystem::recursive_directory_iterator (dir))
+        if (e.path().extension() == ".organ") { odf = e.path(); break; }
+    Options opt;
+    opt.firstTrack = 1;
+    const auto r = importOrganFile (odf, opt);
+    REQUIRE (r.ok);
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    SampleCache cache;
+    for (std::size_t k = 0; k < r.keyboards.size(); ++k)
+    {
+        const int t = 1 + static_cast<int> (k);
+        const auto built = buildInstrument (r.keyboards[k].instrument, nullptr, &cache);
+        REQUIRE (built != nullptr);
+        engine.setTrackActive (t, true);
+        engine.setTrackType (t, TrackType::Sampler);
+        engine.publishInstrument (t, built);
+        mixer::StripSettings strip;
+        strip.midiChannel = r.keyboards[k].midiChannel;
+        engine.setTrackSettings (t, strip);
+    }
+    engine.setRouter (r.router);
+    for (const auto& [id, v] : r.initialValues) params.set (id, v);
+    // tire tous les jeux (modulateurs nommés) de chaque clavier
+    for (std::size_t k = 0; k < r.keyboards.size(); ++k)
+        for (std::size_t i = 0; i < r.keyboards[k].instrument.modulators.size(); ++i)
+            if (! r.keyboards[k].instrument.modulators[i].name.empty() && r.keyboards[k].instrument.modulators[i].name.find ("/") == std::string::npos)
+                params.set (mixer::modulatorParam (1 + static_cast<int> (k), static_cast<int> (i)), 100.0);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    float peak = 0.0f;
+    auto run = [&] (int blocks)
+    {
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256);
+            for (const auto& buf : bufs) for (const float s : buf) peak = std::max (peak, std::abs (s));
+        }
+    };
+    run (4);
+    for (std::size_t k = 0; k < r.keyboards.size(); ++k)
+    {
+        peak = 0.0f;
+        engine.noteOnKeyboard (-1, r.keyboards[k].midiChannel - 1, 60, 1.0f);
+        run (20);
+        std::printf ("PLAY %s ch=%d voices(t%zu)=%d peak=%.4f\n", r.keyboards[k].name.c_str(), r.keyboards[k].midiChannel, k + 1, engine.activeVoices (1 + static_cast<int> (k)), static_cast<double> (peak));
+        engine.noteOffKeyboard (-1, r.keyboards[k].midiChannel - 1, 60);
+        run (200);
+    }
 }
