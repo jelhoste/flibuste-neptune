@@ -123,7 +123,7 @@ public:
             if (v.active && v.zone != nullptr) f (describe (v));
     }
 
-    int activeVoices() const noexcept;    // voix qui sonnent (y compris en relâchement)
+    int activeVoices() const noexcept { return activeCount_; }   // voix qui sonnent (y compris en relâchement) ; un compteur tenu à jour : appelée à chaque bloc pour chaque piste, un parcours des 320 voix coûtait plusieurs microsecondes
     int soundingVoices() const noexcept;  // voix qui sonnent hors fondu de vol : comptées par la limite globale (Engine)
     // Vol global (limite de voix du plugin) : la voix à sacrifier en premier ; les voix en relâchement d'abord, puis la plus faible.
     // Retourne faux s'il n'y en a pas. `releasing` / `level` / `order` permettent à l'appelant de comparer entre pistes.
@@ -209,6 +209,8 @@ private:
 
     // Sur le tas : 320 voix avec leurs états de filtre pèsent plusieurs centaines de Ko (pile de 1 Mo sous Windows).
     std::vector<Voice> voices_ = std::vector<Voice> (kMaxVoices + kFadeSlots);
+    int activeCount_ = 0;                 // nombre de voix `active` (tenu à jour par startVoice, discard et endVoice)
+    void endVoice (Voice& v) noexcept { if (v.active) --activeCount_; v.active = false; }   // une voix qui se termine d'elle-même pendant le rendu
     const Instrument* instrument_ = nullptr;
     std::array<float, kModulators> modEff_ = [] { std::array<float, kModulators> a {}; a.fill (1.0f); return a; }();   // valeurs effectives (tremblant compris)
     std::array<double, kModulators> tremPhase_ {};   // phase (0..1) de chaque tremblant

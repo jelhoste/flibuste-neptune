@@ -20,6 +20,7 @@ inline float hermite (float y0, float y1, float y2, float y3, float t) noexcept
 void SamplerVoices::discard (Voice& v) noexcept
 {
     if (v.streaming && streamer_ != nullptr) streamer_->release (v.streamSlot);
+    if (v.active) --activeCount_;
     v = Voice {};
 }
 
@@ -115,11 +116,6 @@ SamplerVoices::VoiceInfo SamplerVoices::describe (const Voice& v) const noexcept
     i.progress = frames > 0.0 ? static_cast<float> (std::clamp (v.pos / frames, 0.0, 1.0)) : 0.0f;
     i.order = v.order;
     return i;
-}
-
-int SamplerVoices::activeVoices() const noexcept
-{
-    return static_cast<int> (std::count_if (voices_.begin(), voices_.end(), [] (const Voice& v) { return v.active; }));
 }
 
 int SamplerVoices::heldVoices() const noexcept
@@ -436,6 +432,7 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     if (v == nullptr) return;
     discard (*v);
     v->active = true;
+    ++activeCount_;
     v->channel = channel;
     v->key = key;
     v->zoneIndex = instrument_ != nullptr && channel != kPreviewChannel ? static_cast<int> (&zone - instrument_->zones.data()) : -1;
@@ -687,7 +684,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
                 {
                     const double outLeft = (static_cast<double> (have) - 4.0 - v.pos) / std::max (inc, 1e-9);
                     if (streamer_ != nullptr) streamer_->countUnderrun();
-                    if (outLeft < 2.0) { v.active = false; return; }
+                    if (outLeft < 2.0) { endVoice (v); return; }
                     v.stolen = true;
                     v.fadeStep = static_cast<float> (1.0 / std::max (1.0, std::min (kStealFadeSeconds * sampleRate_, outLeft)));
                 }
@@ -711,7 +708,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
     for (int i = 0; i < numFrames; ++i)
     {
         if (v.delayLeft > 0) { --v.delayLeft; continue; } // délai de lecture : rien ne se passe encore (l'enveloppe attend aussi)
-        if (reverse ? v.pos < static_cast<double> (startF) && ! loop : v.pos >= endLimit) { v.active = false; return; } // fin de la région jouée (one-shot)
+        if (reverse ? v.pos < static_cast<double> (startF) && ! loop : v.pos >= endLimit) { endVoice (v); return; } // fin de la région jouée (one-shot)
 
         const std::int64_t i0 = static_cast<std::int64_t> (std::floor (v.pos));
         const float t = static_cast<float> (v.pos - static_cast<double> (i0));
@@ -773,7 +770,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         }
 
         const float envValue = v.env.next (z.env, sampleRate_);
-        if (v.env.finished() && envValue <= 0.0f) { v.active = false; return; } // enveloppe terminée (silence)
+        if (v.env.finished() && envValue <= 0.0f) { endVoice (v); return; } // enveloppe terminée (silence)
         float e = v.ampVel * z.gain * v.mods.gain * v.layerGain * mg * modCur * envValue;
         modCur += modStep;
         if (fadeInOut > 0.0 && v.fadeInPlayed < fadeInOut)
@@ -789,7 +786,7 @@ void SamplerVoices::renderVoiceT (Voice& v, float* left, float* right, int numFr
         if (v.stolen)
         {
             v.fade -= v.fadeStep;
-            if (v.fade <= 0.0f) { v.active = false; return; }
+            if (v.fade <= 0.0f) { endVoice (v); return; }
             e *= v.fade;
         }
         if (trackLevels) v.tracker.process (levelCoefs_, l * e * z.panL, r * e * z.panR);

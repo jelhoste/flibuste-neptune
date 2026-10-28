@@ -1130,3 +1130,69 @@ TEST_CASE ("organ import: generated pages wear the chosen style pack, and keep t
     const auto& last = styled.facade.pages.back();
     for (const auto& w : last.widgets) if (w.type == fc::WidgetType::Action) CHECK (w.style != 0);
 }
+
+TEST_CASE ("engine: cost of one process call with no note (diagnostic)", "[.bench]")
+{
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    std::fprintf (stderr, "BENCH parameters in the core set: %zu\n", params.size());
+    for (const int activeTracks : { 1, 4, 16 })
+    {
+        Engine engine;
+        engine.attachParameters (&params);
+        engine.prepare (48000.0, 64);
+        for (int t = 0; t < activeTracks; ++t) { engine.setTrackActive (t, true); engine.setTrackType (t, TrackType::Sampler); }
+        std::vector<std::vector<float>> bufs (4, std::vector<float> (64, 0.0f));
+        std::vector<float*> ptrs;
+        for (auto& b : bufs) ptrs.push_back (b.data());
+        for (int i = 0; i < 2000; ++i) engine.process (ptrs.data(), 4, 64);   // chauffe
+        const int calls = 50000;
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < calls; ++i) engine.process (ptrs.data(), 4, 64);
+        const double us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count() / calls;
+        std::fprintf (stderr, "BENCH %d active track(s): %.2f us per call of 64 frames\n", activeTracks, us);
+    }
+}
+
+TEST_CASE ("sampler voices: the running count of active voices always matches the voices that sound")
+{
+    auto sine = std::make_shared<SampleData>();
+    sine->channels = 1; sine->frames = 4800; sine->sampleRate = 48000.0;
+    sine->pcm32.assign (4800, 0.3f);
+    auto instrument = std::make_shared<Instrument>();
+    for (const auto mode : { PlayMode::Loop, PlayMode::OneShot })
+    {
+        auto z = makeFullKeyboardZone (sine, 60, mode);
+        z.keyLow = 0; z.keyHigh = 127;
+        instrument->zones.push_back (std::move (z));
+    }
+    instrument->finalize();
+    SamplerVoices v;
+    v.prepare (48000.0);
+    v.setInstrument (instrument.get());
+    auto sounding = [&v]
+    {
+        int n = 0;
+        v.forEachVoice ([&n] (const SamplerVoices::VoiceInfo&) { ++n; });
+        return n;
+    };
+    std::vector<float> l (256), r (256);
+    auto block = [&] { std::fill (l.begin(), l.end(), 0.0f); std::fill (r.begin(), r.end(), 0.0f); v.render (l.data(), r.data(), 256, 1.0f, 1.0f, 0.0); };
+    std::uint32_t seed = 7u;
+    for (int step = 0; step < 600; ++step)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const int action = static_cast<int> ((seed >> 16) % 7), key = 40 + static_cast<int> ((seed >> 8) % 40);
+        if (action <= 2) v.noteOn (0, key, 0.8f);
+        else if (action == 3) v.noteOff (0, key);
+        else if (action == 4) v.releaseAll();
+        else if (action == 5 && step % 50 == 0) v.panic();
+        block();
+        INFO ("step " << step);
+        REQUIRE (v.activeVoices() == sounding());
+    }
+    v.allSoundOff();
+    CHECK (v.activeVoices() == 0);
+}

@@ -692,8 +692,21 @@ void Engine::setParameter (std::uint32_t, double) noexcept {}
 
 int Engine::activeVoices() const noexcept
 {
+    // Une piste désactivée n'a plus de voix (elles sont coupées au changement), et chaque piste ne joue que par le moteur de son type : on ne compte que celui-là
+    // (parcourir les voix des 16 pistes à chaque bloc coûtait plus de la moitié du travail fixe d'un appel à `process`).
     int n = 0;
-    for (const auto& t : tracks_) n += t.voices.activeVoices() + t.synth.activeVoices() + t.fm.activeVoices() + t.organ.heldKeys();
+    for (const auto& t : tracks_)
+    {
+        if (t.active.load (std::memory_order_relaxed) == 0) continue;
+        switch (static_cast<TrackType> (t.type.load (std::memory_order_relaxed)))
+        {
+            case TrackType::Synth: n += t.synth.activeVoices(); break;
+            case TrackType::Fm: n += t.fm.activeVoices(); break;
+            case TrackType::Organ: n += t.organ.heldKeys(); break;
+            case TrackType::AudioIn: break;
+            default: n += t.voices.activeVoices(); break;
+        }
+    }
     return n;
 }
 
@@ -1128,7 +1141,6 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         }
         if (! changed) break;
     }
-
     // Solo : deux domaines. Un solo de piste (ou de piste parallèle) coupe les pistes qui n'y mènent pas (pas les bus : le solo
     // doit rester audible) ; un solo de bus coupe les bus non solo.
     bool trackSolo = false, busSolo = false;
@@ -1139,7 +1151,6 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
     for (const auto& b : buses_) busSolo = busSolo || param (b.idx.solo, 0.0) >= 0.5;
     anySolo_ = trackSolo;
     busSolo_ = busSolo;
-
     // ---- pistes
     // Deux passes : les pistes ordinaires d'abord, puis les pistes « Entrée audio » dans l'ordre (elles ont reçu leurs envois entre-temps).
     for (int visit = 0; visit < 2 * kTracks; ++visit)
@@ -1329,7 +1340,6 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         meterOf (*trackOut, t.peakL, t.peakR, t.rmsL, t.rmsR);
         routeStrip (t.config, t.idx, t.lastSend, raw_, *afterInserts, postFader_, *trackOut, false, -1, false);
     }
-
     // ---- bus, dans l'ordre : un bus n'alimente que des bus d'indice supérieur
     for (int bi = 0; bi < kBuses; ++bi)
     {
@@ -1350,7 +1360,6 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         meterOf (final_, b.peakL, b.peakR, b.rmsL, b.rmsR);
         routeStrip (b.config, b.idx, b.lastSend, in, *afterInserts, postFader_, final_, true, bi, false);
     }
-
     // ---- master : trim, inserts, fader, pan, mute, réduction mono
     {
         const float trimTarget = dbToGain (std::clamp (param (masterTrim_, 0.0), -12.0, 12.0), -1000.0); // le trim ne coupe jamais
