@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include "neptune/core/Engine.h"
 #include "neptune/core/Mixer.h"
@@ -11,6 +12,7 @@
 #include <set>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -956,7 +958,10 @@ TEST_CASE ("organ import: DIAG dry read of an organ file without samples (NEPTUN
     Options opt;
     opt.readSampleMarks = false;
     opt.firstTrack = 0;
+    if (const char* base = std::getenv ("NEPTUNE_DIAG_BASE")) { opt.baseDir = base; opt.readSampleMarks = true; }   // lit aussi les repères des fichiers d'échantillons
+    const auto t0 = std::chrono::steady_clock::now();
     auto r = importOrgan (text, opt);
+    std::fprintf (stderr, "DIAG import took %.2f s\n", std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count());
     std::fprintf (stderr, "DIAG ok=%d err=%s name=%s keyboards=%zu\n", r.ok, r.error.c_str(), r.name.c_str(), r.keyboards.size());
     for (const auto& kb : r.keyboards)
     {
@@ -965,4 +970,23 @@ TEST_CASE ("organ import: DIAG dry read of an organ file without samples (NEPTUN
         std::fprintf (stderr, "DIAG kb %s stops %d pipes %d zones %zu (attacks %zu, releases %zu, loops %zu)\n", kb.name.c_str(), kb.stops, kb.pipes, kb.instrument.zones.size(), attacks, rel, loops);
     }
     for (const auto& w : r.warnings) std::fprintf (stderr, "DIAG warning: %s\n", w.c_str());
+    if (std::getenv ("NEPTUNE_DIAG_BUILD") != nullptr)   // charge tous les claviers comme le plugin : durée et mémoire
+    {
+        SampleCache cache;
+        std::size_t bytes = 0;
+        for (const auto& kb : r.keyboards)
+        {
+            const auto t1 = std::chrono::steady_clock::now();
+            std::vector<std::string> warnings;
+            const auto built = buildInstrument (kb.instrument, &warnings, &cache);
+            std::size_t kbBytes = 0;
+            if (built != nullptr) for (const auto& z : built->zones) (void) z;
+            std::fprintf (stderr, "DIAG build %s: %.1f s, %s, %zu warnings, cached files %zu\n", kb.name.c_str(), std::chrono::duration<double> (std::chrono::steady_clock::now() - t1).count(), built ? "ok" : "FAILED", warnings.size(), cache.size());
+            for (std::size_t i = 0; i < warnings.size() && i < 3; ++i) std::fprintf (stderr, "DIAG   %s\n", warnings[i].c_str());
+            (void) kbBytes;
+        }
+        for (const auto& [k, v] : cache) if (v) bytes += v->bytes();
+        std::fprintf (stderr, "DIAG cache: %zu files, %.0f MB\n", cache.size(), static_cast<double> (bytes) / 1048576.0);
+        if (std::FILE* st = std::fopen ("/proc/self/status", "r")) { char line[256]; while (std::fgets (line, sizeof line, st)) if (std::strncmp (line, "VmHWM", 5) == 0) std::fprintf (stderr, "DIAG %s", line); std::fclose (st); }
+    }
 }

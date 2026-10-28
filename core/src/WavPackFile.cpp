@@ -201,10 +201,46 @@ WavPackData decodeWavPackFile (const std::filesystem::path&)
 }
 #endif
 
+// Les repères (smpl, cue) sont dans l'enveloppe RIFF du fichier : sous-blocs 0x21 (en-tête) et 0x22 (queue) des blocs WavPack. On parcourt les blocs en sautant les
+// données audio, sans rien décoder : lire les repères d'un orgue de 3 000 fichiers doit prendre des secondes, pas des minutes.
 WavPackMarks readWavPackMarks (const std::filesystem::path& path)
 {
-    const auto d = decodeWavPackFile (path);
-    if (! d.info.ok) return {};
-    return parseRiffMarks (d.header, d.trailer);
+    std::ifstream f (path, std::ios::binary);
+    if (! f) return {};
+    std::vector<std::uint8_t> header, trailer;
+    std::uint8_t h[32];
+    while (f.read (reinterpret_cast<char*> (h), 32))
+    {
+        if (std::memcmp (h, "wvpk", 4) != 0) break;
+        const std::uint32_t ckSize = le32 (h + 4);
+        if (ckSize < 24) break;
+        std::uint64_t left = ckSize - 24;   // octets de sous-blocs qui restent dans ce bloc
+        while (left >= 2)
+        {
+            std::uint8_t sub[4];
+            if (! f.read (reinterpret_cast<char*> (sub), 2)) return parseRiffMarks (header, trailer);
+            std::uint64_t words = sub[1], consumed = 2;
+            if ((sub[0] & 0x80) != 0)
+            {
+                if (! f.read (reinterpret_cast<char*> (sub + 2), 2)) return parseRiffMarks (header, trailer);
+                words = sub[1] | (static_cast<std::uint64_t> (sub[2]) << 8) | (static_cast<std::uint64_t> (sub[3]) << 16);
+                consumed = 4;
+            }
+            const std::uint64_t bytes = words * 2;
+            if (consumed + bytes > left) return parseRiffMarks (header, trailer);
+            const int function = sub[0] & 0x3f;
+            if (function == 0x21 || function == 0x22)
+            {
+                std::vector<std::uint8_t> data (static_cast<std::size_t> (bytes));
+                if (bytes > 0 && ! f.read (reinterpret_cast<char*> (data.data()), static_cast<std::streamsize> (bytes))) return parseRiffMarks (header, trailer);
+                if ((sub[0] & 0x40) != 0 && ! data.empty()) data.pop_back();   // taille impaire : le dernier octet n'est que du bourrage
+                (function == 0x21 ? header : trailer).insert ((function == 0x21 ? header : trailer).end(), data.begin(), data.end());
+            }
+            else f.seekg (static_cast<std::streamoff> (bytes), std::ios::cur);
+            left -= consumed + bytes;
+        }
+        if (left > 0) f.seekg (static_cast<std::streamoff> (left), std::ios::cur);
+    }
+    return parseRiffMarks (header, trailer);
 }
 } // namespace neptune::core
