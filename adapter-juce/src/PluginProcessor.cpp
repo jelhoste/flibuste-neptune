@@ -207,6 +207,22 @@ NeptuneProcessor::InstrumentStatus NeptuneProcessor::instrumentStatus (int track
     return status_[static_cast<std::size_t> (juce::jlimit (0, neptune::core::mixer::numTracks - 1, track))];
 }
 
+std::string NeptuneProcessor::loadSummary() const
+{
+    std::string out;
+    const juce::ScopedLock lock (instrumentLock_);
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+    {
+        const auto& track = mixer_.tracks[static_cast<std::size_t> (t)];
+        if (! track.active) continue;
+        const auto& st = status_[static_cast<std::size_t> (t)];
+        const std::string name = track.strip.name.empty() ? "Track " + std::to_string (t + 1) : track.strip.name;
+        if (st.kind == InstrumentStatus::Kind::Loading) out += (out.empty() ? "" : "   |   ") + std::string ("Loading ") + name + " " + std::to_string (st.done) + "/" + std::to_string (st.total);
+        else if (st.kind == InstrumentStatus::Kind::Error) out += (out.empty() ? "" : "   |   ") + name + ": " + st.error;
+    }
+    return out;
+}
+
 void NeptuneProcessor::setStatus (int track, InstrumentStatus s)
 {
     const juce::ScopedLock lock (instrumentLock_);

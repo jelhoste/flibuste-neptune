@@ -343,6 +343,7 @@ public:
     void uiEndGesture() { undo_.endGesture(); }
     InstrumentStatus instrumentStatus() const { return instrumentStatus (selectedTrack()); }
     InstrumentStatus instrumentStatus (int track) const;
+    std::string loadSummary() const;   // pistes en chargement (avancement) ou en erreur ; vide quand tout est prêt
     // Voix éteintes faute de données du disque (streaming) depuis le chargement du plugin.
     std::uint32_t streamUnderruns() const noexcept { return engine_.streamUnderruns(); }
     // Change à chaque modification (instrument de n'importe quelle piste, réglages du mixeur, sélection) : l'interface compare

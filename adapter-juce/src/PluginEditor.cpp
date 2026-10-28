@@ -898,6 +898,12 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     g.setColour (colour (Token::TextDim));   // numéro de version de développement, sous le titre : pour vérifier quelle version tourne
     g.setFont (juce::FontOptions (10.0f));
     g.drawText (neptune::core::version::kString, juce::Rectangle<int> (32, 66, 330, 12), juce::Justification::centredLeft);
+    if (const auto loading = processor_.loadSummary(); ! loading.empty())   // chargement des échantillons en cours (ou raté) : par piste, pour ne pas jouer trop tôt
+    {
+        g.setColour (colour (Token::Accent));
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.drawText (juce::String::fromUTF8 (loading.c_str()), juce::Rectangle<int> (32, 80, lw_ - 64, 18), juce::Justification::centredLeft, true);
+    }
 
     if (showProbe_)
     {
