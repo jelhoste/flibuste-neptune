@@ -15,7 +15,7 @@ namespace neptune::core::mapping
 // d'un même Groupe nommé (ou sans Groupe). Chaque combinaison présente dans l'instrument est une vue.
 struct View
 {
-    enum class Category { Attack, First, Legato, Release } category = Category::Attack;
+    enum class Category { Attack, First, Legato, Release, Continuous } category = Category::Attack;
     std::string group; // "" = zones sans Groupe
     bool accepts (const ZoneDescription&) const noexcept;
     bool operator== (const View& o) const noexcept { return category == o.category && group == o.group; }

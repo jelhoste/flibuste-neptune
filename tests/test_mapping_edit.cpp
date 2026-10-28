@@ -50,15 +50,25 @@ TEST_CASE ("places group round-robin alternates and respect the view")
     CHECK (places (d, View { View::Category::Attack, "pedal" }).size() == 1);
     CHECK (places (d, View { View::Category::Attack, "absent" }).empty());
     const auto vs = views (d);
-    REQUIRE (vs.size() == 5); // les quatre déclenchements sans Groupe (même vides), puis le Groupe « pedal »
+    REQUIRE (vs.size() == 6); // les cinq déclenchements sans Groupe (même vides), puis le Groupe « pedal »
     CHECK (vs[0] == View {});
     CHECK (vs[1].category == View::Category::First);
     CHECK (vs[2].category == View::Category::Legato);
     CHECK (vs[3].category == View::Category::Release);
-    CHECK (vs[4].group == "pedal");
+    CHECK (vs[4].category == View::Category::Continuous);
+    CHECK (vs[5].group == "pedal");
     CHECK (places (d, vs[1]).empty());   // « premier » : vue vierge
-    // un instrument vide a toujours ses quatre tables
-    CHECK (views (InstrumentDescription {}).size() == 4);
+    // un instrument vide a toujours ses cinq tables
+    CHECK (views (InstrumentDescription {}).size() == 5);
+    // une zone placée dans la table « Continu » devient un son continu, et inversement
+    {
+        const auto c = assignToView (d, { 0 }, View { View::Category::Continuous, {} }, 60);
+        CHECK (c.zones[0].trigger == TriggerCondition::Continuous);
+        CHECK_FALSE (c.zones[0].onRelease);
+        CHECK (viewOf (c.zones[0]).category == View::Category::Continuous);
+        const auto back = assignToView (c, { 0 }, View { View::Category::Attack, {} }, 60);
+        CHECK (back.zones[0].trigger == TriggerCondition::Always);
+    }
 }
 
 TEST_CASE ("assigning zones to a view sets the note range and the trigger")

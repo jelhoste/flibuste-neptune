@@ -15,6 +15,7 @@ View viewOf (const ZoneDescription& z) noexcept
     if (z.onRelease) v.category = View::Category::Release;
     else if (z.trigger == TriggerCondition::First) v.category = View::Category::First;
     else if (z.trigger == TriggerCondition::Legato) v.category = View::Category::Legato;
+    else if (z.trigger == TriggerCondition::Continuous) v.category = View::Category::Continuous;
     return v;
 }
 
@@ -23,14 +24,14 @@ bool View::accepts (const ZoneDescription& z) const noexcept { return viewOf (z)
 std::vector<View> views (const InstrumentDescription& d)
 {
     std::set<std::pair<std::string, int>> present;
-    for (const auto c : { View::Category::Attack, View::Category::First, View::Category::Legato, View::Category::Release })
+    for (const auto c : { View::Category::Attack, View::Category::First, View::Category::Legato, View::Category::Release, View::Category::Continuous })
         present.insert ({ std::string(), static_cast<int> (c) });
     for (const auto& z : d.zones)
     {
         const auto v = viewOf (z);
         present.insert ({ v.group, static_cast<int> (v.category) });
     }
-    // sans Groupe d'abord (ordre : attaque, premier, legato, relâchement), puis chaque Groupe
+    // sans Groupe d'abord (ordre : attaque, premier, legato, relâchement, continu), puis chaque Groupe
     std::vector<View> out;
     for (const auto& p : present)
     {
@@ -54,8 +55,8 @@ InstrumentDescription assignToView (const InstrumentDescription& base, const std
         z.velLow = 1;
         z.velHigh = 127;
         z.onRelease = view.category == View::Category::Release;
-        if (z.trigger != TriggerCondition::Continuous || z.onRelease)   // un son continu garde son type (la vue Attaque le montre avec les attaques)
-            z.trigger = view.category == View::Category::First ? TriggerCondition::First : view.category == View::Category::Legato ? TriggerCondition::Legato : TriggerCondition::Always;
+        z.trigger = view.category == View::Category::First ? TriggerCondition::First : view.category == View::Category::Legato ? TriggerCondition::Legato
+                  : view.category == View::Category::Continuous ? TriggerCondition::Continuous : TriggerCondition::Always;
         z.group = view.group;
         ++offset;
     }

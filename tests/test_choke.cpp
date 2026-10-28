@@ -174,7 +174,7 @@ TEST_CASE ("places and layer fades keep different trigger conditions apart")
     d.zones = { a, b };
     // deux vues distinctes (Attaque / Legato) : jamais mélangées, donc jamais en « chevauchement » ni en round-robin
     const auto vs = mapping::views (d);
-    REQUIRE (vs.size() == 4);   // les quatre tables sont toujours là : attaque, premier, legato, relâchement
+    REQUIRE (vs.size() == 5);   // les cinq tables sont toujours là : attaque, premier, legato, relâchement, continu
     CHECK (vs[2].category == mapping::View::Category::Legato);
     CHECK (mapping::places (d, vs[0]).size() == 1);
     CHECK (mapping::places (d, vs[1]).empty());

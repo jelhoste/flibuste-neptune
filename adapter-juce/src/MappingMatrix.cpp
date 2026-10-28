@@ -45,10 +45,11 @@ MappingMatrix::MappingMatrix (const theme::Palette& palette, const i18n::Transla
     categoryBox_.addItem (text ("trig.first"), 2);
     categoryBox_.addItem (text ("trig.legato"), 3);
     categoryBox_.addItem (text ("trig.release"), 4);
+    categoryBox_.addItem (text ("trig.continuous"), 5);
     categoryBox_.setSelectedId (1, juce::dontSendNotification);
     categoryBox_.onChange = [this]
     {
-        view_.category = static_cast<mapping::View::Category> (juce::jlimit (1, 4, categoryBox_.getSelectedId()) - 1);
+        view_.category = static_cast<mapping::View::Category> (juce::jlimit (1, 5, categoryBox_.getSelectedId()) - 1);
         rebuildPlaces();
         repaint();
     };
