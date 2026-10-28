@@ -264,7 +264,7 @@ public:
     void releaseKeys()
     {
         auto& o = owner_;
-        if (o.track_ >= 0)
+        if (true)   // aussi dans la Façade globale (piste -1) : ses claviers jouent par le moteur
         {
             for (const auto& kv : pressed_)
                 if (const auto* w = o.facade_.find (kv.second.first)) noteOff (*w, kv.second.second);
@@ -736,7 +736,7 @@ private:
     void keyDown (const juce::MouseEvent& e, const fc::Widget& w)
     {
         const int key = keyAtPoint (w, toCanvas (e.position));
-        if (key < 0 || owner_.track_ < 0) return;
+        if (key < 0) return;
         if (w.hold != 0 || e.mods.isShiftDown())
         {
             auto& keys = latched_[w.id];
@@ -1253,10 +1253,10 @@ private:
             {
                 bool on = false;
                 if (w.source == 0) on = linked && n >= 0.5f;
-                else if (o.track_ >= 0)
+                else
                 {
                     if (w.source == 1) on = (o.processor_.heldChannelWordAny (w.channel - 1, 0) | o.processor_.heldChannelWordAny (w.channel - 1, 1)) != 0;   // le canal, quelle que soit la piste qui le joue
-                    else on = (o.processor_.heldKeyWord (o.track_, 0) | o.processor_.heldKeyWord (o.track_, 1)) != 0;
+                    else if (o.track_ >= 0) on = (o.processor_.heldKeyWord (o.track_, 0) | o.processor_.heldKeyWord (o.track_, 1)) != 0;
                 }
                 const auto* style = w.style != 0 ? o.facade_.findStyle (w.style) : nullptr;
                 const bool unlinked = w.source == 0 && ! linked;
@@ -1288,7 +1288,6 @@ private:
                                               kstyle != nullptr ? picture (kstyle->keyBlack) : juce::Image(), kstyle != nullptr ? picture (kstyle->keyBlackOn) : juce::Image() };
                 const auto litColour = kstyle != nullptr && ! kstyle->keyLit.empty() ? parseColour (kstyle->keyLit, o.colour (Token::Accent)) : o.colour (Token::Accent);
                 std::uint64_t held[2] = { 0, 0 };
-                if (o.track_ >= 0)
                 {
                     held[0] = o.processor_.heldChannelWordAny (w.channel - 1, 0);   // les notes du canal, quelle que soit la piste qui les joue
                     held[1] = o.processor_.heldChannelWordAny (w.channel - 1, 1);
