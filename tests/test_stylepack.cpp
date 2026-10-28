@@ -167,3 +167,50 @@ TEST_CASE ("style pack: style.json carries text, slicing, pointer angles and key
     CHECK (panel.sliceScale == 150);
     CHECK (pack.warnings.empty());
 }
+
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+TEST_CASE ("style pack: the two organ packs shipped in assets/ are valid and complete")
+{
+    namespace fs = std::filesystem;
+    const fs::path assets = fs::path (__FILE__).parent_path().parent_path() / "assets" / "style-packs";
+    for (const char* id : { "organ-wood-brass", "organ-flat-modern" })
+    {
+        const fs::path root = assets / id;
+        if (! fs::exists (root)) { SUCCEED ("assets not available"); continue; }
+        std::map<std::string, std::string> files;
+        for (const auto& e : fs::recursive_directory_iterator (root))
+        {
+            if (! e.is_regular_file()) continue;
+            std::ifstream in (e.path(), std::ios::binary);
+            std::stringstream text;
+            text << in.rdbuf();
+            files[fs::relative (e.path(), root).generic_string()] = text.str();
+        }
+        const auto pack = run (id, files);
+        INFO (id);
+        CHECK (pack.warnings.empty());
+        CHECK (pack.styles.size() == 10);
+        for (const auto& s : pack.styles)
+        {
+            INFO (s.folder);
+            using neptune::core::facade::ImageStyle;
+            // off et on vont par deux ; curseurs : rail et poignée ; clavier : quatre touches ; potard : corps et aiguille
+            CHECK (s.style.off.empty() == s.style.on.empty());
+            CHECK (s.style.track.empty() == s.style.handle.empty());
+            CHECK (s.style.body.empty() == s.style.pointer.empty());
+            CHECK ((! s.style.off.empty() || ! s.style.track.empty() || ! s.style.body.empty() || ! s.style.keyWhite.empty() || ! s.style.frame.empty()));
+            if (s.folder == "keys") CHECK ((! s.style.keyWhite.empty() && ! s.style.keyWhiteOn.empty() && ! s.style.keyBlack.empty() && ! s.style.keyBlackOn.empty()));
+            if (s.folder == "frame") CHECK (! s.style.frame.empty());
+        }
+        // aucun SVG ne contient ce que le dessin de JUCE ne sait pas faire
+        for (const auto& [name, text] : files)
+        {
+            if (name.size() < 4 || name.substr (name.size() - 4) != ".svg") continue;
+            INFO (name);
+            for (const char* banned : { "<text", "<filter", "<style", "<image", "<mask", "<pattern", "<script" }) CHECK (text.find (banned) == std::string::npos);
+        }
+    }
+}

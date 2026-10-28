@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="300" viewBox="0 0 24 300">
+<defs>
+<linearGradient id="wood" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5a361c"/><stop offset="0.5" stop-color="#43280f"/><stop offset="1" stop-color="#2e1a0b"/></linearGradient>
+<linearGradient id="brass" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#f6e2a0"/><stop offset="0.35" stop-color="#d4ab52"/><stop offset="0.7" stop-color="#a37d2c"/><stop offset="1" stop-color="#6e5218"/></linearGradient>
+</defs>
+<rect x="0.75" y="0.75" width="22.5" height="298.5" rx="11" fill="url(#wood)" stroke="url(#brass)" stroke-width="1.5"/>
+<rect x="9" y="8" width="6" height="284" rx="3" fill="#0f0702"/>
+<rect x="15" y="8" width="1.2" height="284" fill="#8a6038" opacity="0.7"/>
+</svg>

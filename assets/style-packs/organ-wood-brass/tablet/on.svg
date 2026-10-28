@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60" viewBox="0 0 180 60">
+<defs>
+<linearGradient id="wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#74492a"/><stop offset="0.5" stop-color="#5a3820"/><stop offset="1" stop-color="#40260f"/></linearGradient>
+<linearGradient id="brass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3c0"/><stop offset="0.35" stop-color="#f0c862"/><stop offset="0.7" stop-color="#c99a34"/><stop offset="1" stop-color="#8a6a20"/></linearGradient>
+<linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff8e0"/><stop offset="1" stop-color="#efe2b8"/></linearGradient>
+</defs>
+<rect x="5" y="6" width="174" height="52" rx="9" fill="#000000" opacity="0.4"/>
+<rect x="2" y="1" width="176" height="56" rx="9" fill="url(#wood)" stroke="#170c04" stroke-width="2"/>
+<path transform="translate(0 3)" d="M6 3.7 Q20.0 5.0 34.0 3.7 Q48.0 2.4 62.0 3.7 Q76.0 5.0 90.0 3.7 Q104.0 2.4 118.0 3.7 Q132.0 5.0 146.0 3.7 Q160.0 2.4 174.0 3.7" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<path transform="translate(0 3)" d="M6 11.1 Q20.0 8.8 34.0 10.4 Q48.0 13.4 62.0 10.4 Q76.0 8.8 90.0 10.4 Q104.0 13.4 118.0 10.4 Q132.0 8.8 146.0 10.4 Q160.0 13.4 174.0 10.4" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<path transform="translate(0 3)" d="M6 18.6 Q20.0 19.4 34.0 18.9 Q48.0 17.8 62.0 18.9 Q76.0 19.4 90.0 18.9 Q104.0 17.8 118.0 18.9 Q132.0 19.4 146.0 18.9 Q160.0 17.8 174.0 18.9" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<path transform="translate(0 3)" d="M6 26.0 Q20.0 24.2 34.0 25.6 Q48.0 27.8 62.0 25.6 Q76.0 24.2 90.0 25.6 Q104.0 27.8 118.0 25.6 Q132.0 24.2 146.0 25.6 Q160.0 27.8 174.0 25.6" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<path transform="translate(0 3)" d="M6 33.4 Q20.0 36.2 34.0 34.1 Q48.0 30.6 62.0 34.1 Q76.0 36.2 90.0 34.1 Q104.0 30.6 118.0 34.1 Q132.0 36.2 146.0 34.1 Q160.0 30.6 174.0 34.1" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<path transform="translate(0 3)" d="M6 40.9 Q20.0 39.6 34.0 40.9 Q48.0 42.2 62.0 40.9 Q76.0 39.6 90.0 40.9 Q104.0 42.2 118.0 40.9 Q132.0 39.6 146.0 40.9 Q160.0 42.2 174.0 40.9" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<path transform="translate(0 3)" d="M6 48.3 Q20.0 50.6 34.0 47.6 Q48.0 46.0 62.0 47.6 Q76.0 50.6 90.0 47.6 Q104.0 46.0 118.0 47.6 Q132.0 50.6 146.0 47.6 Q160.0 46.0 174.0 47.6" fill="none" stroke="#150a03" stroke-width="1" opacity="0.35"/>
+<rect x="8" y="7" width="164" height="44" rx="5" fill="none" stroke="url(#brass)" stroke-width="3"/>
+<rect x="14" y="12" width="152" height="34" rx="3" fill="url(#plate)" stroke="#6b5a36" stroke-width="1"/>
+<rect x="15" y="13" width="150" height="3" rx="1.5" fill="#ffffff" opacity="0.55"/>
+<rect x="20" y="42" width="140" height="2" rx="1" fill="#ffb347"/>
+<circle cx="7" cy="29" r="3.5" fill="url(#brass)" stroke="#4a3610" stroke-width="0.8"/><line x1="5" y1="28" x2="9" y2="30" stroke="#3a2a0c" stroke-width="1"/>
+<circle cx="173" cy="29" r="3.5" fill="url(#brass)" stroke="#4a3610" stroke-width="0.8"/><line x1="171" y1="28" x2="175" y2="30" stroke="#3a2a0c" stroke-width="1"/>
+</svg>

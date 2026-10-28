@@ -1,0 +1,10 @@
+{
+  "name": "Wood panel with brass edge",
+  "slice": [
+    20,
+    25,
+    20,
+    25
+  ],
+  "slice_scale": 100
+}

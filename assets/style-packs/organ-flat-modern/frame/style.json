@@ -1,0 +1,10 @@
+{
+  "name": "Flat panel",
+  "slice": [
+    20,
+    25,
+    20,
+    25
+  ],
+  "slice_scale": 100
+}

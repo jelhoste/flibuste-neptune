@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+<defs>
+<radialGradient id="wood" cx="0.4" cy="0.35" r="0.8"><stop offset="0" stop-color="#7a4e2c"/><stop offset="1" stop-color="#2e1a0b"/></radialGradient>
+<linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff3c0"/><stop offset="0.35" stop-color="#f0c862"/><stop offset="0.7" stop-color="#c99a34"/><stop offset="1" stop-color="#8a6a20"/></linearGradient>
+<radialGradient id="face" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="#fff8e0"/><stop offset="1" stop-color="#efe2b8"/></radialGradient>
+</defs>
+<circle cx="54" cy="56" r="45" fill="#000000" opacity="0.4"/>
+<circle cx="50" cy="50" r="46" fill="url(#wood)" stroke="#170c04" stroke-width="2"/>
+<circle cx="50" cy="50" r="40" fill="none" stroke="url(#brass)" stroke-width="5"/>
+<circle cx="50" cy="50" r="32" fill="url(#face)" stroke="#6b5a36" stroke-width="1"/>
+<path d="M26 40 Q50 22 74 40" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+<circle cx="50" cy="50" r="35.5" fill="none" stroke="#ffb347" stroke-width="1.6"/>
+</svg>

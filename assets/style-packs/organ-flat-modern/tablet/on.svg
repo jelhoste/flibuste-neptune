@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60" viewBox="0 0 180 60">
+<rect x="2" y="2" width="176" height="56" rx="12" fill="{{card}}" stroke="{{accent}}" stroke-width="3"/>
+<rect x="14" y="48" width="152" height="4" rx="2" fill="{{accent}}"/>
+</svg>

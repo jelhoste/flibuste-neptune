@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="36" viewBox="0 0 80 36">
+<rect x="2" y="2" width="76" height="32" rx="10" fill="{{accent}}"/>
+<line x1="14" y1="12" x2="66" y2="12" stroke="#ffffff" stroke-width="2" opacity="0.5"/><line x1="14" y1="18" x2="66" y2="18" stroke="#ffffff" stroke-width="2" opacity="0.5"/><line x1="14" y1="24" x2="66" y2="24" stroke="#ffffff" stroke-width="2" opacity="0.5"/></svg>

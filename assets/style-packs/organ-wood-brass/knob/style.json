@@ -1,0 +1,11 @@
+{
+  "name": "Brass knob",
+  "pointer_angles": [
+    -135,
+    135
+  ],
+  "pivot": [
+    50,
+    50
+  ]
+}

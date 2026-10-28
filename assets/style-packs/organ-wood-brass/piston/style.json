@@ -1,0 +1,9 @@
+{
+  "name": "Brass piston",
+  "text": {
+    "colour": "#2b1b0b",
+    "size": 30,
+    "position": "center",
+    "bold": true
+  }
+}

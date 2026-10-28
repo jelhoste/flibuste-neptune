@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<defs>
+<radialGradient id="b" cx="0.38" cy="0.3" r="0.85"><stop offset="0" stop-color="#fff3c0"/><stop offset="0.5" stop-color="#d4ab52"/><stop offset="1" stop-color="#7a5a1c"/></radialGradient>
+<radialGradient id="w" cx="0.4" cy="0.35" r="0.8"><stop offset="0" stop-color="#7a4e2c"/><stop offset="1" stop-color="#2e1a0b"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="31" fill="url(#w)" stroke="#170c04" stroke-width="1.5"/>
+<line x1="11.49" y1="52.51" x2="13.97" y2="50.03" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="4.42" y1="40.96" x2="7.75" y2="39.88" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="3.36" y1="27.46" x2="6.81" y2="28.01" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="8.54" y1="14.95" x2="11.37" y2="17.01" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="18.83" y1="6.16" x2="20.42" y2="9.28" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="32.00" y1="3.00" x2="32.00" y2="6.50" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="45.17" y1="6.16" x2="43.58" y2="9.28" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="55.46" y1="14.95" x2="52.63" y2="17.01" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="60.64" y1="27.46" x2="57.19" y2="28.01" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="59.58" y1="40.96" x2="56.25" y2="39.88" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><line x1="52.51" y1="52.51" x2="50.03" y2="50.03" stroke="#f3e6c4" stroke-width="1.4" opacity="0.8"/><circle cx="32" cy="32" r="21" fill="url(#b)" stroke="#4a3610" stroke-width="1.2"/>
+<circle cx="32" cy="32" r="14" fill="none" stroke="#8a6a20" stroke-width="0.8"/>
+</svg>
