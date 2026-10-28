@@ -560,7 +560,7 @@ private:
             if (index < 0) { warn ("keyboard \"" + kb.name + "\": more than " + std::to_string (kModulators) + " switches, stop \"" + name + "\" not imported"); return; }
             mask |= static_cast<ModMask> (1u) << index;
         }
-        if (! windchestMask (keyboard, kb, windchestOf (section), mask)) { warn ("keyboard \"" + kb.name + "\": more than " + std::to_string (kModulators) + " switches, stop \"" + name + "\" not imported"); return; }
+        if (ini_.getInt (section, "NumberOfRanks", 0) == 0 && ! windchestMask (keyboard, kb, windchestOf (section), mask)) { warn ("keyboard \"" + kb.name + "\": more than " + std::to_string (kModulators) + " switches, stop \"" + name + "\" not imported"); return; }
         std::string group = name;
         for (int n = 2; usedGroups_[keyboard].count (group) != 0; ++n) group = name + " (" + std::to_string (n) + ")";
         usedGroups_[keyboard].insert (group);
@@ -598,11 +598,21 @@ private:
                 const double rankAmp = ini_.getInt (rankSection, "AmplitudeLevel", 100) / 100.0;
                 const double tuning = organTuning_ + stopTuning + ini_.getDouble (rankSection, "PitchTuning", 0.0);
                 const double gain = organGain_ + stopGain + ini_.getDouble (rankSection, "Gain", 0.0);
+                // le sommier d'un jeu à rangs est celui de chaque rang : ses boîtes et tremblants s'appliquent aux zones de ce rang
+                ModMask rankMask = 0;
+                if (! windchestMask (keyboard, kb, ini_.getInt (rankSection, "WindchestGroup", windchestOf (section)), rankMask))
+                {
+                    warn ("keyboard \"" + kb.name + "\": more than " + std::to_string (kModulators) + " switches, a rank of stop \"" + name + "\" has no box or tremulant");
+                    rankMask = 0;
+                }
+                const std::size_t before = kb.instrument.zones.size();
                 for (int j = 0; j < pipeCount; ++j)
                 {
                     attackCheck (rankSection, firstPipe + j);
                     addPipe (kb, info, rankSection, firstPipe + j, rankFirstKey + j, group, base * rankAmp, tuning, gain);
                 }
+                if (rankMask != 0)
+                    for (std::size_t z = before; z < kb.instrument.zones.size(); ++z) kb.instrument.zones[z].modulators |= rankMask;
             }
         }
         else

@@ -540,7 +540,7 @@ TEST_CASE ("organ import: engine playback of the demo organ (only with NEPTUNE_D
     // tire tous les jeux (modulateurs nommés) de chaque clavier
     for (std::size_t k = 0; k < r.keyboards.size(); ++k)
         for (std::size_t i = 0; i < r.keyboards[k].instrument.modulators.size(); ++i)
-            if (! r.keyboards[k].instrument.modulators[i].name.empty() && r.keyboards[k].instrument.modulators[i].name.find ("/") == std::string::npos)
+            if (! r.keyboards[k].instrument.modulators[i].name.empty() && r.keyboards[k].instrument.modulators[i].name.find ("/") == std::string::npos && ! r.keyboards[k].instrument.modulators[i].continuous)
                 params.set (mixer::modulatorParam (1 + static_cast<int> (k), static_cast<int> (i)), 100.0);
     std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
     std::vector<float*> ptrs;
@@ -614,4 +614,137 @@ TEST_CASE ("organ import: expression boxes and tremulants become continuous modu
     for (const auto& w : r.facade.widgets) if (w.type == facade::WidgetType::Slider && w.param == mixer::modulatorParam (0, boxIndex)) slider = true;
     CHECK (slider);
     CHECK_FALSE (hasWarning (r, "expression box"));
+}
+
+TEST_CASE ("organ import: box level on the sustain and on the release tail of the demo organ (only with NEPTUNE_DEMO_ORGAN_DIR)", "[.dump]")
+{
+    const char* dir = std::getenv ("NEPTUNE_DEMO_ORGAN_DIR");
+    if (dir == nullptr) return;
+    std::filesystem::path odf;
+    for (const auto& e : std::filesystem::recursive_directory_iterator (dir))
+        if (e.path().extension() == ".organ") { odf = e.path(); break; }
+    Options opt;
+    opt.firstTrack = 1;
+    const auto r = importOrganFile (odf, opt);
+    REQUIRE (r.ok);
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    SampleCache cache;
+    for (std::size_t k = 0; k < r.keyboards.size(); ++k)
+    {
+        const int t = 1 + static_cast<int> (k);
+        const auto built = buildInstrument (r.keyboards[k].instrument, nullptr, &cache);
+        REQUIRE (built != nullptr);
+        engine.setTrackActive (t, true);
+        engine.setTrackType (t, TrackType::Sampler);
+        engine.publishInstrument (t, built);
+        mixer::StripSettings strip;
+        strip.midiChannel = r.keyboards[k].midiChannel;
+        engine.setTrackSettings (t, strip);
+    }
+    engine.setRouter (r.router);
+    for (const auto& [id, v] : r.initialValues) params.set (id, v);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    float peak = 0.0f;
+    auto run = [&] (int blocks)
+    {
+        for (int b = 0; b < blocks; ++b)
+        {
+            engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256);
+            for (const auto& buf : bufs) for (const float s : buf) peak = std::max (peak, std::abs (s));
+        }
+    };
+    for (std::size_t k = 1; k < r.keyboards.size(); ++k)
+    {
+        const auto& mods = r.keyboards[k].instrument.modulators;
+        int box = -1;
+        for (int i = 0; i < kModulators; ++i) if (mods[static_cast<std::size_t> (i)].name.rfind ("Box", 0) == 0) box = i;
+        // un seul jeu tiré : le premier modulateur nommé qui n'est ni continu ni un interrupteur général
+        int stop = -1;   // un jeu dont les zones dépendent de la boîte
+        for (const auto& z : r.keyboards[k].instrument.zones)
+            if (stop < 0 && box >= 0 && ((z.modulators >> box) & 1u) != 0)
+                for (int i = 0; i < kModulators; ++i)
+                    if (stop < 0 && ((z.modulators >> i) & 1u) != 0 && ! mods[static_cast<std::size_t> (i)].continuous) stop = i;
+        if (stop < 0 && box >= 0)
+            for (const auto& [name, g] : r.keyboards[k].instrument.groups)
+                if (stop < 0 && ((g.modulators >> box) & 1u) != 0 && name.find ("noise") == std::string::npos)
+                    for (int i = 0; i < kModulators; ++i)
+                        if (stop < 0 && ((g.modulators >> i) & 1u) != 0 && ! mods[static_cast<std::size_t> (i)].continuous && mods[static_cast<std::size_t> (i)].name.find ("Sounds") == std::string::npos) stop = i;
+        if (box < 0 || stop < 0) { std::printf ("BOX %s: no box (%d) or stop (%d)\n", r.keyboards[k].name.c_str(), box, stop); continue; }
+        const int t = 1 + static_cast<int> (k);
+        params.set (mixer::modulatorParam (t, stop), 100.0);
+        if (std::getenv ("WARMUP") != nullptr) { run (4); engine.noteOnKeyboard (-1, r.keyboards[k].midiChannel - 1, 62, 1.0f); run (20); engine.noteOffKeyboard (-1, r.keyboards[k].midiChannel - 1, 62); run (300); }
+        for (const double level : { 0.0, 100.0, 0.0, 100.0 })
+        {
+            params.set (mixer::modulatorParam (t, box), level);
+            run (4);
+            engine.noteOnKeyboard (-1, r.keyboards[k].midiChannel - 1, 60, 1.0f);
+            if (std::getenv ("BLOCKS") != nullptr) { std::printf ("  blocks:"); for (int b = 0; b < 14; ++b) { peak = 0.0f; run (1); std::printf (" %.4f", static_cast<double> (peak)); } std::printf ("\n"); }
+            for (int s = 0; s < 6; ++s) { peak = 0.0f; run (10); std::printf ("  t=%d peak=%.4f voices=%d modsOn=%d lastPicks=%d/%d\n", s * 10, static_cast<double> (peak), engine.activeVoices (t), engine.modsOn (t), engine.lastPicks (t), engine.lastKeyZones (t)); }
+            peak = 0.0f;
+            run (40);
+            const float sustain = peak;
+            engine.noteOffKeyboard (-1, r.keyboards[k].midiChannel - 1, 60);
+            peak = 0.0f;
+            run (40);
+            const float tail = peak;
+            run (800);
+            std::printf ("BOX %s box=%g stop=%s sustain=%.4f tail=%.4f\n", r.keyboards[k].name.c_str(), level, mods[static_cast<std::size_t> (stop)].name.c_str(), static_cast<double> (sustain), static_cast<double> (tail));
+        }
+    }
+}
+
+
+TEST_CASE ("organ import: the first note after idle only plays the stops that are pulled (modulators are fresh on an idle Sampler track)")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Idle\nNumberOfManuals=1\nHasPedals=N\n"
+        "[Manual001]\nName=Great\nNumberOfStops=2\nStop001=1\nStop002=2\nNumberOfLogicalKeys=1\nNumberOfAccessibleKeys=1\nFirstAccessibleKeyMIDINoteNumber=60\n"
+        "[Stop001]\nName=On\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\n"
+        "[Stop002]\nName=Off\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    auto& inst = r.keyboards[0].instrument;
+    REQUIRE (inst.zones.size() == 2);
+    auto sine = std::make_shared<SampleData>();
+    sine->channels = 1; sine->frames = 48000; sine->sampleRate = 48000.0;
+    sine->pcm32.assign (48000, 0.5f);
+    auto instrument = std::make_shared<Instrument>();
+    for (std::size_t i = 0; i < inst.zones.size(); ++i)
+    {
+        auto z = makeFullKeyboardZone (sine, 60, PlayMode::OneShot);
+        z.modMask = inst.groups.at (inst.zones[i].group).modulators;
+        instrument->zones.push_back (std::move (z));
+    }
+    ParameterSet params;
+    REQUIRE (sampler::addParams (params));
+    REQUIRE (probe::buildPool (params, mixer::numTracks));
+    REQUIRE (mixer::addParams (params, mixer::numTracks, mixer::numBuses));
+    Engine engine;
+    engine.attachParameters (&params);
+    engine.prepare (48000.0, 256);
+    engine.setTrackActive (0, true);
+    engine.setTrackType (0, TrackType::Sampler);
+    engine.publishInstrument (0, instrument);
+    std::vector<std::vector<float>> bufs (4, std::vector<float> (256, 0.0f));
+    std::vector<float*> ptrs;
+    for (auto& b : bufs) ptrs.push_back (b.data());
+    auto run = [&] (int blocks) { for (int b = 0; b < blocks; ++b) engine.process (ptrs.data(), static_cast<int> (ptrs.size()), 256); };
+    // « On » tiré, « Off » repoussé : les paramètres sont réglés pendant que la piste est au repos
+    for (const auto& [id, v] : r.initialValues) params.set (id, v);
+    params.set (mixer::modulatorParam (0, 0), 100.0);
+    params.set (mixer::modulatorParam (0, 1), 0.0);
+    run (4);
+    engine.noteOn (0, 60, 1.0f);
+    CHECK (engine.lastPicks (0) == 1);   // seul « On » est choisi dès la première note
 }

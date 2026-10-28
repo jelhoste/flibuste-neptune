@@ -1163,6 +1163,13 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
                         : organTrack ? t.organ.heldKeys() == 0
                         : fmTrack ? t.fm.activeVoices() == 0
                         : synthTrack ? t.synth.activeVoices() == 0 : (t.slot.current() == nullptr || t.voices.activeVoices() == 0);
+        if (! audioInTrack && ! synthTrack && ! fmTrack && ! organTrack && idle)
+        {
+            // une piste Sampler au repos garde ses modulateurs à jour : la prochaine note (jeux tirés d'un orgue) les juge sur leur valeur actuelle, pas sur celle du dernier bloc joué
+            float mods[kModulators];
+            for (int k = 0; k < kModulators; ++k) mods[k] = static_cast<float> (param (t.idx.mod[static_cast<std::size_t> (k)], 100.0) / 100.0);
+            t.voices.setModulators (mods);
+        }
         if (wasSilent && idle && subtreeBusy_[static_cast<std::size_t> (ti)] == 0) { t.lastSend.fill (0.0f); continue; }
 
         std::fill (raw_.l.begin(), raw_.l.begin() + n, 0.0f);
