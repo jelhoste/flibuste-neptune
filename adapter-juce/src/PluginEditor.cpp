@@ -1,6 +1,8 @@
 #include "PluginEditor.h"
 #include "neptune/core/Version.h"
 #include "GlobalPresets.h"
+#include "OrganStylePacks.h"
+#include "StyleLibrary.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/Mixer.h"
@@ -588,6 +590,16 @@ void NeptuneEditor::importOrgan()
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), safe->text ("organ.no_odf"));
                 return;
             }
+        }
+        // les packs de styles d'orgue livrés avec Neptune : installés dans la bibliothèque s'ils n'y sont pas (les pages générées s'en habillent)
+        {
+            const auto library = stylelib::directory();
+            if (library != juce::File() && library.createDirectory().wasOk())
+                for (const auto& pack : organ_style_packs::kPacks)
+                {
+                    const auto target = library.getChildFile (juce::String (pack.id) + ".neptunestyle");
+                    if (! target.exists()) target.replaceWithData (pack.data, pack.size);
+                }
         }
         const auto result = safe->processor_.uiImportOrgan (std::filesystem::path (organFile.getFullPathName().toStdString()));
         juce::String message;

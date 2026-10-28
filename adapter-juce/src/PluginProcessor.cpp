@@ -775,6 +775,7 @@ neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::f
     opt.baseDir = organFile.parent_path();
     opt.firstTrack = first;
     opt.firstChannel = 1;
+    opt.stylePack = "organ-wood-brass";   // style par défaut des pages générées (bois et laiton)
     auto result = organimport::importOrganFile (organFile, opt);
     if (! result.ok) return result;
 

@@ -286,6 +286,29 @@ def main():
             for rel in sorted(files):
                 z.write(os.path.join(root, rel), rel)
         print(f'{pack_id}: {len(files)} files -> {os.path.relpath(archive)}')
+    write_header()
+
+
+def write_header():
+    """Les packs livrés avec Neptune, embarqués dans le plugin : installés dans la bibliothèque de styles au premier import d'orgue."""
+    lines = ['#pragma once', '// Généré par scripts/gen_organ_style_packs.py : ne pas modifier à la main.',
+             '// Les packs de styles d\'orgue livrés avec Neptune (archives .neptunestyle), installés dans la bibliothèque quand ils manquent.',
+             '#include <cstddef>', '', 'namespace organ_style_packs', '{', 'struct Pack { const char* id; const unsigned char* data; std::size_t size; };']
+    names = []
+    for pack_id in PACKS:
+        data = open(os.path.join(OUT, pack_id + '.neptunestyle'), 'rb').read()
+        ident = 'k' + ''.join(part.capitalize() for part in pack_id.split('-'))
+        names.append((pack_id, ident, len(data)))
+        lines.append(f'inline const unsigned char {ident}[] = {{')
+        for i in range(0, len(data), 24):
+            lines.append('    ' + ', '.join(str(b) for b in data[i:i + 24]) + ',')
+        lines.append('};')
+    lines.append('inline const Pack kPacks[] = {')
+    for pack_id, ident, size in names:
+        lines.append(f'    {{ "{pack_id}", {ident}, {size} }},')
+    lines += ['};', 'constexpr int kPackCount = %d;' % len(names), '}', '']
+    with open(os.path.join(HERE, '..', 'adapter-juce', 'src', 'OrganStylePacks.h'), 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
 
 
 if __name__ == '__main__':

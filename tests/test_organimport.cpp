@@ -1098,3 +1098,35 @@ TEST_CASE ("organ import: a manual whose element gives the width of only one key
     REQUIRE (keys != nullptr);
     CHECK (keys->w >= 400);
 }
+
+TEST_CASE ("organ import: generated pages wear the chosen style pack, and keep the original drawing without one")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Styled\nNumberOfManuals=1\nHasPedals=N\n"
+        "[Manual001]\nName=Great\nNumberOfStops=2\nStop001=1\nStop002=2\nNumberOfLogicalKeys=2\nNumberOfAccessibleKeys=2\nFirstAccessibleKeyMIDINoteNumber=48\n"
+        "[Stop001]\nName=One\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\n"
+        "[Stop002]\nName=Two\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\n";
+    namespace fc = neptune::core::facade;
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto plain = importOrgan (crlf (odf), opt);
+    REQUIRE (plain.ok);
+    for (const auto& w : plain.facade.widgets) CHECK (w.style == 0);
+    CHECK (plain.facade.styles.empty());
+
+    opt.stylePack = "organ-wood-brass";
+    auto styled = importOrgan (crlf (odf), opt);
+    REQUIRE (styled.ok);
+    int buttons = 0;
+    for (const auto& w : styled.facade.widgets)
+    {
+        if (w.type == fc::WidgetType::Button) { ++buttons; REQUIRE (w.style != 0); const auto* st = styled.facade.findStyle (w.style); REQUIRE (st != nullptr); CHECK (st->off == "pack:organ-wood-brass!tablet/off.svg"); CHECK (st->on == "pack:organ-wood-brass!tablet/on.svg"); }
+        if (w.type == fc::WidgetType::Keyboard) { const auto* st = styled.facade.findStyle (w.style); REQUIRE (st != nullptr); CHECK (st->keyWhite == "pack:organ-wood-brass!keys/key_white.svg"); }
+    }
+    CHECK (buttons == 2);
+    CHECK (styled.facade.styles.size() == 2);   // un style de plaquette et un de clavier, partagés par tous les boutons
+    // la dernière page (accouplements) a ses pistons et plaquettes habillés
+    const auto& last = styled.facade.pages.back();
+    for (const auto& w : last.widgets) if (w.type == fc::WidgetType::Action) CHECK (w.style != 0);
+}

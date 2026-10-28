@@ -61,6 +61,7 @@ struct Options
     std::filesystem::path baseDir;   // dossier d'où partent les chemins d'échantillons du fichier d'orgue
     int firstTrack = 0;              // la piste de Neptune qui recevra le premier clavier (les identifiants de paramètres en dépendent)
     int firstChannel = 1;            // canal MIDI du premier manuel ; les suivants prennent les canaux suivants, le pédalier le canal d'après
+    std::string stylePack;           // pack de styles d'images des pages de Façade générées (identifiant, ex. "organ-wood-brass") ; vide : dessin d'origine
     bool readSampleMarks = true;     // lire boucle et repère de relâchement dans les fichiers (faux : tests sans fichiers)
 };
 

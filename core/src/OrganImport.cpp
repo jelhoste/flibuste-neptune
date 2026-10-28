@@ -14,6 +14,7 @@
 
 #include "neptune/core/Mixer.h"
 #include "neptune/core/SampleMeta.h"
+#include "neptune/core/StylePack.h"
 
 namespace neptune::core::organimport
 {
@@ -305,7 +306,25 @@ private:
     void buildFacade()
     {
         namespace fc = neptune::core::facade;
-        constexpr int cols = 6, bw = 156, bh = 40, gap = 8, left = 12, top = 44;
+        constexpr int cols = 6, bw = 156, gap = 8, left = 12, top = 44;
+        const int bh = opt_.stylePack.empty() ? 40 : 52;   // les plaquettes du pack sont en 3:1
+        // Les pages générées s'habillent d'un pack de styles (s'il est installé : sinon Neptune garde son dessin d'origine) : un style par page et par sorte de contrôle.
+        auto packStyle = [this] (fc::Facade& page, const std::string& kind) -> int
+        {
+            if (opt_.stylePack.empty()) return 0;
+            const std::string name = "pack " + kind;
+            for (const auto& st : page.styles) if (st.name == name) return st.id;
+            auto ref = [this, &kind] (const char* file) { return neptune::core::stylepack::makeReference (opt_.stylePack, kind + "/" + file); };
+            fc::ImageStyle st;
+            st.id = page.freeStyleId();
+            st.name = name;
+            if (kind == "tablet" || kind == "piston") { st.off = ref ("off.svg"); st.on = ref ("on.svg"); st.textColour = "#2b1b0b"; st.textSize = kind == "tablet" ? 40 : 30; }
+            else if (kind == "slider-h") { st.track = ref ("track.svg"); st.handle = ref ("handle.svg"); }
+            else if (kind == "keys") { st.keyWhite = ref ("key_white.svg"); st.keyWhiteOn = ref ("key_white_on.svg"); st.keyBlack = ref ("key_black.svg"); st.keyBlackOn = ref ("key_black_on.svg"); st.keyLit = "#ffb347"; }
+            else return 0;
+            page.styles.push_back (st);
+            return st.id;
+        };
         fc::Facade main;
         std::vector<fc::Facade> pages;
         auto add = [] (fc::Facade& f, fc::WidgetType type, int x, int y, int w, int h) -> fc::Widget&
@@ -331,6 +350,7 @@ private:
                 ++boxes;
                 s.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), box.index);
                 s.text = box.name;
+                s.style = packStyle (page, "slider-h");
                 for (const auto& other : boxControls_)
                     if (other.key == box.key && other.keyboard != k) s.mirror.push_back (mixer::modulatorParam (opt_.firstTrack + static_cast<int> (other.keyboard), other.index));
             }
@@ -346,6 +366,7 @@ private:
                 auto& b = add (page, fc::WidgetType::Button, left + (n % cols) * (bw + gap), buttonTop + (n / cols) * (bh + gap), bw, bh);
                 b.param = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (k), index);
                 b.text = kb.instrument.modulators[static_cast<std::size_t> (index)].name;
+                b.style = packStyle (page, "tablet");
                 for (std::size_t other = 0; other < modulators_.size(); ++other)
                     if (other != k)
                         if (const auto it = modulators_[other].find (key); it != modulators_[other].end()) b.mirror.push_back (mixer::modulatorParam (opt_.firstTrack + static_cast<int> (other), it->second));
@@ -355,6 +376,7 @@ private:
             keys.channel = kb.midiChannel;
             keys.firstNote = 36;
             keys.hold = 0;
+            keys.style = packStyle (page, "keys");
             (k == 0 ? main : pages.emplace_back()) = std::move (page);
         }
         std::vector<fc::Facade> panelPages;
@@ -368,6 +390,7 @@ private:
             auto& b = add (last, fc::WidgetType::Button, left + (n % cols) * (bw + gap), top + (n / cols) * (bh + gap), bw, bh);
             b.param = id;
             b.text = label.substr (0, 40);
+            b.style = packStyle (last, "tablet");
             ++n;
         }
         int y = 300;
@@ -376,6 +399,7 @@ private:
         {
             auto& b = add (last, fc::WidgetType::Action, x, y + row * (bh + gap), 100, bh);
             b.actionMode = 1 + cmd;
+            b.style = packStyle (last, "piston");
         };
         int g = 0;
         for (int piston = 0; piston < combi::kPistons; ++piston)
