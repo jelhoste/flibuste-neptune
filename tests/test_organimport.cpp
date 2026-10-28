@@ -1048,3 +1048,30 @@ TEST_CASE ("organ import: panels become Facade pages with the same positions, im
     CHECK (hasWarning (r, "magic"));
     CHECK_FALSE (hasWarning (r, "graphical panels are not imported"));
 }
+
+TEST_CASE ("organ import: a panel that is only partly positioned is left to the generated pages, keyboards are drawn on top")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Mixed\nNumberOfManuals=1\nHasPedals=N\nNumberOfPanels=1\n"
+        "[Manual001]\nName=Great\nNumberOfStops=2\nStop001=1\nStop002=2\nNumberOfLogicalKeys=2\nNumberOfAccessibleKeys=2\nFirstAccessibleKeyMIDINoteNumber=48\n"
+        "[Stop001]\nName=One\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\n"
+        "[Stop002]\nName=Two\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\n"
+        "[Panel000]\nName=Auto\nNumberOfGUIElements=3\n"
+        "[Panel000Element001]\nType=Stop\nStop=1\nPositionX=10\nPositionY=10\n"
+        "[Panel000Element002]\nType=Stop\nStop=2\nDispDrawstopCol=1\nDispDrawstopRow=1\n"
+        "[Panel000Element003]\nType=GC\nPositionX=300\nPositionY=10\n"
+        "[Panel001]\nName=Placed\nNumberOfGUIElements=3\n"
+        "[Panel001Element001]\nType=Manual\nManual=1\nPositionX=0\nPositionY=0\nKey001Width=40\nKey002Width=40\n"
+        "[Panel001Element002]\nType=Stop\nStop=1\nPositionX=10\nPositionY=10\n"
+        "[Panel001Element003]\nType=Stop\nStop=2\nPositionX=60\nPositionY=10\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    namespace fc = neptune::core::facade;
+    CHECK (r.facade.name == "Placed");   // le panneau à moitié automatique n'a pas de page
+    REQUIRE (! r.facade.widgets.empty());
+    CHECK (r.facade.widgets.back().type == fc::WidgetType::Keyboard);   // le clavier est dessiné en dernier, donc dessus
+    CHECK (hasWarning (r, "place their elements automatically"));
+}

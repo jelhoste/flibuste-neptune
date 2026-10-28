@@ -570,6 +570,14 @@ private:
                     widget->style = styleFor (imageOn, imageOff);
                     widget->text = std::to_string (piston + 1);
                 }
+                else if (type == "gc")   // « General Cancel » : l'annulation générale
+                {
+                    auto* widget = addWidget (fc::WidgetType::Action, x, y, w, h);
+                    if (widget == nullptr) continue;
+                    widget->actionMode = 1 + combi::kCommandCancel;
+                    widget->style = styleFor (imageOn, imageOff);
+                    widget->text = label.empty() ? "GC" : label.substr (0, 20);
+                }
                 else if (type == "set")
                 {
                     auto* widget = addWidget (fc::WidgetType::Set, x, y, w, h);
@@ -584,8 +592,11 @@ private:
                 }
                 else unsupported.insert (type);
             }
-            if (anyAuto) ++autoLayout;
-            if (! page.widgets.empty()) out.push_back (std::move (page));
+            // les claviers par-dessus le reste : une image de panneau qui les recouvre les cacherait
+            std::stable_partition (page.widgets.begin(), page.widgets.end(), [] (const fc::Widget& w) { return w.type != fc::WidgetType::Keyboard; });
+            // un panneau dont une partie se range toute seule n'est pas reproduit à moitié : ses éléments restent aux pages générées
+            if (anyAuto) { ++autoLayout; continue; }
+            if (page.widgets.size() >= 2) out.push_back (std::move (page));
         }
         if (out.empty() && ini_.getInt ("Organ", "NumberOfPanels", 0) > 0) warn ("no graphical panel could be reproduced: the generated pages are used");
         if (autoLayout > 0) warn (std::to_string (autoLayout) + " panel(s) place their elements automatically (no PositionX/Y): left to the generated pages");
