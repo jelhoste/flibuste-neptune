@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 #include "neptune/core/Biquad.h"
@@ -392,4 +393,33 @@ TEST_CASE ("shaper: the analyzer display settings are hidden, not automatable an
     }
     CHECK (r.runner.params().get (shaper::anTime) == Approx (3.0));
     CHECK (r.runner.params().get (shaper::anMove) == Approx (0.0));
+}
+
+TEST_CASE ("shaper: a state saved and loaded into a new instance gives the same sound", "[shaper][state]")
+{
+    std::vector<float> noise (48000);
+    std::uint32_t seed = 12345u;
+    for (auto& s : noise) { seed = seed * 1664525u + 1013904223u; s = 0.3f * (static_cast<float> (seed >> 8) / 8388608.0f - 1.0f); }
+    for (const std::size_t first : { std::size_t { 8 }, std::size_t { 20 }, std::size_t { 50 } })
+    {
+        ShaperRig a;
+        auto& pa = a.runner.params();
+        for (std::size_t i = 0; i < first && i < pa.size(); ++i) pa.setNormalizedAt (i, 0.7);
+        const auto outA = a.play (noise);
+        // « sauvegarde » : la valeur de chaque paramètre ; « chargement » dans une autre instance, comme setStateInformation
+        ShaperRig b;
+        auto& pb = b.runner.params();
+        pb.resetAll();
+        for (std::size_t i = 0; i < pa.size(); ++i) pb.set (pa.spec (i).id, pa.getAt (i));
+        b.runner.reset();
+        const auto outB = b.play (noise);
+        double worst = 0.0;
+        // le premier bloc (256 échantillons) peut différer : l'instance A glisse de ses réglages d'origine vers les nouveaux (lissage des gains), l'instance chargée y est déjà
+        for (std::size_t i = 256; i < noise.size(); ++i) worst = std::max (worst, static_cast<double> (std::fabs (outA[i] - outB[i])));
+        INFO ("first " << first << " parameters at 70 %, worst difference " << worst);
+        CHECK (worst < 1.0e-6);
+        CHECK (a.latency() == b.latency());
+        for (std::size_t i = 0; i < pa.size(); ++i)
+            if (pa.getAt (i) != pb.getAt (i)) { INFO ("parameter " << pa.spec (i).name << " " << pa.getAt (i) << " vs " << pb.getAt (i)); CHECK(false); }
+    }
 }
