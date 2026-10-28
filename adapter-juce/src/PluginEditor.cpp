@@ -598,7 +598,14 @@ void NeptuneEditor::importOrgan()
                 for (const auto& pack : organ_style_packs::kPacks)
                 {
                     const auto target = library.getChildFile (juce::String (pack.id) + ".neptunestyle");
-                    if (! target.exists()) target.replaceWithData (pack.data, pack.size);
+                    // un pack livré est remplacé quand il a changé (l'ancien est gardé à côté, en .old, hors de la bibliothèque)
+                    if (target.exists())
+                    {
+                        juce::MemoryBlock current;
+                        if (target.loadFileAsData (current) && current.getSize() == pack.size && std::memcmp (current.getData(), pack.data, pack.size) == 0) continue;
+                        target.copyFileTo (target.withFileExtension ("neptunestyle.old"));
+                    }
+                    target.replaceWithData (pack.data, pack.size);
                 }
         }
         const auto result = safe->processor_.uiImportOrgan (std::filesystem::path (organFile.getFullPathName().toStdString()));

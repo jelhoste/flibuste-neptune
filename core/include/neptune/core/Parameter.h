@@ -92,13 +92,17 @@ public:
     // Modulation (matrice de modulation) : un décalage VIVANT, en unités normalisées (-1..1), qui s'ajoute à la valeur réglée sans la
     // changer. Écrit par le thread audio (un seul écrivain), lu par le moteur (valeur effective) et par l'interface (anneau de modulation).
     // La valeur de base, l'automation de l'hôte et les presets ne voient jamais la modulation.
-    float modOffsetAt (std::size_t index) const noexcept { return slots_[index].offset.load (std::memory_order_relaxed); }
+    // Le décalage total est la somme de deux emplacements séparés : celui de la matrice de modulation (remis à zéro à chaque bloc par le
+    // moteur) et celui de la modulation de l'hôte (CLAP_EVENT_PARAM_MOD monophonique : une valeur tenue jusqu'au prochain événement).
+    float modOffsetAt (std::size_t index) const noexcept { return totalOffset (slots_[index]); }
+    float hostModOffsetAt (std::size_t index) const noexcept { return slots_[index].hostOffset.load (std::memory_order_relaxed); }
+    void setHostModOffsetAt (std::size_t index, float offset) const noexcept { slots_[index].hostOffset.store (offset, std::memory_order_relaxed); }
     void setModOffsetAt (std::size_t index, float offset) const noexcept { slots_[index].offset.store (offset, std::memory_order_relaxed); }   // const : la modulation n'est pas l'état du jeu de paramètres
     void addModOffsetAt (std::size_t index, float delta) const noexcept { slots_[index].offset.store (slots_[index].offset.load (std::memory_order_relaxed) + delta, std::memory_order_relaxed); }
     // Valeur réelle avec la modulation : la valeur de base si le décalage est nul (chemin habituel, sans calcul), sinon bornée à la plage.
     double effectiveAt (std::size_t index) const noexcept
     {
-        const float off = slots_[index].offset.load (std::memory_order_relaxed);
+        const float off = totalOffset (slots_[index]);
         const double base = slots_[index].value.load (std::memory_order_relaxed);
         if (off == 0.0f) return base;
         const auto& spec = slots_[index].spec;
@@ -108,12 +112,12 @@ public:
     bool anyModOffset() const noexcept
     {
         for (const auto& slot : slots_)
-            if (slot.offset.load (std::memory_order_relaxed) != 0.0f) return true;
+            if (totalOffset (slot) != 0.0f) return true;
         return false;
     }
     double effectiveNormalizedAt (std::size_t index) const noexcept
     {
-        return std::clamp (slots_[index].spec.toNormalized (slots_[index].value.load (std::memory_order_relaxed)) + static_cast<double> (slots_[index].offset.load (std::memory_order_relaxed)), 0.0, 1.0);
+        return std::clamp (slots_[index].spec.toNormalized (slots_[index].value.load (std::memory_order_relaxed)) + static_cast<double> (totalOffset (slots_[index])), 0.0, 1.0);
     }
 
     // Accès par id (id inconnu : get -> 0.0, set -> false).
@@ -137,8 +141,14 @@ private:
         ParamSpec spec;
         std::atomic<double> value;
         std::atomic<std::uint32_t> version { 0 };
-        mutable std::atomic<float> offset { 0.0f };   // décalage de modulation (voir modOffsetAt)
+        mutable std::atomic<float> offset { 0.0f };       // décalage de la matrice de modulation (voir modOffsetAt)
+        mutable std::atomic<float> hostOffset { 0.0f };   // décalage de la modulation de l'hôte (voir modOffsetAt)
     };
+
+    static float totalOffset (const Slot& slot) noexcept
+    {
+        return slot.offset.load (std::memory_order_relaxed) + slot.hostOffset.load (std::memory_order_relaxed);
+    }
 
     static_assert (std::atomic<double>::is_always_lock_free, "std::atomic<double> doit être sans verrou");
 

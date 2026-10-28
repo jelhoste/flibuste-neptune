@@ -106,6 +106,27 @@ TEST_CASE ("parameter set: an offset moves the effective value without touching 
     CHECK (set.effectiveAt (i) == Approx (50.0));
 }
 
+TEST_CASE ("parameter set: the host modulation has its own slot, apart from the matrix")
+{
+    auto set = makeSet();
+    const auto i = set.indexOf (kDest);
+    CHECK (set.anyModOffset() == false);
+    set.setHostModOffsetAt (i, 0.25f);
+    CHECK (set.getAt (i) == Approx (50.0));                    // la valeur réglée ne bouge pas
+    CHECK (set.effectiveAt (i) == Approx (75.0));
+    CHECK (set.modOffsetAt (i) == Approx (0.25f));             // l'anneau de modulation le voit
+    CHECK (set.anyModOffset());
+    set.setModOffsetAt (i, 0.5f);                              // la matrice s'y ajoute, sans l'écraser
+    CHECK (set.hostModOffsetAt (i) == Approx (0.25f));
+    CHECK (set.effectiveAt (i) == Approx (100.0));             // 0,5 + 0,25 + 0,5 borné à la plage
+    set.setModOffsetAt (i, 0.0f);                              // la remise à zéro de la matrice (chaque bloc) laisse l'hôte
+    CHECK (set.hostModOffsetAt (i) == Approx (0.25f));
+    CHECK (set.effectiveAt (i) == Approx (75.0));
+    set.setHostModOffsetAt (i, 0.0f);
+    CHECK (set.effectiveAt (i) == Approx (50.0));
+    CHECK (set.anyModOffset() == false);
+}
+
 TEST_CASE ("modulation: an LFO swings the destination, its offset adds up over several routes")
 {
     auto set = makeSet();

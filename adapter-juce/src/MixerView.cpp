@@ -1,5 +1,7 @@
 #include "MixerView.h"
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include "neptune/core/ProbePool.h"
 #include "TrackBundle.h"
 #include "VelocityPanel.h"
@@ -39,8 +41,27 @@ struct BoundSlider : juce::Slider
         id = pid;
         setDoubleClickReturnValue (true, resetValue);
     }
+    // La modulation (hôte ou matrice) ne change pas la valeur réglée : le curseur garde sa place, le rail montre la valeur modulée.
+    void syncModulation()
+    {
+        if (id == 0) return;
+        const auto& set = proc.parameters();
+        const auto index = set.indexOf (id);
+        const float off = index != neptune::core::ParameterSet::npos ? set.modOffsetAt (index) : 0.0f;
+        if (std::abs (off - lastOffset) <= 0.002f && (off == 0.0f) == (lastOffset == 0.0f)) return;
+        lastOffset = off;
+        if (off == 0.0f) getProperties().remove ("modValue");
+        else
+        {
+            const auto& spec = set.spec (index);
+            const double n = std::clamp (spec.toNormalized (getValue()) + static_cast<double> (off), 0.0, 1.0);
+            getProperties().set ("modValue", spec.fromNormalized (n));
+        }
+        repaint();
+    }
     void sync()
     {
+        syncModulation();
         if (id == 0 || dragging || isMouseButtonDown()) return;
         updating = true;
         setValue (proc.parameters().get (id), juce::dontSendNotification);
@@ -50,6 +71,7 @@ struct BoundSlider : juce::Slider
     NeptuneProcessor& proc;
     ParamId id = 0;
     bool dragging = false, updating = false;
+    float lastOffset = 0.0f;
 };
 
 // Bouton à bascule lié à un paramètre 0/1 (mute, solo, mono, parallèle). Dessiné sans les marges du style par défaut : une lettre
