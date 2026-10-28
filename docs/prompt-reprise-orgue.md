@@ -24,7 +24,7 @@ Fait et installé sous **Linux** (Windows n'est PAS à jour depuis l'import d'or
 
 ## À faire ensuite (ordre suggéré)
 1. Jean valide dans Reaper (réimporter l'orgue de démonstration : `~/Bureau/FlibusteSuite/ref-grandorgue/demo-orgue/extracted`) : jeux de la pédale, boîtes Récit / Grandorgue, tremblant (profondeur, vitesse), pages Façade. Corriger ce qu'il signale ; les lignes de diagnostic aident.
-2. **Bruits de jeux et de moteur** (variantes d'attaque `AttackNNN` : seul l'échantillon principal est joué aujourd'hui).
+2. **Bruits de jeux et de moteur** : FAIT pour les variantes d'attaque `AttackNNN` (2026-10-28, à valider) : une zone par variante, vélocité minimale (`AttackVelocity`) = tranches de vélocité, choix au hasard parmi les possibles (comme GrandOrgue) ; `IsTremulant=1` ignoré ; `MaxTimeSinceLastRelease` >= 0 non importé (avertissement). Reste : relâchements indépendants `PipeNNNReleaseMMM` (`MaxKeyPressTime`), `LoadRelease`, `AttackStart`/`ReleaseEnd`, boucles écrites dans l'ODF.
 3. **Façade reconstruite d'après les panneaux de l'orgue** (images, positions) ; masquer par défaut les lignes de diagnostic (option pour les réactiver).
 4. Export de paquets de presets avec échantillons compressés en **WavPack** (sans perte par défaut, mode avec perte en option) : demande de Jean, « plus tard ».
 5. **Streaming WavPack** (début + boucle résidents, queue lue à la demande avec positionnement WavPack) : seulement utile pour les gros orgues ; à faire quand Jean en essaiera un.
