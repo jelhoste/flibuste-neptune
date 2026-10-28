@@ -178,6 +178,8 @@ public:
         return tracks_[static_cast<std::size_t> (track)].held[word].load (std::memory_order_relaxed);
     }
     int totalActiveVoices() const noexcept { return totalVoices_.load (std::memory_order_relaxed); }
+    std::uint32_t notesIn (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].notesIn.load (std::memory_order_relaxed); }
+    int adoptedZones (int track) const noexcept { return tracks_[static_cast<std::size_t> (track)].zones.load (std::memory_order_relaxed); }
     int activeVoices (int track) const noexcept
     {
         const auto& t = tracks_[static_cast<std::size_t> (track)];
@@ -276,6 +278,8 @@ private:
         std::atomic<std::uint64_t> heldChannel[16][2] {}; // idem par canal MIDI (0..15) : un clavier de la Façade n'allume que son canal
         std::atomic<int> type { 0 };   // TrackType
         std::atomic<int> active { 1 };
+        std::atomic<std::uint32_t> notesIn { 0 };   // notes reçues par la piste depuis le début (voyant d'activité)
+        std::atomic<int> zones { 0 };               // zones de l'instrument adopté par le fil audio (0 : aucun)
         int appliedType = 0, appliedActive = 1; // thread audio : ce qui a déjà été pris en compte
         AtomicStrip config;
         ParamIndices idx;

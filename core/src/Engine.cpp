@@ -370,6 +370,7 @@ void Engine::noteOnTrack (int track, int channel, int key, float velocity) noexc
     auto& t = tracks_[static_cast<std::size_t> (track)];
     if (t.active.load (std::memory_order_relaxed) == 0 || t.type.load (std::memory_order_relaxed) == static_cast<int> (TrackType::AudioIn)) return;
     enforceGlobalVoiceLimit();
+    t.notesIn.fetch_add (1, std::memory_order_relaxed);
     if (key >= 0 && key < 128)
     {
         t.held[key >> 6].fetch_or (std::uint64_t (1) << (key & 63), std::memory_order_relaxed);
@@ -771,7 +772,11 @@ void Engine::process (float* const* out, int numChannels, int numFrames) noexcep
     refreshDynamic();       // un tirant d'accouplement a pu changer depuis le dernier bloc
     for (auto& t : tracks_)
     {
-        if (t.slot.adoptPending()) t.voices.setInstrument (t.slot.current());
+        if (t.slot.adoptPending())
+        {
+            t.voices.setInstrument (t.slot.current());
+            t.zones.store (t.slot.current() != nullptr ? static_cast<int> (t.slot.current()->zones.size()) : 0, std::memory_order_relaxed);
+        }
         if (t.synthSlot.adoptPending()) t.synth.setPatch (t.synthSlot.current());
         if (t.fmSlot.adoptPending()) t.fm.setDescription (t.fmSlot.current());
         if (t.organSlot.adoptPending()) t.organ.setDescription (t.organSlot.current());

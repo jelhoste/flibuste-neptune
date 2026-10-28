@@ -904,6 +904,12 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         g.drawText (juce::String::fromUTF8 (loading.c_str()), juce::Rectangle<int> (32, 80, lw_ - 64, 18), juce::Justification::centredLeft, true);
     }
+    if (const auto activity = processor_.activitySummary(); ! activity.empty())   // vérifie que la piste a son instrument et reçoit des notes
+    {
+        g.setColour (colour (Token::TextDim));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (juce::String::fromUTF8 (activity.c_str()), juce::Rectangle<int> (32, 98, lw_ - 64, 14), juce::Justification::centredLeft, true);
+    }
 
     if (showProbe_)
     {

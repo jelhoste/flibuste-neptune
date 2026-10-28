@@ -223,6 +223,21 @@ std::string NeptuneProcessor::loadSummary() const
     return out;
 }
 
+std::string NeptuneProcessor::activitySummary() const
+{
+    std::string out;
+    const juce::ScopedLock lock (instrumentLock_);
+    for (int t = 0; t < neptune::core::mixer::numTracks; ++t)
+    {
+        const auto& track = mixer_.tracks[static_cast<std::size_t> (t)];
+        if (! track.active || track.type != neptune::core::TrackType::Sampler || track.instrument.empty()) continue;
+        const std::string name = track.strip.name.empty() ? "T" + std::to_string (t + 1) : track.strip.name;
+        out += (out.empty() ? "" : "  |  ") + name + " ch" + std::to_string (track.strip.midiChannel) + ": " + std::to_string (engine_.adoptedZones (t)) + " zones, "
+             + std::to_string (engine_.notesIn (t)) + " notes, " + std::to_string (engine_.activeVoices (t)) + " voices";
+    }
+    return out;
+}
+
 void NeptuneProcessor::setStatus (int track, InstrumentStatus s)
 {
     const juce::ScopedLock lock (instrumentLock_);
