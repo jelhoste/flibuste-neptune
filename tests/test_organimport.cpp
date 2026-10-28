@@ -358,7 +358,7 @@ TEST_CASE ("organ import: keyboards, stops, pipes, switches, couplers and combin
     // ce qui n'est pas importé est dit
     CHECK (hasWarning (r, "tremulant"));
     CHECK (hasWarning (r, "expression box"));
-    CHECK (hasWarning (r, "panels"));
+    CHECK (hasWarning (r, "graphical panel"));
 }
 
 TEST_CASE ("organ import: loops and the release marker are read from the sample files")
@@ -970,6 +970,21 @@ TEST_CASE ("organ import: DIAG dry read of an organ file without samples (NEPTUN
         std::fprintf (stderr, "DIAG kb %s stops %d pipes %d zones %zu (attacks %zu, releases %zu, loops %zu)\n", kb.name.c_str(), kb.stops, kb.pipes, kb.instrument.zones.size(), attacks, rel, loops);
     }
     for (const auto& w : r.warnings) std::fprintf (stderr, "DIAG warning: %s\n", w.c_str());
+    {
+        auto show = [] (const neptune::core::facade::Facade& f)
+        {
+            std::size_t buttons = 0, sliders = 0, keyboards = 0, actions = 0, mirrored = 0, styled = 0;
+            for (const auto& w : f.widgets)
+            {
+                using WT = neptune::core::facade::WidgetType;
+                buttons += w.type == WT::Button; sliders += w.type == WT::Slider; keyboards += w.type == WT::Keyboard; actions += w.type == WT::Action || w.type == WT::Set;
+                mirrored += ! w.mirror.empty(); styled += w.style != 0;
+            }
+            std::fprintf (stderr, "DIAG page \"%s\": %zu widgets (buttons %zu, sliders %zu, keyboards %zu, actions %zu; mirrored %zu, with images %zu), %zu styles, background %s\n", f.name.c_str(), f.widgets.size(), buttons, sliders, keyboards, actions, mirrored, styled, f.styles.size(), f.image.empty() ? "none" : "yes");
+        };
+        show (r.facade);
+        for (const auto& pg : r.facade.pages) show (pg);
+    }
     if (std::getenv ("NEPTUNE_DIAG_BUILD") != nullptr)   // charge tous les claviers comme le plugin : durée et mémoire
     {
         SampleCache cache;
@@ -989,4 +1004,47 @@ TEST_CASE ("organ import: DIAG dry read of an organ file without samples (NEPTUN
         std::fprintf (stderr, "DIAG cache: %zu files, %.0f MB\n", cache.size(), static_cast<double> (bytes) / 1048576.0);
         if (std::FILE* st = std::fopen ("/proc/self/status", "r")) { char line[256]; while (std::fgets (line, sizeof line, st)) if (std::strncmp (line, "VmHWM", 5) == 0) std::fprintf (stderr, "DIAG %s", line); std::fclose (st); }
     }
+}
+
+TEST_CASE ("organ import: panels become Facade pages with the same positions, images and controls")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Panels\nNumberOfManuals=1\nHasPedals=N\nNumberOfPanels=1\nNumberOfGenerals=1\nNumberOfSwitches=2\n"
+        "[Manual001]\nName=Great\nNumberOfStops=2\nStop001=1\nStop002=2\nNumberOfLogicalKeys=2\nNumberOfAccessibleKeys=2\nFirstAccessibleKeyMIDINoteNumber=48\n"
+        "[Stop001]\nName=One\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=a.wav\n"
+        "[Stop002]\nName=Two\nNumberOfLogicalPipes=1\nNumberOfAccessiblePipes=1\nPipe001=b.wav\n"
+        "[General001]\nName=G1\nNumberOfStops=1\nStop001=1\n"
+        "[Panel000]\nName=Console\nDispScreenSizeHoriz=2000\nDispScreenSizeVert=1200\nNumberOfGUIElements=4\n"
+        "[Panel000Element001]\nType=Stop\nStop=1\nPositionX=200\nPositionY=300\nImageOn=on.png\nImageOff=off.png\n"
+        "[Panel000Element002]\nType=Stop\nStop=2\nPositionX=400\nPositionY=300\nDispLabelText=Two\n"
+        "[Panel000Element003]\nType=Manual\nManual=1\nPositionX=100\nPositionY=800\nKey001Width=30\nKey002Width=30\n"
+        "[Panel000Element004]\nType=Magic\nPositionX=0\nPositionY=0\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    // la console est la première page ; les pages générées suivent
+    CHECK (r.facade.name == "Console");
+    REQUIRE (r.facade.pages.size() >= 2);
+    namespace fc = neptune::core::facade;
+    const auto& page = r.facade;
+    int buttons = 0, keyboards = 0;
+    const fc::Widget* first = nullptr;
+    for (const auto& w : page.widgets)
+    {
+        buttons += w.type == fc::WidgetType::Button;
+        keyboards += w.type == fc::WidgetType::Keyboard;
+        if (w.type == fc::WidgetType::Button && first == nullptr) first = &w;
+    }
+    CHECK (buttons == 2);
+    CHECK (keyboards == 1);
+    REQUIRE (first != nullptr);
+    CHECK (first->style != 0);                       // ses images
+    CHECK (first->param != 0);                       // un interrupteur de la piste
+    // échelle uniforme 1000 / 2000 = 0,5 : le tirant en (200, 300) est en (100, 150) ; la hauteur 1200 -> 600 remplit le canevas
+    CHECK (first->x == 100);
+    CHECK (first->y == 150);
+    CHECK (hasWarning (r, "magic"));
+    CHECK_FALSE (hasWarning (r, "graphical panels are not imported"));
 }

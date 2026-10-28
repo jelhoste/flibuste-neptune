@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -183,6 +184,20 @@ fs::path resolvePath (const fs::path& base, std::string relative)
     return current;
 }
 
+// Dimensions d'un PNG (en-tête de 24 octets) ; faux pour tout autre fichier.
+bool pngSize (const fs::path& path, int& width, int& height)
+{
+    std::ifstream in (path, std::ios::binary);
+    unsigned char b[24] = {};
+    if (! in.read (reinterpret_cast<char*> (b), 24)) return false;
+    static const unsigned char sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    if (std::memcmp (b, sig, 8) != 0) return false;
+    auto be = [&b] (int o) { return static_cast<int> ((static_cast<unsigned> (b[o]) << 24) | (static_cast<unsigned> (b[o + 1]) << 16) | (static_cast<unsigned> (b[o + 2]) << 8) | b[o + 3]); };
+    width = be (16);
+    height = be (20);
+    return width > 0 && height > 0 && width < 20000 && height < 20000;
+}
+
 struct FileMarks
 {
     bool exists = false;
@@ -342,6 +357,8 @@ private:
             keys.hold = 0;
             (k == 0 ? main : pages.emplace_back()) = std::move (page);
         }
+        std::vector<fc::Facade> panelPages;
+        buildPanels (panelPages);
         fc::Facade last;
         last.name = "Couplers";
         add (last, fc::WidgetType::Label, left, 4, 500, 32).text = "Couplers";
@@ -374,10 +391,212 @@ private:
                 if (result_.combinations.divisional (opt_.firstTrack + static_cast<int> (k), 0, piston) != nullptr) any = true;
             if (any) command (left + (d++) * 108, 2, combi::kCommandDivisional + piston);
         }
-        if (result_.keyboards.empty()) main = std::move (last);
-        else pages.push_back (std::move (last));
-        main.pages = std::move (pages);
+        // les panneaux de l'orgue d'abord (la console est la première page), puis les pages générées : curseurs de profondeur et de vitesse, claviers, accouplements
+        std::vector<fc::Facade> book;
+        for (auto& panel : panelPages) book.push_back (std::move (panel));
+        if (! result_.keyboards.empty()) book.push_back (std::move (main));
+        for (auto& page : pages) book.push_back (std::move (page));
+        book.push_back (std::move (last));
+        if (static_cast<int> (book.size()) > fc::maxPages) book.resize (static_cast<std::size_t> (fc::maxPages));
+        main = std::move (book.front());
+        book.erase (book.begin());
+        main.pages = std::move (book);
         result_.facade = std::move (main);
+    }
+
+    // Un contrôle de l'orgue vu par la Façade : son paramètre principal (celui du clavier qui le porte) et les paramètres qui le suivent.
+    bool resolveControl (const std::string& key, bool box, ParamId& primary, std::vector<ParamId>& mirrors) const
+    {
+        const auto it = params_.find (key);
+        if (it == params_.end() || it->second.empty()) return false;
+        primary = it->second.front();
+        const std::size_t owner = ownerOf (key, box);
+        if (owner < modulators_.size())
+            if (const auto m = modulators_[owner].find (key); m != modulators_[owner].end())
+                primary = mixer::modulatorParam (opt_.firstTrack + static_cast<int> (owner), m->second);
+        mirrors.clear();
+        for (const ParamId id : it->second) if (id != primary) mirrors.push_back (id);
+        return true;
+    }
+
+    // Les panneaux de l'orgue (`[PanelNNN]` et leurs `[PanelNNNElementMMM]`) deviennent des pages de Façade : mêmes positions et mêmes images, mises à l'échelle du canevas
+    // (échelle uniforme, centrée, comme l'image de fond ajustée). Un panneau dont les éléments n'ont pas de position (rangement automatique) est laissé aux pages générées.
+    void buildPanels (std::vector<neptune::core::facade::Facade>& out)
+    {
+        namespace fc = neptune::core::facade;
+        const int panelCount = ini_.getInt ("Organ", "NumberOfPanels", 0);
+        std::set<std::string> unsupported;
+        int unresolved = 0, autoLayout = 0, skippedWidgets = 0;
+        for (int p = 0; p <= panelCount && static_cast<int> (out.size()) < 10; ++p)
+        {
+            const std::string ps = numbered ("Panel", p);
+            if (! ini_.hasSection (ps)) continue;
+            // taille du panneau : celle du fichier, sinon celle de l'image de fond
+            fs::path background;
+            int bgW = 0, bgH = 0;
+            if (const std::string img = ini_.get (numbered (ps + "Image", 1), "Image"); ! img.empty())
+            {
+                const auto path = resolvePath (opt_.baseDir, img);
+                if (! pngSize (path, bgW, bgH)) bgW = bgH = 0;
+                else background = path;
+            }
+            int W = ini_.getInt (ps, "DispScreenSizeHoriz", -1), H = ini_.getInt (ps, "DispScreenSizeVert", -1);
+            if (W <= 0 || H <= 0) { W = bgW > 0 ? bgW : fc::canvasWidth; H = bgH > 0 ? bgH : fc::canvasHeight; }
+            const double scale = std::min (static_cast<double> (fc::canvasWidth) / W, static_cast<double> (fc::canvasHeight) / H);
+            const double ox = (fc::canvasWidth - W * scale) / 2.0, oy = (fc::canvasHeight - H * scale) / 2.0;
+
+            fc::Facade page;
+            const std::string panelName = ini_.get (ps, "Name");
+            page.name = (panelName.empty() ? "Panel " + std::to_string (p) : panelName).substr (0, 24);
+            // l'image de fond n'est gardée que si elle a la taille du panneau (sinon c'est une texture que GrandOrgue répète, que la Façade ne répète pas)
+            if (! background.empty() && std::abs (bgW - W) * 10 <= W && std::abs (bgH - H) * 10 <= H) { page.image = background.u8string(); page.fit = fc::ImageFit::Fit; }
+
+            std::map<std::string, int> styleOf;
+            auto styleFor = [&] (const std::string& on, const std::string& off) -> int
+            {
+                if (on.empty() && off.empty()) return 0;
+                const auto onPath = on.empty() ? fs::path() : resolvePath (opt_.baseDir, on);
+                const auto offPath = off.empty() ? fs::path() : resolvePath (opt_.baseDir, off);
+                const std::string key = onPath.u8string() + "|" + offPath.u8string();
+                if (const auto it = styleOf.find (key); it != styleOf.end()) return it->second;
+                if (static_cast<int> (page.styles.size()) >= fc::maxStyles) return 0;
+                fc::ImageStyle st;
+                st.id = page.freeStyleId();
+                st.name = fs::path (onPath).filename().u8string().substr (0, 30);
+                st.on = onPath.u8string();
+                st.off = offPath.u8string();
+                page.styles.push_back (st);
+                styleOf[key] = st.id;
+                return st.id;
+            };
+            auto addWidget = [&] (fc::WidgetType type, int x, int y, int w, int h) -> fc::Widget*
+            {
+                if (static_cast<int> (page.widgets.size()) >= fc::maxWidgets) { ++skippedWidgets; return nullptr; }
+                page.widgets.push_back (fc::defaultWidget (type, page.freeId(), 0, 0));
+                auto& widget = page.widgets.back();
+                widget.w = std::clamp (static_cast<int> (std::lround (w * scale)), fc::minWidgetSize, fc::canvasWidth);
+                widget.h = std::clamp (static_cast<int> (std::lround (h * scale)), fc::minWidgetSize, fc::canvasHeight);
+                widget.x = std::clamp (static_cast<int> (std::lround (ox + x * scale)), 0, fc::canvasWidth - widget.w);
+                widget.y = std::clamp (static_cast<int> (std::lround (oy + y * scale)), 0, fc::canvasHeight - widget.h);
+                return &widget;
+            };
+            auto sizeOf = [&] (const std::string& image, int& w, int& h, int defW, int defH)
+            {
+                w = defW; h = defH;
+                if (image.empty()) return;
+                int iw = 0, ih = 0;
+                if (pngSize (resolvePath (opt_.baseDir, image), iw, ih)) { w = iw; h = ih; }
+            };
+
+            const int elements = ini_.getInt (ps, "NumberOfGUIElements", 0);
+            bool anyAuto = false;
+            for (int e = 1; e <= elements; ++e)
+            {
+                const std::string es = numbered (ps + "Element", e);
+                if (! ini_.hasSection (es)) continue;
+                const std::string type = lowered (ini_.get (es, "Type"));
+                if (! ini_.has (es, "PositionX") && ! ini_.has (es, "PositionY")) { anyAuto = true; continue; }
+                const int x = ini_.getInt (es, "PositionX", 0), y = ini_.getInt (es, "PositionY", 0);
+                const std::string imageOn = ini_.get (es, "ImageOn"), imageOff = ini_.get (es, "ImageOff");
+                const std::string label = ini_.get (es, "DispLabelText");
+                int w = 0, h = 0;
+                sizeOf (imageOn.empty() ? imageOff : imageOn, w, h, 120, 44);
+
+                std::string controlKey;
+                bool box = false;
+                if (type == "switch") controlKey = switchKey (ini_.getInt (es, "Switch", 0));
+                else if (type == "stop") controlKey = "st" + std::to_string (ini_.getInt (es, "Stop", 0));
+                else if (type == "coupler") controlKey = "cp" + std::to_string (ini_.getInt (es, "Coupler", 0));
+                else if (type == "tremulant")
+                {
+                    const int n = ini_.getInt (es, "Tremulant", 0);
+                    const std::string ts = numbered ("Tremulant", n);
+                    const int sw = ini_.getInt (ts, "Switch001", 0);
+                    controlKey = ini_.getInt (ts, "SwitchCount", 0) > 0 && sw > 0 ? switchKey (sw) : "tm" + std::to_string (n);
+                }
+                if (! controlKey.empty())
+                {
+                    ParamId primary = 0;
+                    std::vector<ParamId> mirrors;
+                    if (! resolveControl (controlKey, false, primary, mirrors)) { ++unresolved; continue; }
+                    auto* widget = addWidget (fc::WidgetType::Button, x, y, w, h);
+                    if (widget == nullptr) continue;
+                    widget->param = primary;
+                    widget->mirror = mirrors;
+                    widget->style = styleFor (imageOn, imageOff);
+                    if (widget->style == 0) widget->text = label.empty() ? controlKey : label.substr (0, 40);
+                }
+                else if (type == "enclosure")
+                {
+                    ParamId primary = 0;
+                    std::vector<ParamId> mirrors;
+                    if (! resolveControl ("en" + std::to_string (ini_.getInt (es, "Enclosure", 0)), true, primary, mirrors)) { ++unresolved; continue; }
+                    sizeOf (ini_.get (es, "Bitmap001"), w, h, 60, 200);
+                    auto* widget = addWidget (fc::WidgetType::Slider, x, y, w, h);
+                    if (widget == nullptr) continue;
+                    widget->param = primary;
+                    widget->mirror = mirrors;
+                    widget->vertical = h >= w ? 1 : 0;
+                    widget->text = label;
+                }
+                else if (type == "manual")
+                {
+                    const int manual = ini_.getInt (es, "Manual", 0);
+                    const std::string ms = numbered ("Manual", manual);
+                    std::size_t index = result_.keyboards.size();
+                    for (std::size_t k = 0; k < result_.keyboards.size(); ++k) if (result_.keyboards[k].odfIndex == manual) index = k;
+                    if (index >= result_.keyboards.size()) { ++unresolved; continue; }
+                    int keysWidth = 0, keysHeight = 0;
+                    for (int k = 1, n = ini_.getInt (ms, "NumberOfAccessibleKeys", ini_.getInt (ms, "NumberOfLogicalKeys", 0)); k <= std::max (n, 1) + 24 && ini_.has (es, numbered ("Key", k) + "Width") ; ++k)
+                    {
+                        keysWidth += ini_.getInt (es, numbered ("Key", k) + "Width", 0);
+                        int kw = 0, kh = 0;
+                        sizeOf (ini_.get (es, numbered ("Key", k) + "ImageOff"), kw, kh, 0, 0);
+                        keysHeight = std::max (keysHeight, kh);
+                    }
+                    auto* widget = addWidget (fc::WidgetType::Keyboard, x, y, keysWidth > 0 ? keysWidth : 600, keysHeight > 0 ? keysHeight : 100);
+                    if (widget == nullptr) continue;
+                    widget->channel = result_.keyboards[index].midiChannel;
+                    widget->firstNote = std::clamp (ini_.getInt (ms, "FirstAccessibleKeyMIDINoteNumber", 36), 0, 127);
+                    widget->hold = 0;
+                }
+                else if (type.rfind ("general", 0) == 0 && type.size() > 7)
+                {
+                    const int piston = std::atoi (type.c_str() + 7) - 1;
+                    if (piston < 0 || piston >= combi::kPistons || result_.combinations.general (0, piston) == nullptr) { ++unresolved; continue; }
+                    auto* widget = addWidget (fc::WidgetType::Action, x, y, w, h);
+                    if (widget == nullptr) continue;
+                    widget->actionMode = 1 + combi::kCommandGeneral + piston;
+                    widget->style = styleFor (imageOn, imageOff);
+                    widget->text = std::to_string (piston + 1);
+                }
+                else if (type == "set")
+                {
+                    auto* widget = addWidget (fc::WidgetType::Set, x, y, w, h);
+                    if (widget == nullptr) continue;
+                    widget->style = styleFor (imageOn, imageOff);
+                    widget->text = label.empty() ? "Set" : label.substr (0, 20);
+                }
+                else if (type == "label")
+                {
+                    auto* widget = addWidget (fc::WidgetType::Label, x, y, std::max (w, 160), std::max (h, 32));
+                    if (widget != nullptr) widget->text = label.substr (0, 60);
+                }
+                else unsupported.insert (type);
+            }
+            if (anyAuto) ++autoLayout;
+            if (! page.widgets.empty()) out.push_back (std::move (page));
+        }
+        if (out.empty() && ini_.getInt ("Organ", "NumberOfPanels", 0) > 0) warn ("no graphical panel could be reproduced: the generated pages are used");
+        if (autoLayout > 0) warn (std::to_string (autoLayout) + " panel(s) place their elements automatically (no PositionX/Y): left to the generated pages");
+        if (unresolved > 0) warn (std::to_string (unresolved) + " panel element(s) act on nothing that was imported: skipped");
+        if (skippedWidgets > 0) warn (std::to_string (skippedWidgets) + " panel element(s) over the 200 widgets of a Facade page: skipped");
+        if (! unsupported.empty())
+        {
+            std::string kinds;
+            for (const auto& k : unsupported) kinds += (kinds.empty() ? "" : ", ") + k;
+            warn ("panel element types not shown: " + kinds);
+        }
     }
 
     void warn (std::string text) { if (result_.warnings.size() < 200) result_.warnings.push_back (std::move (text)); }
@@ -956,7 +1175,6 @@ private:
         for (int e = 1; e <= enclosures; ++e)
             if (usedEnclosures_.count (e) == 0) warn ("expression box \"" + ini_.get (numbered ("Enclosure", e), "Name", numbered ("Enclosure", e)) + "\" acts on no stop: not imported");
         if (repeatAttacksSkipped_ > 0) warn ("attack variants for a pipe that has just been released (MaxTimeSinceLastRelease) are not imported: " + std::to_string (repeatAttacksSkipped_) + " skipped");
-        if (ini_.getInt ("Organ", "NumberOfPanels", 0) > 0) warn ("the graphical panels are not imported");
         if (ini_.getInt ("Organ", "NumberOfReversiblePistons", 0) > 0) warn ("reversible pistons are not imported");
         if (ini_.getInt ("Organ", "NumberOfDivisionalCouplers", 0) > 0) warn ("divisional couplers are not imported");
     }
