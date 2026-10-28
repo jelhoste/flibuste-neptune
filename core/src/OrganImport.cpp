@@ -489,29 +489,71 @@ private:
         const int note = info.firstMidi + (logicalKey - info.firstLogical);
         if (note < 0 || note > 127) return;
         const double amp = ampFactor * ini_.getInt (section, p + "AmplitudeLevel", 100) / 100.0;
-        ZoneDescription z;
-        const fs::path path = resolvePath (opt_.baseDir, file);
-        z.samplePath = path.u8string();
-        z.keyLow = z.keyHigh = note;
-        z.rootNote = note;   // l'échantillon joue à sa hauteur d'origine (comme l'accord « original » de GrandOrgue) ; l'accord du tuyau s'y ajoute
-        z.tuneCents = std::clamp (tuning + ini_.getDouble (section, p + "PitchTuning", 0.0), -1200.0, 1200.0);
-        z.gainDb = std::clamp (20.0 * std::log10 (std::max (amp, 1.0e-6)) + gainDb + ini_.getDouble (section, p + "Gain", 0.0), -60.0, 60.0);
-        z.group = group;
-        const auto& marks = marksOf (path);
-        if (! opt_.readSampleMarks || (marks.exists && ! marks.loops.empty()))   // sans lecture des fichiers : un tuyau d'orgue se tient (boucle)
+        const double tuneCents = std::clamp (tuning + ini_.getDouble (section, p + "PitchTuning", 0.0), -1200.0, 1200.0);
+        const double gainTotal = std::clamp (20.0 * std::log10 (std::max (amp, 1.0e-6)) + gainDb + ini_.getDouble (section, p + "Gain", 0.0), -60.0, 60.0);
+        // Les variantes d'attaque : le fichier du tuyau (vélocité minimale 0) puis `PipeNNNAttackMMM`. Comme GrandOrgue, une variante est possible quand la vélocité
+        // atteint sa vélocité minimale, et le choix parmi les possibles est au hasard ; la plage de vélocité 1..127 est donc coupée aux vélocités minimales, chaque
+        // tranche ayant son jeu de variantes tirées au hasard (round-robin aléatoire).
+        struct Variant { std::string file; int minVelocity = 0; };
+        std::vector<Variant> variants { { file, 0 } };
+        const int attackCount = std::clamp (ini_.getInt (section, p + "AttackCount", 0), 0, 100);
+        for (int a = 1; a <= attackCount; ++a)
         {
-            z.mode = PlayMode::Loop;
-            if (! marks.loops.empty())
-            {
-                z.loopStart = marks.loops[0].start;
-                z.loopEnd = marks.loops[0].end;
-                for (std::size_t i = 1; i < marks.loops.size() && z.extraLoops.size() < ZoneDescription::maxExtraLoops; ++i)
-                    z.extraLoops.push_back ({ marks.loops[i].start, marks.loops[i].end, marks.loops[i].crossfade, marks.loops[i].repeats });
-                const std::int64_t lastEnd = marks.loops.back().end;
-                if (marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd) z.releaseStart = marks.releaseMarker;
-            }
+            const std::string prefix = p + numbered ("Attack", a);
+            const std::string attackFile = ini_.get (section, prefix);
+            if (attackFile.empty() || lowered (attackFile) == "dummy") continue;
+            if (ini_.getInt (section, prefix + "MaxTimeSinceLastRelease", -1) >= 0) { ++repeatAttacksSkipped_; continue; }   // attaque d'un tuyau qui vient d'être relâché : pas de mesure de ce délai
+            if (ini_.getInt (section, prefix + "IsTremulant", -1) == 1) continue;   // enregistrée avec un tremblant d'échantillons, non importé
+            variants.push_back ({ attackFile, std::clamp (ini_.getInt (section, prefix + "AttackVelocity", 0), 0, 127) });
         }
-        kb.instrument.zones.push_back (std::move (z));
+        std::vector<int> cuts;
+        for (const auto& v : variants) if (v.minVelocity > 0) cuts.push_back (v.minVelocity);
+        std::sort (cuts.begin(), cuts.end());
+        cuts.erase (std::unique (cuts.begin(), cuts.end()), cuts.end());
+        cuts.insert (cuts.begin(), 1);
+        for (std::size_t slice = 0; slice < cuts.size(); ++slice)
+        {
+            const int velLow = cuts[slice], velHigh = slice + 1 < cuts.size() ? cuts[slice + 1] - 1 : 127;
+            int rank = 0;
+            std::vector<std::size_t> members;
+            for (const auto& variant : variants)
+            {
+                if (variant.minVelocity > velLow) continue;
+                ZoneDescription z;
+                const fs::path path = resolvePath (opt_.baseDir, variant.file);
+                z.samplePath = path.u8string();
+                z.keyLow = z.keyHigh = note;
+                z.rootNote = note;   // l'échantillon joue à sa hauteur d'origine (comme l'accord « original » de GrandOrgue) ; l'accord du tuyau s'y ajoute
+                z.tuneCents = tuneCents;
+                z.gainDb = gainTotal;
+                z.group = group;
+                z.velLow = velLow;
+                z.velHigh = velHigh;
+                const auto& marks = marksOf (path);
+                if (! opt_.readSampleMarks || (marks.exists && ! marks.loops.empty()))   // sans lecture des fichiers : un tuyau d'orgue se tient (boucle)
+                {
+                    z.mode = PlayMode::Loop;
+                    if (! marks.loops.empty())
+                    {
+                        z.loopStart = marks.loops[0].start;
+                        z.loopEnd = marks.loops[0].end;
+                        for (std::size_t i = 1; i < marks.loops.size() && z.extraLoops.size() < ZoneDescription::maxExtraLoops; ++i)
+                            z.extraLoops.push_back ({ marks.loops[i].start, marks.loops[i].end, marks.loops[i].crossfade, marks.loops[i].repeats });
+                        const std::int64_t lastEnd = marks.loops.back().end;
+                        if (marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd) z.releaseStart = marks.releaseMarker;
+                    }
+                }
+                members.push_back (kb.instrument.zones.size());
+                kb.instrument.zones.push_back (std::move (z));
+            }
+            if (members.size() > 1)
+                for (const std::size_t index : members)
+                {
+                    auto& z = kb.instrument.zones[index];
+                    z.roundRobin = ++rank;
+                    z.rrMode = index == members.front() ? static_cast<int> (RoundRobinMode::Random) : -1;
+                }
+        }
         ++kb.pipes;
     }
 
@@ -636,17 +678,6 @@ private:
         const int nRanks = ini_.getInt (section, "NumberOfRanks", 0);
         const int accessible = ini_.getInt (section, "NumberOfAccessiblePipes", ini_.getInt (section, "NumberOfLogicalPipes", 0));
         const int firstKey = ini_.getInt (section, "FirstAccessiblePipeLogicalKeyNumber", 1);
-        bool attackWarned = false;
-        auto attackCheck = [&] (const std::string& sec, int pipe)
-        {
-            if (! attackWarned && ini_.getInt (sec, numbered ("Pipe", pipe) + "AttackCount", 1) > 1)
-            {
-                attackWarned = true;
-                ++attackStops_;
-                if (attackStops_ == 1) attackWarningIndex_ = result_.warnings.size(), warn ("attack variants of the pipes are not imported (only the main sample)");
-                else result_.warnings[attackWarningIndex_] = "attack variants of the pipes are not imported (only the main sample) in " + std::to_string (attackStops_) + " stops";
-            }
-        };
         if (nRanks > 0)
         {
             for (int r = 1; r <= nRanks; ++r)
@@ -672,7 +703,6 @@ private:
                 const std::size_t before = kb.instrument.zones.size();
                 for (int j = 0; j < pipeCount; ++j)
                 {
-                    attackCheck (rankSection, firstPipe + j);
                     addPipe (kb, info, rankSection, firstPipe + j, rankFirstKey + j, group, base * rankAmp, tuning, gain);
                 }
                 if (rankMask != 0)
@@ -684,7 +714,6 @@ private:
             const int firstPipe = ini_.getInt (section, "FirstAccessiblePipeLogicalPipeNumber", 1);
             for (int j = 0; j < accessible; ++j)
             {
-                attackCheck (section, firstPipe + j);
                 addPipe (kb, info, section, firstPipe + j, firstKey + j, group, base, organTuning_ + stopTuning, organGain_ + stopGain);
             }
         }
@@ -850,6 +879,7 @@ private:
         const int enclosures = ini_.getInt ("Organ", "NumberOfEnclosures", 0);
         for (int e = 1; e <= enclosures; ++e)
             if (usedEnclosures_.count (e) == 0) warn ("expression box \"" + ini_.get (numbered ("Enclosure", e), "Name", numbered ("Enclosure", e)) + "\" acts on no stop: not imported");
+        if (repeatAttacksSkipped_ > 0) warn ("attack variants for a pipe that has just been released (MaxTimeSinceLastRelease) are not imported: " + std::to_string (repeatAttacksSkipped_) + " skipped");
         if (ini_.getInt ("Organ", "NumberOfPanels", 0) > 0) warn ("the graphical panels are not imported");
         if (ini_.getInt ("Organ", "NumberOfReversiblePistons", 0) > 0) warn ("reversible pistons are not imported");
         if (ini_.getInt ("Organ", "NumberOfDivisionalCouplers", 0) > 0) warn ("divisional couplers are not imported");
@@ -866,8 +896,7 @@ private:
     std::map<std::string, double> levelOf_;   // valeur de départ d'un réglage continu (profondeur d'un tremblant)
     std::set<std::string> couplerControlKeys_;
     std::vector<std::pair<std::string, ParamId>> couplerControls_;
-    int attackStops_ = 0;
-    std::size_t attackWarningIndex_ = 0;
+    int repeatAttacksSkipped_ = 0;
     int organAmp_ = 100;
     double organTuning_ = 0.0, organGain_ = 0.0;
     std::map<int, int> channelOf_;

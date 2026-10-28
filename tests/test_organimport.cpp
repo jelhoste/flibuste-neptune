@@ -304,7 +304,6 @@ TEST_CASE ("organ import: keyboards, stops, pipes, switches, couplers and combin
     const auto& swell = r.keyboards[2].instrument;
     CHECK (swell.zones.size() == 4);
     CHECK (swell.groups.at ("Flute").modulators == 1u);
-    CHECK (hasWarning (r, "attack variants"));
 
     // accouplements : le premier est lié à un tirant du routeur (aucun jeu n'utilise son interrupteur), le second au modulateur du Principal
     REQUIRE (r.router.rules.size() == 2);
@@ -439,11 +438,12 @@ TEST_CASE ("organ import: the GrandOrgue demo organ (optional, NEPTUNE_DEMO_ORGA
     REQUIRE (r.ok);
     CHECK (r.name == "GrandOrgue demo V1");
     REQUIRE (r.keyboards.size() == 3);
-    int stops = 0, pipes = 0, loops = 0, tails = 0;
+    int stops = 0, pipes = 0, loops = 0, tails = 0, zoneCount = 0;
     for (const auto& kb : r.keyboards)
     {
         stops += kb.stops;
         pipes += kb.pipes;
+        zoneCount += static_cast<int> (kb.instrument.zones.size());
         for (const auto& z : kb.instrument.zones)
         {
             loops += z.mode == PlayMode::Loop && z.loopEnd > z.loopStart;
@@ -452,8 +452,9 @@ TEST_CASE ("organ import: the GrandOrgue demo organ (optional, NEPTUNE_DEMO_ORGA
     }
     CHECK (stops >= 40);
     CHECK (pipes > 1000);
-    CHECK (loops == pipes);       // chaque fichier a sa boucle
-    CHECK (tails == pipes);       // et son repère de relâchement
+    CHECK (zoneCount == pipes + 162);   // + 6 variantes d'attaque pour chacun des 27 tuyaux « bruits »
+    CHECK (loops == zoneCount);   // chaque fichier a sa boucle
+    CHECK (tails == zoneCount);   // et son repère de relâchement
     for (const auto& w : r.warnings) CHECK (w.find ("sample not found") == std::string::npos);
     CHECK (r.router.rules.size() == 5);
     CHECK (r.combinations.generals.size() == 6);
@@ -812,4 +813,38 @@ TEST_CASE ("organ import: a box or a switch shared by the pedal and a manual has
     CHECK (pedalButtons == 0);
     CHECK (manualButtons == 2);
     CHECK (mirrored == 2);
+}
+
+TEST_CASE ("organ import: attack variants become random alternatives, cut by their minimum velocity")
+{
+    const char* odf =
+        "[Organ]\nChurchName=Attacks\nNumberOfManuals=1\nHasPedals=N\n"
+        "[Manual001]\nName=Great\nNumberOfStops=1\nStop001=1\nNumberOfLogicalKeys=2\nNumberOfAccessibleKeys=2\nFirstAccessibleKeyMIDINoteNumber=60\n"
+        "[Stop001]\nName=Noisy\nNumberOfLogicalPipes=2\nNumberOfAccessiblePipes=2\n"
+        "Pipe001=main.wav\nPipe001AttackCount=4\nPipe001Attack001=a.wav\nPipe001Attack002=b.wav\nPipe001Attack002AttackVelocity=100\n"
+        "Pipe001Attack003=quick.wav\nPipe001Attack003MaxTimeSinceLastRelease=200\nPipe001Attack004=trem.wav\nPipe001Attack004IsTremulant=1\n"
+        "Pipe002=other.wav\n";
+    Options opt;
+    opt.readSampleMarks = false;
+    opt.firstTrack = 0;
+    auto r = importOrgan (crlf (odf), opt);
+    REQUIRE (r.ok);
+    const auto& zones = r.keyboards[0].instrument.zones;
+    // première touche : velocités 1..99 -> principal + a (2 alternatives), 100..127 -> principal + a + b (3) ; deuxième touche : un seul fichier
+    REQUIRE (zones.size() == 6);
+    auto count = [&] (int key, int velLow, int velHigh)
+    {
+        std::vector<int> ranks;
+        for (const auto& z : zones)
+            if (z.keyLow == key && z.velLow == velLow && z.velHigh == velHigh) ranks.push_back (z.roundRobin);
+        std::sort (ranks.begin(), ranks.end());
+        return ranks;
+    };
+    CHECK (count (60, 1, 99) == std::vector<int> { 1, 2 });
+    CHECK (count (60, 100, 127) == std::vector<int> { 1, 2, 3 });
+    CHECK (count (61, 1, 127) == std::vector<int> { 0 });
+    CHECK (zones[0].rrMode == static_cast<int> (RoundRobinMode::Random));
+    CHECK (r.keyboards[0].pipes == 2);
+    CHECK (hasWarning (r, "MaxTimeSinceLastRelease"));
+    CHECK_FALSE (hasWarning (r, "not imported (only the main sample)"));
 }
