@@ -7,6 +7,7 @@
 
 #include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/MicrodecalePresets.h"
+#include "neptune/core/SpliceShifter.h"
 
 using namespace neptune::core;
 using Catch::Approx;
@@ -276,4 +277,35 @@ TEST_CASE ("microdecale: factory presets apply cleanly and Default restores the 
     md::applyPreset (r.runner.params(), list[0]);
     CHECK (r.runner.params().get (md::delayR) == Approx (25.0));
     CHECK (r.runner.params().get (stock::mix) == Approx (100.0));
+}
+
+TEST_CASE ("microdecale: the splice search is spread over many samples and the delay stays inside its range", "[microdecale]")
+{
+    for (const double cents : { 60.0, -60.0, 1200.0, -1200.0 })
+    {
+        SpliceShifter sh;
+        sh.prepare (kRate);
+        sh.setSplice (30.0);
+        const double ratio = std::pow (2.0, cents / 1200.0);
+        const auto in = sine (440.0, static_cast<std::size_t> (kRate * 12.0));
+        double lo = 1.0e9, hi = 0.0;
+        long maxPerSample = 0;
+        int jumps = 0;
+        double prev = sh.currentDelaySamples();
+        for (const float x : in)
+        {
+            sh.process (x, ratio);
+            const double d = sh.currentDelaySamples();
+            lo = std::min (lo, d);
+            hi = std::max (hi, d);
+            maxPerSample = std::max (maxPerSample, sh.candidatesPerSample());
+            if (std::fabs (d - prev) > 500.0) ++jumps;
+            prev = d;
+        }
+        INFO ("cents " << cents << " delay " << lo << " .. " << hi);
+        CHECK (lo > 300.0 * 0.0 + (std::fabs (cents) > 100.0 ? 3.0 : 330.0));   // 6 ms de recherche + 2 ms = 384 échantillons au plus bas, moins la dérive pendant la recherche
+        CHECK (hi < 1824.0 + 288.0 + 8.0 + 1.0);
+        CHECK (jumps >= 1);   // au moins un raccord a eu lieu
+        if (std::fabs (cents) < 100.0) CHECK (maxPerSample <= 2);   // petit écart : la recherche de 577 positions tient en deux par échantillon au plus
+    }
 }
