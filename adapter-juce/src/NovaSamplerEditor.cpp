@@ -1173,10 +1173,17 @@ SampleMeta NovaSamplerEditor::metaOfZone (const Zone& z)
 void NovaSamplerEditor::applyFileMarks (Zone& z, bool withRoot)
 {
     SampleMeta m;
-    if (z.samplePath.empty() || ! readFileMarks (utf8Path (z.samplePath), m)) return;
+    const bool haveMarks = ! z.samplePath.empty() && readFileMarks (utf8Path (z.samplePath), m);
+    if (! haveMarks || m.loops.empty())
+    {
+        // pas de boucle dans le fichier : « Sans boucle » (joué en entier, mais la touche relâchée l'interrompt) ; une zone déjà en boucle le reste
+        if (z.mode != PlayMode::Loop) { z.mode = PlayMode::OneShot; z.releaseCuts = true; }
+        if (! haveMarks) { z = sanitised (z); return; }
+    }
     if (! m.loops.empty())
     {
         z.mode = PlayMode::Loop;
+        z.releaseCuts = false;
         z.loopStart = m.loops[0].start; z.loopEnd = m.loops[0].end; z.loopCrossfade = m.loops[0].crossfade; z.loopRepeats = m.loops[0].repeats;
         z.extraLoops.clear();
         for (std::size_t i = 1; i < m.loops.size(); ++i) z.extraLoops.push_back ({ m.loops[i].start, m.loops[i].end, m.loops[i].crossfade, m.loops[i].repeats });

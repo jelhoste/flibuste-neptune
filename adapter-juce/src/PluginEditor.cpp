@@ -603,15 +603,30 @@ void NeptuneEditor::importSfz()
     {
         const auto picked = fc.getResult();
         if (safe == nullptr || ! picked.existsAsFile()) return;
-        const auto result = safe->processor_.uiImportSfz (std::filesystem::path (picked.getFullPathName().toStdString()));
+        // où mettre l'instrument : vider le mixeur (une seule piste Sampler) ou ajouter une piste Sampler aux autres
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsYesNoCancel (juce::MessageBoxIconType::QuestionIcon, safe->text ("sfz.import"),
+                                                                                        safe->text ("sfz.ask").replace ("{0}", picked.getFileNameWithoutExtension()),
+                                                                                        safe->text ("sfz.clear"), safe->text ("sfz.add"), safe->text ("mix.cancel"), safe.getComponent()),
+                                      [safe, picked] (int answer)
+        {
+            if (safe == nullptr || answer == 0) return;
+            safe->finishSfzImport (picked, answer == 1 ? NeptuneProcessor::SfzPlacement::ClearMixer : NeptuneProcessor::SfzPlacement::AddTrack);
+        });
+    });
+}
+
+void NeptuneEditor::finishSfzImport (const juce::File& picked, NeptuneProcessor::SfzPlacement placement)
+{
+    {
+        const auto result = processor_.uiImportSfz (std::filesystem::path (picked.getFullPathName().toStdString()), placement);
         juce::String message;
-        if (! result.ok) message = result.error == "no_sampler" ? safe->text ("sfz.no_sampler") : juce::String::fromUTF8 (result.error.c_str());
+        if (! result.ok) message = result.error == "no_free_track" ? text ("sfz.no_free_track") : juce::String::fromUTF8 (result.error.c_str());
         else
         {
-            message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (result.imported) + " / " + juce::String (result.regions) + " " + safe->text ("sfz.regions");
+            message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (result.imported) + " / " + juce::String (result.regions) + " " + text ("sfz.regions");
             if (! result.warnings.empty())
             {
-                message += "\n\n" + safe->text ("organ.warnings") + "\n";
+                message += "\n\n" + text ("organ.warnings") + "\n";
                 int shown = 0;
                 for (const auto& w : result.warnings)
                 {
@@ -620,8 +635,8 @@ void NeptuneEditor::importSfz()
                 }
             }
         }
-        juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, safe->text ("sfz.import"), message);
-    });
+        juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, text ("sfz.import"), message);
+    }
 }
 
 void NeptuneEditor::importOrgan()

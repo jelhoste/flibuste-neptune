@@ -239,8 +239,12 @@ public:
     int uiImportTrack (neptune::core::trackexport::Bundle);
     // Importe un orgue GrandOrgue (fichier .organ déjà sur disque) : un clavier = une piste Sampler sur des pistes libres consécutives, routeur et combinaisons fusionnés.
     neptune::core::organimport::Result uiImportOrgan (const std::filesystem::path& organFile);
-    // Remplace les zones de la piste Sampler sélectionnée par celles d'un instrument SFZ (annulable : une seule action d'historique).
-    neptune::core::sfzimport::Result uiImportSfz (const std::filesystem::path& sfzFile);
+    // Import d'un instrument SFZ dans une nouvelle piste Sampler : AddTrack la met dans la première piste libre (ou la piste de départ restée vide), ClearMixer supprime
+    // d'abord toutes les autres pistes. L'historique d'annulation est vidé. Erreur « no_free_track » si les 16 pistes sont prises.
+    enum class SfzPlacement { AddTrack, ClearMixer };
+    neptune::core::sfzimport::Result uiImportSfz (const std::filesystem::path& sfzFile, SfzPlacement placement);
+    // Remet une piste à zéro et y installe un instrument Sampler (inserts, réglages et instruments des autres types compris). midiChannel < 1 : celui d'une piste neuve.
+    void installSamplerTrack (int index, neptune::core::InstrumentDescription instrument, const std::string& name, int midiChannel);
     // Retire une piste (remise à l'état d'origine). Faux s'il n'en reste qu'une. Vide l'historique d'annulation.
     bool uiRemoveTrack (int track);
 

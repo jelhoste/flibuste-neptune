@@ -738,22 +738,82 @@ int NeptuneProcessor::uiImportTrack (neptune::core::trackexport::Bundle b)
     return index;
 }
 
-neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::filesystem::path& sfzFile)
+void NeptuneProcessor::installSamplerTrack (int index, neptune::core::InstrumentDescription instrument, const std::string& name, int midiChannel)
 {
     using namespace neptune::core;
-    const int track = selectedTrack();
-    if (! trackActive (track) || trackType (track) != TrackType::Sampler)
+    namespace mx = neptune::core::mixer;
     {
-        sfzimport::Result r;
-        r.error = "no_sampler";
-        return r;
+        const juce::ScopedLock lock (instrumentLock_);
+        mixer_.resetTrack (index);
+        auto& t = mixer_.tracks[static_cast<std::size_t> (index)];
+        t.active = true;
+        t.type = TrackType::Sampler;
+        t.instrument = std::move (instrument);
+        t.strip.name = name;
+        if (midiChannel >= 1)
+        {
+            t.strip.midiChannel = midiChannel;
+            t.strip.midiChannelMask = 0;
+        }
+        t.strip = mx::sanitisedStrip (std::move (t.strip), false, index);
     }
+    for (int s = 0; s < mx::numInserts; ++s)
+    {
+        { const juce::ScopedLock lock (instrumentLock_); insertInstances_[static_cast<std::size_t> (index)][static_cast<std::size_t> (s)] = nullptr; }
+        engine_.setInsert (StripKind::Track, index, s, nullptr);
+    }
+    resetTrackParameters (index, true);
+    engine_.setTrackSettings (index, trackSettings (index));
+    engine_.setTrackType (index, TrackType::Sampler);
+    engine_.setTrackActive (index, true);
+    publishSynthPatch (index, SynthDescription {});
+    publishFmDescription (index, fm::FmDescription {});
+    publishOrganDescription (index, organ::OrganDescription {});
+    InstrumentDescription description;
+    { const juce::ScopedLock lock (instrumentLock_); description = mixer_.tracks[static_cast<std::size_t> (index)].instrument; }
+    loader_->request (index, description, false);
+}
+
+neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::filesystem::path& sfzFile, SfzPlacement placement)
+{
+    using namespace neptune::core;
     auto result = sfzimport::importSfzFile (sfzFile);
     if (! result.ok) return result;
-    auto d = instrumentDescription (track);   // les réglages de l'instrument (polyphonie, humanize...) sont gardés ; les zones sont remplacées
-    d.zones = result.instrument.zones;
-    d.pool.clear();
-    uiEditInstrument (track, std::move (d), "Import SFZ", {});
+    if (placement == SfzPlacement::ClearMixer)
+    {
+        // toutes les pistes sauf la première active disparaissent ; celle-ci est remise à zéro et reçoit le SFZ
+        int keep = -1;
+        std::vector<int> others;
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            for (int t = 0; t < mixer::numTracks; ++t)
+                if (mixer_.tracks[static_cast<std::size_t> (t)].active) { if (keep < 0) keep = t; else others.push_back (t); }
+        }
+        for (const int t : others) uiRemoveTrack (t);
+        const int target = keep < 0 ? 0 : keep;
+        installSamplerTrack (target, result.instrument, result.name, -1);
+        selectTrack (target);
+    }
+    else
+    {
+        int target = -1;
+        {
+            const juce::ScopedLock lock (instrumentLock_);
+            if (mixer_.tracks[0].active && ! trackHasContent (0)) target = 0;   // la piste de départ, restée vide : le SFZ la remplace
+            else target = mixer_.firstInactive();
+        }
+        if (target < 0)
+        {
+            result.ok = false;
+            result.error = "no_free_track";
+            return result;
+        }
+        installSamplerTrack (target, result.instrument, result.name, -1);
+        selectTrack (target);
+    }
+    undo_.clear();
+    ++revision_;
+    notifyStateChanged();
     return result;
 }
 
@@ -802,33 +862,7 @@ neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::f
     {
         const int index = first + static_cast<int> (k);
         const auto& kb = result.keyboards[k];
-        {
-            const juce::ScopedLock lock (instrumentLock_);
-            mixer_.resetTrack (index);
-            auto& t = mixer_.tracks[static_cast<std::size_t> (index)];
-            t.active = true;
-            t.type = TrackType::Sampler;
-            t.instrument = kb.instrument;
-            t.strip.name = kb.name;
-            t.strip.midiChannel = kb.midiChannel;
-            t.strip.midiChannelMask = 0;
-            t.strip = mx::sanitisedStrip (std::move (t.strip), false, index);
-        }
-        for (int s = 0; s < mx::numInserts; ++s)
-        {
-            { const juce::ScopedLock lock (instrumentLock_); insertInstances_[static_cast<std::size_t> (index)][static_cast<std::size_t> (s)] = nullptr; }
-            engine_.setInsert (StripKind::Track, index, s, nullptr);
-        }
-        resetTrackParameters (index, true);
-        engine_.setTrackSettings (index, trackSettings (index));
-        engine_.setTrackType (index, TrackType::Sampler);
-        engine_.setTrackActive (index, true);
-        publishSynthPatch (index, SynthDescription {});
-        publishFmDescription (index, fm::FmDescription {});
-        publishOrganDescription (index, organ::OrganDescription {});
-        InstrumentDescription description;
-        { const juce::ScopedLock lock (instrumentLock_); description = mixer_.tracks[static_cast<std::size_t> (index)].instrument; }
-        loader_->request (index, description, false);
+        installSamplerTrack (index, kb.instrument, kb.name, kb.midiChannel);
     }
     {
         const juce::ScopedLock lock (instrumentLock_);
