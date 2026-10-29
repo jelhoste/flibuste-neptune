@@ -402,3 +402,88 @@ TEST_CASE ("equalizer: defaults are a 20 Hz high pass and three flat bells, the 
     CHECK (m->totalResponseDb (p, 1000.0, false) == Approx (0.0).margin (0.01));     // quasi transparent dans la bande audio
     CHECK (m->totalResponseDb (p, 100.0, false) == Approx (0.0).margin (0.05));
 }
+
+TEST_CASE ("equalizer: a dynamic band releases with its Release time", "[equalizer]")
+{
+    for (const double releaseMs : { 50.0, 300.0 })
+    {
+        EqRig r;
+        r.band (0, e::kPeak, 1000.0, 0.0, 1.0);
+        r.set (e::bandParam (0, e::kDynOn), 1.0);
+        r.set (e::bandParam (0, e::kTarget), -12.0);
+        r.set (e::bandParam (0, e::kThreshold), -40.0);
+        r.set (e::bandParam (0, e::kKnee), 0.0);
+        r.set (e::bandParam (0, e::kAttack), 5.0);
+        r.set (e::bandParam (0, e::kRelease), releaseMs);
+        std::vector<float> l (256), r2 (256);
+        long counter = 0;
+        auto run = [&] (double amp, double seconds, std::vector<double>* gains)
+        {
+            const int blocks = static_cast<int> (seconds * kRate / 256.0);
+            for (int blk = 0; blk < blocks; ++blk)
+            {
+                for (int i = 0; i < 256; ++i)
+                {
+                    l[static_cast<std::size_t> (i)] = r2[static_cast<std::size_t> (i)] = static_cast<float> (amp * std::sin (2.0 * kPi_ * 1000.0 * static_cast<double> (counter++) / kRate));
+                }
+                r.runner.setKey (nullptr, nullptr);
+                r.runner.process (l.data(), r2.data(), 256, false);
+                if (gains) gains->push_back (r.eq().meter (e::kBandGain0));
+            }
+        };
+        run (0.1, 0.5, nullptr);                              // -20 dBFS : bande tirée vers -12 dB
+        std::vector<double> g;
+        run (0.0003, 1.5, &g);                                // -70 dBFS : sous le seuil, retour vers 0 dB
+        INFO ("release " << releaseMs << " ms : gain " << g.front() << " dB au premier bloc, " << g[g.size() / 2] << " au milieu");
+        CHECK (g.front() < -8.0);                             // pas de retour instantané
+        // 63 % du chemin (de -12 vers 0) : -4,4 dB, atteint vers releaseMs
+        std::size_t k = 0;
+        while (k < g.size() && g[k] < -12.0 * 0.37) ++k;
+        const double t63 = static_cast<double> (k) * 256.0 / kRate * 1000.0;
+        INFO ("t63 = " << t63 << " ms");
+        CHECK (t63 == Approx (releaseMs).epsilon (0.25));
+    }
+}
+
+TEST_CASE ("equalizer: the output level of a dynamic band recovers with Release (bench scenario)", "[equalizer]")
+{
+    for (const double smooth : { 100.0, 0.0 })
+    {
+        EqRig r;
+        r.band (0, e::kPeak, 1000.0, 0.0, 1.0);
+        r.set (e::bandParam (0, e::kDynOn), 1.0);
+        r.set (e::bandParam (0, e::kTarget), -12.0);
+        r.set (e::bandParam (0, e::kThreshold), -40.0);
+        r.set (e::bandParam (0, e::kKnee), 0.0);
+        r.set (e::bandParam (0, e::kAttack), 100.0);
+        r.set (e::bandParam (0, e::kRelease), 100.0);
+        r.set (e::bandParam (0, e::kSmooth), smooth);
+        std::vector<float> l (64), r2 (64);
+        long counter = 0;
+        auto run = [&] (double amp, double seconds, std::vector<double>* gains)
+        {
+            const int blocks = static_cast<int> (seconds * kRate / 64.0);
+            for (int blk = 0; blk < blocks; ++blk)
+            {
+                double si = 0, so = 0;
+                for (int i = 0; i < 64; ++i)
+                {
+                    const auto k = static_cast<std::size_t> (i);
+                    l[k] = r2[k] = static_cast<float> (amp * std::sin (2.0 * kPi_ * 1000.0 * static_cast<double> (counter++) / kRate));
+                    si += l[k] * l[k];
+                }
+                r.runner.setKey (nullptr, nullptr);
+                r.runner.process (l.data(), r2.data(), 64, false);
+                for (int i = 0; i < 64; ++i) so += l[static_cast<std::size_t> (i)] * l[static_cast<std::size_t> (i)];
+                if (gains) gains->push_back (10.0 * std::log10 (std::max (so, 1e-30) / std::max (si, 1e-30)));
+            }
+        };
+        run (0.1, 1.0, nullptr);
+        std::vector<double> g;
+        run (0.0003, 1.0, &g);
+        INFO ("smooth " << smooth << " : gain de sortie par bloc de 1,3 ms : " << g[0] << " " << g[3] << " " << g[10] << " " << g[40] << " " << g[100] << " " << g[200]);
+        // le tout premier bloc est dominé par la résonance du filtre (il garde l'énergie du son précédent) : le rapport sortie/entrée y est très élevé sans que le gain ait bougé
+        CHECK (g[3] < -6.0);   // 5 ms apres la chute : le gain n'est pas revenu
+        CHECK (g[200] > -4.0); // 270 ms apres (> 2 constantes ; avec Smooth a 100 % le retour passe par deux etages, donc un peu plus lent)
+    }
+}

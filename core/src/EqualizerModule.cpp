@@ -209,7 +209,7 @@ bool EqualizerModule::declareParams (ParameterSet& set, std::string* error) cons
         add (P::continuous (bandParam (b, kKnee), (n + "Knee Width").c_str(), Unit::Decibel, 0.0, 32.0, 8.0, Curve::Power, 2.0));
         add (P::continuous (bandParam (b, kAttack), (n + "Attack").c_str(), Unit::Milliseconds, 0.0, 1000.0, 100.0, Curve::Power, 2.0));
         add (P::continuous (bandParam (b, kRelease), (n + "Release").c_str(), Unit::Milliseconds, 0.0, 5000.0, 500.0, Curve::Power, 2.0));
-        add (pct (bandParam (b, kSmooth), n + "Dynamic Smooth", 0.0, 100.0, 100.0));
+        add (pct (bandParam (b, kSmooth), n + "Dynamic Smooth", 0.0, 100.0, 0.0));
         add (P::continuous (bandParam (b, kRmsLength), (n + "Dynamic RMS Length").c_str(), Unit::Milliseconds, 0.0, 40.0, 0.0));
         add (pct (bandParam (b, kRmsMix), n + "Dynamic RMS Mix", 0.0, 100.0, 50.0));
         add (P::choice (bandParam (b, kSideType), n + "Side Filter Type", { "BP", "LP", "HP", "AL" }, 0));

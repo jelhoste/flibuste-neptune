@@ -1810,7 +1810,7 @@ const Entry kEntries[] = {
     { "hlp.dtrange.t", { "RANGE", "RANGE" } },
     { "hlp.dtknee", { "Width of the transition around the threshold.", "Largeur de la transition autour du seuil." } },
     { "hlp.dtknee.t", { "KNEE", "GENOU" } },
-    { "hlp.dtsmooth", { "Smoothing of the band's gain movement.", "Lissage du mouvement de gain de la bande." } },
+    { "hlp.dtsmooth", { "0%: the Attack and Release times are the real times. 100%: steadier detection with less gain ripple on fast-moving sounds, but the return takes about twice the Release time.", "0 % : les temps Attack et Release sont les temps réels. 100 % : détection plus régulière, moins d'ondulation du gain sur les sons qui bougent vite, mais le retour prend environ deux fois le temps de Release." } },
     { "hlp.dtsmooth.t", { "SMOOTH", "LISSAGE" } },
     { "hlp.dtrms", { "Length of the RMS window of the detection (0 = peak detection) and its mix with the peak.", "Longueur de la fenêtre RMS de la détection (0 = détection de crête) et son mélange avec la crête." } },
     { "hlp.dtrms.t", { "RMS", "RMS" } },
