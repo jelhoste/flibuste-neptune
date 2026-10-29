@@ -6,7 +6,7 @@
 // pendant le traitement. Conçu pour des rapports proches de 1 (quelques cents) mais valable de -12 à +12 demi-tons.
 // Le retard du décaleur varie dans [bas, bas + longueur] ; son retard moyen est `baseDelaySamples()`.
 // La recherche du point de raccord (la partie chère : une corrélation par position candidate) est étalée sur plusieurs échantillons après le moment où le raccord
-// devient nécessaire, pour qu'aucun bloc audio, même court (32 échantillons), ne porte tout le coût. Elle compare des zones figées du tampon, mesurées depuis
+// devient nécessaire (jusqu'à 85 ms), pour qu'aucun bloc audio, même court (32 échantillons), ne porte plus qu'une petite part du coût. Elle compare des zones figées du tampon, mesurées depuis
 // le moment du déclenchement : le résultat est le même que si elle avait été faite d'un coup ; seul le début du fondu est retardé de quelques millisecondes, et
 // le retard des deux pointeurs, qui dérivent ensemble, garde le même écart.
 #include <algorithm>
@@ -51,7 +51,8 @@ public:
     }
     double baseDelaySamples() const noexcept { return low_ + 0.5 * spliceSmp_; }   // retard initial et moyen du décaleur
     double currentDelaySamples() const noexcept { return d1_; }
-    long candidatesPerSample() const noexcept { return perSample_; }   // positions candidates évaluées par échantillon pendant la recherche en cours (ou de la dernière)
+    long candidatesPerSample() const noexcept { return perSample_; }   // positions candidates évaluées à chaque évaluation de la recherche en cours (ou de la dernière)
+    long searchStride() const noexcept { return stride_; }              // échantillons entre deux évaluations (1 : à chaque échantillon)
 
     // Un échantillon. `ratio` : rapport de fréquences (1 = inchangé, 2^(cents/1200)).
     float process (float x, double ratio) noexcept
@@ -124,7 +125,11 @@ private:
         const double room = std::max (1.0, 0.5 * slack / std::max (1.0e-9, std::fabs (drift)));
         const long samples = std::clamp (static_cast<long> (room), 1L, kMaxSearchSamples);
         const long candidates = 2 * searchRadius_ + 1;
-        perSample_ = energyA_ > 1.0e-9 ? std::max (1L, (candidates + samples - 1) / samples) : candidates;
+        // Moins de candidats que d'échantillons disponibles : un candidat tous les `stride_` échantillons ; sinon plusieurs par échantillon.
+        if (energyA_ <= 1.0e-9) { perSample_ = candidates; stride_ = 1; }
+        else if (candidates <= samples) { perSample_ = 1; stride_ = std::max (1L, samples / candidates); }
+        else { perSample_ = (candidates + samples - 1) / samples; stride_ = 1; }
+        strideCount_ = 0;
         searching_ = true;
     }
     // Indice du tampon pour un retard compté depuis l'instant du déclenchement ; la lecture recule d'un cran par échantillon plus ancien.
@@ -138,6 +143,8 @@ private:
     void continueSearch() noexcept
     {
         ++elapsed_;
+        if (++strideCount_ < stride_) return;
+        strideCount_ = 0;
         const long size = static_cast<long> (buf_.size());
         const long w = window_i_;
         long done = 0;
@@ -183,11 +190,11 @@ private:
     std::size_t pos_ = 0;
     bool fading_ = false;
     // Recherche du point de raccord en cours (étalée sur plusieurs échantillons, voir plus haut)
-    static constexpr long kMaxSearchSamples = 1024;   // durée d'étalement au plus (21 ms à 48 kHz)
+    static constexpr long kMaxSearchSamples = 4096;   // durée d'étalement au plus (85 ms à 48 kHz)
     bool searching_ = false;
     int dir_ = 1;
     double xf_ = 64.0, target_ = 0.0, searchD1_ = 0.0, energyA_ = 0.0, bestScore_ = -2.0;
     std::size_t searchPos_ = 0;
-    long elapsed_ = 0, window_i_ = 0, searchRadius_ = 0, cursor_ = 0, perSample_ = 1, bestShift_ = 0;
+    long elapsed_ = 0, window_i_ = 0, searchRadius_ = 0, cursor_ = 0, perSample_ = 1, stride_ = 1, strideCount_ = 0, bestShift_ = 0;
 };
 } // namespace neptune::core

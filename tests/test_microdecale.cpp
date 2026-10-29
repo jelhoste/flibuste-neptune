@@ -303,9 +303,9 @@ TEST_CASE ("microdecale: the splice search is spread over many samples and the d
             prev = d;
         }
         INFO ("cents " << cents << " delay " << lo << " .. " << hi);
-        CHECK (lo > 300.0 * 0.0 + (std::fabs (cents) > 100.0 ? 3.0 : 330.0));   // 6 ms de recherche + 2 ms = 384 échantillons au plus bas, moins la dérive pendant la recherche
+        CHECK (lo >= 3.0);   // la recherche étalée laisse le pointeur dériver un peu sous le bas de sa course (384 échantillons) : jamais sous 3
         CHECK (hi < 1824.0 + 288.0 + 8.0 + 1.0);
         CHECK (jumps >= 1);   // au moins un raccord a eu lieu
-        if (std::fabs (cents) < 100.0) CHECK (maxPerSample <= 2);   // petit écart : la recherche de 577 positions tient en deux par échantillon au plus
+        if (std::fabs (cents) < 100.0) { CHECK (maxPerSample == 1); CHECK (sh.searchStride() >= 4); }   // petit écart : un candidat tous les quelques échantillons (577 positions sur 4096 échantillons)
     }
 }
