@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter", "-Wextra-semi", "-Wnon-virtual-dtor")
 #include <clap-juce-extensions/clap-juce-extensions.h>
@@ -65,6 +66,7 @@ private:
 
     neptune::core::ModuleRunner runner_;
     HostProbe probe_;
+    std::vector<int> hostIndex_;   // indice de chaque réglage dans la liste de l'hôte ; -1 : réglage caché (affichage), non déclaré à l'hôte
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;
     neptune::core::uistate::Size modal_[2] {};

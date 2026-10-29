@@ -38,8 +38,14 @@ ShaperProcessor::ShaperProcessor()
 {
     jassert (runner_.ok());
     auto& set = runner_.params();
+    // Les réglages d'affichage (cachés) ne sont pas déclarés à l'hôte ; ils restent dans l'état du plugin (voir getStateInformation).
+    hostIndex_.assign (set.size(), -1);
     for (std::size_t i = 0; i < set.size(); ++i)
-        addParameter (new NeptuneParameter (set, i, probe_)); // l'AudioProcessor en prend la propriété ; même ordre que le jeu
+    {
+        if (set.spec (i).hidden) continue;
+        hostIndex_[i] = getParameters().size();
+        addParameter (new NeptuneParameter (set, i, probe_)); // l'AudioProcessor en prend la propriété
+    }
     std::vector<std::string> warnings;
     settings_ = settings::loadFile (configDirectory() / "settings.json", &warnings);
     for (auto& s : modal_) s = {};
@@ -127,7 +133,7 @@ void ShaperProcessor::uiBeginEdit (ParamId id)
 {
     const auto index = runner_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
-    getParameters()[static_cast<int> (index)]->beginChangeGesture();
+    if (hostIndex_[index] >= 0) getParameters()[hostIndex_[index]]->beginChangeGesture();
     undo_.beginGesture();
 }
 
@@ -137,7 +143,7 @@ void ShaperProcessor::uiSetNormalised (ParamId id, double n)
     const auto index = set.indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.setParameter (set, id, set.spec (index).fromNormalized (n));
-    getParameters()[static_cast<int> (index)]->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
+    if (hostIndex_[index] >= 0) getParameters()[hostIndex_[index]]->setValueNotifyingHost (static_cast<float> (set.getNormalizedAt (index)));
 }
 
 void ShaperProcessor::uiEndEdit (ParamId id)
@@ -145,7 +151,7 @@ void ShaperProcessor::uiEndEdit (ParamId id)
     const auto index = runner_.params().indexOf (id);
     if (index == ParameterSet::npos) return;
     undo_.endGesture();
-    getParameters()[static_cast<int> (index)]->endChangeGesture();
+    if (hostIndex_[index] >= 0) getParameters()[hostIndex_[index]]->endChangeGesture();
 }
 
 void ShaperProcessor::uiResetToDefault (ParamId id)
