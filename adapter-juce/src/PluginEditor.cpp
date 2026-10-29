@@ -562,6 +562,7 @@ void NeptuneEditor::showGlobalPresetMenu()
     menu.addItem (3, text ("gpreset.open_folder"));
     menu.addSeparator();
     menu.addItem (4, text ("organ.import"));
+    menu.addItem (5, text ("sfz.import"));
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&globalPresetButton_), [safe, files] (int choice)
@@ -581,6 +582,7 @@ void NeptuneEditor::showGlobalPresetMenu()
         }
         else if (choice == 3) global_presets::folder (safe->settingsDir()).revealToUser();
         else if (choice == 4) safe->importOrgan();
+        else if (choice == 5) safe->importSfz();
         else if (choice >= 100 && choice < 1000 && choice - 100 < files.size()) safe->loadGlobalPreset (files[choice - 100]);
         else if (choice >= 1000 && choice - 1000 < files.size())
         {
@@ -590,6 +592,35 @@ void NeptuneEditor::showGlobalPresetMenu()
                                                                                          safe->text ("gpreset.delete"), safe->text ("mix.cancel"), safe.getComponent()),
                                           [file] (int result) { if (result == 1) juce::ignoreUnused (file.moveToTrash()); });
         }
+    });
+}
+
+void NeptuneEditor::importSfz()
+{
+    auto chooser = std::make_shared<juce::FileChooser> (text ("sfz.import"), juce::File::getSpecialLocation (juce::File::userHomeDirectory), "*.sfz");
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe, chooser] (const juce::FileChooser& fc)
+    {
+        const auto picked = fc.getResult();
+        if (safe == nullptr || ! picked.existsAsFile()) return;
+        const auto result = safe->processor_.uiImportSfz (std::filesystem::path (picked.getFullPathName().toStdString()));
+        juce::String message;
+        if (! result.ok) message = result.error == "no_sampler" ? safe->text ("sfz.no_sampler") : juce::String::fromUTF8 (result.error.c_str());
+        else
+        {
+            message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (result.imported) + " / " + juce::String (result.regions) + " " + safe->text ("sfz.regions");
+            if (! result.warnings.empty())
+            {
+                message += "\n\n" + safe->text ("organ.warnings") + "\n";
+                int shown = 0;
+                for (const auto& w : result.warnings)
+                {
+                    if (++shown > 12) { message += "..."; break; }
+                    message += "- " + juce::String::fromUTF8 (w.c_str()) + "\n";
+                }
+            }
+        }
+        juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, safe->text ("sfz.import"), message);
     });
 }
 

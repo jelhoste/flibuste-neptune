@@ -738,6 +738,25 @@ int NeptuneProcessor::uiImportTrack (neptune::core::trackexport::Bundle b)
     return index;
 }
 
+neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::filesystem::path& sfzFile)
+{
+    using namespace neptune::core;
+    const int track = selectedTrack();
+    if (! trackActive (track) || trackType (track) != TrackType::Sampler)
+    {
+        sfzimport::Result r;
+        r.error = "no_sampler";
+        return r;
+    }
+    auto result = sfzimport::importSfzFile (sfzFile);
+    if (! result.ok) return result;
+    auto d = instrumentDescription (track);   // les réglages de l'instrument (polyphonie, humanize...) sont gardés ; les zones sont remplacées
+    d.zones = result.instrument.zones;
+    d.pool.clear();
+    uiEditInstrument (track, std::move (d), "Import SFZ", {});
+    return result;
+}
+
 neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::filesystem::path& organFile)
 {
     using namespace neptune::core;
