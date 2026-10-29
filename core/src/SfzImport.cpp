@@ -289,7 +289,7 @@ Result importSfz (std::string_view sfzText, const Options& options)
     }
 
     std::map<std::string, int> unsupported;   // opcode -> nombre de régions où il apparaît
-    int missingFiles = 0, generators = 0, badRanges = 0, withoutLoop = 0;
+    int missingFiles = 0, generators = 0, badRanges = 0;
     std::vector<double> randomLow;            // lorand de chaque zone (hors zones à lorand : -1), pour numéroter les alternances au hasard
     std::vector<std::string> rangeKey;        // clef d'étendue de chaque zone
     for (const auto& ops : regions)
@@ -303,7 +303,13 @@ Result importSfz (std::string_view sfzText, const Options& options)
         };
         auto text = [&ops] (const char* k) { const auto it = ops.find (k); return it == ops.end() ? std::string() : lowered (it->second); };
         for (const auto& kv : ops)
-            if (! handledOpcodes().count (kv.first)) ++unsupported[kv.first];
+        {
+            if (handledOpcodes().count (kv.first)) continue;
+            double v = 0.0;
+            const bool numeric = parseDouble (kv.second, v);
+            if (numeric && ((kv.first == "width" && v == 100.0) || (kv.first == "position" && v == 0.0))) continue;   // la valeur par défaut de SFZ : rien à convertir
+            ++unsupported[kv.first];
+        }
 
         const auto sampleName = has ("sample") ? ops.at ("sample") : std::string();
         if (sampleName.empty()) continue;
@@ -364,7 +370,7 @@ Result importSfz (std::string_view sfzText, const Options& options)
             else if (fileLoop) z.loopEnd = meta.loops[0].end;
             if (! explicitLoop && fileLoop) z.loopCrossfade = meta.loops[0].crossfade;
         }
-        else if (loopMode != "one_shot" && ! z.onRelease) ++withoutLoop;
+        else if (loopMode != "one_shot" && ! z.onRelease) z.releaseCuts = true;   // no_loop (le défaut) : joué en entier, mais la touche relâchée l'interrompt
 
         // enveloppe d'amplitude (secondes -> ms ; le relâchement garde ses 50 ms d'origine tant qu'il n'est pas donné)
         if (has ("ampeg_delay") || has ("ampeg_attack") || has ("ampeg_hold") || has ("ampeg_decay") || has ("ampeg_sustain") || has ("ampeg_release"))
@@ -433,7 +439,6 @@ Result importSfz (std::string_view sfzText, const Options& options)
     if (missingFiles > 0) r.warnings.push_back (std::to_string (missingFiles) + " region(s) skipped: sample file missing");
     if (generators > 0) r.warnings.push_back (std::to_string (generators) + " region(s) skipped: built-in oscillators (*sine, *saw...) are not converted");
     if (badRanges > 0) r.warnings.push_back (std::to_string (badRanges) + " region(s) skipped: lokey above hikey");
-    if (withoutLoop > 0) r.warnings.push_back ("Notes without a loop play to their end; releasing the key does not cut them (the key release envelope only applies to looped notes)");
     if (! unsupported.empty())
     {
         std::vector<std::pair<std::string, int>> sorted (unsupported.begin(), unsupported.end());

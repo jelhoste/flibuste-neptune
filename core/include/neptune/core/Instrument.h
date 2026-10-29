@@ -130,6 +130,9 @@ struct ZoneDescription
     double humanizePct = 100.0;
     double pan = 0.0;              // -1 (gauche) .. +1 (droite) ; loi de balance en cosinus, neutre au centre
     bool reverse = false;          // lecture à l'envers (le sample est alors gardé entièrement en mémoire)
+    // Zone sans boucle (one-shot) que le Note Off interrompt : l'enveloppe de relâchement s'applique à la touche relâchée, comme pour une boucle (pianos SFZ...).
+    // Faux : le sample est joué en entier, le Note Off est ignoré (percussions). Sans effet sur une zone en boucle ou déclenchée au relâchement.
+    bool releaseCuts = false;
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
     static constexpr double defaultFadeInMs = 1.0, defaultFadeOutMs = 2.0, maxFadeMs = 5000.0, maxDelayMs = 10000.0;
 
@@ -141,7 +144,7 @@ struct ZoneDescription
             && trigger == o.trigger && heldMinMs == o.heldMinMs && heldMaxMs == o.heldMaxMs && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
             && filterOverride == o.filterOverride && filters == o.filters
             && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
-            && fadeOutMs == o.fadeOutMs && reverse == o.reverse && delayMs == o.delayMs
+            && fadeOutMs == o.fadeOutMs && reverse == o.reverse && releaseCuts == o.releaseCuts && delayMs == o.delayMs
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
             && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
             && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb && releaseStart == o.releaseStart
@@ -306,6 +309,7 @@ struct Zone
     std::int64_t loopCrossfade = 0;            // en échantillons, <= loopStart et <= la moitié de la boucle
     double fadeInMs = 0.0, fadeOutMs = 0.0;
     bool reverse = false;
+    bool releaseCuts = false;             // one-shot interrompu par le Note Off (voir ZoneDescription::releaseCuts)
     double delayMs = 0.0;
     std::array<LoopRt, 3> moreLoops {};   // boucles 2 à 4, strictement croissantes (fin après la fin de la précédente)
     int moreLoopCount = 0;

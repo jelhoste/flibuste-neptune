@@ -239,6 +239,7 @@ std::string toJson (const InstrumentDescription& d)
         if (z.fadeInMs != ZoneDescription::defaultFadeInMs) o["fade_in_ms"] = z.fadeInMs;
         if (z.fadeOutMs != ZoneDescription::defaultFadeOutMs) o["fade_out_ms"] = z.fadeOutMs;
         if (z.reverse) o["reverse"] = true;
+        if (z.releaseCuts) o["release_cuts"] = true;
         if (z.delayMs != 0.0) o["delay_ms"] = z.delayMs;
         if (z.pan != 0.0) o["pan"] = z.pan;
         if (z.humanizePct != 100.0) o["humanize_pct"] = z.humanizePct;
@@ -458,6 +459,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.fadeInMs = readNum (o, "fade_in_ms", z.fadeInMs);
     z.fadeOutMs = readNum (o, "fade_out_ms", z.fadeOutMs);
     if (const auto it = o.find ("reverse"); it != o.end() && it->is_boolean()) z.reverse = it->get<bool>();
+    if (const auto it = o.find ("release_cuts"); it != o.end() && it->is_boolean()) z.releaseCuts = it->get<bool>();
     z.delayMs = readNum (o, "delay_ms", z.delayMs);
     z.pan = readNum (o, "pan", z.pan);
     z.humanizePct = readNum (o, "humanize_pct", z.humanizePct);
@@ -1073,6 +1075,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.fadeInMs = zd.fadeInMs;
         z.fadeOutMs = zd.fadeOutMs;
         z.reverse = zd.reverse;
+        z.releaseCuts = zd.releaseCuts && zd.mode == PlayMode::OneShot && ! zd.onRelease && zd.trigger != TriggerCondition::Continuous;
         z.delayMs = zd.delayMs;
         {
             // Boucles 2 à 4 : chacune se termine après la précédente (sinon elle est ignorée, avec les suivantes) ; début borné après le début de la précédente.

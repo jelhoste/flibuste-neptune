@@ -20,6 +20,14 @@ namespace
 {
 juce::String U (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
+// Mode d'une zone au clic : boucle -> one-shot (joué en entier, le Note Off est ignoré) -> sans boucle (joué en entier, mais le Note Off l'interrompt) -> boucle.
+void cycleZoneMode (ZoneDescription& z)
+{
+    if (z.mode == PlayMode::Loop) { z.mode = PlayMode::OneShot; z.releaseCuts = false; }
+    else if (! z.releaseCuts) z.releaseCuts = true;
+    else { z.mode = PlayMode::Loop; z.releaseCuts = false; }
+}
+
 // Boucle n d'une zone (0 = la première, les autres sont dans extraLoops) : lecture et écriture uniformes.
 int loopCountOf (const ZoneDescription& z) { return 1 + static_cast<int> (z.extraLoops.size()); }
 LoopRegion loopView (const ZoneDescription& z, int idx)
@@ -674,7 +682,7 @@ void NovaSamplerEditor::buildZonesPage()
     selectionText_ = add<nova::Text> (0, skin(), Token::TextDim, 11.0f);
     modePill_ = pill (0, {}, [this]
     {
-        editZone ([] (Zone& z) { z.mode = z.mode == PlayMode::Loop ? PlayMode::OneShot : PlayMode::Loop; });
+        editZone (cycleZoneMode);
     });
     rootNumber_ = add<nova::NumberPill> (0, skin(), tx ("sampler.root").toUpperCase(), 0, 127,
                                          [this] { const auto* z = shownZone(); return z != nullptr ? z->rootNote : 60; },
@@ -884,7 +892,7 @@ void NovaSamplerEditor::buildSamplePage()
     playPanel_->setTitle (tx ("sm.play").toUpperCase());
     addInfo (1, playPanel_, "hlp.sm_play", 1);
     loopPill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
-    loopPill_->onClick = [this] { editZone ([] (Zone& z) { z.mode = z.mode == PlayMode::Loop ? PlayMode::OneShot : PlayMode::Loop; }); };
+    loopPill_->onClick = [this] { editZone (cycleZoneMode); };
     reversePill_ = add<nova::Pill> (1, skin(), nova::Pill::Look::Small);
     reversePill_->setText (tx ("sm.reverse"));
     reversePill_->onClick = [this] { const auto* z = shownZone(); const bool now = z != nullptr && ! z->reverse; editZone ([now] (Zone& d) { d.reverse = now; }); };
@@ -3529,7 +3537,7 @@ void NovaSamplerEditor::tick()
         removePill_->setAlpha (sel.empty() ? 0.4f : 1.0f);
         selectionText_->setText (sel.empty() ? tx ("sampler.selection_all") : U (translator().format ("sampler.selection_n", { std::to_string (sel.size()) })));
         const bool loop = has && z->mode == PlayMode::Loop;
-        modePill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : "sampler.mode_one_shot")) })));
+        modePill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : has && z->releaseCuts ? "sampler.mode_no_loop" : "sampler.mode_one_shot")) })));
         modePill_->setOn (loop);
         rootNumber_->update();
         {
@@ -3599,7 +3607,7 @@ void NovaSamplerEditor::tick()
                                                           ? "  " + juce::String (loopCandidateIndex_ + 1) + "/" + juce::String (static_cast<int> (loopCandidates_.size())) : juce::String()));
         }
         const bool loop = has && z->mode == PlayMode::Loop;
-        loopPill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : "sampler.mode_one_shot")) })));
+        loopPill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : has && z->releaseCuts ? "sampler.mode_no_loop" : "sampler.mode_one_shot")) })));
         loopPill_->setOn (loop);
         reversePill_->setOn (has && z->reverse);
         for (auto* s : { fadeIn_, fadeOut_, delay_, tune_, gain_, pan_ }) { s->update(); s->setActive (has); }

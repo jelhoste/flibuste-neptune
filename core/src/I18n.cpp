@@ -36,6 +36,7 @@ const Entry kEntries[] = {
     { "sampler.stereo", { "stereo", "stéréo" } },
     { "sampler.mode", { "Mode: {0}", "Mode : {0}" } },
     { "sampler.mode_one_shot", { "One-shot", "One-shot" } },
+    { "sampler.mode_no_loop", { "No loop", "Sans boucle" } },
     { "sampler.mode_loop", { "Loop", "Boucle" } },
     { "sampler.root", { "Root note (MIDI number)", "Note racine (numéro MIDI)" } },
     { "sampler.release", { "Release (ms, loop mode)", "Relâchement (ms, mode boucle)" } },

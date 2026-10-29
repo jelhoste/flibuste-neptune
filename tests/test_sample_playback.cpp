@@ -1248,3 +1248,24 @@ TEST_CASE ("continuous zone: without any modulator it sounds at once, and it sur
     d.zones.push_back (z);
     CHECK (instrumentFromJson (toJson (d)).zones[0].trigger == TriggerCondition::Continuous);
 }
+
+TEST_CASE ("a one-shot zone that cuts on release is interrupted by Note Off, a plain one-shot plays to its end")
+{
+    auto play = [] (bool cuts)
+    {
+        Rig rig (makeConstant (96000, 1.0f), PlayMode::OneShot, [cuts] (Zone& z) { z.releaseCuts = cuts; z.fadeOutMs = 0.0; });
+        std::vector<float> l (9600, 0.0f), r (9600, 0.0f);
+        rig.voices.noteOn (0, 60, 1.0f);
+        rig.voices.render (l.data(), r.data(), 2400, 1.0f, 1.0f, 0.0);
+        rig.voices.noteOff (0, 60);
+        rig.voices.render (l.data() + 2400, r.data() + 2400, 7200, 1.0f, 1.0f, 0.0);
+        return std::make_pair (l, rig.voices.activeVoices());
+    };
+    const auto cut = play (true);
+    CHECK (cut.first[2300] > 0.99f);          // tenu tant que la touche est enfoncée
+    CHECK (cut.first[9599] < 0.01f);          // l'enveloppe de relâchement l'a éteint
+    CHECK (cut.second == 0);
+    const auto plain = play (false);
+    CHECK (plain.first[9599] > 0.99f);        // le Note Off est ignoré
+    CHECK (plain.second == 1);
+}

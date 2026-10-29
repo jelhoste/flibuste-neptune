@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -142,6 +144,7 @@ TEST_CASE ("sfz: loops, region bounds, envelope, filter, triggers and choke grou
     CHECK (a.endFrame == 901);
     const auto& b = r.instrument.zones[1];
     CHECK (b.mode == PlayMode::OneShot);
+    CHECK_FALSE (b.releaseCuts);                    // one_shot : joué en entier quoi que fasse la touche
     CHECK (b.envelopeOverride);
     CHECK (b.envelope.attack.ms == Approx (250.0));
     CHECK (b.envelope.release.ms == Approx (1500.0));
@@ -156,6 +159,7 @@ TEST_CASE ("sfz: loops, region bounds, envelope, filter, triggers and choke grou
     CHECK (c.filters.filter[0].resonance == Approx (0.5));
     CHECK (c.filters.filter[0].keyTrack == Approx (0.5));
     CHECK (r.instrument.zones[3].onRelease);
+    CHECK_FALSE (r.instrument.zones[3].releaseCuts);
     const auto& e = r.instrument.zones[4];
     CHECK (e.trigger == TriggerCondition::First);
     CHECK (e.chokeCuts == 3);
@@ -187,7 +191,8 @@ TEST_CASE ("sfz: sequential and random round robin sets")
 TEST_CASE ("sfz: what is not converted is reported")
 {
     const auto r = importSfz (R"(
-<region> sample=a.wav key=60 sw_last=36 locc64=64 hicc64=127
+<global> width=100 position=0
+<region> sample=a.wav key=60 sw_last=36 locc64=64 hicc64=127 width=50
 <region> sample=*sine key=61
 <curve> curve_index=1 v000=0 v127=1
 )", noFiles());
@@ -198,6 +203,8 @@ TEST_CASE ("sfz: what is not converted is reported")
     CHECK (all.find ("sw_last") != std::string::npos);
     CHECK (all.find ("locc64") != std::string::npos);
     CHECK (all.find ("<curve>") != std::string::npos);
+    CHECK (all.find ("position") == std::string::npos);     // la valeur par défaut de SFZ n'est pas signalée
+    CHECK (all.find ("width") != std::string::npos);        // 50 l'est : la largeur stéréo n'est pas convertie
     CHECK (all.find ("oscillators") != std::string::npos);
 }
 
@@ -222,10 +229,11 @@ TEST_CASE ("sfz: files are checked and read")
     CHECK (tone.mode == PlayMode::Loop);
     CHECK (tone.loopEnd > tone.loopStart);
     CHECK (r.instrument.zones[1].mode == PlayMode::OneShot);
-    bool missing = false, noLoop = false;
-    for (const auto& w : r.warnings) { missing = missing || w.find ("gone.wav") != std::string::npos; noLoop = noLoop || w.find ("without a loop") != std::string::npos; }
+    bool missing = false;
+    for (const auto& w : r.warnings) missing = missing || w.find ("gone.wav") != std::string::npos;
     CHECK (missing);
-    CHECK (noLoop);
+    CHECK (r.instrument.zones[1].releaseCuts);           // sans boucle : joué en entier, mais la touche relâchée l'interrompt
+    CHECK_FALSE (tone.releaseCuts);                       // en boucle : le relâchement habituel
 }
 
 TEST_CASE ("sfz: a file without region fails cleanly")
@@ -233,4 +241,26 @@ TEST_CASE ("sfz: a file without region fails cleanly")
     CHECK_FALSE (importSfz ("<global> volume=0\n", noFiles()).ok);
     CHECK_FALSE (importSfz ("", noFiles()).ok);
     CHECK_FALSE (importSfzFile ("/nonexistent/none.sfz").ok);
+}
+
+// Essai à la main sur un vrai instrument : NEPTUNE_SFZ=/chemin/instrument.sfz neptune_core_tests "[.sfz-real]"
+TEST_CASE ("sfz: a real instrument, from NEPTUNE_SFZ", "[.sfz-real]")
+{
+    const char* path = std::getenv ("NEPTUNE_SFZ");
+    if (path == nullptr) { SUCCEED ("NEPTUNE_SFZ not set"); return; }
+    const auto r = importSfzFile (path);
+    INFO (r.error);
+    REQUIRE (r.ok);
+    int loops = 0, cuts = 0, oneShots = 0;
+    for (const auto& z : r.instrument.zones)
+    {
+        if (z.mode == PlayMode::Loop) ++loops;
+        else if (z.releaseCuts) ++cuts;
+        else ++oneShots;
+    }
+    std::printf ("SFZ %s: %d regions, %d zones (%d loops, %d cut on release, %d one-shot)\n", r.name.c_str(), r.regions, r.imported, loops, cuts, oneShots);
+    for (const auto& w : r.warnings) std::printf ("  warning: %s\n", w.c_str());
+    const auto& z0 = r.instrument.zones.front();
+    std::printf ("  first zone: keys %d-%d root %d vel %d-%d env release %.0f ms override %d loop %lld-%lld\n", z0.keyLow, z0.keyHigh, z0.rootNote, z0.velLow, z0.velHigh,
+                 z0.envelope.release.ms, z0.envelopeOverride ? 1 : 0, static_cast<long long> (z0.loopStart), static_cast<long long> (z0.loopEnd));
 }

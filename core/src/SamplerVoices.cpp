@@ -540,7 +540,13 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
                 releaseEnvelopes (v);
             }
         }
-        // one-shot : le Note Off est ignoré, le sample est joué en entier
+        else if (v.zone->releaseCuts)
+        {
+            // one-shot sans boucle que la touche relâchée interrompt (SFZ) : l'enveloppe de relâchement s'applique
+            v.releasing = true;
+            releaseEnvelopes (v);
+        }
+        // autre one-shot : le Note Off est ignoré, le sample est joué en entier
     }
 
     releaseZonesFor (channel, key);
@@ -956,7 +962,7 @@ void SamplerVoices::releaseAll() noexcept
     for (auto& v : voices_)
     {
         if (! v.active || v.releasing || v.stolen || v.zone == nullptr || v.channel == kPreviewChannel || v.channel == kDroneChannel) continue;
-        if (v.zone->mode == PlayMode::Loop)
+        if (v.zone->mode == PlayMode::Loop || v.zone->releaseCuts)
         {
             v.releasing = true;
             releaseEnvelopes (v);
@@ -1057,7 +1063,7 @@ void SamplerVoices::releasePreview() noexcept
     for (auto& v : voices_)
     {
         if (! v.active || v.releasing || v.stolen || v.channel != kPreviewChannel || v.zone == nullptr) continue;
-        if (v.zone->mode == PlayMode::Loop)
+        if (v.zone->mode == PlayMode::Loop || v.zone->releaseCuts)
         {
             v.releasing = true;
             releaseEnvelopes (v);
