@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "PluginProcessor.h"
+#include "neptune/core/MemoryBudget.h"
 #include "FacadeBundle.h"
 #include "neptune/core/GlobalPreset.h"
 #include "neptune/core/CompressorModule.h"
@@ -837,7 +838,26 @@ neptune::core::soundfont::Result NeptuneProcessor::uiImportSoundFont (const std:
     return result;
 }
 
-neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::filesystem::path& organFile)
+NeptuneProcessor::OrganMemory NeptuneProcessor::uiEstimateOrganMemory (const std::filesystem::path& organFile)
+{
+    using namespace neptune::core;
+    organimport::Options probe;
+    probe.baseDir = organFile.parent_path();
+    probe.readSampleMarks = false;
+    auto counted = organimport::importOrganFile (organFile, probe);
+    OrganMemory m;
+    if (! counted.ok) return m;
+    memory::FileInfoCache cache;
+    for (auto& kb : counted.keyboards)
+    {
+        kb.instrument.streamFromDisk = false;
+        m.needed += memory::estimateInstrumentBytes (kb.instrument, cache);
+    }
+    m.headroom = memory::availablePhysicalBytes();
+    return m;
+}
+
+neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::filesystem::path& organFile, bool streamFromDisk)
 {
     using namespace neptune::core;
     namespace mx = neptune::core::mixer;
@@ -875,6 +895,7 @@ neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::f
     opt.firstTrack = first;
     opt.firstChannel = 1;
     opt.stylePack = "organ-wood-brass";   // style par défaut des pages générées (bois et laiton)
+    opt.streamFromDisk = streamFromDisk;
     auto result = organimport::importOrganFile (organFile, opt);
     if (! result.ok) return result;
 

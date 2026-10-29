@@ -234,22 +234,29 @@ AudioFileInfo probeOpus (const std::filesystem::path& path)
     return r;
 }
 
-// WavPack décodé en entier ; 16 bits gardés en int16 comme les autres formats, le reste en float32.
-SampleLoadResult loadWavPack (const std::filesystem::path& path)
+// WavPack décodé en entier, ou seulement son début (`maxResident` > 0 : le reste est lu sur le disque par DiskStreamer) ; 16 bits gardés en int16 comme les
+// autres formats, le reste en float32.
+SampleLoadResult loadWavPack (const std::filesystem::path& path, std::int64_t maxResident)
 {
-    auto d = decodeWavPackFile (path);
+    std::int64_t want = -1;
+    if (maxResident > 0)
+    {
+        const auto probe = probeWavPackFile (path);
+        if (probe.ok) want = residentCount (probe.frames, maxResident, path);
+    }
+    auto d = decodeWavPackFile (path, want);
     if (! d.info.ok) return fail (d.info.error);
     auto data = std::make_shared<SampleData>();
     const int ch = d.info.channels;
     const std::int64_t frames = d.info.frames;
     data->channels = ch;
     data->frames = frames;
-    data->residentFrames = frames;   // pas de lecture depuis le disque en cours de jeu pour l'instant
+    data->residentFrames = d.decodedFrames;
     data->path = path.u8string();
     data->sampleRate = static_cast<double> (d.info.sampleRate);
     data->name = fileName (path);
     data->sourceBitDepth = d.info.isFloat ? 32 : d.info.bitsPerSample;
-    const auto count = static_cast<std::size_t> (frames);
+    const auto count = static_cast<std::size_t> (d.decodedFrames);
     if (! d.info.isFloat && d.info.bitsPerSample <= 16)
     {
         data->pcm16.resize (count * static_cast<std::size_t> (ch));
@@ -404,7 +411,7 @@ SampleLoadResult loadSampleFile (const std::filesystem::path& path, std::int64_t
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return fail ("file not found: " + path.string());
     if (isOpusPath (path)) return loadOpus (path);
-    if (isWavPackPath (path)) return loadWavPack (path);
+    if (isWavPackPath (path)) return loadWavPack (path, maxResidentFrames);
     return hasExtension (path, ".flac") ? loadFlac (path, maxResidentFrames) : loadWithSndfile (path, maxResidentFrames);
 }
 
@@ -413,19 +420,21 @@ struct AudioStreamReader::Impl
 {
     SNDFILE* sf = nullptr;
     drflac* flac = nullptr;
-    std::vector<float> memory;   // Opus et WavPack : fichier décodé en entier à l'ouverture
+    WavPackReader wavpack;
+    std::vector<float> memory;   // Opus et banque SoundFont : fichier décodé en entier à l'ouverture
     std::int64_t memoryPos = 0;
     bool inMemory = false;
 };
 
 AudioStreamReader::AudioStreamReader() : impl_ (new Impl) {}
 AudioStreamReader::~AudioStreamReader() { close(); delete impl_; }
-bool AudioStreamReader::isOpen() const noexcept { return impl_->sf != nullptr || impl_->flac != nullptr || impl_->inMemory; }
+bool AudioStreamReader::isOpen() const noexcept { return impl_->sf != nullptr || impl_->flac != nullptr || impl_->wavpack.isOpen() || impl_->inMemory; }
 
 void AudioStreamReader::close()
 {
     if (impl_->sf != nullptr) { sf_close (impl_->sf); impl_->sf = nullptr; }
     if (impl_->flac != nullptr) { drflac_close (impl_->flac); impl_->flac = nullptr; }
+    impl_->wavpack.close();
     impl_->memory.clear();
     impl_->memory.shrink_to_fit();
     impl_->memoryPos = 0;
@@ -461,13 +470,10 @@ bool AudioStreamReader::open (const std::filesystem::path& path, std::string* er
     }
     else if (isWavPackPath (path))
     {
-        auto d = decodeWavPackFile (path);
-        if (! d.info.ok) { if (error != nullptr) *error = d.info.error; return false; }
-        impl_->memory = std::move (d.samples);
-        impl_->memoryPos = 0;
-        impl_->inMemory = true;
-        channels_ = d.info.channels;
-        totalFrames_ = d.info.frames;
+        std::string why;
+        if (! impl_->wavpack.open (path, &why)) { if (error != nullptr) *error = why; return false; }
+        channels_ = impl_->wavpack.info().channels;
+        totalFrames_ = impl_->wavpack.info().frames;
     }
     else if (hasExtension (path, ".flac"))
     {
@@ -504,6 +510,7 @@ bool AudioStreamReader::seek (std::int64_t frame)
         impl_->memoryPos = frame;
         return true;
     }
+    if (impl_->wavpack.isOpen()) return impl_->wavpack.seek (frame);
     if (impl_->sf != nullptr) return sf_seek (impl_->sf, frame, SEEK_SET) >= 0;
     if (impl_->flac != nullptr) return drflac_seek_to_pcm_frame (impl_->flac, static_cast<drflac_uint64> (frame)) != 0;
     return false;
@@ -519,6 +526,7 @@ std::int64_t AudioStreamReader::read (float* interleaved, std::int64_t frames)
         impl_->memoryPos += n;
         return n;
     }
+    if (impl_->wavpack.isOpen()) return impl_->wavpack.read (interleaved, frames);
     if (impl_->sf != nullptr) return static_cast<std::int64_t> (sf_readf_float (impl_->sf, interleaved, frames));
     if (impl_->flac != nullptr)
         return static_cast<std::int64_t> (drflac_read_pcm_frames_f32 (impl_->flac, static_cast<drflac_uint64> (frames), interleaved));

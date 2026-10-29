@@ -142,7 +142,7 @@ WavPackInfo probeWavPackFile (const std::filesystem::path& path)
     return infoOf (wpc);
 }
 
-WavPackData decodeWavPackFile (const std::filesystem::path& path)
+WavPackData decodeWavPackFile (const std::filesystem::path& path, std::int64_t maxFrames)
 {
     WavPackData d;
     std::string error;
@@ -154,7 +154,8 @@ WavPackData decodeWavPackFile (const std::filesystem::path& path)
     takeWrapper (wpc, d.header);
 
     const int channels = d.info.channels;
-    const std::int64_t total = d.info.frames;
+    const std::int64_t total = maxFrames > 0 ? std::min (maxFrames, d.info.frames) : d.info.frames;
+    const bool partial = total < d.info.frames;
     if (static_cast<std::uint64_t> (total) > (std::uint64_t (1) << 31) / static_cast<std::uint64_t> (channels)) { d.info.ok = false; d.info.error = "WavPack: file too long to load in memory"; return d; }
     d.samples.resize (static_cast<std::size_t> (total) * static_cast<std::size_t> (channels));
     constexpr std::uint32_t kBlock = 4096;
@@ -180,8 +181,74 @@ WavPackData decodeWavPackFile (const std::filesystem::path& path)
         d.info.error = done < total ? "WavPack: file is truncated or damaged" : "WavPack: checksum errors while decoding";
         return d;
     }
-    takeWrapper (wpc, d.trailer);   // les chunks de queue ne sont connus qu'après le dernier échantillon
+    d.decodedFrames = done;
+    if (! partial) takeWrapper (wpc, d.trailer);   // les chunks de queue ne sont connus qu'après le dernier échantillon
     return d;
+}
+
+struct WavPackReader::Impl
+{
+    WavpackContext* wpc = nullptr;
+    std::vector<std::int32_t> block;
+    double scale = 1.0;
+};
+
+WavPackReader::WavPackReader() : impl_ (new Impl) {}
+WavPackReader::~WavPackReader() { close(); delete impl_; }
+bool WavPackReader::isOpen() const noexcept { return impl_->wpc != nullptr; }
+
+void WavPackReader::close()
+{
+    if (impl_->wpc != nullptr) { WavpackCloseFile (impl_->wpc); impl_->wpc = nullptr; }
+    impl_->block.clear();
+    impl_->block.shrink_to_fit();
+    info_ = {};
+}
+
+bool WavPackReader::open (const std::filesystem::path& path, std::string* error)
+{
+    close();
+    std::string message;
+    impl_->wpc = openFile (path, 0, message);
+    if (impl_->wpc == nullptr) { if (error != nullptr) *error = message; return false; }
+    info_ = infoOf (impl_->wpc);
+    if (! info_.ok)
+    {
+        if (error != nullptr) *error = info_.error;
+        close();
+        return false;
+    }
+    impl_->scale = info_.isFloat ? 1.0 : 1.0 / std::ldexp (1.0, info_.bitsPerSample - 1);
+    return true;
+}
+
+bool WavPackReader::seek (std::int64_t frame)
+{
+    if (impl_->wpc == nullptr || frame < 0 || frame > info_.frames) return false;
+    return WavpackSeekSample64 (impl_->wpc, frame) != 0;
+}
+
+std::int64_t WavPackReader::read (float* out, std::int64_t frames)
+{
+    if (impl_->wpc == nullptr || frames <= 0) return 0;
+    const std::size_t channels = static_cast<std::size_t> (info_.channels);
+    constexpr std::int64_t kBlock = 4096;
+    impl_->block.resize (static_cast<std::size_t> (kBlock) * channels);
+    std::int64_t done = 0;
+    while (done < frames)
+    {
+        const std::uint32_t want = static_cast<std::uint32_t> (std::min<std::int64_t> (kBlock, frames - done));
+        const std::uint32_t got = WavpackUnpackSamples (impl_->wpc, impl_->block.data(), want);
+        if (got == 0) break;
+        float* dst = out + static_cast<std::size_t> (done) * channels;
+        const std::size_t n = static_cast<std::size_t> (got) * channels;
+        if (info_.isFloat)
+            for (std::size_t k = 0; k < n; ++k) { float v; std::memcpy (&v, &impl_->block[k], sizeof v); dst[k] = v; }
+        else
+            for (std::size_t k = 0; k < n; ++k) dst[k] = static_cast<float> (static_cast<double> (impl_->block[k]) * impl_->scale);
+        done += got;
+    }
+    return done;
 }
 
 #else   // sans libwavpack : les fichiers sont reconnus mais refusés
@@ -193,12 +260,25 @@ WavPackInfo probeWavPackFile (const std::filesystem::path&)
     return i;
 }
 
-WavPackData decodeWavPackFile (const std::filesystem::path&)
+WavPackData decodeWavPackFile (const std::filesystem::path&, std::int64_t)
 {
     WavPackData d;
     d.info.error = "WavPack support is not built into this version";
     return d;
 }
+
+struct WavPackReader::Impl {};
+WavPackReader::WavPackReader() : impl_ (new Impl) {}
+WavPackReader::~WavPackReader() { delete impl_; }
+bool WavPackReader::isOpen() const noexcept { return false; }
+void WavPackReader::close() { info_ = {}; }
+bool WavPackReader::open (const std::filesystem::path&, std::string* error)
+{
+    if (error != nullptr) *error = "WavPack support is not built into this version";
+    return false;
+}
+bool WavPackReader::seek (std::int64_t) { return false; }
+std::int64_t WavPackReader::read (float*, std::int64_t) { return 0; }
 #endif
 
 // Les repères (smpl, cue) sont dans l'enveloppe RIFF du fichier : sous-blocs 0x21 (en-tête) et 0x22 (queue) des blocs WavPack. On parcourt les blocs en sautant les

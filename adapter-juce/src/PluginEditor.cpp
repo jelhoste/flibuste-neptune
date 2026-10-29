@@ -3,6 +3,7 @@
 #include "GlobalPresets.h"
 #include "OrganStylePacks.h"
 #include "StyleLibrary.h"
+#include "neptune/core/MemoryBudget.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
 #include "neptune/core/Mixer.h"
@@ -758,27 +759,46 @@ void NeptuneEditor::importOrgan()
                     target.replaceWithData (pack.data, pack.size);
                 }
         }
-        const auto result = safe->processor_.uiImportOrgan (std::filesystem::path (organFile.getFullPathName().toStdString()));
-        juce::String message;
-        if (! result.ok) message = juce::String::fromUTF8 (result.error.c_str());
-        else
+        const std::filesystem::path organPath (organFile.getFullPathName().toStdString());
+        // Lecture sur le disque : automatique quand l'orgue entier dépasse la moitié de la mémoire disponible, proposée au-delà du quart.
+        auto runImport = [safe, organPath] (bool stream, juce::String note)
         {
-            int stops = 0, pipes = 0;
-            for (const auto& k : result.keyboards) { stops += k.stops; pipes += k.pipes; }
-            message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (static_cast<int> (result.keyboards.size())) + " " + safe->text ("organ.imp_keyboards")
-                    + ", " + juce::String (stops) + " " + safe->text ("organ.stops") + ", " + juce::String (pipes) + " " + safe->text ("organ.pipes");
-            if (! result.warnings.empty())
+            if (safe == nullptr) return;
+            const auto result = safe->processor_.uiImportOrgan (organPath, stream);
+            juce::String message;
+            if (! result.ok) message = juce::String::fromUTF8 (result.error.c_str());
+            else
             {
-                message += "\n\n" + safe->text ("organ.warnings") + "\n";
-                int shown = 0;
-                for (const auto& w : result.warnings)
+                int stops = 0, pipes = 0;
+                for (const auto& k : result.keyboards) { stops += k.stops; pipes += k.pipes; }
+                message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (static_cast<int> (result.keyboards.size())) + " " + safe->text ("organ.imp_keyboards")
+                        + ", " + juce::String (stops) + " " + safe->text ("organ.stops") + ", " + juce::String (pipes) + " " + safe->text ("organ.pipes");
+                if (! result.warnings.empty())
                 {
-                    if (++shown > 12) { message += "..."; break; }
-                    message += "- " + juce::String::fromUTF8 (w.c_str()) + "\n";
+                    message += "\n\n" + safe->text ("organ.warnings") + "\n";
+                    int shown = 0;
+                    for (const auto& w : result.warnings)
+                    {
+                        if (++shown > 12) { message += "..."; break; }
+                        message += "- " + juce::String::fromUTF8 (w.c_str()) + "\n";
+                    }
                 }
             }
-        }
-        juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), message);
+            if (note.isNotEmpty()) message += "\n\n" + note;
+            juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), message);
+        };
+        const auto mem = safe->processor_.uiEstimateOrganMemory (organPath);
+        const auto mb = [] (std::uint64_t bytes) { return std::to_string (bytes / (1024ull * 1024ull)); };
+        const bool known = mem.needed > 0 && mem.headroom > 0;
+        if (known && static_cast<double> (mem.needed) > neptune::core::memory::refuseFraction * static_cast<double> (mem.headroom))
+            runImport (true, juce::String::fromUTF8 (safe->tr_.format ("organ.stream_auto", { mb (mem.needed), mb (mem.headroom) }).c_str()));
+        else if (known && static_cast<double> (mem.needed) > neptune::core::memory::warnFraction * static_cast<double> (mem.headroom))
+            juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsYesNo (juce::MessageBoxIconType::QuestionIcon, safe->text ("organ.import"),
+                                              juce::String::fromUTF8 (safe->tr_.format ("organ.stream_ask", { mb (mem.needed), mb (mem.headroom) }).c_str()),
+                                              safe->text ("organ.stream_yes"), safe->text ("organ.stream_no"), safe),
+                                          [runImport] (int result) { runImport (result == 1, {}); });
+        else
+            runImport (false, {});
     });
 }
 

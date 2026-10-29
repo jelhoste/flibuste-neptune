@@ -63,6 +63,7 @@ struct Options
     int firstChannel = 1;            // canal MIDI du premier manuel ; les suivants prennent les canaux suivants, le pédalier le canal d'après
     std::string stylePack;           // pack de styles d'images des pages de Façade générées (identifiant, ex. "organ-wood-brass") ; vide : dessin d'origine
     bool readSampleMarks = true;     // lire boucle et repère de relâchement dans les fichiers (faux : tests sans fichiers)
+    bool streamFromDisk = false;     // vrai : les instruments gardent le début des échantillons en mémoire et lisent le reste sur le disque (gros orgues)
 };
 
 struct Result

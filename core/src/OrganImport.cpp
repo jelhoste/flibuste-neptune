@@ -1064,7 +1064,7 @@ private:
         kb.midiChannel = channelOf_[odfIndex];
         kb.name = ini_.get (section, "Name", odfIndex == 0 ? "Pedal" : "Manual " + std::to_string (odfIndex));
         kb.instrument.maxVoices = InstrumentDescription::maxVoicesLimit;
-        kb.instrument.streamFromDisk = false;
+        kb.instrument.streamFromDisk = opt_.streamFromDisk;
         ManualInfo info;
         info.keyboard = keyboard;
         info.firstMidi = ini_.getInt (section, "FirstAccessibleKeyMIDINoteNumber", 36);

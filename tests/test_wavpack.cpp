@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -244,6 +245,62 @@ TEST_CASE ("wavpack: 24-bit mono is kept as float, a damaged file is refused")
     CHECK_FALSE (bad.error.empty());
     std::filesystem::remove (path);
     std::filesystem::remove (cut);
+}
+
+TEST_CASE ("wavpack: only the start is loaded when streaming, the rest is read with seeks")
+{
+    // Assez long pour couvrir plusieurs blocs WavPack ; du bruit déterministe pour que la compression ne réduise pas tout à presque rien.
+    constexpr int frames = 300000;
+    std::vector<std::int32_t> pcm;
+    std::uint32_t seed = 12345u;
+    for (int i = 0; i < frames * 2; ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        pcm.push_back (static_cast<std::int32_t> ((seed >> 16) % 20000u) - 10000);
+    }
+    const auto path = tempFile ("long_stereo16.wv");
+    REQUIRE (writeWavPack (path, 2, 16, 44100, pcm, {}, {}));
+
+    // début résident seulement : la longueur reste celle du fichier
+    const auto part = loadSampleFile (path, 5000);
+    REQUIRE (part.ok());
+    const auto& s = *part.sample;
+    CHECK (s.frames == frames);
+    CHECK (s.resident() == 5000);
+    CHECK (s.isStreamed());
+    CHECK (s.isInt16());
+    for (int i = 0; i < 5000; i += 7)
+    {
+        REQUIRE (s.int16Channel (0)[i] == pcm[static_cast<std::size_t> (2 * i)]);
+        REQUIRE (s.int16Channel (1)[i] == pcm[static_cast<std::size_t> (2 * i + 1)]);
+    }
+
+    // demande de préchargement plus grande que le fichier : tout est chargé
+    const auto whole = loadSampleFile (path, frames + 10);
+    REQUIRE (whole.ok());
+    CHECK_FALSE (whole.sample->isStreamed());
+
+    // lecture avec positionnement, dans le désordre
+    AudioStreamReader reader;
+    REQUIRE (reader.open (path));
+    CHECK (reader.totalFrames() == frames);
+    std::vector<float> chunk (2 * 600);
+    for (const int start : { 250000, 5000, 123457, 0, 299000 })
+    {
+        REQUIRE (reader.seek (start));
+        const int want = std::min (600, frames - start);
+        REQUIRE (reader.read (chunk.data(), want) == want);
+        for (int i = 0; i < want; ++i)
+        {
+            REQUIRE (chunk[static_cast<std::size_t> (2 * i)] == Approx (static_cast<float> (pcm[static_cast<std::size_t> (2 * (start + i))]) / 32768.0f).margin (1e-7));
+            REQUIRE (chunk[static_cast<std::size_t> (2 * i + 1)] == Approx (static_cast<float> (pcm[static_cast<std::size_t> (2 * (start + i) + 1)]) / 32768.0f).margin (1e-7));
+        }
+    }
+    // la fin du fichier : on lit ce qui reste, puis plus rien
+    REQUIRE (reader.seek (frames - 100));
+    CHECK (reader.read (chunk.data(), 600) == 100);
+    CHECK (reader.read (chunk.data(), 600) == 0);
+    std::filesystem::remove (path);
 }
 #endif
 

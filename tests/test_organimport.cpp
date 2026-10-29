@@ -361,6 +361,22 @@ TEST_CASE ("organ import: keyboards, stops, pipes, switches, couplers and combin
     CHECK (hasWarning (r, "graphical panel"));
 }
 
+TEST_CASE ("organ import: streaming from disk is off by default and applies to every keyboard when asked")
+{
+    Options opt;
+    opt.readSampleMarks = false;
+    const auto plain = importOrgan (crlf (kOrgan), opt);
+    REQUIRE (plain.ok);
+    REQUIRE_FALSE (plain.keyboards.empty());
+    for (const auto& k : plain.keyboards) CHECK_FALSE (k.instrument.streamFromDisk);
+
+    opt.streamFromDisk = true;
+    const auto streamed = importOrgan (crlf (kOrgan), opt);
+    REQUIRE (streamed.ok);
+    REQUIRE (streamed.keyboards.size() == plain.keyboards.size());
+    for (const auto& k : streamed.keyboards) CHECK (k.instrument.streamFromDisk);
+}
+
 TEST_CASE ("organ import: loops and the release marker are read from the sample files")
 {
     const auto dir = std::filesystem::temp_directory_path() / "neptune_organ_import_test";
