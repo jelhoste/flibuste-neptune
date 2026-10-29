@@ -1,4 +1,5 @@
 // AnalogSynth : le synthé de Neptune en plugin indépendant (paramètres, moteur, état, presets, presets livrés).
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -14,6 +15,7 @@
 
 using namespace neptune::core;
 using namespace neptune::core::analogsynth;
+using Catch::Approx;
 using Catch::Matchers::WithinAbs;
 
 namespace
@@ -116,6 +118,20 @@ TEST_CASE ("analogsynth volume and pan apply to the output", "[analogsynth]")
     AnalogSynthEngine off;
     off.params().set (volume, -100.0);
     CHECK (play (off, 60, 4800).peak() < 1.0e-6f);
+}
+
+TEST_CASE ("analogsynth follows the host modulation without changing the set value", "[analogsynth]")
+{
+    AnalogSynthEngine plain, modulated;
+    const float peakPlain = play (plain, 60, 9600).peak();
+    const auto idx = modulated.params().indexOf (volume);
+    REQUIRE (idx != ParameterSet::npos);
+    modulated.params().setHostModOffsetAt (idx, -0.1f);               // décalage normalisé de la modulation d'hôte
+    const float peakMod = play (modulated, 60, 9600).peak();
+    CHECK (peakMod < peakPlain * 0.6f);
+    CHECK (modulated.params().get (volume) == Approx (plain.params().get (volume)));   // le réglage ne bouge pas
+    modulated.params().setHostModOffsetAt (idx, 0.0f);
+    CHECK (play (modulated, 60, 9600).peak() == Approx (peakPlain).margin (peakPlain * 0.02f));
 }
 
 TEST_CASE ("analogsynth adopts a new patch published from the message thread", "[analogsynth]")

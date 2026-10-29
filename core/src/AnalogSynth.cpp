@@ -364,10 +364,10 @@ AnalogSynthEngine::AnalogSynthEngine()
 void AnalogSynthEngine::prepare (double sampleRate, int)
 {
     voices_.prepare (sampleRate);
-    lastFader_ = static_cast<float> (sampler::dbToGain (params_.getAt (idxVolume_)));
-    lastGain_ = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
+    lastFader_ = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxVolume_)));
+    lastGain_ = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxGain_)));
     float l = 1.0f, r = 1.0f;
-    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.getAt (idxPan_) / 100.0), l, r);
+    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.effectiveAt (idxPan_) / 100.0), l, r);
     lastPanL_ = l;
     lastPanR_ = r;
 }
@@ -437,14 +437,15 @@ void AnalogSynthEngine::process (float* left, float* right, int n) noexcept
     std::fill (left, left + n, 0.0f);
     if (right != nullptr) std::fill (right, right + n, 0.0f);
 
+    // le son lit les valeurs effectives : la modulation de l'hôte (et celle de la matrice) s'y ajoute sans changer les réglages
     SynthVoices::Params sp;
     for (int f = 0; f < 2; ++f)
     {
-        sp.cutoffHz[f] = params_.getAt (idxCutoff_[static_cast<std::size_t> (f)]);
-        sp.resonance[f] = params_.getAt (idxReso_[static_cast<std::size_t> (f)]) / 100.0;
+        sp.cutoffHz[f] = params_.effectiveAt (idxCutoff_[static_cast<std::size_t> (f)]);
+        sp.resonance[f] = params_.effectiveAt (idxReso_[static_cast<std::size_t> (f)]) / 100.0;
     }
-    sp.tuneCents = params_.getAt (idxSemi_) * 100.0 + params_.getAt (idxCents_);
-    auto get = [this] (mixer::SynthKind k) { return params_.getAt (synthIdx_[static_cast<std::size_t> (k)]); };
+    sp.tuneCents = params_.effectiveAt (idxSemi_) * 100.0 + params_.effectiveAt (idxCents_);
+    auto get = [this] (mixer::SynthKind k) { return params_.effectiveAt (synthIdx_[static_cast<std::size_t> (k)]); };
     for (int o = 0; o < numSources; ++o) sp.level[o] = get (static_cast<mixer::SynthKind> (mixer::kLevelOsc1 + o));
     for (int o = 0; o < numOscillators; ++o)
     {
@@ -453,7 +454,7 @@ void AnalogSynthEngine::process (float* left, float* right, int n) noexcept
         sp.unisonDetune[o] = get (static_cast<mixer::SynthKind> (mixer::kDetuneOsc1 + o));
     }
     sp.pitchEnvDepth = get (mixer::kPitchEnvDepth);
-    auto env = [this] (mixer::SynthEnvKind k) { return params_.getAt (envIdx_[static_cast<std::size_t> (k)]); };
+    auto env = [this] (mixer::SynthEnvKind k) { return params_.effectiveAt (envIdx_[static_cast<std::size_t> (k)]); };
     auto fill = [&env] (SynthVoices::Params::EnvParams& e, int base)
     {
         e.attackMs = env (static_cast<mixer::SynthEnvKind> (base));
@@ -467,14 +468,14 @@ void AnalogSynthEngine::process (float* left, float* right, int n) noexcept
     sp.glideMs = env (mixer::kSynthGlide);
     sp.filterBalance = env (mixer::kFilterBalance) / 100.0;
 
-    const float gain = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
+    const float gain = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxGain_)));
     voices_.render (left, right, n, lastGain_, gain, sp);
     lastGain_ = gain;
 
     // volume et pan de sortie : rampes linéaires sur le bloc (pas de clic à l'automation)
-    const float fader = static_cast<float> (sampler::dbToGain (params_.getAt (idxVolume_)));
+    const float fader = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxVolume_)));
     float pl = 1.0f, pr = 1.0f;
-    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.getAt (idxPan_) / 100.0), pl, pr);
+    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.effectiveAt (idxPan_) / 100.0), pl, pr);
     const float inv = 1.0f / static_cast<float> (n);
     const float fStep = (fader - lastFader_) * inv, lStep = (pl - lastPanL_) * inv, rStep = (pr - lastPanR_) * inv;
     float f = lastFader_, gl = lastPanL_, gr = lastPanR_, peakL = 0.0f, peakR = 0.0f;

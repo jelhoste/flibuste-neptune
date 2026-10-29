@@ -535,3 +535,26 @@ TEST_CASE ("organ engine: the key click settings change the attack (more attenua
     CHECK (attackEnergy (50, 400) > attackEnergy (50, 25) * 1.5);    // un bruit plus long retarde l'établissement du son
     CHECK (std::isfinite (attackEnergy (50, 100)));
 }
+
+TEST_CASE ("organ synth follows the host modulation without changing the set value", "[organ][synth]")
+{
+    auto peakOf = [] (OrganSynthEngine& e)
+    {
+        e.prepare (kRate, 128);
+        e.postNoteOn (0, 60);
+        std::vector<float> l (128), r (128);
+        float peak = 0.0f;
+        for (int i = 0; i < 200; ++i)
+        {
+            e.process (l.data(), r.data(), 128);
+            for (auto v : l) peak = std::max (peak, std::fabs (v));
+        }
+        return peak;
+    };
+    OrganSynthEngine plain, modulated;
+    const float peakPlain = peakOf (plain);
+    const auto idx = modulated.params().indexOf (synthVolume);
+    REQUIRE (idx != neptune::core::ParameterSet::npos);
+    modulated.params().setHostModOffsetAt (idx, -0.1f);
+    CHECK (peakOf (modulated) < peakPlain * 0.6f);
+}

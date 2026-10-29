@@ -693,3 +693,27 @@ TEST_CASE ("fm track in the engine: extreme operator level offsets stay silent o
     CHECK (std::isfinite (high));
     CHECK (high < 16.0f);
 }
+
+TEST_CASE ("fm synth engine follows the host modulation without changing the set value", "[fm][engine]")
+{
+    auto peakOf = [] (FmSynthEngine& e)
+    {
+        e.prepare (kRate, 128);
+        e.postNoteOn (60, 0.9f);
+        std::vector<float> l (128), r (128);
+        float peak = 0.0f;
+        for (int i = 0; i < 100; ++i)
+        {
+            e.process (l.data(), r.data(), 128);
+            for (auto v : l) peak = std::max (peak, std::fabs (v));
+        }
+        return peak;
+    };
+    FmSynthEngine plain, modulated;
+    const float peakPlain = peakOf (plain);
+    const auto idx = modulated.params().indexOf (synthVolume);
+    REQUIRE (idx != ParameterSet::npos);
+    modulated.params().setHostModOffsetAt (idx, -0.1f);                  // décalage normalisé de la modulation d'hôte
+    CHECK (peakOf (modulated) < peakPlain * 0.6f);
+    CHECK (modulated.params().get (synthVolume) == plain.params().get (synthVolume));   // le réglage ne bouge pas
+}

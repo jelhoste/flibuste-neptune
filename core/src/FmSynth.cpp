@@ -91,8 +91,8 @@ void FmSynthEngine::prepare (double sampleRate, int)
 {
     initTables (sampleRate);
     voices_.prepare (sampleRate);
-    lastFader_ = static_cast<float> (sampler::dbToGain (params_.getAt (idxVolume_)));
-    lastGain_ = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
+    lastFader_ = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxVolume_)));
+    lastGain_ = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxGain_)));
     float l = 1.0f, r = 1.0f;
     mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.getAt (idxPan_) / 100.0), l, r);
     lastPanL_ = l;
@@ -158,8 +158,9 @@ void FmSynthEngine::process (float* left, float* right, int n) noexcept
     std::fill (left, left + n, 0.0f);
     if (right != nullptr) std::fill (right, right + n, 0.0f);
 
+    // le son lit les valeurs effectives : la modulation de l'hôte (et celle de la matrice) s'y ajoute sans changer les réglages
     FmLive live;
-    auto get = [this] (mixer::FmKind k) { return params_.getAt (fmIdx_[static_cast<std::size_t> (k)]); };
+    auto get = [this] (mixer::FmKind k) { return params_.effectiveAt (fmIdx_[static_cast<std::size_t> (k)]); };
     live.brightness = static_cast<float> (get (mixer::kFmBrightness) / 100.0);
     live.envSpeed = static_cast<float> (get (mixer::kFmEnvSpeed) / 100.0);
     live.feedbackDrive = static_cast<float> (get (mixer::kFmFeedbackDrive) / 100.0);
@@ -167,10 +168,10 @@ void FmSynthEngine::process (float* left, float* right, int n) noexcept
         live.opLevel[static_cast<std::size_t> (op)] = static_cast<float> (get (static_cast<mixer::FmKind> (mixer::kFmLevelOp1 + op)));
     live.unisonDetuneCents = static_cast<float> (get (mixer::kFmUnisonDetune));
     live.unisonSpread = static_cast<float> (get (mixer::kFmUnisonSpread) / 100.0);
-    live.tuneCents = static_cast<float> (params_.getAt (idxSemi_) * 100.0 + params_.getAt (idxCents_));
+    live.tuneCents = static_cast<float> (params_.effectiveAt (idxSemi_) * 100.0 + params_.effectiveAt (idxCents_));
     live.modWheel = modWheel_;
     live.pitchBend = pitchBend_;
-    auto extra = [this] (mixer::FmExtraKind k) { return static_cast<int> (std::lround (params_.getAt (extraIdx_[static_cast<std::size_t> (k)]))); };
+    auto extra = [this] (mixer::FmExtraKind k) { return static_cast<int> (std::lround (params_.effectiveAt (extraIdx_[static_cast<std::size_t> (k)]))); };
     live.lfoSpeed = extra (mixer::kFmLfoSpeed);
     live.lfoPmd = extra (mixer::kFmLfoPmd);
     live.lfoAmd = extra (mixer::kFmLfoAmd);
@@ -179,13 +180,13 @@ void FmSynthEngine::process (float* left, float* right, int n) noexcept
     live.wheelAmpSens = extra (mixer::kFmWheelAmp);
     live.glideMs = extra (mixer::kFmGlide);
 
-    const float gain = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
+    const float gain = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxGain_)));
     voices_.render (left, right, n, lastGain_, gain, live);
     lastGain_ = gain;
 
-    const float fader = static_cast<float> (sampler::dbToGain (params_.getAt (idxVolume_)));
+    const float fader = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxVolume_)));
     float pl = 1.0f, pr = 1.0f;
-    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.getAt (idxPan_) / 100.0), pl, pr);
+    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.effectiveAt (idxPan_) / 100.0), pl, pr);
     const float inv = 1.0f / static_cast<float> (n);
     const float fStep = (fader - lastFader_) * inv, lStep = (pl - lastPanL_) * inv, rStep = (pr - lastPanR_) * inv;
     float f = lastFader_, gl = lastPanL_, gr = lastPanR_;

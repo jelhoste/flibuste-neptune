@@ -37,7 +37,7 @@ OrganLive liveFromParams (const ParameterSet& set, int track)
     for (int k = 0; k < kOrganValues; ++k)
     {
         const auto i = set.indexOf (mixer::organParam (track, k));
-        v[k] = i == ParameterSet::npos ? 0.0 : set.getAt (i);
+        v[k] = i == ParameterSet::npos ? 0.0 : set.effectiveAt (i);
     }
     return liveFromValues (v);
 }
@@ -199,10 +199,10 @@ OrganSynthEngine::OrganSynthEngine()
 void OrganSynthEngine::prepare (double sampleRate, int)
 {
     voices_.reserve (sampleRate);
-    lastFader_ = static_cast<float> (sampler::dbToGain (params_.getAt (idxVolume_)));
-    lastGain_ = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
+    lastFader_ = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxVolume_)));
+    lastGain_ = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxGain_)));
     float l = 1.0f, r = 1.0f;
-    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.getAt (idxPan_) / 100.0), l, r);
+    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.effectiveAt (idxPan_) / 100.0), l, r);
     lastPanL_ = l;
     lastPanR_ = r;
 }
@@ -264,14 +264,15 @@ void OrganSynthEngine::process (float* left, float* right, int n) noexcept
     std::fill (left, left + n, 0.0f);
     if (right != nullptr) std::fill (right, right + n, 0.0f);
 
+    // le son lit les valeurs effectives : la modulation de l'hôte (et celle de la matrice) s'y ajoute sans changer les réglages
     const OrganLive live = liveFromParams (params_);
-    const float gain = static_cast<float> (sampler::dbToGain (params_.getAt (idxGain_)));
+    const float gain = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxGain_)));
     voices_.render (left, right, n, lastGain_, gain, live);
     lastGain_ = gain;
 
-    const float fader = static_cast<float> (sampler::dbToGain (params_.getAt (idxVolume_)));
+    const float fader = static_cast<float> (sampler::dbToGain (params_.effectiveAt (idxVolume_)));
     float pl = 1.0f, pr = 1.0f;
-    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.getAt (idxPan_) / 100.0), pl, pr);
+    mixer::panGains (mixer::PanMode::Balance, static_cast<float> (params_.effectiveAt (idxPan_) / 100.0), pl, pr);
     const float inv = 1.0f / static_cast<float> (n);
     const float fStep = (fader - lastFader_) * inv, lStep = (pl - lastPanL_) * inv, rStep = (pr - lastPanR_) * inv;
     float f = lastFader_, gl = lastPanL_, gr = lastPanR_;

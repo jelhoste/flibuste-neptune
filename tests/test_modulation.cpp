@@ -562,3 +562,30 @@ TEST_CASE ("modulation: a large host buffer is evaluated in short pieces, the LF
     const double phase = std::fmod (5.0 * 8192.0 / 48000.0, 1.0);
     CHECK (params.modOffsetAt (pan) == Approx (0.5 * std::sin (2.0 * 3.14159265358979323846 * phase)).margin (0.02));
 }
+
+TEST_CASE ("host modulation: it lifts the output of a stock module and goes away when it returns to zero")
+{
+    auto insert = createInsert ("utility", 48000.0, 256);
+    REQUIRE (insert != nullptr);
+    auto& ps = insert->runner.params();
+    const auto idx = ps.indexOf (stock::outputTrim);
+    REQUIRE (idx != ParameterSet::npos);
+    auto level = [&]
+    {
+        std::vector<float> l (256), r (256);
+        for (int b = 0; b < 60; ++b)
+        {
+            std::fill (l.begin(), l.end(), 0.1f);
+            std::fill (r.begin(), r.end(), 0.1f);
+            insert->runner.process (l.data(), r.data(), 256, false);
+        }
+        return l[255];
+    };
+    const float base = level();
+    ps.setHostModOffsetAt (idx, 0.25f);
+    const float up = level();
+    CHECK (up > base * 1.5f);                                  // la modulation de l'hôte agit sur le son du module
+    CHECK (ps.getAt (idx) == Approx (ps.spec (idx).defaultValue));   // sans toucher la valeur réglée
+    ps.setHostModOffsetAt (idx, 0.0f);
+    CHECK (level() == Approx (base).margin (1.0e-4));          // et le retour à zéro rend le niveau d'origine
+}
