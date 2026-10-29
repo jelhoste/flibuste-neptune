@@ -178,13 +178,13 @@ std::vector<LayerFade> computeLayerFades (const std::vector<LayerKey>& zones, in
     width = std::max (0, width);
 
     // Famille -> couches distinctes (velLow, velHigh) -> indices de zones
-    using Family = std::tuple<int, int, int, bool, int>;
+    using Family = std::tuple<int, int, int, bool, int, int>;
     using Range = std::pair<int, int>;
     std::map<Family, std::map<Range, std::vector<std::size_t>>> families;
     for (std::size_t i = 0; i < zones.size(); ++i)
     {
         const auto& z = zones[i];
-        families[{ z.keyLow, z.keyHigh, z.group, z.onRelease, z.variant }][{ z.velLow, z.velHigh }].push_back (i);
+        families[{ z.keyLow, z.keyHigh, z.group, z.onRelease, z.variant, z.layer }][{ z.velLow, z.velHigh }].push_back (i);
         out[i].activeLo = static_cast<float> (z.velLow) - 0.5f;
         out[i].activeHi = static_cast<float> (z.velHigh) + 0.5f;
     }

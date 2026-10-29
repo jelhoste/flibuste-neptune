@@ -78,6 +78,7 @@ ZoneDescription sanitised (ZoneDescription z)
     z.gainDb = std::isfinite (z.gainDb) ? std::clamp (z.gainDb, -60.0, 60.0) : 0.0;
     z.roundRobin = std::clamp (z.roundRobin, 0, 100000);
     if (z.group.size() > 128) z.group.resize (128);
+    z.layer = std::clamp (z.layer, 0, ZoneDescription::maxLayers - 1);
     z.chokeCuts = std::clamp (z.chokeCuts, 0, maxChokeGroup);
     z.chokeCutBy = std::clamp (z.chokeCutBy, 0, maxChokeGroup);
     z.filters = sanitised (std::move (z.filters));
@@ -276,6 +277,7 @@ std::string toJson (const InstrumentDescription& d)
         }
         if (z.roundRobin != 0) o["round_robin"] = z.roundRobin;
         if (! z.group.empty()) o["group"] = z.group;
+        if (z.layer != 0) o["layer"] = z.layer;
         if (z.onRelease) o["on_release"] = true;
         if (z.onRelease && z.heldMinMs > 0) o["held_min_ms"] = z.heldMinMs;
         if (z.onRelease && z.heldMaxMs > 0) o["held_max_ms"] = z.heldMaxMs;
@@ -491,6 +493,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
         }
     z.roundRobin = readInt (o, "round_robin", 0);
     if (const auto it = o.find ("group"); it != o.end() && it->is_string()) z.group = it->get<std::string>();
+    z.layer = std::clamp (readInt (o, "layer", 0), 0, ZoneDescription::maxLayers - 1);
     if (const auto it = o.find ("on_release"); it != o.end() && it->is_boolean()) z.onRelease = it->get<bool>();
     z.heldMinMs = std::clamp (readInt (o, "held_min_ms", 0), 0, maxHeldMs);
     z.heldMaxMs = std::clamp (readInt (o, "held_max_ms", 0), 0, maxHeldMs);
@@ -699,22 +702,22 @@ void Instrument::finalize()
     for (std::size_t i = 0; i < zones.size() && droneZones_.size() < static_cast<std::size_t> (kMaxDrones); ++i)
         if (zones[i].sample && ! zones[i].onRelease && zones[i].trigger == TriggerCondition::Continuous) droneZones_.push_back (static_cast<int> (i));
 
-    using PlaceKey = std::tuple<int, int, int, int, int, bool, int>;
-    using FamilyKey = std::tuple<int, int, int, bool, int>;
+    using PlaceKey = std::tuple<int, int, int, int, int, bool, int, int>;
+    using FamilyKey = std::tuple<int, int, int, bool, int, int>;
     std::map<PlaceKey, int> setIndex;
     std::map<FamilyKey, int> familyIndex;
     std::vector<LayerKey> keys (zones.size());
     for (std::size_t i = 0; i < zones.size(); ++i)
     {
         const Zone& z = zones[i];
-        keys[i] = { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, static_cast<int> (z.trigger) };
+        keys[i] = { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, static_cast<int> (z.trigger), z.layer };
         const int trig = static_cast<int> (z.trigger);
-        auto it = setIndex.find ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, trig });
+        auto it = setIndex.find ({ z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, trig, z.layer });
         if (it == setIndex.end())
         {
-            it = setIndex.emplace (PlaceKey { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, trig }, static_cast<int> (rrSets_.size())).first;
+            it = setIndex.emplace (PlaceKey { z.keyLow, z.keyHigh, z.velLow, z.velHigh, z.groupId, z.onRelease, trig, z.layer }, static_cast<int> (rrSets_.size())).first;
             rrSets_.push_back ({});
-            const FamilyKey fk { z.keyLow, z.keyHigh, z.groupId, z.onRelease, trig };
+            const FamilyKey fk { z.keyLow, z.keyHigh, z.groupId, z.onRelease, trig, z.layer };
             auto fit = familyIndex.find (fk);
             if (fit == familyIndex.end())
             {
@@ -725,7 +728,7 @@ void Instrument::finalize()
         }
         rrSets_[static_cast<std::size_t> (it->second)].members.push_back (static_cast<int> (i));
         zoneSet_[i] = it->second;
-        zoneFamily_[i] = familyIndex[FamilyKey { z.keyLow, z.keyHigh, z.groupId, z.onRelease, trig }];
+        zoneFamily_[i] = familyIndex[FamilyKey { z.keyLow, z.keyHigh, z.groupId, z.onRelease, trig, z.layer }];
         for (int k = std::max (0, z.keyLow); k <= std::min (127, z.keyHigh); ++k) keyZones_[static_cast<std::size_t> (k)].push_back (static_cast<int> (i));
     }
     for (auto& set : rrSets_) // ordre des indices round-robin, puis ordre de déclaration
@@ -824,14 +827,19 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
         out[0] = { z, 1.0f };
         return 1;
     }
-    // Deux passes : les zones à condition (« Legato », puis « Premier ») dont la condition est satisfaite passent avant les
-    // zones d'attaque normales, QUEL QUE SOIT l'ordre de déclaration. Dans une passe, la première zone qui couvre la note gagne.
-    int family = -1;
-    for (int pass = 0; pass < 3 && family < 0; ++pass) // 0 : Legato, 1 : Premier, 2 : toujours (et relâchement)
+    // Trois passes : les zones à condition (« Legato », puis « Premier ») dont la condition est satisfaite passent avant les zones d'attaque normales, QUEL QUE SOIT
+    // l'ordre de déclaration. Dans une passe, la première zone qui couvre la note gagne, COUCHE PAR COUCHE : chaque couche (ZoneDescription::layer) en désigne une famille,
+    // et toutes les couches jouent ensemble (sans couches, la couche 0 seule : comportement inchangé).
+    int familyOfLayer[ZoneDescription::maxLayers];
+    for (int& f : familyOfLayer) f = -1;
+    bool any = false;
+    for (int pass = 0; pass < 3; ++pass) // 0 : Legato, 1 : Premier, 2 : toujours (et relâchement)
     {
         for (const int zi : keyZones_[static_cast<std::size_t> (key)])
         {
             const Zone& z = zones[static_cast<std::size_t> (zi)];
+            const int layer = std::clamp (z.layer, 0, ZoneDescription::maxLayers - 1);
+            if (familyOfLayer[layer] >= 0) continue;   // cette couche a déjà sa famille (d'une passe plus prioritaire, ou d'une zone plus haut dans la liste)
             if (! z.sample || z.onRelease != release || vInt < z.velLow || vInt > z.velHigh) continue;
             if (held != nullptr && held->allowed != nullptr && ! held->allowed (held->context, z)) continue;   // condition MIDI de la zone
             const TriggerCondition t = release ? TriggerCondition::Always : z.trigger;
@@ -844,23 +852,27 @@ int Instrument::selectLayers (int key, float velocity, bool release, Pick* out, 
                 if (t == TriggerCondition::First && other) continue;    // une autre note du Groupe est tenue
                 if (t == TriggerCondition::Legato && ! other) continue; // rien de tenu : pas de transition liée
             }
-            family = zoneFamily_[static_cast<std::size_t> (zi)];
-            break;
+            familyOfLayer[layer] = zoneFamily_[static_cast<std::size_t> (zi)];
+            any = true;
         }
     }
-    if (family < 0) return 0;
+    if (! any) return 0;
 
     int n = 0;
-    for (const int set : familySets_[static_cast<std::size_t> (family)])
+    for (const int family : familyOfLayer)
     {
-        const int rep = rrSets_[static_cast<std::size_t> (set)].members.front();
-        const float g = layerGain (fades_[static_cast<std::size_t> (rep)], vCont, fadeLinear);
-        if (g <= 1e-4f) continue;
-        float corr = 1.0f;
-        const Zone* z = pickFromSet (static_cast<std::size_t> (set), held, &corr);
-        if (z == nullptr || ! z->sample) continue;
-        out[n++] = { z, g * corr };
-        if (n >= maxOut) break;
+        if (family < 0) continue;
+        for (const int set : familySets_[static_cast<std::size_t> (family)])
+        {
+            const int rep = rrSets_[static_cast<std::size_t> (set)].members.front();
+            const float g = layerGain (fades_[static_cast<std::size_t> (rep)], vCont, fadeLinear);
+            if (g <= 1e-4f) continue;
+            float corr = 1.0f;
+            const Zone* z = pickFromSet (static_cast<std::size_t> (set), held, &corr);
+            if (z == nullptr || ! z->sample) continue;
+            out[n++] = { z, g * corr };
+            if (n >= maxOut) return n;
+        }
     }
     return n;
 }
@@ -876,9 +888,9 @@ std::vector<bool> loadedZones (const InstrumentDescription& d)
     }
     if (d.mainRoundRobinOnly)
     {
-        using Place = std::tuple<std::string, bool, int, int, int, int, int>;
+        using Place = std::tuple<std::string, bool, int, int, int, int, int, int>;
         std::map<Place, int> best;
-        auto place = [] (const ZoneDescription& z) { return Place { z.group, z.onRelease, z.keyLow, z.keyHigh, z.velLow, z.velHigh, static_cast<int> (z.trigger) }; };
+        auto place = [] (const ZoneDescription& z) { return Place { z.group, z.onRelease, z.keyLow, z.keyHigh, z.velLow, z.velHigh, static_cast<int> (z.trigger), z.layer }; };
         for (std::size_t i = 0; i < d.zones.size(); ++i)
             if (mask[i])
             {
@@ -1064,6 +1076,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.trigger = zd.trigger;
         z.chokeCuts = zd.chokeCuts;
         z.chokeCutBy = zd.chokeCutBy;
+        z.layer = zd.layer;
         if (! zd.group.empty())
             z.groupId = groupIds.emplace (zd.group, static_cast<int> (groupIds.size()) + 1).first->second;
         z.startFrame = std::clamp<std::int64_t> (zd.startFrame, 0, frames - 1);

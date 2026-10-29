@@ -359,6 +359,7 @@ struct Built
 {
     ZoneDescription z;
     int sample = -1;
+    int presetLayer = 0;
     std::int64_t frames = 0;
     bool merged = false;
 };
@@ -484,6 +485,7 @@ Result importPreset (const fs::path& file, int presetIndex)
 
     std::set<std::string> unconverted;
     std::vector<Built> built;
+    int presetLayerCount = 0;
     int skipped = 0;
 
     for (const auto& pz : presetZones)
@@ -493,6 +495,7 @@ Result importPreset (const fs::path& file, int presetIndex)
         if (ii < 0 || static_cast<std::size_t> (ii) + 1 >= bank.inst.size()) { ++skipped; continue; }
         const auto instZones = zonesOf (bank.ibag, bank.igen, bank.inst[static_cast<std::size_t> (ii)].bagNdx, bank.inst[static_cast<std::size_t> (ii) + 1].bagNdx);
         const ZoneGens* instGlobal = ! instZones.empty() && ! instZones[0].has (kSampleId) ? &instZones[0] : nullptr;
+        const int presetLayer = presetLayerCount++;   // une couche par zone de preset : les zones de couches différentes jouent ensemble
 
         for (const auto& iz : instZones)
         {
@@ -517,6 +520,7 @@ Result importPreset (const fs::path& file, int presetIndex)
 
             Built bz;
             bz.sample = sampleIdx;
+            bz.presetLayer = presetLayer;
             bz.frames = frameCount (bank, sampleIdx, err);
             if (bz.frames <= 0) { ++skipped; continue; }
             ZoneDescription& z = bz.z;
@@ -616,6 +620,23 @@ Result importPreset (const fs::path& file, int presetIndex)
             c.merged = true;
             break;
         }
+    }
+    // Couches : dans un SoundFont, des zones de couches différentes jouent ENSEMBLE, même avec la même étendue de notes (et deux zones de même étendue dans un même instrument
+    // aussi). Neptune joue ensemble des zones de couches différentes, et prend pour des alternatives (une seule joue) des zones de même étendue dans une même couche.
+    {
+        std::map<std::string, int> seen;                    // couche du preset + étendue -> combien de zones déjà vues
+        std::map<std::pair<int, int>, int> layerId;         // (couche du preset, rang de la zone dans son étendue) -> couche de Neptune
+        bool tooMany = false;
+        for (auto& b : built)
+        {
+            if (b.merged) continue;
+            const std::string key = std::to_string (b.presetLayer) + "|" + std::to_string (b.z.keyLow) + "-" + std::to_string (b.z.keyHigh) + "|" + std::to_string (b.z.velLow) + "-" + std::to_string (b.z.velHigh);
+            const int rank = seen[key]++;
+            const auto id = layerId.emplace (std::make_pair (b.presetLayer, rank), static_cast<int> (layerId.size())).first->second;
+            if (id >= ZoneDescription::maxLayers) tooMany = true;
+            b.z.layer = std::min (id, ZoneDescription::maxLayers - 1);
+        }
+        if (tooMany) res.warnings.push_back ("More than " + std::to_string (ZoneDescription::maxLayers) + " layers: the last ones are merged into the last layer");
     }
     for (auto& b : built)
         if (! b.merged) res.instrument.zones.push_back (std::move (b.z));

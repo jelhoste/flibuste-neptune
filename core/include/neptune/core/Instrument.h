@@ -79,6 +79,9 @@ struct ZoneDescription
     int roundRobin = 0;            // indice dans le jeu round-robin (0 = non précisé)
     int rrMode = -1;               // mode du jeu d'alternatives (celui de la première zone du jeu) : -1 = celui de l'instrument, 0 séquentiel, 1 aléatoire, 2 aléatoire sans répétition
     std::string group;             // nom de Groupe (micro, articulation...) ; vide = aucun
+    // Couche (0..maxLayers-1) : des zones de couches différentes jouent ENSEMBLE sur une même note (une zone par couche au moins). Dans une même couche, la première zone qui couvre
+    // la note gagne, comme avant. 0 par défaut : un seul jeu de zones. Les banques SoundFont superposent ainsi leurs instruments.
+    int layer = 0;
     bool onRelease = false;        // déclenchée au Note Off (bruits de mécanique, fins de note), pas au Note On
     TriggerCondition trigger = TriggerCondition::Always; // condition d'une zone d'attaque (ignorée si onRelease)
     // Zone de relâchement seulement : elle ne se déclenche que si la touche a été tenue au moins `heldMinMs` et au plus `heldMaxMs` millisecondes (0 : pas de limite de ce côté).
@@ -135,12 +138,13 @@ struct ZoneDescription
     bool releaseCuts = false;
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
     static constexpr double defaultFadeInMs = 1.0, defaultFadeOutMs = 2.0, maxFadeMs = 40.0, maxDelayMs = 10000.0;
+    static constexpr int maxLayers = 32;
 
     bool operator== (const ZoneDescription& o) const noexcept
     {
         return samplePath == o.samplePath && keyLow == o.keyLow && keyHigh == o.keyHigh && velLow == o.velLow && velHigh == o.velHigh
             && rootNote == o.rootNote && mode == o.mode && envelope == o.envelope && envelopeOverride == o.envelopeOverride && modulators == o.modulators && rrMode == o.rrMode && tuneCents == o.tuneCents && gainDb == o.gainDb
-            && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && onRelease == o.onRelease
+            && loopStart == o.loopStart && loopEnd == o.loopEnd && roundRobin == o.roundRobin && group == o.group && layer == o.layer && onRelease == o.onRelease
             && trigger == o.trigger && heldMinMs == o.heldMinMs && heldMaxMs == o.heldMaxMs && chokeCuts == o.chokeCuts && chokeCutBy == o.chokeCutBy
             && filterOverride == o.filterOverride && filters == o.filters
             && startFrame == o.startFrame && endFrame == o.endFrame && loopCrossfade == o.loopCrossfade && fadeInMs == o.fadeInMs
@@ -333,6 +337,7 @@ struct Zone
     int roundRobin = 0;
     int rrMode = -1;
     int groupId = 0;      // 0 = aucun ; sinon identifiant interne du nom de Groupe
+    int layer = 0;        // couche (voir ZoneDescription::layer)
     bool onRelease = false;
     int heldMinMs = 0, heldMaxMs = 0;   // durée d'appui exigée d'une zone de relâchement (voir ZoneDescription)
     std::int64_t releaseStart = -1;     // zone en boucle : début de la queue de relâchement du fichier (-1 : aucune)
@@ -385,7 +390,7 @@ struct Instrument
 
     // Une zone choisie pour une note, avec son gain de couche (fondu) ; le round-robin est résolu.
     struct Pick { const Zone* zone = nullptr; float gain = 1.0f; };
-    static constexpr int maxPicks = 16;
+    static constexpr int maxPicks = 48;
     // Les couches de la FAMILLE de la première zone qui couvre la note et la vélocité jouent ensemble, avec leur fondu.
     // `velocity` (0..1) est la vélocité déjà passée par shapeVelocity. Rend le nombre de zones écrites dans `out`.
     // Thread audio uniquement (les compteurs round-robin sont modifiés).

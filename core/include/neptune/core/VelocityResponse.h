@@ -79,6 +79,7 @@ struct LayerKey
     int group = 0;            // identifiant de Groupe (0 = aucun) ; deux Groupes différents ne se fondent jamais
     bool onRelease = false;
     int variant = 0;          // condition de déclenchement : les couches de conditions différentes ne se fondent jamais
+    int layer = 0;            // couche de zones superposées (ZoneDescription::layer) : deux couches ne se fondent jamais
 };
 
 struct LayerFade

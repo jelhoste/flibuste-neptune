@@ -1,0 +1,3 @@
+# Outils en ligne de commande construits sur le cœur (sans JUCE) : rendu et analyse du synthé AnalogSynth, pour la recherche de sons hors de Reaper.
+add_executable(neptune_synth_tool synth_tool/main.cpp)
+target_link_libraries(neptune_synth_tool PRIVATE neptune_core SndFile::sndfile)

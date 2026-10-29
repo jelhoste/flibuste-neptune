@@ -7,13 +7,16 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "neptune/core/SampleLoader.h"
+#include "neptune/core/SamplerVoices.h"
 #include "neptune/core/SoundFont.h"
 
 using namespace neptune::core;
@@ -72,7 +75,7 @@ Bytes buildBank()
         { R (43, 60, 127), G (17, 500), G (54, 1), G (53, 2) } };                                                      // droite
     const std::vector<std::vector<GenDef>> inst1 = { { R (43, 20, 30), G (53, 0) } };
     const std::vector<std::vector<std::vector<GenDef>>> insts = { inst0, inst1 };
-    const std::vector<std::vector<std::vector<GenDef>>> presets = { { { G (51, 12), G (41, 0) } }, { { R (43, 0, 10), G (41, 1) } } };
+    const std::vector<std::vector<std::vector<GenDef>>> presets = { { { G (51, 12), G (41, 0) } }, { { R (43, 0, 10), G (41, 1) } }, { { G (41, 0) }, { G (41, 1) }, { G (41, 0) } } };
 
     Bytes ibag, igen, imod, instR, pbag, pgen, pmod, phdr;
     int bagNo = 0, genNo = 0;
@@ -94,7 +97,7 @@ Bytes buildBank()
     int pbagNo = 0, pgenNo = 0;
     for (std::size_t p = 0; p < presets.size(); ++p)
     {
-        putName (phdr, p == 0 ? "Preset0" : "Preset1"); put16 (phdr, static_cast<int> (p)); put16 (phdr, 0); put16 (phdr, pbagNo); put32 (phdr, 0); put32 (phdr, 0); put32 (phdr, 0);
+        putName (phdr, "Preset" + std::to_string (p)); put16 (phdr, static_cast<int> (p)); put16 (phdr, 0); put16 (phdr, pbagNo); put32 (phdr, 0); put32 (phdr, 0); put32 (phdr, 0);
         for (const auto& z : presets[p])
         {
             put16 (pbag, pgenNo); put16 (pbag, 0);
@@ -149,7 +152,7 @@ TEST_CASE ("soundfont: the bank index lists presets and samples", "[soundfont]")
     CHECK (info.versionMajor == 2);
     CHECK_FALSE (info.compressed);
     CHECK (info.samples == 3);
-    REQUIRE (info.presets.size() == 2);
+    REQUIRE (info.presets.size() == 3);
     CHECK (info.presets[0].name == "Preset0");
     CHECK (info.presets[1].program == 1);
 
@@ -203,6 +206,9 @@ TEST_CASE ("soundfont: a preset becomes zones, with preset values added to instr
     CHECK (restored.soundfontFile == t.path.u8string());
     CHECK (restored.soundfontPreset == 0);
     CHECK (restored.zones == r.instrument.zones);
+
+    CHECK (mono->layer == 0);
+    CHECK (stereo->layer == 0);
 
     const auto empty = sf::importPreset (t.path, 1);   // l'étendue de notes du preset ne rencontre pas celle de l'instrument
     CHECK_FALSE (empty.ok);
@@ -287,4 +293,91 @@ TEST_CASE ("soundfont: real banks (SF2 and SF3 give the same sounds)", "[soundfo
         if (ra.ok) { CHECK (ra.zones == rb.zones); ++played; }
     }
     CHECK (played > 250);
+}
+
+TEST_CASE ("soundfont: level per key of a real preset", "[soundfont][realbank][level]")
+{
+    const char* sf2 = std::getenv ("NEPTUNE_TEST_SF2");
+    const char* name = std::getenv ("NEPTUNE_TEST_PRESET");
+    if (sf2 == nullptr || name == nullptr) { SUCCEED ("no real bank given"); return; }
+    const auto bank = sf::readBank (sf2);
+    REQUIRE (bank.ok);
+    int idx = -1;
+    for (std::size_t i = 0; i < bank.presets.size(); ++i) if (bank.presets[i].name == name) { idx = static_cast<int> (i); break; }
+    REQUIRE (idx >= 0);
+    auto r = sf::importPreset (sf2, idx);
+    REQUIRE (r.ok);
+    if (const char* lo = std::getenv ("NEPTUNE_TEST_SAMPLE_FROM"))   // ne garder que les zones dont l'échantillon est dans [from, to]
+    {
+        const int from = std::atoi (lo), to = std::atoi (std::getenv ("NEPTUNE_TEST_SAMPLE_TO"));
+        std::vector<ZoneDescription> kept;
+        for (const auto& z : r.instrument.zones)
+        {
+            sf::SampleRef ref;
+            if (sf::parseSamplePath (z.samplePath, ref) && ref.left >= from && ref.left <= to) kept.push_back (z);
+        }
+        r.instrument.zones = kept;
+        std::printf ("zones kept: %zu\n", kept.size());
+    }
+    const auto inst = buildInstrument (r.instrument);
+    REQUIRE (inst != nullptr);
+    SamplerVoices voices;
+    voices.prepare (48000.0);
+    voices.setInstrument (inst.get());
+    for (int key = 24; key <= 108; key += 3)
+    {
+        voices.noteOn (0, key, 100.0f / 127.0f);
+        std::vector<float> l (24000, 0.0f), rr (24000, 0.0f);
+        for (int pos = 0; pos < 24000; pos += 256)
+            voices.render (l.data() + pos, rr.data() + pos, std::min (256, 24000 - pos), 1.0f, 1.0f, 0.0);
+        double sum = 0, peak = 0;
+        for (const float v : l) { sum += static_cast<double> (v) * v; peak = std::max<double> (peak, std::fabs (v)); }
+        std::printf ("key %3d  rms %6.1f dB  peak %6.1f dB\n", key, 10.0 * std::log10 (sum / l.size() + 1e-12), 20.0 * std::log10 (peak + 1e-9));
+        voices.noteOff (0, key);
+        for (int k = 0; k < 40; ++k) voices.render (l.data(), rr.data(), 256, 1.0f, 1.0f, 0.0);
+    }
+}
+
+TEST_CASE ("soundfont: layers of a preset play together", "[soundfont]")
+{
+    TempBank t;
+    // trois couches : Inst0 (mono 0-59 + paire stéréo 60-127), Inst1 (notes 20 à 30), puis Inst0 de nouveau
+    const auto r = sf::importPreset (t.path, 2);
+    REQUIRE (r.ok);
+    std::map<int, int> perLayer;
+    for (const auto& z : r.instrument.zones) ++perLayer[z.layer];
+    CHECK (perLayer[0] == 2);   // Inst0 : mono + paire stéréo fusionnée
+    CHECK (perLayer[1] == 1);   // Inst1
+    CHECK (perLayer[2] == 2);   // Inst0 en seconde couche
+    CHECK (perLayer.size() == 3);
+
+    // dans le moteur : le la 25 est couvert par une zone de chaque couche, les trois jouent ; le do 70 par les deux couches d'Inst0 (la paire stéréo, deux fois)
+    const auto inst = buildInstrument (r.instrument);
+    REQUIRE (inst != nullptr);
+    SamplerVoices voices;
+    voices.prepare (48000.0);
+    voices.setInstrument (inst.get());
+    voices.noteOn (0, 25, 1.0f);
+    CHECK (voices.activeVoices() == 3);
+    voices.noteOn (0, 70, 1.0f);
+    CHECK (voices.activeVoices() == 5);
+}
+
+TEST_CASE ("sampler: zones of different layers play together, zones of one layer stay alternatives", "[sampler]")
+{
+    InstrumentDescription d;
+    auto zone = [] (const char* path, int layer)
+    {
+        ZoneDescription z;
+        z.samplePath = path;
+        z.layer = layer;
+        return z;
+    };
+    CHECK (sanitised (zone ("a.wav", 99)).layer == ZoneDescription::maxLayers - 1);
+    CHECK (sanitised (zone ("a.wav", -4)).layer == 0);
+    d.zones = { zone ("a.wav", 0), zone ("b.wav", 1) };
+    const auto back = instrumentFromJson (toJson (d));
+    REQUIRE (back.zones.size() == 2);
+    CHECK (back.zones[0].layer == 0);
+    CHECK (back.zones[1].layer == 1);
 }

@@ -12,6 +12,7 @@ endif()
 # Le cœur (core/) ne dépend jamais de JUCE : il se compile et se teste seul.
 option(NEPTUNE_BUILD_PLUGIN "Construire l'adaptateur JUCE / CLAP" ON)
 option(NEPTUNE_BUILD_TESTS  "Construire les tests unitaires du cœur" ON)
+option(NEPTUNE_BUILD_TOOLS  "Construire les outils en ligne de commande (rendu et analyse du synthé)" ON)
 
 include(cmake/Dependencies.cmake)
 
@@ -20,6 +21,10 @@ add_subdirectory(core)
 if(NEPTUNE_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(NEPTUNE_BUILD_TOOLS)
+  add_subdirectory(tools)
 endif()
 
 if(NEPTUNE_BUILD_PLUGIN)

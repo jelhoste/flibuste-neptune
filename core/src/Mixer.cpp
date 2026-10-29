@@ -12,7 +12,8 @@ bool addSynthParams (ParameterSet& set, int track, const std::string& prefix, st
     {
         const auto id = synthParam (track, static_cast<SynthKind> (k));
         ParamSpec spec;
-        const std::string o = std::to_string (k % 3 + 1);
+        // numéro de l'oscillateur d'un réglage par oscillateur (Fine, Pulse Width, Unison Detune) : 1 à 3 dans chaque groupe de trois
+        const std::string o = std::to_string ((k - kFineOsc1) % 3 + 1);
         if (k <= kLevelNoise) spec = ParamSpec::continuous (id, prefix + sourceNames[k], Unit::Percent, 0.0, 100.0, k == kLevelOsc1 ? 100.0 : 0.0);
         else if (k <= kFineOsc3) spec = ParamSpec::continuous (id, prefix + "Osc " + o + " Fine", Unit::Cents, -100.0, 100.0, 0.0);
         else if (k <= kPulseOsc3) spec = ParamSpec::continuous (id, prefix + "Osc " + o + " Pulse Width", Unit::Percent, 2.0, 98.0, 50.0);

@@ -584,3 +584,16 @@ TEST_CASE ("state saved, reloaded and saved again is identical even with awkward
     const auto second = stateToJson (f.params(), f.description(), "");
     CHECK (first == second);
 }
+
+TEST_CASE ("analogsynth per-oscillator parameter names carry the right oscillator number", "[analogsynth]")
+{
+    AnalogSynthEngine e;
+    for (int o = 0; o < 3; ++o)
+    {
+        const auto number = std::string (" ") + std::to_string (o + 1) + " ";
+        auto nameOf = [&] (mixer::SynthKind k) { return e.params().spec (e.params().indexOf (mixer::synthParam (0, k))).name; };
+        CHECK (nameOf (static_cast<mixer::SynthKind> (mixer::kFineOsc1 + o)) == "Osc" + number + "Fine");
+        CHECK (nameOf (static_cast<mixer::SynthKind> (mixer::kPulseOsc1 + o)) == "Osc" + number + "Pulse Width");
+        CHECK (nameOf (static_cast<mixer::SynthKind> (mixer::kDetuneOsc1 + o)) == "Osc" + number + "Unison Detune");
+    }
+}
