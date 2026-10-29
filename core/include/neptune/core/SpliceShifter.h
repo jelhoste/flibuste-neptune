@@ -9,6 +9,8 @@
 #include <cmath>
 #include <vector>
 
+#include <array>
+
 #include "neptune/core/DelayRead.h"
 
 namespace neptune::core
@@ -30,7 +32,7 @@ public:
         search_ = std::min (0.25 * spliceSmp_, 0.006 * fs_);
         low_ = search_ + 0.002 * fs_;
         high_ = low_ + spliceSmp_;
-        window_ = std::max (32.0, std::min (0.004 * fs_, 0.25 * spliceSmp_));
+        window_ = std::max (32.0, std::min ({ 0.004 * fs_, 0.25 * spliceSmp_, static_cast<double> (kMaxWindow) }));
         d1_ = std::clamp (d1_, low_, high_);
         if (fading_) fading_ = false;
     }
@@ -82,23 +84,37 @@ private:
     void startSplice (int dir, double xf) noexcept
     {
         const double target = d1_ + dir * spliceSmp_;
-        const long w = static_cast<long> (window_), s = static_cast<long> (search_), base = std::lround (d1_);
+        const long w = std::min (static_cast<long> (window_), static_cast<long> (kMaxWindow)), s = static_cast<long> (search_), base = std::lround (d1_);
+        const long size = static_cast<long> (buf_.size());
+        // Lecture du tampon circulaire sans modulo par échantillon : l'indice part de celui du retard demandé et recule d'un cran par échantillon plus ancien.
+        // Même résultat, dans le même ordre de calcul, que la lecture par `at (retard + i)` ; seul le coût change (un raccord ne doit pas dépasser un bloc audio).
+        auto startIndex = [this, size] (long delay) { const long i = (static_cast<long> (pos_) - delay) % size; return i < 0 ? i + size : i; };
+        long idx = startIndex (base);
+        double energyA = 0.0;
+        for (long i = 0; i < w; ++i)
+        {
+            const float v = buf_[static_cast<std::size_t> (idx)];
+            ref_[static_cast<std::size_t> (i)] = v;
+            const double a = v;
+            energyA += a * a;
+            idx = idx == 0 ? size - 1 : idx - 1;
+        }
         double bestScore = -2.0;
         long bestShift = 0;
-        double energyA = 0.0;
-        for (long i = 0; i < w; ++i) { const double a = at (base + i); energyA += a * a; }
         if (energyA > 1.0e-9)
         {
             for (long shift = -s; shift <= s; ++shift)
             {
                 const long cand = std::lround (target) + shift;
-                if (cand < 4 || cand + w + 4 >= static_cast<long> (buf_.size())) continue;
+                if (cand < 4 || cand + w + 4 >= size) continue;
                 double ab = 0.0, bb = 0.0;
+                idx = startIndex (cand);
                 for (long i = 0; i < w; ++i)
                 {
-                    const double a = at (base + i), b = at (cand + i);
+                    const double a = ref_[static_cast<std::size_t> (i)], b = buf_[static_cast<std::size_t> (idx)];
                     ab += a * b;
                     bb += b * b;
+                    idx = idx == 0 ? size - 1 : idx - 1;
                 }
                 const double score = ab / std::sqrt (energyA * bb + 1.0e-12);
                 if (score > bestScore) { bestScore = score; bestShift = shift; }
@@ -112,6 +128,8 @@ private:
 
     double fs_ = 48000.0, spliceSmp_ = 1440.0, search_ = 288.0, low_ = 384.0, high_ = 1824.0, window_ = 192.0;
     double d1_ = 1104.0, d2_ = 0.0, fadeLen_ = 64.0, fadePos_ = 0.0;
+    static constexpr std::size_t kMaxWindow = 2048;   // fenêtre de corrélation au plus (4 ms jusqu'à 512 kHz)
+    std::array<float, kMaxWindow> ref_ {};            // copie de la fenêtre de référence pendant la recherche du raccord
     std::vector<float> buf_;
     std::size_t pos_ = 0;
     bool fading_ = false;

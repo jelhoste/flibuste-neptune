@@ -140,7 +140,7 @@ TEST_CASE ("compressor: HOLD keeps the reduction after the loud part has gone", 
     {
         CompRig r;
         r.set (c::attack, 0.0);
-        r.set (c::release, 5.0);
+        r.set (c::release, 0.8);                  // constante de temps (avant la correction du suiveur, 5 ms valaient 5 / 2 pi)
         r.hold (0.5f, 0.5f, 0.3);                 // forte : réduction installée
         std::vector<float> a (256, 0.001f), b (256, 0.001f);
         // 30 ms de faible niveau : sans maintien la réduction est retombée, avec 100 ms de maintien elle reste
@@ -150,7 +150,7 @@ TEST_CASE ("compressor: HOLD keeps the reduction after the loud part has gone", 
     CHECK (reductionAfterBurst (0.0) > -3.0);
     CompRig held;
     held.set (c::attack, 0.0);
-    held.set (c::release, 5.0);
+    held.set (c::release, 0.8);
     held.set (c::hold, 100.0);
     held.hold (0.5f, 0.5f, 0.3);
     std::vector<float> a (256, 0.001f), b (256, 0.001f);
@@ -547,4 +547,19 @@ TEST_CASE ("compressor: the MIDI source parameters exist and the old external sw
     REQUIRE (ch != nullptr);
     CHECK (ch->max == Approx (16.0));
     CHECK (! ch->automatable);
+}
+
+TEST_CASE ("dynamics follower: attack and release times are time constants (63 % after the set time)", "[compressor]")
+{
+    neptune::core::dyn::Follower f;
+    f.prepare (48000.0);
+    f.set (100.0, 250.0, 0.0, 0.0);
+    f.reset (0.0);
+    double y = 0.0;
+    for (int i = 0; i < 4800; ++i) y = f.process (1.0);                     // 100 ms d'échelon vers le haut
+    CHECK (y == Approx (1.0 - std::exp (-1.0)).margin (0.01));
+    for (int i = 0; i < 48000 * 2; ++i) y = f.process (1.0);                // rattrape l'échelon
+    CHECK (y == Approx (1.0).margin (0.001));
+    for (int i = 0; i < 12000; ++i) y = f.process (0.0);                    // 250 ms de relâchement
+    CHECK (y == Approx (std::exp (-1.0)).margin (0.01));
 }

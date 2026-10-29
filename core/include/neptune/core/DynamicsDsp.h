@@ -121,7 +121,9 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
-// Suiveur « pump / punch / smooth » : lissage exponentiel avec temps d'attaque et de relâchement (ms), plus
+// Suiveur « pump / punch / smooth » : lissage exponentiel dont les temps d'attaque et de relâchement (ms) sont des CONSTANTES DE TEMPS : après un échelon, la sortie a
+// parcouru 63 % du chemin au bout de ce temps (relevé par le banc de test de la suite, 2026-10-29 : la version précédente prenait le réglage
+// pour une période, et la constante réelle était 2 pi fois plus courte que le temps affiché). Plus,
 //  - PUMP (> 0) : après une attaque, la pente est rendue plus douce (la compression « respire ») ; PUNCH (< 0) : l'inverse ;
 //  - SMOOTH : étage de relâchement sur l'entrée, entièrement ou en mélange (0..1).
 enum class PunchState { Off, Punch, Pump };
@@ -132,7 +134,7 @@ class Follower
 public:
     void prepare (double sampleRate) noexcept
     {
-        factor_ = -2.0 * kPi * 1000.0 / sampleRate;
+        factor_ = -1000.0 / sampleRate;   // exp(-1 / (constante de temps en échantillons)) = exp(factor_ / ms)
         update();
     }
     void reset (double v = 0.0) noexcept { y_ = v; state_ = v; slope_ = 0.0; }
@@ -202,7 +204,7 @@ private:
 
     double y_ = 0.0, state_ = 0.0, slope_ = 0.0, attack_ = 0.0, release_ = 0.0, pp_ = 0.0, smooth_ = 0.0;
     double attackMs_ = 50.0, releaseMs_ = 100.0, pp_portion_ = 0.0, smooth_portion_ = 0.0;
-    double factor_ = -0.1308996938995747;
+    double factor_ = -1000.0 / 48000.0;
     PunchState ppState_ = PunchState::Off;
     SmoothState sState_ = SmoothState::Off;
 };
