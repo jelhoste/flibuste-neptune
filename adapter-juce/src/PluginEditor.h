@@ -93,7 +93,14 @@ private:
         void mouseDrag (const juce::MouseEvent& e) override { if (onDrag) onDrag (e.getDistanceFromDragStartX()); }
     };
     bool showSplit_ = false;
-    double splitRatio_ = 0.55, splitStartRatio_ = 0.55;   // part de la largeur donnée au Mixeur
+    double splitRatio_ = 0.55, splitStartRatio_ = 0.55;   // part de la largeur donnée au panneau de gauche
+    // Les deux panneaux de la vue double, au choix : 0 Mixeur, 1 Façade, 2 Modulation, 3 Routeur
+    enum SplitPane { paneMixer = 0, paneFacade, paneMod, paneRouter, paneCount };
+    int splitLeft_ = paneMixer, splitRight_ = paneFacade;
+    bool splitShows (int pane) const { return showSplit_ && (splitLeft_ == pane || splitRight_ == pane); }
+    juce::String splitPaneName (int pane) const;
+    void showSplitMenu();
+    void updateSplitButtonText();
     juce::TextButton splitButton_;
     SplitBar splitBar_;
     bool consoleLocked_ = false;               // mode console actif et non déverrouillé pour cette session

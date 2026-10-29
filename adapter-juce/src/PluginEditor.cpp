@@ -103,7 +103,7 @@ NeptuneEditor::NeptuneEditor (NeptuneProcessor& p)
     splitButton_.setButtonText (text ("split.button"));
     splitButton_.setTooltip (text ("split.tip"));
     splitButton_.setClickingTogglesState (false);
-    splitButton_.onClick = [this] { if (showSplit_) setView (true, false); else setSplit(); };   // un second clic revient au Mixeur
+    splitButton_.onClick = [this] { showSplitMenu(); };   // le menu choisit les deux panneaux (ou quitte la vue double)
     addAndMakeVisible (splitButton_);
     splitBar_.onBegin = [this] { splitStartRatio_ = splitRatio_; };
     splitBar_.onDrag = [this] (int dx)
@@ -364,12 +364,12 @@ void NeptuneEditor::updateViewVisibility()
     audioInShown_ = audioIn;
     audioInView_->setVisible (audioIn);
     instrumentShown_ = mapping && ! audioIn;
-    mixerView_->setVisible (showMixer_ || showSplit_);
-    facadeView_->setVisible ((showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_) || showSplit_);
+    mixerView_->setVisible (showMixer_ || splitShows (paneMixer));
+    facadeView_->setVisible ((showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_) || splitShows (paneFacade));
     splitBar_.setVisible (showSplit_);
     splitButton_.setToggleState (showSplit_, juce::dontSendNotification);
-    modView_->setVisible (showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_);
-    routerView_->setVisible (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_);
+    modView_->setVisible ((showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_) || splitShows (paneMod));
+    routerView_->setVisible ((showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_) || splitShows (paneRouter));
     routerButton_.setToggleState (showRouter_ && ! showProbe_ && ! showMixer_ && ! showFacade_ && ! showMod_, juce::dontSendNotification);
     modButton_.setToggleState (showMod_ && ! showProbe_ && ! showMixer_ && ! showFacade_, juce::dontSendNotification);
     facadeButton_.setToggleState (showFacade_ && ! showProbe_ && ! showMixer_ && ! showMod_, juce::dontSendNotification);
@@ -419,11 +419,57 @@ void NeptuneEditor::showConsoleMenu()
     });
 }
 
-// Vue double : le Mixeur et la Façade côte à côte.
+juce::String NeptuneEditor::splitPaneName (int pane) const
+{
+    switch (pane)
+    {
+        case paneMixer:  return mixerButton_.getButtonText();
+        case paneFacade: return facadeButton_.getButtonText();
+        case paneMod:    return modButton_.getButtonText();
+        default:         return routerButton_.getButtonText();
+    }
+}
+
+void NeptuneEditor::updateSplitButtonText()
+{
+    splitButton_.setButtonText (showSplit_ ? splitPaneName (splitLeft_) + " | " + splitPaneName (splitRight_) : text ("split.button"));
+}
+
+// Menu de la vue double : un panneau à gauche, un à droite (choisir celui de l'autre côté échange les deux), ou revenir au Mixeur.
+void NeptuneEditor::showSplitMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader (text ("split.left"));
+    for (int p = 0; p < paneCount; ++p) menu.addItem (1 + p, splitPaneName (p), true, showSplit_ && splitLeft_ == p);
+    menu.addSeparator();
+    menu.addSectionHeader (text ("split.right"));
+    for (int p = 0; p < paneCount; ++p) menu.addItem (11 + p, splitPaneName (p), true, showSplit_ && splitRight_ == p);
+    if (showSplit_)
+    {
+        menu.addSeparator();
+        menu.addItem (100, text ("split.exit"));
+    }
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&splitButton_), [safe] (int choice)
+    {
+        if (safe == nullptr || choice == 0) return;
+        if (choice == 100) { safe->setView (true, false); return; }
+        const bool left = choice < 11;
+        const int pane = left ? choice - 1 : choice - 11;
+        int& mine = left ? safe->splitLeft_ : safe->splitRight_;
+        int& other = left ? safe->splitRight_ : safe->splitLeft_;
+        if (pane == other) other = mine;   // le même panneau des deux côtés n'aurait pas de sens : on échange
+        mine = pane;
+        safe->setSplit();
+    });
+}
+
+// Vue double : deux panneaux au choix côte à côte (Mixeur et Façade au départ).
 void NeptuneEditor::setSplit()
 {
     showSplit_ = true;
     showRouter_ = showMixer_ = showProbe_ = showFacade_ = showMod_ = false;
+    updateSplitButtonText();
     updateViewVisibility();
     resized();
     repaint();
@@ -432,6 +478,7 @@ void NeptuneEditor::setSplit()
 void NeptuneEditor::setView (bool mixer, bool probe, bool facade, bool mod, bool router)
 {
     showSplit_ = false;
+    updateSplitButtonText();
     showRouter_ = router;
     showMixer_ = mixer;
     showProbe_ = probe;
@@ -858,20 +905,34 @@ void NeptuneEditor::resized()
         const int areaH = juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0));
         if (showSplit_)
         {
-            // Mixeur à gauche (réduit pour tenir), Façade à droite, barre de séparation entre les deux
+            // deux panneaux au choix (le Mixeur est réduit pour tenir), barre de séparation entre les deux
             const int total = lw_ - 64, barW = 10;
             const int leftW = juce::jlimit (160, juce::jmax (160, total - 160 - barW), juce::roundToInt (total * splitRatio_));
-            mixerView_->placeScaled ({ 32, top, leftW, areaH });
+            const juce::Rectangle<int> leftArea { 32, top, leftW, areaH }, rightArea { 32 + leftW + barW, top, total - leftW - barW, areaH };
+            auto place = [this] (int pane, juce::Rectangle<int> r)
+            {
+                switch (pane)
+                {
+                    case paneMixer:  mixerView_->placeScaled (r); break;
+                    case paneFacade: facadeView_->setBounds (r); break;
+                    case paneMod:    modView_->setBounds (r); break;
+                    default:         routerView_->setBounds (r); break;
+                }
+            };
+            place (splitLeft_, leftArea);
+            place (splitRight_, rightArea);
             splitBar_.setBounds (32 + leftW, top, barW, areaH);
-            facadeView_->setBounds (32 + leftW + barW, top, total - leftW - barW, areaH);
         }
         else
         {
             mixerView_->placeScaled ({ 32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40) });
             facadeView_->setBounds (32, top, lw_ - 64, areaH);
         }
-        modView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
-        routerView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
+        if (! showSplit_)
+        {
+            modView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
+            routerView_->setBounds (32, top, lw_ - 64, juce::jmax (200, lh_ - top - 40 - (recoveryShown_ ? 40 : 0)));
+        }
     }
     if (midiFilterEditor_) midiFilterEditor_->setBounds (rootBounds());
     if (midiSendPanel_) midiSendPanel_->setBounds (rootBounds());

@@ -894,9 +894,11 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int 
 {
     const float alpha = s.isEnabled() ? 1.0f : 0.4f;
     // modulation (hôte ou matrice) : la propriété « modValue » porte la valeur modulée ; un trait de la valeur réglée à la valeur modulée
-    // et un repère au bout, dans la couleur de l'anneau de modulation des potards
+    // et un petit point au bout
     const bool modulated = s.getProperties().contains ("modValue");
     const float modPos = modulated ? s.getPositionOfValue (static_cast<double> (s.getProperties()["modValue"])) : pos;
+    // même teinte que l'anneau de modulation des potards, tirée vers le jaune pour bien ressortir du remplissage orange
+    const auto modColour = skin_.colour (Token::Accent2, alpha).interpolatedWith (juce::Colour (0xffffe066).withAlpha (alpha), 0.55f);
     if (style == juce::Slider::LinearVertical && s.getProperties().getWithDefault ("fader", false))
     {
         // fader du mixeur : rail sombre, remplissage orange dégradé depuis le bas, poignée blanche arrondie
@@ -908,16 +910,18 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int 
         g.setGradientFill (juce::ColourGradient (skin_.colour (Token::Accent, alpha).brighter (0.3f), fill.getX(), fill.getY(),
                                                  skin_.colour (Token::Accent, alpha), fill.getX(), fill.getBottom(), false));
         g.fillRoundedRectangle (fill, tw / 2.0f);
-        if (modulated)
-        {
-            const float mw = tw + skin_.px (3.0f);
-            g.setColour (skin_.colour (Token::Accent2, alpha));
-            g.fillRoundedRectangle (juce::Rectangle<float> (cx - mw / 2.0f, std::min (pos, modPos), mw, std::max (std::abs (pos - modPos), skin_.px (2.0f))), mw / 2.0f);
-            g.fillRoundedRectangle (juce::Rectangle<float> (cx - skin_.px (9.0f), modPos - skin_.px (1.5f), skin_.px (18.0f), skin_.px (3.0f)), skin_.px (1.5f));
-        }
         const float tw2 = std::min (static_cast<float> (w) - 2.0f, skin_.px (24.0f)), th = skin_.px (10.0f);
         g.setColour (skin_.colour (Token::Text, alpha == 1.0f ? 1.0f : 0.5f));
         g.fillRoundedRectangle (cx - tw2 / 2.0f, pos - th / 2.0f, tw2, th, skin_.px (3.0f));
+        if (modulated)
+        {
+            // trait fin sur le bord droit, à côté du rail : la valeur réglée reste visible, la modulation se lit à côté
+            const float lw = skin_.px (2.5f), lx = static_cast<float> (x + w) - lw - skin_.px (0.5f);
+            const float dm = skin_.px (6.0f);
+            g.setColour (modColour);
+            g.fillRoundedRectangle (juce::Rectangle<float> (lx, std::min (pos, modPos), lw, std::max (std::abs (pos - modPos), skin_.px (2.0f))), lw / 2.0f);
+            g.fillEllipse (lx + lw / 2.0f - dm / 2.0f, modPos - dm / 2.0f, dm, dm);
+        }
         return;
     }
     if (style != juce::Slider::LinearHorizontal)
@@ -937,15 +941,17 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int 
         g.fillRoundedRectangle (juce::Rectangle<float> (std::min (mid, pos), track.getY(), std::abs (pos - mid), th), th / 2.0f);
     }
     else g.fillRoundedRectangle (track.withRight (pos), th / 2.0f);
-    if (modulated)
-    {
-        const float mh = th + skin_.px (3.0f), dm = skin_.px (7.0f);
-        g.setColour (skin_.colour (Token::Accent2, alpha));
-        g.fillRoundedRectangle (juce::Rectangle<float> (std::min (pos, modPos), cy - mh / 2.0f, std::max (std::abs (pos - modPos), skin_.px (2.0f)), mh), mh / 2.0f);
-        g.fillEllipse (modPos - dm / 2.0f, cy - dm / 2.0f, dm, dm);
-    }
     const float d = skin_.px (11.0f);
     g.setColour (skin_.colour (Token::Text, s.isEnabled() ? 1.0f : 0.5f));
     g.fillEllipse (pos - d / 2.0f, cy - d / 2.0f, d, d);
+    if (modulated)
+    {
+        // trait fin au-dessus du rail, de la valeur réglée à la valeur modulée, avec un petit point au bout (comme l'anneau des potards)
+        const float lh = skin_.px (2.5f), ly = std::max (static_cast<float> (y) + skin_.px (2.5f), cy - d / 2.0f - lh - skin_.px (1.0f));
+        const float dm = skin_.px (6.0f);
+        g.setColour (modColour);
+        g.fillRoundedRectangle (juce::Rectangle<float> (std::min (pos, modPos), ly, std::max (std::abs (pos - modPos), skin_.px (2.0f)), lh), lh / 2.0f);
+        g.fillEllipse (modPos - dm / 2.0f, ly + lh / 2.0f - dm / 2.0f, dm, dm);
+    }
 }
 } // namespace nova
