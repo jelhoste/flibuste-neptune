@@ -17,6 +17,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "PresetHost.h"
 #include "neptune/core/OrganImport.h"
 #include "neptune/core/SfzImport.h"
+#include "neptune/core/SoundFont.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/AudioRecorder.h"
@@ -243,6 +244,9 @@ public:
     // d'abord toutes les autres pistes. L'historique d'annulation est vidé. Erreur « no_free_track » si les 16 pistes sont prises.
     enum class SfzPlacement { AddTrack, ClearMixer };
     neptune::core::sfzimport::Result uiImportSfz (const std::filesystem::path& sfzFile, SfzPlacement placement);
+    // Importe un preset d'une banque SoundFont (.sf2 / .sf3) ; `presetIndex` : position dans neptune::core::soundfont::readBank(...).presets. Erreur « no_free_track » si aucune piste libre.
+    neptune::core::soundfont::Result uiImportSoundFont (const std::filesystem::path& bankFile, int presetIndex, SfzPlacement placement);
+    bool installImportedInstrument (const neptune::core::InstrumentDescription& instrument, const std::string& name, SfzPlacement placement);
     // Remet une piste à zéro et y installe un instrument Sampler (inserts, réglages et instruments des autres types compris). midiChannel < 1 : celui d'une piste neuve.
     void installSamplerTrack (int index, neptune::core::InstrumentDescription instrument, const std::string& name, int midiChannel);
     // Retire une piste (remise à l'état d'origine). Faux s'il n'en reste qu'une. Vide l'historique d'annulation.

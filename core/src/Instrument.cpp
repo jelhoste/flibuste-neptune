@@ -358,6 +358,7 @@ std::string toJson (const InstrumentDescription& d)
         if (! groups.empty()) doc["groups"] = groups;
     }
     if (d.streamFromDisk) doc["stream_from_disk"] = true;
+    if (! d.soundfontFile.empty()) { doc["soundfont_file"] = d.soundfontFile; doc["soundfont_preset"] = d.soundfontPreset; }
     if (d.preloadKB != InstrumentDescription::defaultPreloadKB) doc["preload_kb"] = d.preloadKB;
     nlohmann::json slots = nlohmann::json::array();
     for (std::size_t i = 0; i < d.slots.size(); ++i)
@@ -609,6 +610,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
             if (! g.isDefault()) d.groups[name->get<std::string>()] = g;
         }
     if (const auto m = doc.find ("stream_from_disk"); m != doc.end() && m->is_boolean()) d.streamFromDisk = m->get<bool>();
+    if (const auto m = doc.find ("soundfont_file"); m != doc.end() && m->is_string()) { d.soundfontFile = m->get<std::string>(); d.soundfontPreset = readInt (doc, "soundfont_preset", -1); }
     d.preloadKB = std::clamp (readInt (doc, "preload_kb", InstrumentDescription::defaultPreloadKB),
                               InstrumentDescription::minPreloadKB, InstrumentDescription::maxPreloadKB);
     if (const auto m = doc.find ("unloaded_groups"); m != doc.end() && m->is_array())

@@ -1,6 +1,7 @@
 #include "neptune/core/SampleLoader.h"
 
 #include "neptune/core/OpusFile.h"
+#include "neptune/core/SoundFont.h"
 #include "neptune/core/WavPackFile.h"
 
 #include <algorithm>
@@ -344,8 +345,51 @@ AudioFileInfo probeFlac (const std::filesystem::path& path)
 }
 } // namespace
 
+namespace
+{
+// ----- échantillons d'une banque SoundFont (chemin virtuel « banque.sf2#12 » ou « banque.sf2#12+13 », voir SoundFont.h) -----
+bool bankSampleRef (const std::filesystem::path& p, soundfont::SampleRef& ref) { return soundfont::parseSamplePath (p.u8string(), ref); }
+
+AudioFileInfo probeBankSample (const soundfont::SampleRef& ref)
+{
+    const auto p = soundfont::probeSample (ref);
+    AudioFileInfo r;
+    r.ok = p.ok;
+    r.error = p.error;
+    r.channels = p.channels;
+    r.frames = p.frames;
+    r.sampleRate = p.sampleRate;
+    r.bitDepth = 16;
+    r.keptAsInt16 = true;
+    return r;
+}
+
+SampleLoadResult loadBankSample (const std::filesystem::path& path, const soundfont::SampleRef& ref)
+{
+    auto d = soundfont::decodeSample (ref);
+    if (! d.ok) return fail (d.error);
+    auto data = std::make_shared<SampleData>();
+    data->channels = d.channels;
+    data->frames = d.frames;
+    data->residentFrames = d.frames;   // jamais en streaming : un échantillon de banque est petit et sa source n'est pas un fichier lisible séquentiellement
+    data->path = path.u8string();
+    data->sampleRate = d.sampleRate;
+    data->name = ref.bank.stem().string() + "#" + std::to_string (ref.left) + (ref.right >= 0 ? "+" + std::to_string (ref.right) : std::string());
+    data->sourceBitDepth = 16;
+    const auto n = static_cast<std::size_t> (d.frames);
+    data->pcm16.resize (n * static_cast<std::size_t> (d.channels));
+    for (int c = 0; c < d.channels; ++c)
+        for (std::size_t i = 0; i < n; ++i) data->pcm16[static_cast<std::size_t> (c) * n + i] = d.interleaved[i * static_cast<std::size_t> (d.channels) + static_cast<std::size_t> (c)];
+    SampleLoadResult r;
+    r.sample = std::move (data);
+    return r;
+}
+
+} // namespace
+
 AudioFileInfo probeAudioFile (const std::filesystem::path& path)
 {
+    if (soundfont::SampleRef ref; bankSampleRef (path, ref)) return probeBankSample (ref);
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return probeFailure ("file not found: " + path.string());
     AudioFileInfo r = isOpusPath (path) ? probeOpus (path) : isWavPackPath (path) ? probeWavPack (path) : hasExtension (path, ".flac") ? probeFlac (path) : probeWithSndfile (path);
@@ -356,6 +400,7 @@ AudioFileInfo probeAudioFile (const std::filesystem::path& path)
 
 SampleLoadResult loadSampleFile (const std::filesystem::path& path, std::int64_t maxResidentFrames)
 {
+    if (soundfont::SampleRef ref; bankSampleRef (path, ref)) return loadBankSample (path, ref);
     std::error_code ec;
     if (! std::filesystem::is_regular_file (path, ec)) return fail ("file not found: " + path.string());
     if (isOpusPath (path)) return loadOpus (path);
@@ -393,7 +438,18 @@ bool AudioStreamReader::open (const std::filesystem::path& path, std::string* er
 {
     close();
     auto bad = [&] (const char* msg) { if (error != nullptr) *error = msg; return false; };
-    if (isOpusPath (path))
+    if (soundfont::SampleRef ref; bankSampleRef (path, ref))
+    {
+        const auto d = soundfont::decodeSample (ref);
+        if (! d.ok) { if (error != nullptr) *error = d.error; return false; }
+        impl_->memory.resize (d.interleaved.size());
+        for (std::size_t i = 0; i < d.interleaved.size(); ++i) impl_->memory[i] = static_cast<float> (d.interleaved[i]) * (1.0f / 32768.0f);
+        impl_->memoryPos = 0;
+        impl_->inMemory = true;
+        channels_ = d.channels;
+        totalFrames_ = d.frames;
+    }
+    else if (isOpusPath (path))
     {
         auto d = decodeOpusFile (path);
         if (! d.info.ok) { if (error != nullptr) *error = d.info.error; return false; }

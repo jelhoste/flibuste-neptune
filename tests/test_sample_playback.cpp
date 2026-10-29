@@ -174,6 +174,10 @@ TEST_CASE ("zone description round-trips the new playback settings")
     CHECK (clean.startFrame == 0);
     CHECK (clean.endFrame == -1);
     CHECK (clean.delayMs == ZoneDescription::maxDelayMs);
+    ZoneDescription longFade;
+    longFade.fadeInMs = 800.0; longFade.fadeOutMs = 3000.0;   // les fondus d'entrée et de sortie vont de 0 à 40 ms
+    CHECK (sanitised (longFade).fadeInMs == 40.0);
+    CHECK (sanitised (longFade).fadeOutMs == 40.0);
 }
 
 TEST_CASE ("several loops play in sequence")

@@ -563,6 +563,7 @@ void NeptuneEditor::showGlobalPresetMenu()
     menu.addSeparator();
     menu.addItem (4, text ("organ.import"));
     menu.addItem (5, text ("sfz.import"));
+    menu.addItem (6, text ("sf.import"));
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&globalPresetButton_), [safe, files] (int choice)
@@ -583,6 +584,7 @@ void NeptuneEditor::showGlobalPresetMenu()
         else if (choice == 3) global_presets::folder (safe->settingsDir()).revealToUser();
         else if (choice == 4) safe->importOrgan();
         else if (choice == 5) safe->importSfz();
+        else if (choice == 6) safe->importSoundFont();
         else if (choice >= 100 && choice < 1000 && choice - 100 < files.size()) safe->loadGlobalPreset (files[choice - 100]);
         else if (choice >= 1000 && choice - 1000 < files.size())
         {
@@ -637,6 +639,61 @@ void NeptuneEditor::finishSfzImport (const juce::File& picked, NeptuneProcessor:
         }
         juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, text ("sfz.import"), message);
     }
+}
+
+void NeptuneEditor::importSoundFont()
+{
+    auto chooser = std::make_shared<juce::FileChooser> (text ("sf.import"), juce::File::getSpecialLocation (juce::File::userHomeDirectory), "*.sf2;*.sf3");
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe, chooser] (const juce::FileChooser& fc)
+    {
+        const auto picked = fc.getResult();
+        if (safe == nullptr || ! picked.existsAsFile()) return;
+        const auto bank = neptune::core::soundfont::readBank (std::filesystem::path (picked.getFullPathName().toStdString()));
+        if (! bank.ok)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("sf.import"), juce::String::fromUTF8 (bank.error.c_str()));
+            return;
+        }
+        // un seul dialogue : le preset à charger (liste des presets de la banque) et où le mettre
+        auto* w = new juce::AlertWindow (safe->text ("sf.import"), safe->text ("sf.ask").replace ("{0}", picked.getFileNameWithoutExtension()), juce::MessageBoxIconType::QuestionIcon);
+        juce::StringArray names;
+        for (const auto& p : bank.presets)
+            names.add (juce::String::fromUTF8 (p.name.c_str()) + "  (" + juce::String (p.bank) + ":" + juce::String (p.program) + ")");
+        w->addComboBox ("preset", names, safe->text ("sf.preset"));
+        w->getComboBoxComponent ("preset")->setSelectedItemIndex (0, juce::dontSendNotification);
+        w->addButton (safe->text ("sfz.clear"), 1);
+        w->addButton (safe->text ("sfz.add"), 2, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton (safe->text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w, picked] (int answer)
+        {
+            if (safe == nullptr || answer == 0) return;
+            const int preset = w->getComboBoxComponent ("preset")->getSelectedItemIndex();
+            safe->finishSoundFontImport (picked, std::max (0, preset), answer == 1 ? NeptuneProcessor::SfzPlacement::ClearMixer : NeptuneProcessor::SfzPlacement::AddTrack);
+        }), true);
+    });
+}
+
+void NeptuneEditor::finishSoundFontImport (const juce::File& picked, int presetIndex, NeptuneProcessor::SfzPlacement placement)
+{
+    const auto result = processor_.uiImportSoundFont (std::filesystem::path (picked.getFullPathName().toStdString()), presetIndex, placement);
+    juce::String message;
+    if (! result.ok) message = result.error == "no_free_track" ? text ("sfz.no_free_track") : juce::String::fromUTF8 (result.error.c_str());
+    else
+    {
+        message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (result.zones) + " " + text ("sf.zones");
+        if (! result.warnings.empty())
+        {
+            message += "\n\n" + text ("organ.warnings") + "\n";
+            int shown = 0;
+            for (const auto& wn : result.warnings)
+            {
+                if (++shown > 12) { message += "..."; break; }
+                message += "- " + juce::String::fromUTF8 (wn.c_str()) + "\n";
+            }
+        }
+    }
+    juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, text ("sf.import"), message);
 }
 
 void NeptuneEditor::importOrgan()

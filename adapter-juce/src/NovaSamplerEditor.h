@@ -13,6 +13,7 @@
 #include "EnvelopeEditor.h"
 #include "FilterEditor.h"
 #include "ImportWizard.h"
+#include "neptune/core/SoundFont.h"
 #include "MappingMatrix.h"
 #include "MidiFilterEditor.h"
 #include "PoolTable.h"
@@ -63,6 +64,11 @@ private:
     void setSelection (const std::vector<int>&);
     const Zone* shownZone() const;                 // la première zone sélectionnée (sinon la première) : ce que les commandes affichent
     void refreshFromInstrument();
+    void updatePresetPill();
+    void openPresetPicker();
+    void changePreset (int preset);
+    void applyPreset (int preset);
+    void dismissPresetPicker();
     void chooseSample();
     void startImport();
     void openWizard (std::vector<std::string> paths);
@@ -147,6 +153,10 @@ private:
 
     NeptuneProcessor& proc_;
     neptune::core::InstrumentDescription cached_;
+    juce::String presetPillText_;
+    juce::Component::SafePointer<juce::CallOutBox> presetBox_;   // la liste des presets quand elle est ouverte
+    std::string sfBankFile_;                   // banque dont sfBank_ est l'index
+    neptune::core::soundfont::BankInfo sfBank_;
     std::uint32_t lastRevision_ = 0xFFFFFFFFu;
     bool updating_ = false;
     bool listVisible_ = true, showVoices_ = false;
@@ -213,7 +223,7 @@ private:
 
     // page ZONES
     nova::Panel *zonePanel_ = nullptr, *tablePanel_ = nullptr, *matrixPanel_ = nullptr;
-    nova::Pill *loadPill_ = nullptr, *importPill_ = nullptr, *removePill_ = nullptr, *listPill_ = nullptr, *monitorPill_ = nullptr, *modePill_ = nullptr, *chokeMorePill_ = nullptr, *levelsPill_ = nullptr;
+    nova::Pill *loadPill_ = nullptr, *importPill_ = nullptr, *removePill_ = nullptr, *listPill_ = nullptr, *monitorPill_ = nullptr, *presetPill_ = nullptr, *modePill_ = nullptr, *chokeMorePill_ = nullptr, *levelsPill_ = nullptr;
     nova::Text* selectionText_ = nullptr;
     nova::NumberPill* rootNumber_ = nullptr;
     nova::ChoicePill *triggerChoice_ = nullptr, *chokeChoice_ = nullptr;

@@ -47,6 +47,8 @@ private:
     void importOrgan();                                // importer un orgue GrandOrgue (.organ ou paquet .orgue)
     void importSfz();                                  // importer un instrument SFZ : choisit le fichier, demande où le mettre, puis finishSfzImport
     void finishSfzImport (const juce::File& picked, NeptuneProcessor::SfzPlacement placement);
+    void importSoundFont();
+    void finishSoundFontImport (const juce::File& picked, int presetIndex, NeptuneProcessor::SfzPlacement placement);
     void showGlobalPresetMenu();                       // presets globaux : enregistrer, charger, supprimer
     void saveGlobalPreset (const juce::String& name);
     void loadGlobalPreset (const juce::File&);

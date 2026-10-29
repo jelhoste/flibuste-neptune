@@ -134,7 +134,7 @@ struct ZoneDescription
     // Faux : le sample est joué en entier, le Note Off est ignoré (percussions). Sans effet sur une zone en boucle ou déclenchée au relâchement.
     bool releaseCuts = false;
     double delayMs = 0.0;          // retard du déclenchement du son après le Note On
-    static constexpr double defaultFadeInMs = 1.0, defaultFadeOutMs = 2.0, maxFadeMs = 5000.0, maxDelayMs = 10000.0;
+    static constexpr double defaultFadeInMs = 1.0, defaultFadeOutMs = 2.0, maxFadeMs = 40.0, maxDelayMs = 10000.0;
 
     bool operator== (const ZoneDescription& o) const noexcept
     {
@@ -179,6 +179,10 @@ struct InstrumentDescription
     // Réserve de fichiers : les samples disponibles pour cet instrument, placés ou non (chemins absolus UTF-8). Les fichiers des zones y sont aussi, de fait ; la
     // réserve garde en plus ceux qui ne sont (encore) dans aucune zone. Rien n'est chargé en mémoire pour un fichier de la réserve.
     std::vector<std::string> pool;
+    // Banque SoundFont d'où vient l'instrument (chemin UTF-8 du .sf2/.sf3) et numéro du preset dans cette banque ; vides (-1) pour un instrument qui n'en vient pas.
+    // Les zones désignent les échantillons de la banque par des chemins virtuels (voir SoundFont.h) : la session ne copie pas les sons.
+    std::string soundfontFile;
+    int soundfontPreset = -1;
     RoundRobinMode roundRobinMode = RoundRobinMode::Sequential;
     // Emprunt aux couches de vélocité voisines (spec §3, round-robin) : une couche qui a moins d'alternatives que sa voisine immédiate peut emprunter les siennes
     // (avec une correction de volume) pour éviter la répétition exacte.

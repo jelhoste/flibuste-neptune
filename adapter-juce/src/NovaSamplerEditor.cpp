@@ -11,6 +11,7 @@
 #include "neptune/core/Mixer.h"
 #include "neptune/core/SampleMeta.h"
 #include "neptune/core/SamplerParams.h"
+#include "neptune/core/SoundFont.h"
 
 using namespace neptune::core;
 using neptune::core::theme::Token;
@@ -412,6 +413,82 @@ private:
     juce::Label pitchLabel_, volumeLabel_, timingLabel_, zoneLabel_, hint_;
 };
 
+// Liste des presets d'une banque SoundFont, avec une zone de recherche : taper filtre la liste (sur le nom, le numéro de banque ou de programme), Entrée choisit le premier,
+// un clic choisit le preset cliqué. Le preset en cours est en gras.
+class SoundFontPresetPanel : public juce::Component, private juce::ListBoxModel
+{
+public:
+    std::function<void (int presetIndex)> onPick;
+
+    SoundFontPresetPanel (const nova::Skin& skin, const neptune::core::soundfont::BankInfo& bank, int current, const juce::String& hint)
+        : skin_ (skin), look_ (skin_), bank_ (bank), current_ (current)
+    {
+        setLookAndFeel (&look_);
+        search_.setTextToShowWhenEmpty (hint, skin_.colour (Token::TextDim2));
+        search_.onTextChange = [this] { refilter(); };
+        search_.onReturnKey = [this] { if (! rows_.empty() && onPick) onPick (rows_.front()); };
+        list_.setModel (this);
+        list_.setRowHeight (24);
+        addAndMakeVisible (search_);
+        addAndMakeVisible (list_);
+        refilter();
+        for (std::size_t i = 0; i < rows_.size(); ++i)
+            if (rows_[i] == current_) { list_.scrollToEnsureRowIsOnscreen (static_cast<int> (i)); list_.selectRow (static_cast<int> (i), true, false); }
+        setSize (400, 440);
+    }
+    ~SoundFontPresetPanel() override { setLookAndFeel (nullptr); list_.setModel (nullptr); }
+    void paint (juce::Graphics& g) override { g.fillAll (skin_.colour (Token::BgCard)); }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        search_.setBounds (r.removeFromTop (28));
+        r.removeFromTop (6);
+        list_.setBounds (r);
+    }
+    void visibilityChanged() override { if (isShowing()) search_.grabKeyboardFocus(); }
+
+private:
+    void refilter()
+    {
+        const auto q = search_.getText().trim().toLowerCase();
+        rows_.clear();
+        for (std::size_t i = 0; i < bank_.presets.size(); ++i)
+        {
+            const auto& p = bank_.presets[i];
+            const auto label = juce::String::fromUTF8 (p.name.c_str()).toLowerCase() + " " + juce::String (p.bank) + ":" + juce::String (p.program);
+            if (q.isEmpty() || label.contains (q)) rows_.push_back (static_cast<int> (i));
+        }
+        list_.updateContent();
+        list_.repaint();
+    }
+    int getNumRows() override { return static_cast<int> (rows_.size()); }
+    void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override
+    {
+        if (row < 0 || row >= static_cast<int> (rows_.size())) return;
+        const int idx = rows_[static_cast<std::size_t> (row)];
+        const auto& p = bank_.presets[static_cast<std::size_t> (idx)];
+        if (selected) g.fillAll (skin_.colour (Token::Accent, 0.25f));
+        g.setColour (skin_.colour (idx == current_ ? Token::Accent : Token::Text));
+        g.setFont (skin_.font (12.5f, idx == current_));
+        g.drawText (juce::String::fromUTF8 (p.name.c_str()), 8, 0, w - 90, h, juce::Justification::centredLeft, true);
+        g.setColour (skin_.colour (Token::TextDim));
+        g.setFont (skin_.font (11.0f));
+        g.drawText (juce::String (p.bank) + ":" + juce::String (p.program), w - 80, 0, 72, h, juce::Justification::centredRight);
+    }
+    void listBoxItemClicked (int row, const juce::MouseEvent&) override
+    {
+        if (row >= 0 && row < static_cast<int> (rows_.size()) && onPick) onPick (rows_[static_cast<std::size_t> (row)]);
+    }
+
+    nova::Skin skin_;
+    nova::LookAndFeel look_;
+    neptune::core::soundfont::BankInfo bank_;
+    int current_ = -1;
+    std::vector<int> rows_;
+    juce::TextEditor search_;
+    juce::ListBox list_;
+};
+
 // Fenêtre « Modulateurs » (superposée) : les 16 modulateurs de la piste. Chacun a un nom, un mode (bascule / momentané), un type (discret / continu), une touche de
 // keyswitch (note et canal), un groupe d'exclusion, sa valeur (le paramètre automatisable) et, au niveau de la piste, la case « Piste ».
 class ModulatorsPanel : public juce::Component, private juce::Timer
@@ -680,6 +757,8 @@ void NovaSamplerEditor::buildZonesPage()
         pageChanged();
     });
     selectionText_ = add<nova::Text> (0, skin(), Token::TextDim, 11.0f);
+    presetPill_ = pill (0, {}, [this] { openPresetPicker(); });
+    presetPill_->setVisible (false);
     modePill_ = pill (0, {}, [this]
     {
         editZone (cycleZoneMode);
@@ -748,7 +827,7 @@ void NovaSamplerEditor::buildZonesPage()
         h->onReset = [this] { listWidth_ = 330.0f; resized(); };
         splitter_ = h;
     }
-    for (nova::Pill* p : { loadPill_, importPill_, removePill_, listPill_, monitorPill_, modePill_, triggerChoice_->pill, chokeChoice_->pill, chokeMorePill_, levelsPill_, applyPitchPill_, humanizePill_ })
+    for (nova::Pill* p : { loadPill_, importPill_, removePill_, listPill_, monitorPill_, presetPill_, modePill_, triggerChoice_->pill, chokeChoice_->pill, chokeMorePill_, levelsPill_, applyPitchPill_, humanizePill_ })
         p->setFontSize (kZoneButtonFont);
     listExpandPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     listExpandPill_->setFontSize (kZoneButtonFont);
@@ -934,10 +1013,10 @@ void NovaSamplerEditor::buildSamplePage()
         s->gestureEnd = [this] { proc_.uiEndGesture(); };
         return s;
     };
-    fadeIn_ = slider (tx ("sm.fade_in").toUpperCase(), 0.0, 500.0, 0.5, " ms", [this] { const auto* z = shownZone(); return z != nullptr ? z->fadeInMs : ZoneDescription::defaultFadeInMs; },
+    fadeIn_ = slider (tx ("sm.fade_in").toUpperCase(), 0.0, ZoneDescription::maxFadeMs, 0.5, " ms", [this] { const auto* z = shownZone(); return z != nullptr ? z->fadeInMs : ZoneDescription::defaultFadeInMs; },
                       [] (Zone& z, double v) { z.fadeInMs = v; }, ZoneDescription::defaultFadeInMs);
     addInfo (1, fadeIn_, "hlp.sm_fadein", 1);
-    fadeOut_ = slider (tx ("sm.fade_out").toUpperCase(), 0.0, 500.0, 0.5, " ms", [this] { const auto* z = shownZone(); return z != nullptr ? z->fadeOutMs : ZoneDescription::defaultFadeOutMs; },
+    fadeOut_ = slider (tx ("sm.fade_out").toUpperCase(), 0.0, ZoneDescription::maxFadeMs, 0.5, " ms", [this] { const auto* z = shownZone(); return z != nullptr ? z->fadeOutMs : ZoneDescription::defaultFadeOutMs; },
                        [] (Zone& z, double v) { z.fadeOutMs = v; }, ZoneDescription::defaultFadeOutMs);
     addInfo (1, fadeOut_, "hlp.sm_fadeout", 1);
     delay_ = slider (tx ("sm.delay").toUpperCase(), 0.0, 2000.0, 1.0, " ms", [this] { const auto* z = shownZone(); return z != nullptr ? z->delayMs : 0.0; },
@@ -3022,6 +3101,109 @@ void NovaSamplerEditor::rebuildLoadPanel()
     }
 }
 
+// Le bouton du preset SoundFont de la piste : visible seulement si l'instrument vient d'une banque ; son texte est le nom du preset en cours.
+void NovaSamplerEditor::updatePresetPill()
+{
+    const bool isBank = ! cached_.soundfontFile.empty() && expanded_ == 0 && currentPage() == 0;
+    presetPill_->setVisible (isBank);
+    if (! isBank) return;
+    if (cached_.soundfontFile != sfBankFile_)
+    {
+        sfBankFile_ = cached_.soundfontFile;
+        sfBank_ = neptune::core::soundfont::readBank (std::filesystem::u8path (sfBankFile_));
+    }
+    juce::String name = tx ("sf.missing");
+    if (sfBank_.ok && cached_.soundfontPreset >= 0 && cached_.soundfontPreset < static_cast<int> (sfBank_.presets.size()))
+        name = U (sfBank_.presets[static_cast<std::size_t> (cached_.soundfontPreset)].name);
+    const auto text = tx ("sf.preset_pill") + ": " + name;
+    if (presetPillText_ != text) { presetPillText_ = text; presetPill_->setText (text); }
+}
+
+// Clic sur le bouton : la liste des presets de la banque, avec recherche. Choisir un preset remplace les zones de la piste par celles du preset (les réglages de l'instrument,
+// comme la polyphonie ou la réponse de vélocité, restent). Si les zones ont été modifiées à la main, on demande confirmation : elles seraient perdues.
+void NovaSamplerEditor::openPresetPicker()
+{
+    namespace sfc = neptune::core::soundfont;
+    if (cached_.soundfontFile.empty()) return;
+    const auto file = std::filesystem::u8path (cached_.soundfontFile);
+    const auto bank = sfc::readBank (file);
+    if (! bank.ok)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tx ("sf.import"), tx ("sf.missing") + "\n" + U (bank.error) + "\n" + U (cached_.soundfontFile));
+        return;
+    }
+    auto panel = std::make_unique<SoundFontPresetPanel> (skin(), bank, cached_.soundfontPreset, tx ("sf.search"));
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    panel->onPick = [safe] (int preset)
+    {
+        if (safe == nullptr) return;
+        safe->changePreset (preset);
+    };
+    presetBox_ = &juce::CallOutBox::launchAsynchronously (std::move (panel), presetPill_->getScreenBounds(), nullptr);
+}
+
+void NovaSamplerEditor::changePreset (int preset)
+{
+    namespace sfc = neptune::core::soundfont;
+    juce::Component::SafePointer<NovaSamplerEditor> safe (this);
+    const auto current = proc_.instrumentDescription();
+    if (current.soundfontFile.empty() || preset == current.soundfontPreset) { dismissPresetPicker(); return; }
+    const auto file = std::filesystem::u8path (current.soundfontFile);
+    // zones modifiées à la main ? on les compare à ce que le preset d'origine donne
+    bool edited = false;
+    {
+        const auto original = sfc::importPreset (file, current.soundfontPreset);
+        edited = original.ok && ! (original.instrument.zones == current.zones);
+    }
+    auto apply = [safe, preset]
+    {
+        if (safe == nullptr) return;
+        safe->applyPreset (preset);
+    };
+    dismissPresetPicker();
+    if (! edited) { apply(); return; }
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, tx ("sf.change_title"), tx ("sf.change_confirm"),
+                                                                                 tx ("sf.change_ok"), tx ("mix.cancel"), this),
+                                  [apply] (int result) { if (result == 1) apply(); });
+}
+
+void NovaSamplerEditor::applyPreset (int preset)
+{
+    namespace sfc = neptune::core::soundfont;
+    auto d = proc_.instrumentDescription();
+    if (d.soundfontFile.empty()) return;
+    const auto oldPreset = d.soundfontPreset;
+    const auto result = sfc::importPreset (std::filesystem::u8path (d.soundfontFile), preset);
+    if (! result.ok)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tx ("sf.import"), U (result.error));
+        return;
+    }
+    std::string oldName;
+    if (sfBank_.ok && oldPreset >= 0 && oldPreset < static_cast<int> (sfBank_.presets.size())) oldName = sfBank_.presets[static_cast<std::size_t> (oldPreset)].name;
+    d.zones = result.instrument.zones;
+    d.pool.clear();
+    d.unloadedGroups.clear();
+    d.declaredGroups.clear();
+    d.soundfontPreset = preset;
+    proc_.uiEditInstrument (std::move (d), "SoundFont preset");
+    // la piste porte le nom de l'ancien preset (ou aucun) : elle prend celui du nouveau
+    const int tr = proc_.selectedTrack();
+    auto strip = proc_.trackSettings (tr);
+    if (strip.name.empty() || strip.name == oldName)
+    {
+        strip.name = result.name;
+        proc_.uiEditTrack (tr, strip, "SoundFont preset name");
+    }
+    lastRevision_ = 0xFFFFFFFFu;
+    refreshFromInstrument();
+}
+
+void NovaSamplerEditor::dismissPresetPicker()
+{
+    if (presetBox_ != nullptr) presetBox_->dismiss();
+}
+
 void NovaSamplerEditor::refreshFromInstrument()
 {
     const auto rev = proc_.instrumentRevision();
@@ -3170,6 +3352,7 @@ void NovaSamplerEditor::layout()
         x = place (removePill_, x, 108);
         x = place (listPill_, x, 108);
         x = place (monitorPill_, x, 108);
+        presetPill_->setBounds (R (x + 8.0f, 108, std::clamp (X0 + 650.0f - (x + 8.0f), 120.0f, 300.0f), kH));
         const float selX = std::max (x + 8.0f, X0 + 660.0f);
         selectionText_->setBounds (R (selX, 112, X0 + 930.0f - selX, 18));
         modePill_->setBounds (R (X0 + 12, 146, 160, kH));
@@ -3546,6 +3729,7 @@ void NovaSamplerEditor::tick()
         const bool loop = has && z->mode == PlayMode::Loop;
         modePill_->setText (U (translator().format ("sampler.mode", { std::string (translator().tr (loop ? "sampler.mode_loop" : has && z->releaseCuts ? "sampler.mode_no_loop" : "sampler.mode_one_shot")) })));
         modePill_->setOn (loop);
+        updatePresetPill();
         rootNumber_->update();
         {
             // note détectée de la zone affichée, à côté de la note racine

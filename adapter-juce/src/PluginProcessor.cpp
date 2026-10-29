@@ -774,14 +774,13 @@ void NeptuneProcessor::installSamplerTrack (int index, neptune::core::Instrument
     loader_->request (index, description, false);
 }
 
-neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::filesystem::path& sfzFile, SfzPlacement placement)
+// Place un instrument importé (SFZ, SoundFont) : soit il remplace tout le mixeur (une seule piste Sampler), soit il va sur une piste libre. Faux : plus de piste libre.
+bool NeptuneProcessor::installImportedInstrument (const neptune::core::InstrumentDescription& instrument, const std::string& name, SfzPlacement placement)
 {
     using namespace neptune::core;
-    auto result = sfzimport::importSfzFile (sfzFile);
-    if (! result.ok) return result;
     if (placement == SfzPlacement::ClearMixer)
     {
-        // toutes les pistes sauf la première active disparaissent ; celle-ci est remise à zéro et reçoit le SFZ
+        // toutes les pistes sauf la première active disparaissent ; celle-ci est remise à zéro et reçoit l'instrument
         int keep = -1;
         std::vector<int> others;
         {
@@ -791,7 +790,7 @@ neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::files
         }
         for (const int t : others) uiRemoveTrack (t);
         const int target = keep < 0 ? 0 : keep;
-        installSamplerTrack (target, result.instrument, result.name, -1);
+        installSamplerTrack (target, instrument, name, -1);
         selectTrack (target);
     }
     else
@@ -799,21 +798,42 @@ neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::files
         int target = -1;
         {
             const juce::ScopedLock lock (instrumentLock_);
-            if (mixer_.tracks[0].active && ! trackHasContent (0)) target = 0;   // la piste de départ, restée vide : le SFZ la remplace
+            if (mixer_.tracks[0].active && ! trackHasContent (0)) target = 0;   // la piste de départ, restée vide : l'instrument la remplace
             else target = mixer_.firstInactive();
         }
-        if (target < 0)
-        {
-            result.ok = false;
-            result.error = "no_free_track";
-            return result;
-        }
-        installSamplerTrack (target, result.instrument, result.name, -1);
+        if (target < 0) return false;
+        installSamplerTrack (target, instrument, name, -1);
         selectTrack (target);
     }
     undo_.clear();
     ++revision_;
     notifyStateChanged();
+    return true;
+}
+
+neptune::core::sfzimport::Result NeptuneProcessor::uiImportSfz (const std::filesystem::path& sfzFile, SfzPlacement placement)
+{
+    using namespace neptune::core;
+    auto result = sfzimport::importSfzFile (sfzFile);
+    if (! result.ok) return result;
+    if (! installImportedInstrument (result.instrument, result.name, placement))
+    {
+        result.ok = false;
+        result.error = "no_free_track";
+    }
+    return result;
+}
+
+neptune::core::soundfont::Result NeptuneProcessor::uiImportSoundFont (const std::filesystem::path& bankFile, int presetIndex, SfzPlacement placement)
+{
+    using namespace neptune::core;
+    auto result = soundfont::importPreset (bankFile, presetIndex);
+    if (! result.ok) return result;
+    if (! installImportedInstrument (result.instrument, result.name, placement))
+    {
+        result.ok = false;
+        result.error = "no_free_track";
+    }
     return result;
 }
 
