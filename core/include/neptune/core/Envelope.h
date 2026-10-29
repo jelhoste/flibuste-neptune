@@ -95,12 +95,12 @@ struct EnvelopeRuntime
 // et interrupteurs de segment restent ceux de l'enveloppe.
 struct EnvelopeTiming
 {
-    double attackSec = 0.0, decaySec = 0.0, releaseSec = 0.05;
+    double attackSec = 0.0, holdSec = 0.0, decaySec = 0.0, releaseSec = 0.05;
     float sustain = 1.0f;
     static EnvelopeTiming of (const EnvelopeRuntime& e) noexcept
     {
         EnvelopeTiming t;
-        t.attackSec = e.attackSec; t.decaySec = e.decaySec; t.releaseSec = e.releaseSec; t.sustain = e.sustain;
+        t.attackSec = e.attackSec; t.holdSec = e.holdSec; t.decaySec = e.decaySec; t.releaseSec = e.releaseSec; t.sustain = e.sustain;
         return t;
     }
 };

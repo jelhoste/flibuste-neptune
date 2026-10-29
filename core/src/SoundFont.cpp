@@ -34,7 +34,8 @@ enum Gen
     kPan = 17, kDelayVolEnv = 33, kAttackVolEnv = 34, kHoldVolEnv = 35, kDecayVolEnv = 36, kSustainVolEnv = 37, kReleaseVolEnv = 38,
     kKeynumToVolEnvHold = 39, kKeynumToVolEnvDecay = 40, kInstrument = 41, kKeyRange = 43, kVelRange = 44, kStartLoopAddrsCoarse = 45, kKeynum = 46, kVelocity = 47,
     kAttenuation = 48, kEndLoopAddrsCoarse = 50, kCoarseTune = 51, kFineTune = 52, kSampleId = 53, kSampleModes = 54, kScaleTuning = 56, kExclusiveClass = 57,
-    kRootKey = 58, kKeynumToModEnvHold = 31, kKeynumToModEnvDecay = 32, kNumGens = 64
+    kRootKey = 58, kKeynumToModEnvHold = 31, kKeynumToModEnvDecay = 32,
+    kDelayModEnv = 25, kAttackModEnv = 26, kHoldModEnv = 27, kDecayModEnv = 28, kSustainModEnv = 29, kReleaseModEnv = 30, kNumGens = 64
 };
 
 struct GenVal
@@ -572,9 +573,22 @@ Result importPreset (const fs::path& file, int presetIndex)
                 if (anySet (kReleaseVolEnv)) z.envelope.release.ms = std::max (1.0, timecentsMs (val (kReleaseVolEnv, -12000)));
             }
 
-            // filtre passe-bas statique (à 13 500 cents ou plus, le filtre est ouvert)
+            // loi de vélocité des SoundFonts (modulateur par défaut) : volume = (vélocité / 127)^2, soit 40 log10 (v / 127) dB ; le choix des couches reste fait sur la vélocité reçue
+            z.velExponent = 2.0;
+            // note et vélocité imposées
+            z.fixedKey = std::clamp (instVal (kKeynum, -1), -1, 127);
+            z.fixedVelocity = std::clamp (instVal (kVelocity, -1), -1, 127);
+            // suivi de la touche par le maintien et le déclin de l'enveloppe de volume (timecents par touche autour de la note 60)
+            if (z.envelopeOverride)
+            {
+                z.envHoldKeyTrack = std::clamp (val (kKeynumToVolEnvHold, 0), -1200, 1200);
+                z.envDecayKeyTrack = std::clamp (val (kKeynumToVolEnvDecay, 0), -1200, 1200);
+            }
+
+            // filtre passe-bas (à 13 500 cents ou plus, le filtre est ouvert), avec l'enveloppe de modulation si elle ouvre ou ferme la coupure
             const int fc = val (kFilterFc, 13500);
-            if (fc < 13490)
+            const int envToFc = std::clamp (val (kModEnvToFilterFc, 0), -12000, 12000);
+            if (fc < 13490 || envToFc != 0)
             {
                 z.filterOverride = true;
                 auto& f = z.filters.filter[0];
@@ -583,18 +597,27 @@ Result importPreset (const fs::path& file, int presetIndex)
                 f.slopeDb = 12;
                 f.cutoffHz = std::clamp (8.176 * std::pow (2.0, fc / 1200.0), filterMinHz, filterMaxHz);
                 f.resonance = std::clamp (std::max (0, val (kFilterQ, 0)) / 10.0 / 40.0, 0.0, 1.0);
+                if (envToFc != 0)
+                {
+                    // enveloppe de modulation : monte à 1 puis descend linéairement vers le niveau tenu (1 - sustain/1000) ; le déclin donné est celui d'une chute complète
+                    const double sustainDrop = std::clamp (val (kSustainModEnv, 0), 0, 1000) / 1000.0;
+                    f.envDepthOctaves = envToFc / 1200.0;
+                    f.env.delay.ms = timecentsMs (val (kDelayModEnv, -12000));
+                    f.env.attack.ms = timecentsMs (val (kAttackModEnv, -12000));
+                    f.env.hold.ms = timecentsMs (val (kHoldModEnv, -12000));
+                    f.env.decay.ms = std::min (envelopeMaxMs, timecentsMs (val (kDecayModEnv, -12000)) * sustainDrop);
+                    f.env.sustain = 1.0 - sustainDrop;
+                    f.env.release.ms = std::max (1.0, timecentsMs (val (kReleaseModEnv, -12000)));
+                }
             }
 
             z.chokeCuts = z.chokeCutBy = std::max (0, instVal (kExclusiveClass, 0));
 
-            for (const int k : { kModLfoToPitch, kVibLfoToPitch, kModEnvToPitch, kModLfoToFilterFc, kModEnvToFilterFc, kModLfoToVolume })
-                if (val (k, 0) != 0) { note (unconverted, "LFO and modulation envelope"); break; }
+            for (const int k : { kModLfoToPitch, kVibLfoToPitch, kModEnvToPitch, kModLfoToFilterFc, kModLfoToVolume })
+                if (val (k, 0) != 0) { note (unconverted, "LFO, modulation envelope to pitch"); break; }
             if (val (kReverbSend, 0) != 0 || val (kChorusSend, 0) != 0) note (unconverted, "reverb and chorus sends");
-            for (const int k : { kKeynumToVolEnvHold, kKeynumToVolEnvDecay })
-                if (val (k, 0) != 0) { note (unconverted, "key tracking of the envelope"); break; }
             if (iz.has (kScaleTuning) || (instGlobal != nullptr && instGlobal->has (kScaleTuning)) || pz.has (kScaleTuning))
                 if (val (kScaleTuning, 100) != 100) note (unconverted, "scale tuning");
-            if (instVal (kKeynum, -1) >= 0 || instVal (kVelocity, -1) >= 0) note (unconverted, "fixed key or velocity");
             built.push_back (std::move (bz));
         }
     }

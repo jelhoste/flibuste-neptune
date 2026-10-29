@@ -7,10 +7,11 @@
 //   - SF2 : PCM 16 bits lu tel quel.
 //   - SF3 : échantillons compressés en Ogg Vorbis (chacun dans son flux), décodés en mémoire (stb_vorbis).
 // Convertis : étendue de notes et de vélocités, note racine, accordage (grossier, fin, correction de l'échantillon), volume (atténuation initiale), panoramique,
-// boucles (modes 1 et 3), décalages de début/fin/boucle, enveloppe de volume (délai, attaque, maintien, déclin, sustain, relâchement), filtre passe-bas statique,
+// boucles (modes 1 et 3), décalages de début/fin/boucle, enveloppe de volume (délai, attaque, maintien, déclin, sustain, relâchement), suivi de la touche du maintien et
+// du déclin, filtre passe-bas avec son enveloppe de modulation, note et vélocité imposées, loi de vélocité par défaut (volume = vélocité au carré),
 // classe d'exclusion (coupure mutuelle). Les réglages du preset s'ajoutent à ceux de l'instrument, comme dans la spécification 2.04.
-// Non convertis, signalés dans `warnings` : LFO et enveloppe de modulation, suivi de la touche du maintien et du déclin, envois de réverbération/chorus, échelle
-// d'accord, touche et vélocité fixes, modulateurs. Cœur portable, sans JUCE.
+// Non convertis, signalés dans `warnings` : LFO, enveloppe de modulation vers la hauteur (LFO vers le filtre ou le volume compris), envois de réverbération/chorus,
+// échelle d'accord, modulateurs (la loi de vélocité par défaut est appliquée même si la banque en redéfinit un). Cœur portable, sans JUCE.
 #include <cstdint>
 #include <filesystem>
 #include <string>

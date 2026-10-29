@@ -105,6 +105,11 @@ ZoneDescription sanitised (ZoneDescription z)
     z.velTrackPct = std::isfinite (z.velTrackPct) ? std::clamp (z.velTrackPct, -100.0, 100.0) : 100.0;
     z.keyTrackDbPerOct = std::isfinite (z.keyTrackDbPerOct) ? std::clamp (z.keyTrackDbPerOct, -24.0, 24.0) : 0.0;
     z.keyTrackCenter = std::clamp (z.keyTrackCenter, 0, 127);
+    z.velExponent = std::isfinite (z.velExponent) ? std::clamp (z.velExponent, 0.25, 4.0) : 1.0;
+    z.fixedKey = std::clamp (z.fixedKey, -1, 127);
+    z.fixedVelocity = std::clamp (z.fixedVelocity, -1, 127);
+    z.envHoldKeyTrack = std::clamp (z.envHoldKeyTrack, -1200, 1200);
+    z.envDecayKeyTrack = std::clamp (z.envDecayKeyTrack, -1200, 1200);
     z.midiCondition = midi::sanitised (std::move (z.midiCondition));
     z.releaseMeter = std::clamp (z.releaseMeter, 0, 2);
     z.releaseFloorDb = std::isfinite (z.releaseFloorDb) ? std::clamp (z.releaseFloorDb, -96.0, -6.0) : -48.0;
@@ -250,6 +255,11 @@ std::string toJson (const InstrumentDescription& d)
         if (z.velTrackPct != 100.0) o["vel_track_pct"] = z.velTrackPct;
         if (z.keyTrackDbPerOct != 0.0) o["key_track_db_per_oct"] = z.keyTrackDbPerOct;
         if (z.keyTrackCenter != 60) o["key_track_center"] = z.keyTrackCenter;
+        if (z.velExponent != 1.0) o["vel_exponent"] = z.velExponent;
+        if (z.fixedKey >= 0) o["fixed_key"] = z.fixedKey;
+        if (z.fixedVelocity >= 0) o["fixed_velocity"] = z.fixedVelocity;
+        if (z.envHoldKeyTrack != 0) o["env_hold_key_track"] = z.envHoldKeyTrack;
+        if (z.envDecayKeyTrack != 0) o["env_decay_key_track"] = z.envDecayKeyTrack;
         if (z.midiCondition.enabled) o["midi_condition"] = nlohmann::json::parse (midi::toJson (z.midiCondition), nullptr, false);
         if (z.releaseStart >= 0) o["release_start"] = z.releaseStart;
         if (z.releaseCrossfadeMs > 0.0) o["release_crossfade_ms"] = z.releaseCrossfadeMs;
@@ -473,6 +483,11 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.velTrackPct = readNum (o, "vel_track_pct", z.velTrackPct);
     z.keyTrackDbPerOct = readNum (o, "key_track_db_per_oct", z.keyTrackDbPerOct);
     z.keyTrackCenter = readInt (o, "key_track_center", z.keyTrackCenter);
+    z.velExponent = readNum (o, "vel_exponent", z.velExponent);
+    z.fixedKey = readInt (o, "fixed_key", z.fixedKey);
+    z.fixedVelocity = readInt (o, "fixed_velocity", z.fixedVelocity);
+    z.envHoldKeyTrack = readInt (o, "env_hold_key_track", z.envHoldKeyTrack);
+    z.envDecayKeyTrack = readInt (o, "env_decay_key_track", z.envDecayKeyTrack);
     if (const auto it = o.find ("midi_condition"); it != o.end() && it->is_object()) z.midiCondition = midi::filterFromJson (it->dump());
     if (const auto it = o.find ("release_follows_level"); it != o.end() && it->is_boolean()) z.releaseFollowsLevel = it->get<bool>();
     z.releaseMeter = readInt (o, "release_meter", z.releaseMeter);
@@ -1123,6 +1138,11 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             z.velTrack = static_cast<float> (zd.velTrackPct / 100.0);
             z.keyTrackDbPerOct = static_cast<float> (zd.keyTrackDbPerOct);
             z.keyTrackCenter = zd.keyTrackCenter;
+            z.velExponent = static_cast<float> (zd.velExponent);
+            z.fixedKey = zd.fixedKey;
+            z.fixedVelocity = zd.fixedVelocity;
+            z.envHoldKeyTrack = zd.envHoldKeyTrack;
+            z.envDecayKeyTrack = zd.envDecayKeyTrack;
             if (zd.midiCondition.enabled) z.midiCond = std::make_shared<const midi::CompiledFilter> (zd.midiCondition);
             const double pan = std::clamp (zd.pan, -1.0, 1.0);
             z.panL = pan > 0.0 ? static_cast<float> (std::cos (pan * 1.5707963267948966)) : 1.0f;

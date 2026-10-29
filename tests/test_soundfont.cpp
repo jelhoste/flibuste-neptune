@@ -69,8 +69,9 @@ Bytes buildBank()
 
     // instruments : chaque zone = liste de générateurs ; la zone globale est la première sans sampleID
     const std::vector<std::vector<GenDef>> inst0 = {
-        { G (48, 100), G (34, 0), G (36, 0), G (37, 200), G (38, -1200), G (8, 9600) },                              // globale
-        { R (43, 0, 59), G (54, 1), G (57, 3), G (53, 0) },                                                           // mono
+        { G (48, 100), G (34, 0), G (36, 0), G (37, 200), G (38, -1200), G (8, 9600),                                 // globale
+          G (39, -100), G (40, 50), G (11, 2400), G (26, 0), G (28, 0), G (29, 500), G (30, -1200) },
+        { R (43, 0, 59), G (54, 1), G (57, 3), G (46, 36), G (47, 100), G (53, 0) },                                         // mono
         { R (43, 60, 127), G (17, -500), G (54, 1), G (53, 1) },                                                      // gauche
         { R (43, 60, 127), G (17, 500), G (54, 1), G (53, 2) } };                                                      // droite
     const std::vector<std::vector<GenDef>> inst1 = { { R (43, 20, 30), G (53, 0) } };
@@ -193,6 +194,20 @@ TEST_CASE ("soundfont: a preset becomes zones, with preset values added to instr
     REQUIRE (mono->filterOverride);
     CHECK (mono->filters.filter[0].on);
     CHECK (mono->filters.filter[0].cutoffHz == Approx (2093.0).margin (3.0));
+
+    // loi de vélocité des SoundFonts, note et vélocité imposées, suivi de la touche de l'enveloppe, enveloppe de modulation vers le filtre
+    CHECK (mono->velExponent == Approx (2.0));
+    CHECK (mono->fixedKey == 36);
+    CHECK (mono->fixedVelocity == 100);
+    CHECK (stereo->fixedKey == -1);
+    CHECK (mono->envHoldKeyTrack == -100);
+    CHECK (mono->envDecayKeyTrack == 50);
+    CHECK (mono->filters.filter[0].envDepthOctaves == Approx (2.0));
+    CHECK (mono->filters.filter[0].env.attack.ms == Approx (1000.0));
+    CHECK (mono->filters.filter[0].env.sustain == Approx (0.5));
+    CHECK (mono->filters.filter[0].env.decay.ms == Approx (500.0));   // 1 s pour une chute complète, moitié de chute jusqu'au niveau tenu
+    CHECK (mono->filters.filter[0].env.release.ms == Approx (500.0));
+    for (const auto& w : r.warnings) CHECK (w.find ("fixed") == std::string::npos);
 
     CHECK (stereo->samplePath == t.path.u8string() + "#1+2");
     CHECK (stereo->pan == Approx (0.0));
@@ -380,4 +395,55 @@ TEST_CASE ("sampler: zones of different layers play together, zones of one layer
     REQUIRE (back.zones.size() == 2);
     CHECK (back.zones[0].layer == 0);
     CHECK (back.zones[1].layer == 1);
+}
+
+TEST_CASE ("soundfont: velocity follows the squared law, and fixed key and velocity ignore the played ones", "[soundfont]")
+{
+    TempBank t;
+    const auto r = sf::importPreset (t.path, 0);
+    REQUIRE (r.ok);
+    const auto inst = buildInstrument (r.instrument);
+    REQUIRE (inst != nullptr);
+
+    auto render = [&] (int key, float velocity)
+    {
+        SamplerVoices voices;
+        voices.prepare (48000.0);
+        voices.setInstrument (inst.get());
+        voices.noteOn (0, key, velocity);
+        std::vector<float> l (2048, 0.0f), rr (2048, 0.0f);
+        for (int block = 0; block < 4; ++block) voices.render (l.data() + block * 512, rr.data() + block * 512, 512, 1.0f, 1.0f, 0.0);
+        return l;
+    };
+    auto energy = [] (const std::vector<float>& v) { double e = 0.0; for (const float x : v) e += std::abs (static_cast<double> (x)); return e; };
+
+    // zone sans note ni vélocité imposées (touches 60 à 127) : le volume suit le carré de la vélocité
+    const double loud = energy (render (72, 1.0f));
+    const double soft = energy (render (72, 0.5f));
+    REQUIRE (loud > 0.0);
+    CHECK (soft / loud == Approx (0.25).epsilon (0.02));
+
+    // zone à note 36 et vélocité 100 imposées : la touche et la force jouées ne changent rien au son
+    const auto a = render (20, 1.0f);
+    const auto b = render (50, 0.3f);
+    REQUIRE (energy (a) > 0.0);
+    CHECK (a == b);
+}
+
+TEST_CASE ("soundfont: the new zone fields survive saving and are bounded", "[soundfont]")
+{
+    ZoneDescription z;
+    z.samplePath = "a.wav";
+    z.velExponent = 2.0; z.fixedKey = 36; z.fixedVelocity = 90; z.envHoldKeyTrack = -50; z.envDecayKeyTrack = 75;
+    InstrumentDescription d;
+    d.zones = { z };
+    const auto back = instrumentFromJson (toJson (d));
+    REQUIRE (back.zones.size() == 1);
+    CHECK (back.zones[0] == z);
+    z.velExponent = 99.0; z.fixedKey = 500; z.fixedVelocity = -7; z.envHoldKeyTrack = 99999;
+    const auto s = sanitised (z);
+    CHECK (s.velExponent == Approx (4.0));
+    CHECK (s.fixedKey == 127);
+    CHECK (s.fixedVelocity == -1);
+    CHECK (s.envHoldKeyTrack == 1200);
 }

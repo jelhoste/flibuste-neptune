@@ -145,7 +145,7 @@ void EnvelopeRunner::enterFirstStage (const EnvelopeRuntime& env) noexcept
     pos_ = 0.0;
     if (env.delayOn && env.delaySec > 0.0) { stage_ = Stage::Delay; value_ = 0.0f; return; }
     if (env.attackOn && t_.attackSec > 0.0) { stage_ = Stage::Attack; value_ = 0.0f; return; }
-    if (env.holdOn && env.holdSec > 0.0) { stage_ = Stage::Hold; value_ = 1.0f; return; }
+    if (env.holdOn && t_.holdSec > 0.0) { stage_ = Stage::Hold; value_ = 1.0f; return; }
     enterAfterHold (env);
 }
 
@@ -184,7 +184,7 @@ void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double
             {
                 pos_ = 0.0;
                 if (env.attackOn && t_.attackSec > 0.0) stage_ = Stage::Attack;
-                else if (env.holdOn && env.holdSec > 0.0) { stage_ = Stage::Hold; value_ = 1.0f; }
+                else if (env.holdOn && t_.holdSec > 0.0) { stage_ = Stage::Hold; value_ = 1.0f; }
                 else enterAfterHold (env);
             }
             break;
@@ -195,7 +195,7 @@ void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double
             if (pos_ >= len)
             {
                 value_ = 1.0f;
-                if (env.holdOn && env.holdSec > 0.0) { stage_ = Stage::Hold; pos_ = 0.0; }
+                if (env.holdOn && t_.holdSec > 0.0) { stage_ = Stage::Hold; pos_ = 0.0; }
                 else enterAfterHold (env);
             }
             else
@@ -204,7 +204,7 @@ void EnvelopeRunner::step (const EnvelopeRuntime& env, double sampleRate, double
         }
         case Stage::Hold:
             pos_ += frames;
-            if (pos_ >= env.holdSec * sampleRate) enterAfterHold (env);
+            if (pos_ >= t_.holdSec * sampleRate) enterAfterHold (env);
             break;
         case Stage::Decay:
         {

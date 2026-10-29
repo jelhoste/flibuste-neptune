@@ -129,6 +129,13 @@ struct ZoneDescription
     double velTrackPct = 100.0;
     double keyTrackDbPerOct = 0.0;
     int keyTrackCenter = 60;
+    // Loi du volume selon la vélocité : le gain vaut vélocité^velExponent (1 = linéaire ; 2 = la courbe par défaut des SoundFonts). Sans effet sur le choix des couches,
+    // qui se fait sur la vélocité reçue. S'applique avec `velTrackPct` (mélange entre volume constant et loi de vélocité).
+    double velExponent = 1.0;
+    // Note et vélocité imposées (SoundFont : notes de percussion) : >= 0 remplace la touche jouée pour la hauteur / la vélocité jouée pour le volume (le choix de la zone reste fait sur la touche et la vélocité reçues).
+    int fixedKey = -1, fixedVelocity = -1;
+    // Suivi de la touche par le maintien et le déclin de l'enveloppe de volume : centièmes de demi-ton de durée (timecents) par touche, autour de la note 60 (négatif : plus court dans les aigus).
+    int envHoldKeyTrack = 0, envDecayKeyTrack = 0;
     // Condition MIDI supplémentaire (même arbre que le filtre MIDI de piste), jugée au déclenchement sur l'état des contrôleurs et sur la note : par exemple
     // « ne joue que si la pédale de sustain (CC 64) est enfoncée ». Éteinte par défaut.
     midi::FilterDescription midiCondition;
@@ -155,7 +162,8 @@ struct ZoneDescription
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
             && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
             && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb && releaseStart == o.releaseStart && releaseCrossfadeMs == o.releaseCrossfadeMs
-            && humanizePct == o.humanizePct && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition;
+            && humanizePct == o.humanizePct && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition
+            && velExponent == o.velExponent && fixedKey == o.fixedKey && fixedVelocity == o.fixedVelocity && envHoldKeyTrack == o.envHoldKeyTrack && envDecayKeyTrack == o.envDecayKeyTrack;
     }
 };
 
@@ -334,6 +342,9 @@ struct Zone
     float velTrack = 1.0f;                // suivi de la vélocité (1 = comme avant)
     float keyTrackDbPerOct = 0.0f;
     int keyTrackCenter = 60;
+    float velExponent = 1.0f;
+    int fixedKey = -1, fixedVelocity = -1;
+    int envHoldKeyTrack = 0, envDecayKeyTrack = 0;
     std::shared_ptr<const midi::CompiledFilter> midiCond;   // nul : aucune condition
     float releaseRefDb = -1000.0f;        // niveau de référence au marqueur de volume (mesuré au chargement) ; <= -900 : pas de marqueur
     float releaseOffsetDb = 0.0f;

@@ -41,7 +41,8 @@ void SamplerVoices::bindZone (Voice& v, const Zone& zone) noexcept
 {
     v.zone = &zone;
     v.mods = slotModsFor (zone);
-    const double semis = static_cast<double> (v.key - zone.rootNote) + (zone.tuneCents + v.mods.tuneCents + v.humanCents) / 100.0;
+    const int pitchKey = zone.fixedKey >= 0 ? zone.fixedKey : v.key;   // note imposée (SoundFont) ou touche jouée
+    const double semis = static_cast<double> (pitchKey - zone.rootNote) + (zone.tuneCents + v.mods.tuneCents + v.humanCents) / 100.0;
     v.baseRatio = zone.sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
     v.targetRatio = v.baseRatio;
     v.glideLeft = 0;
@@ -340,7 +341,7 @@ bool SamplerVoices::retargetHeld (int newKey) noexcept
     {
         if (! v.active || v.releasing || v.stolen || v.zone == nullptr) continue;
         v.key = newKey;
-        const double semis = static_cast<double> (newKey - v.zone->rootNote) + (v.zone->tuneCents + v.mods.tuneCents) / 100.0;
+        const double semis = static_cast<double> (v.zone->fixedKey >= 0 ? v.zone->fixedKey : newKey) - v.zone->rootNote + (v.zone->tuneCents + v.mods.tuneCents) / 100.0;
         v.targetRatio = v.zone->sample->sampleRate / sampleRate_ * std::exp2 (semis / 12.0);
         if (glideFrames > 0)
         {
@@ -466,7 +467,9 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     {
         // suivi de la vélocité (1 : le volume suit la vélocité ; 0 : constant ; < 0 : plus fort en jouant doucement) et suivi du clavier (dB par octave autour de la note centrale)
         const float t = std::clamp (zone.velTrack, -1.0f, 1.0f);
-        float amp = std::max (0.0f, (1.0f - t) + t * v->velocity);
+        float vel = zone.fixedVelocity >= 0 ? static_cast<float> (zone.fixedVelocity) / 127.0f : v->velocity;
+        if (zone.velExponent != 1.0f) vel = std::pow (vel, zone.velExponent);
+        float amp = std::max (0.0f, (1.0f - t) + t * vel);
         if (zone.keyTrackDbPerOct != 0.0f)
             amp *= static_cast<float> (std::pow (10.0, static_cast<double> (zone.keyTrackDbPerOct) * static_cast<double> (key - zone.keyTrackCenter) / 12.0 / 20.0));
         if (humanDb != 0.0f) amp *= static_cast<float> (std::pow (10.0, static_cast<double> (humanDb) / 20.0));
@@ -475,12 +478,23 @@ void SamplerVoices::startVoice (int channel, int key, float velocity, const Zone
     v->layerGain = layerGain;
     v->level = v->ampVel * zone.gain * v->mods.gain * layerGain;
     v->targetRatio = v->baseRatio;
-    if (v->mods.any)
+    const bool envKeyTrack = zone.envHoldKeyTrack != 0 || zone.envDecayKeyTrack != 0;
+    if (v->mods.any || envKeyTrack)
     {
         auto timing = EnvelopeTiming::of (zone.env);
-        timing.attackSec *= v->mods.attack;
-        timing.decaySec *= v->mods.decay;
-        timing.sustain = std::clamp (timing.sustain * v->mods.sustain, 0.0f, 1.0f);
+        if (v->mods.any)
+        {
+            timing.attackSec *= v->mods.attack;
+            timing.decaySec *= v->mods.decay;
+            timing.sustain = std::clamp (timing.sustain * v->mods.sustain, 0.0f, 1.0f);
+        }
+        if (envKeyTrack)
+        {
+            // maintien et déclin plus longs ou plus courts selon la touche (timecents par touche autour de la note 60)
+            const double offset = static_cast<double> (60 - (zone.fixedKey >= 0 ? zone.fixedKey : key));
+            timing.holdSec *= std::exp2 (offset * zone.envHoldKeyTrack / 1200.0);
+            timing.decaySec *= std::exp2 (offset * zone.envDecayKeyTrack / 1200.0);
+        }
         v->env.begin (zone.env, sampleRate_, &timing);
     }
     else
