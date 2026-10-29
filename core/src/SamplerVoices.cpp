@@ -166,10 +166,10 @@ void SamplerVoices::stealWeakest() noexcept
     if (best != nullptr) steal (*best);
 }
 
-void SamplerVoices::steal (Voice& v) noexcept
+void SamplerVoices::steal (Voice& v, double fadeSeconds) noexcept
 {
     v.stolen = true;
-    v.fadeStep = static_cast<float> (1.0 / std::max (1.0, stealFadeSeconds_ * sampleRate_));
+    v.fadeStep = static_cast<float> (1.0 / std::max (1.0, (fadeSeconds > 0.0 ? fadeSeconds : stealFadeSeconds_) * sampleRate_));
 }
 
 SamplerVoices::Voice* SamplerVoices::allocate() noexcept
@@ -533,7 +533,7 @@ void SamplerVoices::noteOff (int channel, int key) noexcept
         if (! v.active || v.releasing || v.stolen || v.channel != channel || v.key != key) continue;
         if (v.zone->mode == PlayMode::Loop)
         {
-            if (v.zone->hasTail) steal (v);   // la queue enregistrée du fichier prend le relais (zone de relâchement implicite) : la boucle s'éteint en fondu rapide
+            if (v.zone->hasTail) steal (v, v.zone->releaseCrossfadeMs * 0.001);   // la queue enregistrée du fichier prend le relais (zone de relâchement implicite) : la boucle s'éteint en fondu rapide
             else
             {
                 v.releasing = true;

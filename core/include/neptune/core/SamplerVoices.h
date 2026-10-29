@@ -186,7 +186,7 @@ private:
     std::array<float, kZoneSlots> slotAmounts_ {};
     void releaseEnvelopes (Voice& v) noexcept; // Note Off des enveloppes de volume et de filtres
     void updateFilterCoefs (Voice& v, const FilterRuntimeBlock& fr) const noexcept;
-    void steal (Voice& v) noexcept;
+    void steal (Voice& v, double fadeSeconds = 0.0) noexcept;   // fondu de coupure (0 : celui de l'instrument)
     void cutKey (int channel, int key) noexcept;       // même touche : coupe l'ancienne (fondu)
     void cutAll() noexcept;                            // mono : coupe tout ce qui sonne (fondu)
     bool retargetHeld (int newKey) noexcept;           // legato : les voix tenues changent de hauteur ; faux s'il n'y en a pas

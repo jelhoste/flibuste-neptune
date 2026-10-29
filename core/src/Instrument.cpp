@@ -111,6 +111,7 @@ ZoneDescription sanitised (ZoneDescription z)
     z.releaseCurve = std::isfinite (z.releaseCurve) ? std::clamp (z.releaseCurve, 0.25, 4.0) : 1.0;
     if (z.releaseRefFrame < -1) z.releaseRefFrame = -1;
     if (z.onRelease || z.mode != PlayMode::Loop || z.releaseStart <= z.startFrame) z.releaseStart = -1;   // une queue n'a de sens que pour une boucle qui se relâche
+    z.releaseCrossfadeMs = std::isfinite (z.releaseCrossfadeMs) ? std::clamp (z.releaseCrossfadeMs, 0.0, 3000.0) : 0.0;
     z.releaseOffsetDb = std::isfinite (z.releaseOffsetDb) ? std::clamp (z.releaseOffsetDb, -24.0, 24.0) : 0.0;
     z.loopRepeats = std::clamp (z.loopRepeats, 0, 1000);
     if (z.extraLoops.size() > ZoneDescription::maxExtraLoops) z.extraLoops.resize (ZoneDescription::maxExtraLoops);
@@ -251,6 +252,7 @@ std::string toJson (const InstrumentDescription& d)
         if (z.keyTrackCenter != 60) o["key_track_center"] = z.keyTrackCenter;
         if (z.midiCondition.enabled) o["midi_condition"] = nlohmann::json::parse (midi::toJson (z.midiCondition), nullptr, false);
         if (z.releaseStart >= 0) o["release_start"] = z.releaseStart;
+        if (z.releaseCrossfadeMs > 0.0) o["release_crossfade_ms"] = z.releaseCrossfadeMs;
         if (z.releaseRefFrame >= 0) o["release_ref_frame"] = z.releaseRefFrame;   // propriété du sample : posée même sur une zone d'attaque (ignorée tant qu'elle n'est pas de relâchement)
         if (z.releaseFollowsLevel)
         {
@@ -478,6 +480,7 @@ ZoneDescription zoneFromJson (const nlohmann::json& o)
     z.releaseCurve = readNum (o, "release_curve", z.releaseCurve);
     z.releaseRefFrame = readI64 (o, "release_ref_frame", z.releaseRefFrame);
     z.releaseStart = readI64 (o, "release_start", -1);
+    z.releaseCrossfadeMs = readNum (o, "release_crossfade_ms", 0.0);
     z.releaseOffsetDb = readNum (o, "release_offset_db", z.releaseOffsetDb);
     z.loopRepeats = readInt (o, "loop_repeats", z.loopRepeats);
     if (const auto it = o.find ("extra_loops"); it != o.end() && it->is_array())
@@ -1067,6 +1070,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
         z.heldMinMs = zd.onRelease ? zd.heldMinMs : 0;
         z.heldMaxMs = zd.onRelease ? zd.heldMaxMs : 0;
         z.releaseStart = zd.mode == PlayMode::Loop && ! zd.onRelease && zd.trigger != TriggerCondition::Continuous && zd.releaseStart > zd.startFrame && zd.releaseStart < z.sample->frames ? zd.releaseStart : -1;
+        z.releaseCrossfadeMs = zd.releaseCrossfadeMs;
         z.sourceIndex = static_cast<int> (zi);
         {
             // filtres : la zone personnalisée > le Groupe personnalisé > l'instrument
@@ -1158,7 +1162,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
             tail.releaseFollowsLevel = false;
             tail.heldMinMs = tail.heldMaxMs = 0;
             tail.env = EnvelopeRuntime {};            // la queue enregistrée garde sa propre extinction : pas d'enveloppe de zone
-            tail.fadeInMs = std::max (tail.fadeInMs, 5.0);
+            tail.fadeInMs = std::max ({ tail.fadeInMs, 5.0, tail.releaseCrossfadeMs });
             tail.releaseStart = -1;
             tail.hasTail = false;
             tail.chokeCuts = 0;

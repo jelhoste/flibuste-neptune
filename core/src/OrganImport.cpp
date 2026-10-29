@@ -767,7 +767,7 @@ private:
         // Les relâchements enregistrés à part : `PipeNNNReleaseMMM`, choisis selon la durée d'appui (`MaxKeyPressTime`, -1 : sans limite). Comme GrandOrgue, c'est le plus court qui
         // convient à la durée d'appui qui est joué ; chaque durée maximale ouvre donc une tranche (tranche précédente + 1 ms .. durée maximale). Quand un tuyau en a, la queue
         // du fichier d'attaque ne joue plus (sinon deux relâchements à chaque note).
-        struct Release { std::string file; int maxMs = -1; std::int64_t cue = -1; };
+        struct Release { std::string file; int maxMs = -1; std::int64_t cue = -1; std::int64_t end = -1; int crossfadeMs = 0; };
         std::vector<Release> releases;
         const int releaseCount = std::clamp (ini_.getInt (section, p + "ReleaseCount", 0), 0, 100);
         for (int r = 1; r <= releaseCount; ++r)
@@ -776,7 +776,8 @@ private:
             const std::string releaseFile = ini_.get (section, prefix);
             if (releaseFile.empty() || lowered (releaseFile) == "dummy") continue;
             if (ini_.getInt (section, prefix + "IsTremulant", -1) == 1) continue;   // enregistré avec un tremblant d'échantillons, non importé
-            releases.push_back ({ releaseFile, ini_.getInt (section, prefix + "MaxKeyPressTime", -1), ini_.getInt (section, prefix + "CuePoint", -1) });
+            releases.push_back ({ releaseFile, ini_.getInt (section, prefix + "MaxKeyPressTime", -1), ini_.getInt (section, prefix + "CuePoint", -1),
+                                  ini_.getInt (section, prefix + "ReleaseEnd", -1), std::clamp (ini_.getInt (section, prefix + "ReleaseCrossfadeLength", 0), 0, 3000) });
         }
         const bool ownRelease = ! releases.empty();
         std::vector<int> cuts;
@@ -826,9 +827,20 @@ private:
                         for (std::size_t i = 1; i < loops.size() && z.extraLoops.size() < ZoneDescription::maxExtraLoops; ++i)
                             z.extraLoops.push_back ({ loops[i].start, loops[i].end, loops[i].crossfade, loops[i].repeats });
                         const std::int64_t lastEnd = loops.back().end;
-                        if (! ownRelease && marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd) z.releaseStart = marks.releaseMarker;
+                        // `LoadRelease=N` : le fichier n'a pas de queue à jouer (GrandOrgue ne charge pas la fin du fichier comme relâchement) ; par défaut oui
+                        const bool loadRelease = ini_.getBool (section, variant.prefix + "LoadRelease", true);
+                        if (! ownRelease && loadRelease && marks.releaseMarker > 0 && lastEnd >= 0 && marks.releaseMarker >= lastEnd)
+                        {
+                            z.releaseStart = marks.releaseMarker;
+                            // `ReleaseEnd` : fin de la queue (échantillons) ; `ReleaseCrossfadeLength` : fondu entre la boucle et la queue (ms)
+                            const auto releaseEnd = ini_.getInt (section, variant.prefix + "ReleaseEnd", -1);
+                            if (releaseEnd > z.releaseStart && releaseEnd > lastEnd) z.endFrame = releaseEnd;
+                            z.releaseCrossfadeMs = std::clamp (ini_.getInt (section, variant.prefix + "ReleaseCrossfadeLength", 0), 0, 3000);
+                        }
                     }
                 }
+                // `AttackStart` : la lecture saute ce début du fichier (échantillons)
+                if (const auto attackStart = ini_.getInt (section, variant.prefix + "AttackStart", 0); attackStart > 0) z.startFrame = attackStart;
                 members.push_back (kb.instrument.zones.size());
                 kb.instrument.zones.push_back (std::move (z));
             }
@@ -875,6 +887,8 @@ private:
                     const auto& marks = marksOf (path);
                     const std::int64_t cue = r.cue >= 0 ? r.cue : (marks.exists && marks.releaseMarker > 0 ? marks.releaseMarker : 0);
                     if (cue > 0) z.startFrame = cue;
+                    if (r.end > z.startFrame) z.endFrame = r.end;   // `ReleaseEnd` : la lecture s'arrête là (échantillons)
+                    if (r.crossfadeMs > 0) z.fadeInMs = std::max (z.fadeInMs, static_cast<double> (r.crossfadeMs));   // `ReleaseCrossfadeLength` : entrée en fondu du relâchement
                     members.push_back (kb.instrument.zones.size());
                     kb.instrument.zones.push_back (std::move (z));
                 }

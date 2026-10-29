@@ -443,6 +443,91 @@ Pipe002=Rank\missing.wav
     std::filesystem::remove_all (dir);
 }
 
+TEST_CASE ("organ import: LoadRelease, AttackStart, ReleaseEnd and ReleaseCrossfadeLength")
+{
+    const auto dir = std::filesystem::temp_directory_path() / "neptune_organ_import_keys_test";
+    std::filesystem::remove_all (dir);
+    std::filesystem::create_directories (dir / "Rank");
+    auto writeLoop = [&] (const char* name)
+    {
+        SF_INFO info {};
+        info.samplerate = 22050; info.channels = 1; info.format = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+        SNDFILE* f = sf_open ((dir / "Rank" / name).string().c_str(), SFM_WRITE, &info);
+        REQUIRE (f != nullptr);
+        SF_INSTRUMENT inst {};
+        inst.basenote = 60; inst.loop_count = 1; inst.loops[0].mode = SF_LOOP_FORWARD; inst.loops[0].start = 1000; inst.loops[0].end = 3999;
+        REQUIRE (sf_command (f, SFC_SET_INSTRUMENT, &inst, sizeof inst) == SF_TRUE);
+        SF_CUES cues {};
+        cues.cue_count = 1;
+        cues.cue_points[0].indx = 1; cues.cue_points[0].position = 0; cues.cue_points[0].fcc_chunk = 0x61746164; cues.cue_points[0].sample_offset = 5000;
+        REQUIRE (sf_command (f, SFC_SET_CUE, &cues, sizeof cues) == SF_TRUE);
+        std::vector<short> data (8000, 1000);
+        sf_writef_short (f, data.data(), static_cast<sf_count_t> (data.size()));
+        sf_close (f);
+    };
+    writeLoop ("a.wav");
+    writeLoop ("rel.wav");
+    const std::string odf = crlf (R"([Organ]
+ChurchName=Keys
+NumberOfManuals=1
+HasPedals=N
+[Manual001]
+Name=Man
+NumberOfLogicalKeys=4
+NumberOfAccessibleKeys=4
+FirstAccessibleKeyMIDINoteNumber=60
+NumberOfStops=1
+Stop001=1
+[Stop001]
+Name=Pipe
+SwitchCount=1
+Switch001=1
+NumberOfAccessiblePipes=4
+Pipe001=Rank\a.wav
+Pipe002=Rank\a.wav
+Pipe002LoadRelease=N
+Pipe003=Rank\a.wav
+Pipe003AttackStart=200
+Pipe003ReleaseEnd=7000
+Pipe003ReleaseCrossfadeLength=40
+Pipe004=Rank\a.wav
+Pipe004LoadRelease=N
+Pipe004ReleaseCount=1
+Pipe004Release001=Rank\rel.wav
+Pipe004Release001CuePoint=100
+Pipe004Release001ReleaseEnd=6000
+Pipe004Release001ReleaseCrossfadeLength=30
+)");
+    Options opt;
+    opt.baseDir = dir;
+    const auto r = importOrgan (odf, opt);
+    REQUIRE (r.ok);
+    const auto& zones = r.keyboards[0].instrument.zones;
+    REQUIRE (zones.size() == 5);
+    CHECK (zones[0].releaseStart == 5000);       // défaut : la queue du fichier joue
+    CHECK (zones[0].endFrame == -1);
+    CHECK (zones[0].releaseCrossfadeMs == 0.0);
+    CHECK (zones[1].releaseStart == -1);         // LoadRelease=N : pas de queue
+    CHECK (zones[2].startFrame == 200);          // AttackStart
+    CHECK (zones[2].releaseStart == 5000);
+    CHECK (zones[2].endFrame == 7000);           // ReleaseEnd de la queue
+    CHECK (zones[2].releaseCrossfadeMs == 40.0);
+    CHECK (zones[3].releaseStart == -1);         // relâchement propre : pas de queue
+    CHECK (zones[4].onRelease);
+    CHECK (zones[4].startFrame == 100);
+    CHECK (zones[4].endFrame == 6000);
+    CHECK (zones[4].fadeInMs >= 30.0);
+
+    // le fondu survit à l'écriture / relecture de l'instrument, et la queue implicite en hérite
+    CHECK (instrumentFromJson (toJson (r.keyboards[0].instrument)).zones[2].releaseCrossfadeMs == 40.0);
+    const auto built = buildInstrument (r.keyboards[0].instrument);
+    REQUIRE (built != nullptr);
+    bool tail = false;
+    for (const auto& z : built->zones) if (z.onRelease && z.startFrame == 5000 && z.endFrame == 7000) { tail = true; CHECK (z.fadeInMs >= 40.0); }
+    CHECK (tail);
+    std::filesystem::remove_all (dir);
+}
+
 // Contrôle sur le vrai orgue de démonstration de GrandOrgue (facultatif) : NEPTUNE_DEMO_ORGAN_DIR doit désigner son dossier décompressé.
 TEST_CASE ("organ import: the GrandOrgue demo organ (optional, NEPTUNE_DEMO_ORGAN_DIR)")
 {

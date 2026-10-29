@@ -121,6 +121,9 @@ struct ZoneDescription
     // >= 0 : au Note Off, la boucle s'éteint en fondu rapide et le fichier est joué en entier à partir de cette image (une zone de relâchement implicite,
     // même touche, même Groupe, mêmes modulateurs, est ajoutée à la construction). -1 : le relâchement habituel par l'enveloppe.
     std::int64_t releaseStart = -1;
+    // Fondu enchaîné (ms) entre la boucle et sa queue de relâchement : durée du fondu de sortie de la boucle au Note Off et du fondu d'entrée de la queue ; 0 = le fondu de coupure de
+    // l'instrument (voir cutFadeMs). N'a de sens que pour une zone en boucle qui a une queue (releaseStart >= 0).
+    double releaseCrossfadeMs = 0.0;
     // Volume : suivi de la vélocité (indépendant du choix de la couche : -100..+100 %, 100 = le volume suit la vélocité comme avant, 0 = volume constant, négatif =
     // plus fort quand on joue doucement) et suivi du clavier (dB par octave autour de `keyTrackCenter`, 0 = aucun).
     double velTrackPct = 100.0;
@@ -151,7 +154,7 @@ struct ZoneDescription
             && fadeOutMs == o.fadeOutMs && reverse == o.reverse && releaseCuts == o.releaseCuts && delayMs == o.delayMs
             && extraLoops == o.extraLoops && loopRepeats == o.loopRepeats && pan == o.pan
             && releaseFollowsLevel == o.releaseFollowsLevel && releaseMeter == o.releaseMeter && releaseFloorDb == o.releaseFloorDb && releaseCurve == o.releaseCurve
-            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb && releaseStart == o.releaseStart
+            && releaseRefFrame == o.releaseRefFrame && releaseOffsetDb == o.releaseOffsetDb && releaseStart == o.releaseStart && releaseCrossfadeMs == o.releaseCrossfadeMs
             && humanizePct == o.humanizePct && velTrackPct == o.velTrackPct && keyTrackDbPerOct == o.keyTrackDbPerOct && keyTrackCenter == o.keyTrackCenter && midiCondition == o.midiCondition;
     }
 };
@@ -341,6 +344,7 @@ struct Zone
     bool onRelease = false;
     int heldMinMs = 0, heldMaxMs = 0;   // durée d'appui exigée d'une zone de relâchement (voir ZoneDescription)
     std::int64_t releaseStart = -1;     // zone en boucle : début de la queue de relâchement du fichier (-1 : aucune)
+    double releaseCrossfadeMs = 0.0;    // fondu de la boucle vers sa queue (ms) ; 0 = fondu de coupure de l'instrument
     bool hasTail = false;               // zone en boucle dont la queue est jouée par une zone de relâchement implicite : son Note Off est un fondu rapide
     TriggerCondition trigger = TriggerCondition::Always;
     int chokeCuts = 0, chokeCutBy = 0;
