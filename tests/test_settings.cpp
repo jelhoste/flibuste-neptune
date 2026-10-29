@@ -132,6 +132,10 @@ TEST_CASE ("settings: the reduced host list is off by default and round trips", 
     GlobalSettings s;
     CHECK_FALSE (s.reducedHostList);
     CHECK_FALSE (fromJson ("{}").reducedHostList);
+    CHECK_FALSE (s.showDiagnostics);
+    CHECK_FALSE (fromJson ("{}").showDiagnostics);
+    s.showDiagnostics = true;
+    CHECK (fromJson (toJson (s)).showDiagnostics);
     s.reducedHostList = true;
     CHECK (fromJson (toJson (s)).reducedHostList);
     // zoom du mixeur : 120 par défaut, borné à 60..160

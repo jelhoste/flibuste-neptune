@@ -32,6 +32,9 @@ struct GlobalSettings
     // l'instance (l'hôte lit la liste une fois) : un changement ne joue qu'au prochain chargement. Casse l'automation déjà enregistrée sur les autres.
     bool reducedHostList = false;
 
+    // Neptune : ligne de diagnostic sous la version (zones, notes, voix de chaque piste Sampler). Masquée par défaut ; le chargement et les erreurs restent affichés.
+    bool showDiagnostics = false;
+
     int mixerZoomPercent = 120;   // zoom du mixeur de Neptune, 60..160 (il ne grossit que si la fenêtre a la place)
 
 };

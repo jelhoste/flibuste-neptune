@@ -101,6 +101,8 @@ public:
     int mixerZoomPercent() const { return settings_.mixerZoomPercent; }
     void uiSetMixerZoomPercent (int percent);   // mémorisé dans les réglages globaux
     bool reducedHostList() const { return settings_.reducedHostList; }   // lu à la création de l'instance
+    bool showDiagnostics() const { return settings_.showDiagnostics; }
+    void uiSetShowDiagnostics (bool on);                                 // écrit settings.json ; joue tout de suite
     void uiSetReducedHostList (bool on);                                 // écrit settings.json ; joue au prochain chargement
     bool uiUndo() override;
     bool uiRedo() override;

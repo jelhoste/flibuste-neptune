@@ -2247,6 +2247,7 @@ const Entry kEntries[] = {
     { "control.assign_organ", { "Assign setBfree controllers to the selected organ track", "Assigner les contrôleurs de setBfree à la piste Orgue sélectionnée" } },
     { "macro.assign", { "Assign to macro", "Assigner à une macro" } },
     { "macro.clear", { "Remove macro assignments", "Retirer les assignations de macro" } },
+    { "control.diagnostics", { "Show the diagnostic line (zones, notes, voices)", "Afficher la ligne de diagnostic (zones, notes, voix)" } },
     { "macro.reduced", { "Reduced host parameter list (next load)", "Liste réduite des paramètres de l'hôte (au prochain chargement)" } },
     { "cpanel.manage", { "Manage assignments...", "Gérer les assignations..." } },
     { "cpanel.title", { "Control assignments (MIDI CC, macros, OSC)", "Assignations de contrôle (CC MIDI, macros, OSC)" } },

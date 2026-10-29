@@ -858,9 +858,11 @@ void NeptuneEditor::showControlMenu()
     menu.addSeparator();
     const bool reduced = processor_.reducedHostList();
     menu.addItem (4, text ("macro.reduced"), true, reduced);
+    const bool diagnostics = processor_.showDiagnostics();
+    menu.addItem (6, text ("control.diagnostics"), true, diagnostics);
     juce::Component::SafePointer<NeptuneEditor> safe (this);
     menu.setLookAndFeel (&getLookAndFeel());   // sinon le menu prend le style JUCE d'origine
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlButton_), [safe, on, reduced] (int choice)
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&controlButton_), [safe, on, reduced, diagnostics] (int choice)
     {
         if (safe == nullptr) return;
         if (choice == 1) safe->processor_.uiSetCcEnabled (! on);
@@ -871,6 +873,7 @@ void NeptuneEditor::showControlMenu()
         }
         else if (choice == 3) safe->processor_.uiClearControllers();
         else if (choice == 4) safe->processor_.uiSetReducedHostList (! reduced);
+        else if (choice == 6) { safe->processor_.uiSetShowDiagnostics (! diagnostics); safe->repaint(); }
         else if (choice == 5)
         {
             auto panel = std::make_unique<ControlPanel> (safe->processor_, safe->palette_, safe->tr_);
@@ -1112,7 +1115,7 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
     g.setFont (juce::FontOptions (10.0f));
     g.drawText (neptune::core::version::kString, juce::Rectangle<int> (32, 66, 330, 12), juce::Justification::centredLeft);
     {
-        const int needed = (processor_.loadSummary().empty() ? 0 : 18) + (processor_.activitySummary().empty() ? 0 : 16);
+        const int needed = (processor_.loadSummary().empty() ? 0 : 18) + (! processor_.showDiagnostics() || processor_.activitySummary().empty() ? 0 : 16);
         if (needed != diagH_)
         {
             diagH_ = needed;
@@ -1125,7 +1128,7 @@ void NeptuneEditor::paintContent (juce::Graphics& g)
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         g.drawText (juce::String::fromUTF8 (loading.c_str()), juce::Rectangle<int> (32, 80, lw_ - 64, 18), juce::Justification::centredLeft, true);
     }
-    if (const auto activity = processor_.activitySummary(); ! activity.empty())   // vérifie que la piste a son instrument et reçoit des notes
+    if (const auto activity = processor_.showDiagnostics() ? processor_.activitySummary() : std::string(); ! activity.empty())   // vérifie que la piste a son instrument et reçoit des notes
     {
         g.setColour (colour (Token::TextDim));
         g.setFont (juce::FontOptions (11.0f));

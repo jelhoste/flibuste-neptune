@@ -1931,6 +1931,14 @@ void NeptuneProcessor::uiSetReducedHostList (bool on)
     neptune::core::settings::saveFile (settingsFile_, settings_, &error);   // lu au prochain chargement du plugin
 }
 
+void NeptuneProcessor::uiSetShowDiagnostics (bool on)
+{
+    if (settings_.showDiagnostics == on) return;
+    settings_.showDiagnostics = on;
+    std::string error;
+    neptune::core::settings::saveFile (settingsFile_, settings_, &error);
+}
+
 void NeptuneProcessor::uiSetMixerZoomPercent (int percent)
 {
     percent = std::clamp (percent, 60, 160);
