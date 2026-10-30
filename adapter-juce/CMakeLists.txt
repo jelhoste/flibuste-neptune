@@ -461,6 +461,7 @@ target_sources(AnalogSynth PRIVATE
   src/PresetManager.cpp
   src/SynthKeyboard.cpp
   src/EnvelopeEditor.cpp
+  src/ModView.cpp
   src/NeptuneKnob.cpp
   src/KnobModal.cpp)
 

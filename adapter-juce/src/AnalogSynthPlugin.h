@@ -8,12 +8,14 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <string>
 #include <vector>
 #include "HostProbe.h"
+#include "ModulationHost.h"
 #include "ParamHost.h"
 #include "NovaSynthEditor.h"
 #include "PresetHost.h"
 #include "PresetManager.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/I18n.h"
+#include "neptune/core/ModulationRig.h"
 #include "neptune/core/Preset.h"
 #include "neptune/core/PresetLibrary.h"
 #include "neptune/core/Settings.h"
@@ -27,6 +29,7 @@ class AnalogSynthProcessor : public juce::AudioProcessor,
                              public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                              public ParamHost,
                              public PresetHost,
+                             public ModulationHost,   // matrice de modulation du plugin (onglet MOD)
                              private juce::AsyncUpdater
 {
 public:
@@ -106,6 +109,15 @@ public:
         return keys;
     }
 
+    // ---- ModulationHost : la matrice du plugin (une seule « piste », la 0) ----
+    int modTrack() const noexcept override { return 0; }
+    neptune::core::modulation::Matrix modMatrix (int) const override { return rig_.matrix(); }
+    void modEdit (int, neptune::core::modulation::Matrix) override;
+    void modBeginGesture() override { undo_.beginGesture(); }
+    void modEndGesture() override { undo_.endGesture(); }
+    neptune::core::ParameterSet& modParameters() override { return engine_.params(); }
+    std::string modDestName (int, neptune::core::ParamId dest) const override;
+
     neptune::core::analogsynth::AnalogSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
     void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
@@ -113,10 +125,12 @@ public:
 private:
     static BusesProperties makeBuses();
     void handleAsyncUpdate() override; // Program Change MIDI : appliqué sur le thread de message
+    std::string modulationText() const;
     void notifyHostOfParameterChanges (const std::vector<float>& before);
     std::vector<float> snapshotNormalised() const;
 
     neptune::core::analogsynth::AnalogSynthEngine engine_;
+    neptune::core::modulation::Rig rig_;   // matrice, LFO, enveloppes et sources MIDI du plugin
     HostProbe probe_;
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;

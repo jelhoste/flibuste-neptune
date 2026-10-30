@@ -2477,6 +2477,7 @@ const Entry kEntries[] = {
     { "wave.search", { "Search...", "Rechercher..." } },
     { "synth.page_osc", { "OSCILLATORS", "OSCILLATEURS" } },
     { "synth.page_filter", { "FILTERS", "FILTRES" } },
+    { "synth.page_mod", { "MODULATION", "MODULATION" } },
     { "synth.page_env", { "ENVELOPES / VOICES", "ENVELOPPES / VOIX" } },
     { "synth.osc", { "OSC {0}", "OSC {0}" } },
     { "synth.sub", { "SUB", "SOUS-OSC" } },

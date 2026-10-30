@@ -16,6 +16,7 @@
 
 #include "neptune/core/HandoffSlot.h"
 #include "neptune/core/Mixer.h"
+#include "neptune/core/Modulation.h"
 #include "neptune/core/Parameter.h"
 #include "neptune/core/Preset.h"
 #include "neptune/core/Synth.h"
@@ -53,9 +54,10 @@ void seedEnvelopeParams (const SynthDescription&, ParameterSet&, int track = 0);
 SynthDescription withLiveParams (SynthDescription, const ParameterSet&, int track = 0);
 
 // ---- état du plugin (getStateInformation) ----
-std::string stateToJson (const ParameterSet&, const SynthDescription&, const std::string& currentPresetId);
+// `modulation` (facultatif) : la matrice de modulation du plugin ; écrite seulement si elle n'est pas vide, de sorte qu'un état sans matrice reste identique octet pour octet.
+std::string stateToJson (const ParameterSet&, const SynthDescription&, const std::string& currentPresetId, const modulation::Matrix* modulation = nullptr);
 // Retourne faux (sans rien modifier) si le texte n'est pas un état d'AnalogSynth.
-bool stateFromJson (std::string_view text, ParameterSet&, SynthDescription&, std::string& currentPresetId);
+bool stateFromJson (std::string_view text, ParameterSet&, SynthDescription&, std::string& currentPresetId, modulation::Matrix* modulation = nullptr);   // `modulation` : vide si l'état n'en porte pas
 
 // ---- presets ----
 // Les identifiants de `keyedParams()` sont ceux de la piste 0 ; Neptune applique les mêmes presets à n'importe laquelle de ses

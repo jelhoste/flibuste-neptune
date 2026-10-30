@@ -134,7 +134,7 @@ SynthDescription withLiveParams (SynthDescription d, const ParameterSet& set, in
 
 // ---------------------------------------------------------------------------------------------------- état
 
-std::string stateToJson (const ParameterSet& set, const SynthDescription& d, const std::string& currentPresetId)
+std::string stateToJson (const ParameterSet& set, const SynthDescription& d, const std::string& currentPresetId, const modulation::Matrix* modulation)
 {
     json doc;
     doc["format"] = kFormat;
@@ -145,10 +145,15 @@ std::string stateToJson (const ParameterSet& set, const SynthDescription& d, con
     const auto synth = json::parse (toJson (d), nullptr, false);
     if (! synth.is_discarded()) doc["synth"] = synth;
     if (! currentPresetId.empty()) doc["preset_id"] = currentPresetId;
+    if (modulation != nullptr && *modulation != modulation::Matrix {})
+    {
+        const auto m = json::parse (modulation::toJson (*modulation), nullptr, false);
+        if (! m.is_discarded()) doc["modulation"] = m;
+    }
     return doc.dump (2);
 }
 
-bool stateFromJson (std::string_view text, ParameterSet& set, SynthDescription& d, std::string& currentPresetId)
+bool stateFromJson (std::string_view text, ParameterSet& set, SynthDescription& d, std::string& currentPresetId, modulation::Matrix* modulation)
 {
     const auto doc = json::parse (text.begin(), text.end(), nullptr, false);
     if (doc.is_discarded() || ! doc.is_object()) return false;
@@ -167,6 +172,11 @@ bool stateFromJson (std::string_view text, ParameterSet& set, SynthDescription& 
     seedEnvelopeParams (d, set); // la description fait foi (les états d'avant ces paramètres n'en portent pas)
     currentPresetId.clear();
     if (const auto p = doc.find ("preset_id"); p != doc.end() && p->is_string() && p->get<std::string>().size() <= 64) currentPresetId = p->get<std::string>();
+    if (modulation != nullptr)
+    {
+        *modulation = modulation::Matrix {};
+        if (const auto m = doc.find ("modulation"); m != doc.end() && m->is_object()) *modulation = modulation::fromJson (m->dump());
+    }
     return true;
 }
 

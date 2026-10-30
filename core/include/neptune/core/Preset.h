@@ -66,6 +66,9 @@ struct Preset
     // Façade de la piste d'origine (Neptune) : objet JSON {"track":n,"facade":{...}}, images désignées par « asset:<nom> » (fichiers
     // copiés sous <bibliothèque>/facade-assets) ; "" = aucune. Les autres plugins la conservent sans la lire.
     std::string facade;
+    // Matrice de modulation du plugin seul (AnalogSynth) : objet JSON de modulation::toJson ; "" = aucune (matrice vide). Neptune applique les presets de synthé
+    // aux pistes, qui ont leur propre matrice : il l'ignore.
+    std::string modulation;
 
     // Effets uniquement : conservés tels quels.
     std::string reverbEngine;                      // "light" | "convolution" | ""

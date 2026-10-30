@@ -56,6 +56,8 @@ bool AnalogSynthProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 void AnalogSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine_.prepare (sampleRate, samplesPerBlock);
+    rig_.prepare (sampleRate);
+    rig_.reset (engine_.params());
 }
 
 void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -65,6 +67,9 @@ void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     if (n <= 0 || buffer.getNumChannels() < 1) return;
     float* left = buffer.getWritePointer (0);
     float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
+
+    // Matrice de modulation : évaluée une fois par bloc, avant le rendu (les décalages sont lus par le moteur à chaque morceau de bloc)
+    rig_.process (n, engine_.params());
 
     // Les événements MIDI sont appliqués à leur position dans le bloc : le rendu est découpé aux événements.
     int pos = 0;
@@ -77,9 +82,14 @@ void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             pos = at;
         }
         const auto m = meta.getMessage();
-        if (m.isNoteOn()) engine_.noteOn (m.getChannel() - 1, m.getNoteNumber(), m.getFloatVelocity());
-        else if (m.isNoteOff()) engine_.noteOff (m.getChannel() - 1, m.getNoteNumber());
-        else if (m.isAllNotesOff()) engine_.releaseAll();
+        const int channel = juce::jlimit (0, 15, m.getChannel() - 1);
+        if (m.isNoteOn()) { engine_.noteOn (m.getChannel() - 1, m.getNoteNumber(), m.getFloatVelocity()); rig_.noteOn (m.getNoteNumber()); }
+        else if (m.isNoteOff()) { engine_.noteOff (m.getChannel() - 1, m.getNoteNumber()); rig_.noteOff (m.getNoteNumber()); }
+        else if (m.isController()) rig_.midiEvent ({ midi::MsgKind::ControlChange, channel, m.getControllerNumber(), m.getControllerValue() });
+        else if (m.isPitchWheel()) rig_.midiEvent ({ midi::MsgKind::PitchBend, channel, 0, m.getPitchWheelValue() >> 7 });
+        else if (m.isChannelPressure()) rig_.midiEvent ({ midi::MsgKind::ChannelPressure, channel, 0, m.getChannelPressureValue() });
+        else if (m.isAftertouch()) rig_.midiEvent ({ midi::MsgKind::PolyPressure, channel, m.getNoteNumber(), m.getAfterTouchValue() });
+        if (m.isAllNotesOff()) { engine_.releaseAll(); rig_.releaseAll(); }
         else if (m.isAllSoundOff()) engine_.panic();
         else if (m.isController() && m.getControllerNumber() == 0) midiBank_.store (juce::jlimit (0, 127, m.getControllerValue()));
         else if (m.isProgramChange())
@@ -105,7 +115,8 @@ void AnalogSynthProcessor::handleAsyncUpdate()
 // ---- état : JSON, comme Neptune
 void AnalogSynthProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    const auto text = analog::stateToJson (engine_.params(), engine_.description(), currentPresetId_);
+    const auto matrix = rig_.matrix();
+    const auto text = analog::stateToJson (engine_.params(), engine_.description(), currentPresetId_, &matrix);
     dest.append (text.data(), text.size());
 }
 
@@ -114,9 +125,11 @@ void AnalogSynthProcessor::setStateInformation (const void* data, int size)
     if (data == nullptr || size <= 0) return;
     SynthDescription d;
     std::string presetId;
+    modulation::Matrix matrix;
     const std::string text (static_cast<const char*> (data), static_cast<std::size_t> (size));
-    if (! analog::stateFromJson (text, engine_.params(), d, presetId)) return;
+    if (! analog::stateFromJson (text, engine_.params(), d, presetId, &matrix)) return;
     engine_.setDescription (d);
+    rig_.setMatrix (matrix, engine_.params());
     currentPresetId_ = presetId;
     undo_.clear();
     ++presetRevision_;
@@ -190,6 +203,36 @@ void AnalogSynthProcessor::uiEditSynth (SynthDescription d, std::string name, st
         std::move (name), std::move (mergeKey)));
 }
 
+// ---- matrice de modulation (onglet MOD)
+void AnalogSynthProcessor::modEdit (int, modulation::Matrix matrix)
+{
+    matrix = modulation::sanitised (std::move (matrix));
+    const auto previous = rig_.matrix();
+    if (previous == matrix) return;
+    undo_.perform (std::make_unique<SnapshotCommand<modulation::Matrix>> (
+        previous, matrix,
+        [this] (const modulation::Matrix& v)
+        {
+            rig_.setMatrix (v, engine_.params());
+            updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+        },
+        "Modulation", "modulation"));
+}
+
+// La matrice pour un preset : vide si elle l'est (un preset sans matrice reste identique).
+std::string AnalogSynthProcessor::modulationText() const
+{
+    const auto& m = rig_.matrix();
+    return m == modulation::Matrix {} ? std::string() : modulation::toJson (m);
+}
+
+std::string AnalogSynthProcessor::modDestName (int, ParamId dest) const
+{
+    const auto& set = engine_.params();
+    const auto index = set.indexOf (dest);
+    return index == ParameterSet::npos ? std::string() : set.spec (index).name;
+}
+
 // ---- presets
 std::vector<float> AnalogSynthProcessor::snapshotNormalised() const
 {
@@ -221,6 +264,7 @@ bool AnalogSynthProcessor::loadPreset (const std::string& id)
     if (p == nullptr) return false;
     const auto before = snapshotNormalised();
     if (! engine_.loadPreset (*p, library_->config())) return false; // capture par voix : voir AnalogSynthEngine::loadPreset
+    rig_.setMatrix (p->modulation.empty() ? modulation::Matrix {} : modulation::fromJson (p->modulation), engine_.params());   // un preset sans matrice la vide
     currentPresetId_ = id;
     undo_.clear();
     notifyHostOfParameterChanges (before);
@@ -238,7 +282,9 @@ bool AnalogSynthProcessor::stepPreset (int direction)
 bool AnalogSynthProcessor::isModified() const
 {
     const auto* p = currentPreset();
-    return p != nullptr && analog::differsFromPreset (*p, engine_.params(), engine_.description(), library_->config());
+    if (p == nullptr) return false;
+    const auto stored = p->modulation.empty() ? modulation::Matrix {} : modulation::sanitised (modulation::fromJson (p->modulation));
+    return analog::differsFromPreset (*p, engine_.params(), engine_.description(), library_->config()) || stored != rig_.matrix();
 }
 
 bool AnalogSynthProcessor::canSaveCurrent() const
@@ -253,6 +299,7 @@ bool AnalogSynthProcessor::overwritePreset (const std::string& id, std::string* 
     if (base == nullptr || base->factory) { if (error) *error = "factory preset is read-only"; return false; }
     if (base->locked) { if (error) *error = "preset is locked"; return false; }
     auto p = analog::capturePreset (engine_.params(), engine_.description(), library_->config(), base->name, base->type, base);
+    p.modulation = modulationText();
     const bool ok = library_->save (std::move (p), error);
     if (ok) ++presetRevision_;
     return ok;
@@ -278,6 +325,7 @@ bool AnalogSynthProcessor::saveCurrentAs (const std::string& name, const std::st
         // les exceptions de capture reviennent dans les paramètres stockés
         p = analog::capturePreset (engine_.params(), engine_.description(), library_->config(), name, p.type, &p);
     }
+    p.modulation = modulationText();
     preset::Preset stored;
     if (! library_->importPreset (std::move (p), &stored, error)) return false;
     currentPresetId_ = stored.id;
@@ -342,6 +390,7 @@ void NovaSynthPluginEditor::buildContent()
     link.noteOff = [&p] (int key) { p.uiNoteOff (key); };
     link.heldKeys = [&p] (int word) { return p.engine().heldKeyWord (word); };
     link.track = 0;
+    link.modulation = &p;   // la page MOD : la matrice de modulation du plugin
     link.outputs = { analog::volume, analog::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
     content_.reset();
     content_ = std::make_unique<NovaSynthEditor> (p, p, std::move (link), palette, def.knob, tr_, opt);

@@ -113,7 +113,7 @@ bool Preset::operator== (const Preset& o) const noexcept
 {
     return id == o.id && name == o.name && type == o.type && characteristics == o.characteristics && rating == o.rating
         && locked == o.locked && customFields == o.customFields && derivedFrom == o.derivedFrom && parameters == o.parameters
-        && captureOverrides == o.captureOverrides && module == o.module && state == o.state && facade == o.facade && reverbEngine == o.reverbEngine
+        && captureOverrides == o.captureOverrides && module == o.module && state == o.state && facade == o.facade && modulation == o.modulation && reverbEngine == o.reverbEngine
         && reverbIrRef == o.reverbIrRef && declaredLatencySamples == o.declaredLatencySamples
         && pedalHeldOverride == o.pedalHeldOverride;
 }
@@ -162,6 +162,7 @@ Preset sanitised (Preset p)
     p.module = clipped (p.module, 32);
     if (p.state.size() > kMaxState) p.state.clear();
     if (p.facade.size() > kMaxState) p.facade.clear();
+    if (p.modulation.size() > kMaxState) p.modulation.clear();
     p.reverbEngine = p.reverbEngine == "light" || p.reverbEngine == "convolution" ? p.reverbEngine : std::string();
     p.reverbIrRef = clipped (p.reverbIrRef, 64);
     p.declaredLatencySamples = std::clamp (p.declaredLatencySamples, 0, 1 << 20);
@@ -197,6 +198,11 @@ std::string toJson (const Preset& in)
     {
         const auto st = json::parse (p.state, nullptr, false);
         if (! st.is_discarded() && st.is_object()) o["state"] = st;
+    }
+    if (! p.modulation.empty())
+    {
+        const auto m = json::parse (p.modulation, nullptr, false);
+        if (! m.is_discarded() && m.is_object()) o["modulation"] = m;
     }
     if (! p.facade.empty())
     {
@@ -244,6 +250,7 @@ Preset presetFromJson (std::string_view text, bool* ok)
     p.module = strOf (o, "module");
     if (const auto it = o.find ("state"); it != o.end() && it->is_object()) p.state = it->dump();
     if (const auto it = o.find ("facade"); it != o.end() && it->is_object()) p.facade = it->dump();
+    if (const auto it = o.find ("modulation"); it != o.end() && it->is_object()) p.modulation = it->dump();
     return sanitised (std::move (p));
 }
 

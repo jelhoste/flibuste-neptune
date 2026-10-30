@@ -5,6 +5,7 @@
 // conservée : la pastille de preset de l'en-tête ouvre un menu NOVA et le gestionnaire existant se superpose à la fenêtre.
 // L'éditeur ne connaît le synthé que par `SynthLink` (description du patch, notes) : le même éditeur sert au plugin indépendant et à une piste de Neptune.
 #include "EnvelopeEditor.h"
+#include "ModulationHost.h"
 #include "NovaInstrumentBase.h"
 #include "neptune/core/Synth.h"
 
@@ -12,7 +13,10 @@ struct SynthLink : InstrumentLink
 {
     std::function<neptune::core::SynthDescription()> description;
     std::function<void (neptune::core::SynthDescription)> edit;   // annulable (clé de fusion « synth »)
+    ModulationHost* modulation = nullptr;                         // plugin seul : la matrice de modulation (page MOD) ; nul dans Neptune, qui a son onglet MOD
 };
+
+class ModView;
 
 class NovaSynthEditor : public NovaInstrumentBase
 {
@@ -31,6 +35,9 @@ private:
     void buildOscPage();
     void buildFilterPage();
     void buildEnvPage();
+    void buildModPage();
+    ModulationHost* modulation_ = nullptr;   // page MOD (plugin seul) : l'hôte de la matrice
+    ModView* modView_ = nullptr;
 
     // ---- fabriques typées sur la description du patch
     void edit (const std::function<void (Desc&)>&);

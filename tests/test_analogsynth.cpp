@@ -597,3 +597,57 @@ TEST_CASE ("analogsynth per-oscillator parameter names carry the right oscillato
         CHECK (nameOf (static_cast<mixer::SynthKind> (mixer::kDetuneOsc1 + o)) == "Osc" + number + "Unison Detune");
     }
 }
+
+TEST_CASE ("analogsynth state: the modulation matrix is saved when it is not empty, and an empty one leaves the state unchanged", "[analogsynth][modulation]")
+{
+    analogsynth::AnalogSynthEngine e;
+    REQUIRE (e.ok());
+    const auto without = stateToJson (e.params(), e.description(), "");
+    modulation::Matrix empty;
+    CHECK (stateToJson (e.params(), e.description(), "", &empty) == without);   // sans matrice : identique octet pour octet à l'état d'avant
+
+    modulation::Matrix m;
+    m.lfos[0].shape = modulation::LfoShape::Triangle;
+    m.lfos[0].rateHz = 5.5;
+    modulation::Route r;
+    r.source = { modulation::SourceKind::Lfo, 0, 0 };
+    r.dest = analogsynth::keyedParams().front().id;
+    r.amount = 0.3;
+    m.routes.push_back (r);
+    const auto with = stateToJson (e.params(), e.description(), "", &m);
+    CHECK (with != without);
+
+    ParameterSet set;
+    REQUIRE (analogsynth::addParams (set));
+    SynthDescription back;
+    std::string id;
+    modulation::Matrix loaded;
+    REQUIRE (stateFromJson (with, set, back, id, &loaded));
+    CHECK (loaded == m);
+    modulation::Matrix none;
+    none.lfos[1].rateHz = 3.0;   // une valeur de départ non vide doit être remise à vide par un état sans matrice
+    REQUIRE (stateFromJson (without, set, back, id, &none));
+    CHECK (none == modulation::Matrix {});
+    CHECK (stateFromJson (without, set, back, id));   // l'appel d'avant, sans matrice, marche toujours
+}
+
+TEST_CASE ("preset: the modulation field round trips, is bounded and defaults to empty", "[preset][modulation]")
+{
+    preset::Preset p;
+    p.id = "x";
+    p.name = "With modulation";
+    p.module = "analogsynth";
+    modulation::Matrix m;
+    m.lfos[2].rateHz = 7.0;
+    p.modulation = modulation::toJson (m);
+    bool ok = false;
+    const auto back = preset::presetFromJson (preset::toJson (p), &ok);
+    REQUIRE (ok);
+    CHECK (modulation::fromJson (back.modulation) == m);
+    preset::Preset plain;
+    plain.id = "y";
+    plain.name = "Plain";
+    const auto backPlain = preset::presetFromJson (preset::toJson (plain), &ok);
+    REQUIRE (ok);
+    CHECK (backPlain.modulation.empty());
+}

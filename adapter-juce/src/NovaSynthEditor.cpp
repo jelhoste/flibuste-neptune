@@ -1,4 +1,5 @@
 #include "NovaSynthEditor.h"
+#include "ModView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +37,16 @@ juce::Path iconPath (int kind)
         p.lineTo (12.0f, 11.0f);
         p.lineTo (18.0f, 11.0f);
         p.lineTo (22.0f, 20.0f);
+    }
+    else if (kind == 5)   // modulation : deux ondes lentes
+    {
+        p.startNewSubPath (2.0f, 8.0f);
+        p.cubicTo (5.0f, 1.0f, 9.0f, 1.0f, 12.0f, 8.0f);
+        p.cubicTo (15.0f, 15.0f, 19.0f, 15.0f, 22.0f, 8.0f);
+        p.startNewSubPath (2.0f, 18.0f);
+        p.lineTo (8.0f, 18.0f);
+        p.lineTo (11.0f, 13.0f);
+        p.lineTo (22.0f, 13.0f);
     }
     else if (kind == 3)   // matrice
     {
@@ -174,18 +185,27 @@ NovaSynthEditor::NovaSynthEditor (ParamHost& host, PresetHost& presets, SynthLin
     : NovaInstrumentBase (host, presets, link, palette, knobStyle, tr, std::move (options), juce::String::fromUTF8 ("ANALOGSYNTH")), describe_ (link.description), apply_ (link.edit)
 {
     desc_ = describe_();
+    modulation_ = link.modulation;
     addPage (tx ("synth.page_osc"), iconPath (0));
     addPage (tx ("synth.page_filter"), iconPath (1));
     addPage (tx ("synth.page_env"), iconPath (2));
+    if (modulation_ != nullptr) addPage (tx ("synth.page_mod"), iconPath (5));   // plugin seul
     buildCommon ("hlp.sy_out");   // MATRICE, SETTINGS, colonne de gauche, clavier
     buildOscPage();
     buildFilterPage();
     buildEnvPage();
+    if (modulation_ != nullptr) buildModPage();
     setPage (0);
     setSize (designWidth, designHeight);
 }
 
 NovaSynthEditor::~NovaSynthEditor() = default;
+
+void NovaSynthEditor::buildModPage()
+{
+    // l'onglet MOD de Neptune, tel quel, sur la matrice du plugin (page 3 : après OSC, FILTRES, ENVELOPPES)
+    modView_ = add<ModView> (3, *modulation_, skin().palette(), translator());
+}
 
 void NovaSynthEditor::buildOscPage()
 {
@@ -395,6 +415,9 @@ void NovaSynthEditor::layout()
         u.drive->setBounds (R (px + 352, py + 134, 100, 46));
         u.env->setBounds (R (px + 12, py + 200, 441, ph - 212));
     }
+
+    // ---- page MOD (plugin seul)
+    if (modView_ != nullptr) modView_->setBounds (R (X0, 72, 942, H));
 
     // ---- page ENVELOPPES / VOIX
     {
