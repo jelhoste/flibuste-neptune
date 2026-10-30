@@ -8,6 +8,7 @@
 #include "../src/NovaChorusEditor.h"
 #include "../src/NovaDelayEditor.h"
 #include "../src/NovaMicrodecaleEditor.h"
+#include "../src/NovaDiapasonEditor.h"
 #include "../src/NovaSynthEditor.h"
 #include "../src/NovaFmEditor.h"
 #include "../src/NovaSpectrum.h"
@@ -17,6 +18,7 @@
 #include "neptune/core/ChorusModule.h"
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/MicrodecaleModule.h"
+#include "neptune/core/SignalGenerator.h"
 #include "neptune/core/StockModule.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmSynth.h"
@@ -48,6 +50,17 @@ struct RunnerHost : ParamHost
     void uiSetNormalised (ParamId id, double n) override { runner.params().setNormalized (id, n); }
     void uiEndEdit (ParamId) override {}
     void uiResetToDefault (ParamId id) override { runner.params().reset (id); }
+};
+
+struct EngineHost : ParamHost
+{
+    generator::GeneratorEngine& engine;
+    explicit EngineHost (generator::GeneratorEngine& e) : engine (e) {}
+    ParameterSet& parameters() override { return engine.params(); }
+    void uiBeginEdit (ParamId) override {}
+    void uiSetNormalised (ParamId id, double n) override { engine.params().setNormalized (id, n); }
+    void uiEndEdit (ParamId) override {}
+    void uiResetToDefault (ParamId id) override { engine.params().reset (id); }
 };
 
 struct FakePresets : PresetHost
@@ -612,6 +625,49 @@ int main (int argc, char** argv)
             NovaMicrodecaleEditor ed (mh, static_cast<const MicrodecaleModule*> (&mRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
             ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel de Diapason
+    {
+        generator::GeneratorEngine dEngine;
+        dEngine.prepare (48000.0, 512);
+        EngineHost dh (dEngine);
+        auto& dp = dEngine.params();
+        dp.set (generator::steps, 16);
+        for (const int s : { 0, 8, 10 }) dp.set (generator::stepParam (generator::kKick, s), s == 0 ? 2 : 1);
+        for (const int s : { 4, 12 }) dp.set (generator::stepParam (generator::kSnare, s), 2);
+        for (int s = 0; s < 16; s += 2) dp.set (generator::stepParam (s == 14 ? generator::kHatOpen : generator::kHatClosed, s), s % 4 == 0 ? 2 : 1);
+        struct DCase { const char* name; th::ThemeId id; float scale; int page; int signal; int mode; };
+        const DCase dcs[] = { { "diapason-dark-sine", th::ThemeId::Dark, 1.0f, 0, generator::kSine, 0 }, { "diapason-dark-square", th::ThemeId::Dark, 1.0f, 0, generator::kSquare, 1 },
+                              { "diapason-dark-pink", th::ThemeId::Dark, 1.0f, 0, generator::kPink, 0 }, { "diapason-dark-sweep", th::ThemeId::Dark, 1.0f, 0, generator::kSweepLog, 2 },
+                              { "diapason-dark-two", th::ThemeId::Dark, 1.0f, 0, generator::kTwoTone, 0 }, { "diapason-dark-drums", th::ThemeId::Dark, 1.0f, 1, 0, 0 },
+                              { "diapason-light-drums", th::ThemeId::Light, 1.0f, 1, 0, 0 }, { "diapason-dark-set", th::ThemeId::Dark, 1.0f, 2, 0, 0 },
+                              { "diapason-dark-sine-070", th::ThemeId::Dark, 0.7f, 0, generator::kSine, 0 } };
+        for (const auto& c : dcs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            dp.set (generator::signal, c.signal);
+            dp.set (generator::mode, c.mode);
+            NovaDiapasonEditor::Options opt;
+            opt.brand = true;
+            opt.moduleName = "diapason";
+            opt.noPresets = true;
+            opt.noAB = true;
+            opt.noBypass = true;
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaDiapasonEditor ed (dh, dEngine, th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            ed.selectDrumForTest (2);
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;
