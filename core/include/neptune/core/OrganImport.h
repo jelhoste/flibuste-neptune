@@ -77,7 +77,8 @@ struct Result
     combi::Library combinations;
     facade::Facade facade;                              // Façade sommaire : une page par clavier (jeux et clavier), puis accouplements et combinaisons
     std::vector<std::pair<ParamId, double>> initialValues;   // état initial des interrupteurs (valeurs réelles)
-    std::vector<std::string> warnings;
+    std::vector<std::string> warnings;                  // au plus 200 ; les fichiers d'échantillons introuvables n'y figurent que par les 2 premiers (voir missingSamples)
+    int missingSamples = 0;                             // fichiers d'échantillons introuvables (comptés tous, avec `readSampleMarks`)
 };
 
 // Perspectives d'un orgue (positions de micro : « Front (Diffuse) », « Rear »...). Dans un fichier converti d'un format Hauptwerk, chaque perspective est un jeu de rangs

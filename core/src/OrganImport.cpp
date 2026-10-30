@@ -720,7 +720,7 @@ private:
         FileMarks m;
         std::error_code ec;
         m.exists = fs::exists (path, ec);
-        if (! m.exists) { if (opt_.readSampleMarks) warn ("sample not found: " + key); }
+        if (! m.exists) { if (opt_.readSampleMarks && ++result_.missingSamples <= 2) warn ("sample not found: " + key); }
         else if (opt_.readSampleMarks)
         {
             SampleMeta meta;

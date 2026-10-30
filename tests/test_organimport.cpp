@@ -559,6 +559,7 @@ TEST_CASE ("organ import: the GrandOrgue demo organ (optional, NEPTUNE_DEMO_ORGA
     CHECK (loops == zoneCount);   // chaque fichier a sa boucle
     CHECK (tails == zoneCount);   // et son repère de relâchement
     for (const auto& w : r.warnings) CHECK (w.find ("sample not found") == std::string::npos);
+    CHECK (r.missingSamples == 0);
     CHECK (r.router.rules.size() == 5);
     CHECK (r.combinations.generals.size() == 6);
     // le premier clavier se construit tel quel
@@ -1477,4 +1478,25 @@ TEST_CASE ("organ import: the Buckeburg surround demo definition lists three per
     INFO ("zones " << zonesAll << " -> " << zonesOne);
     CHECK (zonesOne < zonesAll);
     CHECK (zonesOne > 0);
+}
+
+TEST_CASE ("organ import: missing sample files are all counted, and the summary warnings are not pushed out by them")
+{
+    // des centaines de fichiers introuvables (les rangs d'un orgue sans ses échantillons) : le compte est exact, la liste d'avertissements garde la place pour le reste
+    std::string text = "[Organ]\nChurchName=Many\nNumberOfManuals=1\nHasPedals=N\n[Manual001]\nName=Great\nNumberOfLogicalKeys=400\nNumberOfAccessibleKeys=400\nFirstAccessibleKeyLogicalKeyNumber=1\nFirstAccessibleKeyMIDINoteNumber=0\nNumberOfStops=2\nStop001=1\nStop002=2\n";
+    text += "[Stop001]\nName=A\nSwitchCount=1\nSwitch001=1\nNumberOfLogicalPipes=400\nNumberOfAccessiblePipes=400\nFirstAccessiblePipeLogicalKeyNumber=1\nNumberOfRanks=1\nRank001=1\n";
+    text += "[Stop002]\nName=B\nSwitchCount=1\nSwitch001=2\nNumberOfAccessiblePipes=3\nFirstAccessiblePipeLogicalKeyNumber=1\nNumberOfRanks=2\nRank001=2\nRank002=3\n";
+    text += "[Rank001]\nName=Special: A\nNumberOfLogicalPipes=400\n";
+    for (int i = 1; i <= 400; ++i) { char b[64]; std::snprintf (b, sizeof b, "Pipe%03d=nope/%d.wav\n", i, i); text += b; }
+    text += "[Rank002]\nName=Front: B\nNumberOfLogicalPipes=3\nPipe001=x/1.wav\nPipe002=x/2.wav\nPipe003=x/3.wav\n[Rank003]\nName=Rear: B\nNumberOfLogicalPipes=3\nPipe001=y/1.wav\nPipe002=y/2.wav\nPipe003=y/3.wav\n";
+    Options opt;
+    opt.baseDir = std::filesystem::temp_directory_path() / "neptune_no_such_organ_dir";
+    opt.excludedPerspectives = { "Front", "Rear" };
+    const auto r = importOrgan (text, opt);
+    REQUIRE (r.ok);
+    CHECK (r.missingSamples >= 100);   // seuls les tuyaux dans l'étendue MIDI (128 notes) sont lus
+    int examples = 0;
+    for (const auto& w : r.warnings) if (w.rfind ("sample not found", 0) == 0) ++examples;
+    CHECK (examples <= 2);
+    CHECK (hasWarning (r, "1 stop(s) have no rank in the chosen perspectives"));
 }

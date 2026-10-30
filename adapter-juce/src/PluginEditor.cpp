@@ -852,16 +852,13 @@ void NeptuneEditor::finishOrganImport (const std::filesystem::path& organPath, c
                 for (const auto& k : result.keyboards) { stops += k.stops; pipes += k.pipes; }
                 message = juce::String::fromUTF8 (result.name.c_str()) + "\n" + juce::String (static_cast<int> (result.keyboards.size())) + " " + safe->text ("organ.imp_keyboards")
                         + ", " + juce::String (stops) + " " + safe->text ("organ.stops") + ", " + juce::String (pipes) + " " + safe->text ("organ.pipes");
-                if (! result.warnings.empty())
+                if (! result.warnings.empty() || result.missingSamples > 0)
                 {
                     // les fichiers d'échantillons introuvables (un avertissement chacun) sont comptés sur une seule ligne, mise à la fin : ils ne doivent pas cacher le reste
-                    int missing = 0;
+                    const int missing = result.missingSamples;
                     std::vector<const std::string*> others;
                     for (const auto& w : result.warnings)
-                    {
-                        if (w.rfind ("sample not found", 0) == 0) ++missing;
-                        else others.push_back (&w);
-                    }
+                        if (w.rfind ("sample not found", 0) != 0) others.push_back (&w);
                     message += "\n\n" + safe->text ("organ.warnings") + "\n";
                     int shown = 0;
                     for (const auto* w : others)
