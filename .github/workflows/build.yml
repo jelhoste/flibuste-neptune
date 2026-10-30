@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur, Microdécale et Convolution)
-        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -125,6 +125,9 @@ jobs:
           CNV=$(find build/adapter-juce/Convolution_artefacts -name 'Convolution.clap' -print -quit)
           test -n "$CNV" || { echo "Convolution.clap introuvable"; exit 1; }
           "$CV" validate "$CNV"
+          DIA=$(find build/adapter-juce/Diapason_artefacts -name 'Diapason.clap' -print -quit)
+          test -n "$DIA" || { echo "Diapason.clap introuvable"; exit 1; }
+          "$CV" validate "$DIA"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -436,3 +439,27 @@ jobs:
             --title "Neptune ${{ github.ref_name }}" \
             --generate-notes \
             --prerelease
+
+      # Diapason séparé, archivé à part.
+      - name: Archive Diapason.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Diapason_artefacts -name 'Diapason.clap' -print -quit)
+          test -n "$CLAP" || { echo "Diapason.clap introuvable"; exit 1; }
+          mkdir -p dist-dia/stage
+          cp -R "$CLAP" dist-dia/stage/
+          cd dist-dia/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Diapason-${{ matrix.name }}.zip" Diapason.clap
+          else
+            tar -czf "../Diapason-${{ matrix.name }}.tar.gz" Diapason.clap
+          fi
+          cd ../..
+          rm -rf dist-dia/stage
+          ls -la dist-dia
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Diapason-${{ matrix.name }}
+          path: dist-dia/*
+          if-no-files-found: error
