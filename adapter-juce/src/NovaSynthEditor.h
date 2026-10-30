@@ -97,6 +97,7 @@ private:
     nova::Panel *ampPanel_ = nullptr, *pitchPanel_ = nullptr, *voicesPanel_ = nullptr;
     EnvelopeEditor *ampEnv_ = nullptr, *pitchEnv_ = nullptr;
     nova::KnobCard* pitchDepth_ = nullptr;
+    nova::NumberPill* bendRange_ = nullptr;   // plage du pitch bend (plugin seul : Neptune n'envoie pas de pitch bend au synthé)
     nova::ChoicePill *polyMode_ = nullptr, *steal_ = nullptr;
     nova::ValueSlider *voices_ = nullptr, *glide_ = nullptr;
 };

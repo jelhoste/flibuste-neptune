@@ -99,13 +99,42 @@ public:
         centred_.setToggleState (bipolar || r.centred, juce::dontSendNotification);
         centred_.setButtonText (owner_.text (bipolar || r.centred ? "mod.range_bipolar" : "mod.range_unipolar"));
         centred_.setEnabled (! bipolar);
-        const auto destName = r.dest != 0 ? owner_.host_.modDestName (owner_.track_, r.dest) : std::string();
-        dest_.setButtonText (! destName.empty() ? juce::String::fromUTF8 (destName.c_str()) : owner_.text ("mod.choose_dest"));
+        destName_ = r.dest != 0 ? owner_.host_.modDestName (owner_.track_, r.dest) : std::string();
+        showDest();
         updating_ = false;
+    }
+
+    // Avertit quand la modulation ne peut pas aller dans le sens voulu : source unipolaire, quantité dans un sens, et le réglage déjà au bout de sa course
+    // (une coupure ouverte au maximum ne peut pas monter). Appelée à chaque tick de la vue.
+    void updateLimit()
+    {
+        bool limited = false;
+        const auto& r = owner_.matrix_.routes[index_];
+        if (r.dest != 0 && r.amount != 0.0 && ! mod::isBipolar (r.source.kind) && ! r.centred)
+        {
+            const auto& set = owner_.host_.modParameters();
+            if (const auto i = set.indexOf (r.dest); i != neptune::core::ParameterSet::npos)
+            {
+                const double n = set.getNormalizedAt (i);
+                limited = r.amount > 0.0 ? n >= 0.999 : n <= 0.001;
+            }
+        }
+        if (limited == atLimit_) return;
+        atLimit_ = limited;
+        showDest();
     }
 
 private:
     mod::Route& edit() { return owner_.matrix_.routes[index_]; }
+
+    void showDest()
+    {
+        auto label = ! destName_.empty() ? juce::String::fromUTF8 (destName_.c_str()) : owner_.text ("mod.choose_dest");
+        if (atLimit_) label = "! " + label;
+        dest_.setButtonText (label);
+        dest_.setTooltip (atLimit_ ? owner_.text ("mod.at_limit") : juce::String());
+        dest_.setColour (juce::TextButton::textColourOffId, atLimit_ ? juce::Colour (0xffe8a33d) : owner_.colour (Token::Text));
+    }
 
     void fillIndex (mod::SourceKind kind)
     {
@@ -133,6 +162,8 @@ private:
 
     ModView& owner_;
     std::size_t index_;
+    std::string destName_;
+    bool atLimit_ = false;
     bool updating_ = false;
     juce::ComboBox kind_, indexBox_, channel_;
     DragValuePill amount_;
@@ -366,6 +397,7 @@ void ModView::timerCallback()
     if (! isShowing()) return;
     if (host_.modTrack() != track_) { reload(); return; }
     if (host_.modMatrix (track_) != committed_) reload();   // annulation, chargement... : la matrice a changé ailleurs
+    for (auto& row : rows_) row->updateLimit();
 }
 
 void ModView::addRoute()

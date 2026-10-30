@@ -157,6 +157,13 @@ void NovaInstrumentBase::buildCommon (const char* outputHelpKey)
     keyboard_ = add<SynthKeyboard> (-2, skin().palette());
     keyboard_->onNoteOn = [this] (int key, float v) { if (link_.noteOn) link_.noteOn (key, v); };
     keyboard_->onNoteOff = [this] (int key) { if (link_.noteOff) link_.noteOff (key); };
+    if (link_.pitchBend || link_.modWheel)
+    {
+        bendWheel_ = add<KeyboardWheel> (-2, skin().palette(), true, "PITCH");
+        bendWheel_->onChange = [this] (float v) { if (link_.pitchBend) link_.pitchBend (v); };
+        modWheel_ = add<KeyboardWheel> (-2, skin().palette(), false, "MOD");
+        modWheel_->onChange = [this] (float v) { if (link_.modWheel) link_.modWheel (v); };
+    }
     octDown_ = add<nova::Pill> (-2, skin(), nova::Pill::Look::Small);
     octDown_->setText (tx ("synth.oct_down"));
     octDown_->onClick = [this] { keyboard_->shiftOctave (-1); };
@@ -210,7 +217,8 @@ bool NovaInstrumentBase::keyPressed (const juce::KeyPress& k)
 void NovaInstrumentBase::applyKeyboard()
 {
     const bool shown = keyboardShown_ && currentPage() != settingsPage();
-    for (juce::Component* c : std::initializer_list<juce::Component*> { keyboardPanel_, keyboard_, octDown_, octUp_, holdPill_, panicPill_ }) c->setVisible (shown);
+    for (juce::Component* c : std::initializer_list<juce::Component*> { keyboardPanel_, keyboard_, octDown_, octUp_, holdPill_, panicPill_, bendWheel_, modWheel_ })
+        if (c != nullptr) c->setVisible (shown);
     setInfoVisible (keyboardPanel_, shown);
 }
 
@@ -245,7 +253,14 @@ void NovaInstrumentBase::layoutCommon()
 
     // ---- clavier
     keyboardPanel_->setBounds (R (X0, 596, 942, 114));
-    keyboard_->setBounds (R (X0 + 12, 626, 700, 78));
+    if (bendWheel_ != nullptr)   // deux molettes à gauche : le clavier perd leur largeur
+    {
+        bendWheel_->setBounds (R (X0 + 12, 622, 34, 86));
+        modWheel_->setBounds (R (X0 + 52, 622, 34, 86));
+        keyboard_->setBounds (R (X0 + 94, 626, 618, 78));
+    }
+    else
+        keyboard_->setBounds (R (X0 + 12, 626, 700, 78));
     octDown_->setBounds (R (X0 + 732, 628, 60, 26));
     octUp_->setBounds (R (X0 + 798, 628, 60, 26));
     holdPill_->setBounds (R (X0 + 864, 628, 66, 26));

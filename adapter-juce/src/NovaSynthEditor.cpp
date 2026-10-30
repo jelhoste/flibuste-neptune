@@ -339,6 +339,9 @@ void NovaSynthEditor::buildEnvPage()
     ampEnv_ = envelope (2, [] (const Desc& d) { return d.ampEnv; }, [] (Desc& d, const EnvelopeDescription& e) { d.ampEnv = e; });
     pitchEnv_ = envelope (2, [] (const Desc& d) { return d.pitchEnv; }, [] (Desc& d, const EnvelopeDescription& e) { d.pitchEnv = e; });
     pitchDepth_ = knob (2, mx::synthParam (link_.track, mx::kPitchEnvDepth), tx ("synth.pitch_depth"), false);
+    if (modulation_ != nullptr)
+        bendRange_ = number (2, tx ("synth.bend_range").toUpperCase(), 0, SynthDescription::maxBendRange, [] (const Desc& d) { return d.bendRange; },
+                             [] (Desc& d, int v) { d.bendRange = v; }, {});
     voicesPanel_ = add<nova::Panel> (2, skin());
     voicesPanel_->setTitle (tx ("sy.voices").toUpperCase());
     addInfo (2, voicesPanel_, "hlp.sy_voices", 1);
@@ -426,6 +429,7 @@ void NovaSynthEditor::layout()
         ampEnv_->setBounds (R (X0 + 12, 72 + 36, 441, ph - 48));
         pitchPanel_->setBounds (R (X0 + 477, 72, 465, ph));
         pitchDepth_->setBounds (R (X0 + 477 + 12, 72 + 34, 104, 116));
+        if (bendRange_ != nullptr) bendRange_->setBounds (R (X0 + 477 + 140, 72 + 64, 200, 28));
         pitchEnv_->setBounds (R (X0 + 477 + 12, 72 + 156, 441, ph - 168));
         const float vy = 72.0f + H - 100.0f;
         voicesPanel_->setBounds (R (X0, vy, 942, 100));

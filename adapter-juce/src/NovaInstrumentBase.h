@@ -10,6 +10,7 @@
 #include "NovaPresetFields.h"
 #include "NovaPresetUi.h"
 #include "NovaWidgets.h"
+#include "KeyboardWheel.h"
 #include "SynthKeyboard.h"
 
 struct InstrumentLink
@@ -18,6 +19,8 @@ struct InstrumentLink
     std::function<void (int key, float velocity)> noteOn;
     std::function<void (int key)> noteOff;
     std::function<std::uint64_t (int word)> heldKeys;             // touches tenues (bits 0..63 puis 64..127)
+    std::function<void (float)> pitchBend;                        // molette de hauteur à l'écran, -1..+1 (plugin seul ; nul : pas de molette)
+    std::function<void (float)> modWheel;                         // molette de modulation à l'écran, 0..1 (CC 1)
     int track = 0;                                                // piste dont on règle les paramètres automatisables
     std::vector<neptune::core::ParamId> outputs;                  // potards de la colonne de gauche (volume, pan, gain, accordage)
 };
@@ -84,5 +87,6 @@ private:
     nova::Pill *colsPill_ = nullptr, *rowsPill_ = nullptr, *bankPrev_ = nullptr, *bankNext_ = nullptr, *bankPill_ = nullptr, *fieldPill_ = nullptr, *fillPill_ = nullptr;
     nova::Panel* keyboardPanel_ = nullptr;
     SynthKeyboard* keyboard_ = nullptr;
+    KeyboardWheel *bendWheel_ = nullptr, *modWheel_ = nullptr;   // à gauche du clavier, seulement si l'hôte les fournit
     nova::Pill *octDown_ = nullptr, *octUp_ = nullptr, *holdPill_ = nullptr, *panicPill_ = nullptr;
 };

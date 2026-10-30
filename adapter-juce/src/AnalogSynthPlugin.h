@@ -80,6 +80,9 @@ public:
     void uiNoteOn (int key, float velocity) { engine_.postNoteOn (key, velocity); }
     void uiNoteOff (int key) { engine_.postNoteOff (key); }
     void uiPanic() { engine_.postPanic(); }
+    // molettes de l'écran (thread de message) : lues par le thread audio à chaque bloc, comme si elles venaient du MIDI
+    void uiPitchBend (float position) noexcept { uiBend_.store (position); }
+    void uiModWheel (float position) noexcept { uiMod_.store (position); }
 
     // ---- presets (thread de message) : PresetHost ----
     neptune::core::preset::Library& library() override { return *library_; }
@@ -140,6 +143,8 @@ private:
     std::string currentPresetId_;
     std::uint32_t presetRevision_ = 1;
 
+    std::atomic<float> uiBend_ { 0.0f }, uiMod_ { 0.0f };   // molettes de l'écran
+    float lastUiBend_ = 0.0f, lastUiMod_ = 0.0f;              // thread audio : dernières positions transmises
     std::atomic<int> midiBank_ { 0 };           // dernier CC 0 reçu (Bank Select MSB)
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 

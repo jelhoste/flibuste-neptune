@@ -68,6 +68,22 @@ void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     float* left = buffer.getWritePointer (0);
     float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
 
+    // Molettes de l'écran : une position qui change est transmise comme un message MIDI (hauteur du synthé, source de la matrice)
+    {
+        const float bend = uiBend_.load (std::memory_order_relaxed), mod = uiMod_.load (std::memory_order_relaxed);
+        if (bend != lastUiBend_)
+        {
+            lastUiBend_ = bend;
+            engine_.setPitchBend (bend);
+            rig_.midiEvent ({ midi::MsgKind::PitchBend, 0, 0, juce::jlimit (0, 127, static_cast<int> (std::lround (64.0f + bend * 63.5f))) });
+        }
+        if (mod != lastUiMod_)
+        {
+            lastUiMod_ = mod;
+            rig_.midiEvent ({ midi::MsgKind::ControlChange, 0, 1, juce::jlimit (0, 127, static_cast<int> (std::lround (mod * 127.0f))) });
+        }
+    }
+
     // Matrice de modulation : évaluée une fois par bloc, avant le rendu (les décalages sont lus par le moteur à chaque morceau de bloc)
     rig_.process (n, engine_.params());
 
@@ -86,7 +102,11 @@ void AnalogSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         if (m.isNoteOn()) { engine_.noteOn (m.getChannel() - 1, m.getNoteNumber(), m.getFloatVelocity()); rig_.noteOn (m.getNoteNumber()); }
         else if (m.isNoteOff()) { engine_.noteOff (m.getChannel() - 1, m.getNoteNumber()); rig_.noteOff (m.getNoteNumber()); }
         else if (m.isController()) rig_.midiEvent ({ midi::MsgKind::ControlChange, channel, m.getControllerNumber(), m.getControllerValue() });
-        else if (m.isPitchWheel()) rig_.midiEvent ({ midi::MsgKind::PitchBend, channel, 0, m.getPitchWheelValue() >> 7 });
+        else if (m.isPitchWheel())
+        {
+            rig_.midiEvent ({ midi::MsgKind::PitchBend, channel, 0, m.getPitchWheelValue() >> 7 });
+            engine_.setPitchBend (static_cast<float> (m.getPitchWheelValue() - 8192) / 8192.0f);   // le synthé suit la molette (plage du patch)
+        }
         else if (m.isChannelPressure()) rig_.midiEvent ({ midi::MsgKind::ChannelPressure, channel, 0, m.getChannelPressureValue() });
         else if (m.isAftertouch()) rig_.midiEvent ({ midi::MsgKind::PolyPressure, channel, m.getNoteNumber(), m.getAfterTouchValue() });
         if (m.isAllNotesOff()) { engine_.releaseAll(); rig_.releaseAll(); }
@@ -390,6 +410,8 @@ void NovaSynthPluginEditor::buildContent()
     link.noteOff = [&p] (int key) { p.uiNoteOff (key); };
     link.heldKeys = [&p] (int word) { return p.engine().heldKeyWord (word); };
     link.track = 0;
+    link.pitchBend = [&p] (float v) { p.uiPitchBend (v); };
+    link.modWheel = [&p] (float v) { p.uiModWheel (v); };
     link.modulation = &p;   // la page MOD : la matrice de modulation du plugin
     link.outputs = { analog::volume, analog::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
     content_.reset();
