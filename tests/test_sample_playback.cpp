@@ -1,4 +1,5 @@
 // Lecture d'une zone : région début / fin, fondu enchaîné de boucle, fondus d'entrée et de sortie, lecture inversée, délai de lecture.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -1272,4 +1273,60 @@ TEST_CASE ("a one-shot zone that cuts on release is interrupted by Note Off, a p
     const auto plain = play (false);
     CHECK (plain.first[9599] > 0.99f);        // le Note Off est ignoré
     CHECK (plain.second == 1);
+}
+
+TEST_CASE ("engine: a Sampler track follows the pitch wheel of the host and of the screen, within the range of its instrument", "[engine][bend]")
+{
+    auto frequencyOf = [] (const std::vector<float>& v, std::size_t from)
+    {
+        int crossings = 0;
+        double first = -1.0, last = -1.0;
+        for (std::size_t i = from + 1; i < v.size(); ++i)
+            if (v[i - 1] < 0.0f && v[i] >= 0.0f)
+            {
+                const double t = static_cast<double> (i - 1) + static_cast<double> (-v[i - 1]) / static_cast<double> (v[i] - v[i - 1]);
+                if (first < 0.0) first = t;
+                last = t;
+                ++crossings;
+            }
+        return crossings > 2 ? (crossings - 1) * 48000.0 / (last - first) : 0.0;
+    };
+    auto run = [&] (int midiBend14, float uiBend, int range)
+    {
+        Engine engine;
+        engine.prepare (48000.0, 256);
+        engine.setTrackActive (0, true);
+        auto sample = makeConstant (9600, 0.0f);   // 480 Hz exactement : 100 périodes
+        for (std::size_t i = 0; i < sample->pcm32.size(); ++i) sample->pcm32[i] = 0.5f * static_cast<float> (std::sin (2.0 * 3.14159265358979 * 480.0 * static_cast<double> (i) / 48000.0));
+        auto inst = std::make_shared<Instrument>();
+        inst->zones.push_back (makeFullKeyboardZone (sample, 60, PlayMode::Loop));
+        inst->bendRange = range;
+        inst->finalize();
+        engine.publishInstrument (0, inst);
+        engine.pitchBendMidi (0, midiBend14);
+        engine.setUiPitchBend (0, uiBend);
+        std::vector<float> all, l (256), r (256);
+        float* out[2] = { l.data(), r.data() };
+        engine.process (out, 2, 256);   // adopte l'instrument
+        engine.noteOnTrack (0, 0, 60, 0.8f);
+        for (int i = 0; i < 100; ++i)
+        {
+            engine.process (out, 2, 256);
+            all.insert (all.end(), l.begin(), l.end());
+        }
+        return frequencyOf (all, 6000);
+    };
+    const double centre = run (8192, 0.0f, 2);
+    REQUIRE (centre > 400.0);
+    CHECK (centre == Catch::Approx (480.0).epsilon (0.01));
+    CHECK (run (16383, 0.0f, 2) / centre == Catch::Approx (std::pow (2.0, 2.0 / 12.0)).epsilon (0.01));
+    CHECK (run (0, 0.0f, 2) / centre == Catch::Approx (std::pow (2.0, -2.0 / 12.0)).epsilon (0.01));
+    CHECK (run (16383, 0.0f, 12) / centre == Catch::Approx (2.0).epsilon (0.01));                                  // plage de 12 demi-tons : une octave
+    CHECK (run (16383, 0.0f, 0) / centre == Catch::Approx (1.0).epsilon (0.01));                                   // plage 0 : la molette ne change rien
+    CHECK (run (16383, 0.5f, 2) / centre == Catch::Approx (std::pow (2.0, 1.0 / 12.0)).epsilon (0.01));            // la molette de l'écran prime tant qu'elle n'est pas au repos
+
+    InstrumentDescription d;
+    CHECK (toJson (d).find ("bend_range") == std::string::npos);   // les fichiers d'avant se réécrivent à l'identique
+    d.bendRange = 5;
+    CHECK (instrumentFromJson (toJson (d)).bendRange == 5);
 }

@@ -157,6 +157,7 @@ const Entry kEntries[] = {
     { "poly.same_stack", { "Stack (both sound)", "Empiler (les deux sonnent)" } },
     { "poly.same_cut", { "Cut the previous one", "Couper l'ancienne" } },
     { "poly.cut_fade", { "Cut fade", "Fondu de coupure" } },
+    { "poly.bend_range", { "Pitch bend range", "Plage du pitch bend" } },
     { "poly.glide", { "Legato glide", "Glissando legato" } },
     { "poly.hint", { "Mono: one note at a time; releasing the sounding key returns to the previous held key. The cut fade also applies to stolen voices.",
                      "Mono : une seule note à la fois ; relâcher la touche qui sonne revient à la précédente encore tenue. Le fondu de coupure s'applique aussi aux voix volées." } },

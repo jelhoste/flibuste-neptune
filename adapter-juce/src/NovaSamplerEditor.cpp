@@ -1982,7 +1982,7 @@ void NovaSamplerEditor::buildInstrumentPage()
     {
         PolyphonyPanel::Settings s;
         s.mode = d.polyphony; s.maxVoices = d.maxVoices; s.steal = d.stealMode; s.sameKey = d.sameKey;
-        s.cutFadeMs = d.cutFadeMs; s.glideMs = d.glideMs; s.chokeSameZone = d.chokeSameZone;
+        s.cutFadeMs = d.cutFadeMs; s.glideMs = d.glideMs; s.bendRange = d.bendRange; s.chokeSameZone = d.chokeSameZone;
         return s;
     };
     poly_ = add<PolyphonyPanel> (3, skin().palette(), translator(), fromDescription (proc_.instrumentDescription()));
@@ -1994,7 +1994,7 @@ void NovaSamplerEditor::buildInstrumentPage()
     {
         auto desc = proc_.instrumentDescription();
         desc.polyphony = s.mode; desc.maxVoices = s.maxVoices; desc.stealMode = s.steal; desc.sameKey = s.sameKey;
-        desc.cutFadeMs = s.cutFadeMs; desc.glideMs = s.glideMs; desc.chokeSameZone = s.chokeSameZone;
+        desc.cutFadeMs = s.cutFadeMs; desc.glideMs = s.glideMs; desc.bendRange = s.bendRange; desc.chokeSameZone = s.chokeSameZone;
         proc_.uiEditInstrument (std::move (desc), "Polyphony", "polyphony");
     };
 
@@ -3837,7 +3837,7 @@ void NovaSamplerEditor::tick()
         velocity_->setValues (cached_.velocityFadeWidth, cached_.velocityFadeLinear, cached_.velocityCurve);
         PolyphonyPanel::Settings ps;
         ps.mode = cached_.polyphony; ps.maxVoices = cached_.maxVoices; ps.steal = cached_.stealMode; ps.sameKey = cached_.sameKey;
-        ps.cutFadeMs = cached_.cutFadeMs; ps.glideMs = cached_.glideMs; ps.chokeSameZone = cached_.chokeSameZone;
+        ps.cutFadeMs = cached_.cutFadeMs; ps.glideMs = cached_.glideMs; ps.bendRange = cached_.bendRange; ps.chokeSameZone = cached_.chokeSameZone;
         poly_->setValues (ps);
     }
 }

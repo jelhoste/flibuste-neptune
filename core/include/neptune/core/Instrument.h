@@ -237,6 +237,7 @@ struct InstrumentDescription
     SameKeyMode sameKey = SameKeyMode::Stack;
     int cutFadeMs = 3;                               // fondu d'une voix volée / coupée (1..maxCutFadeMs)
     int glideMs = 0;                                 // glissando du legato (0..maxGlideMs)
+    int bendRange = 2;                               // plage de la molette de hauteur (pitch bend), demi-tons de chaque côté (0..maxBendRange) ; 0 : la molette ne change rien
     // Filtres par défaut de l'instrument, hérités par les zones qui ne les surchargent pas. Leur coupure et leur résonance sont
     // les PARAMÈTRES automatisables (SamplerParams : filterCutoff/filterResonance) : les valeurs stockées ici sont ignorées.
     FilterBlock defaultFilters;
@@ -245,7 +246,7 @@ struct InstrumentDescription
     ModMask trackModulators = 0;                           // modulateurs qui commandent toute la piste
     std::map<std::string, GroupSettings> groups;          // réglages propres aux Groupes (seulement ceux qui personnalisent un bloc), par nom de Groupe
     bool chokeSameZone = false;                      // un choke coupe aussi les voix de la MÊME place (alternatives round-robin comprises)
-    static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000;
+    static constexpr int defaultMaxVoices = 64, maxVoicesLimit = 256, maxCutFadeMs = 200, maxGlideMs = 2000, defaultBendRange = 2, maxBendRange = 24;
 
     // Emplacements assignables (ZoneSlots.h) : qui vise quoi. Ils font référence aux zones par leur indice (retirés ou décalés quand des
     // zones disparaissent, voir removeZones) et aux Groupes par leur nom.
@@ -258,7 +259,7 @@ struct InstrumentDescription
         unloadedGroups = o.unloadedGroups; declaredGroups = o.declaredGroups; streamFromDisk = o.streamFromDisk; preloadKB = o.preloadKB;
         velocityCurve = o.velocityCurve; velocityFadeWidth = o.velocityFadeWidth; velocityFadeLinear = o.velocityFadeLinear;
         polyphony = o.polyphony; maxVoices = o.maxVoices; stealMode = o.stealMode; sameKey = o.sameKey;
-        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups; modulators = o.modulators; trackModulators = o.trackModulators;
+        cutFadeMs = o.cutFadeMs; glideMs = o.glideMs; bendRange = o.bendRange; chokeSameZone = o.chokeSameZone; defaultFilters = o.defaultFilters; defaultEnvelope = o.defaultEnvelope; groups = o.groups; modulators = o.modulators; trackModulators = o.trackModulators;
         slots = o.slots; pool = o.pool; compensateOnReplace = o.compensateOnReplace; analysisMs = o.analysisMs;
         humanizePitchCents = o.humanizePitchCents; humanizeVolumeDb = o.humanizeVolumeDb; humanizeTimingMs = o.humanizeTimingMs;
     }
@@ -270,7 +271,7 @@ struct InstrumentDescription
             && streamFromDisk == o.streamFromDisk && preloadKB == o.preloadKB
             && velocityCurve == o.velocityCurve && velocityFadeWidth == o.velocityFadeWidth && velocityFadeLinear == o.velocityFadeLinear
             && polyphony == o.polyphony && maxVoices == o.maxVoices && stealMode == o.stealMode && sameKey == o.sameKey
-            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone
+            && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && bendRange == o.bendRange && chokeSameZone == o.chokeSameZone
             && defaultFilters == o.defaultFilters && defaultEnvelope == o.defaultEnvelope && groups == o.groups && modulators == o.modulators && trackModulators == o.trackModulators && slots == o.slots && compensateOnReplace == o.compensateOnReplace && analysisMs == o.analysisMs
             && humanizePitchCents == o.humanizePitchCents && humanizeVolumeDb == o.humanizeVolumeDb && humanizeTimingMs == o.humanizeTimingMs;
     }
@@ -398,6 +399,7 @@ struct Instrument
     SameKeyMode sameKey = SameKeyMode::Stack;
     int cutFadeMs = 3;
     int glideMs = 0;
+    int bendRange = 2;   // voir InstrumentDescription::bendRange
     bool chokeSameZone = false;
 
     // Vélocité (0..1) après la courbe de l'instrument.

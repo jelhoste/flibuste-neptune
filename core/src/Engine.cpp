@@ -1345,7 +1345,10 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
                 for (int k = 0; k < kModulators; ++k) mods[k] = static_cast<float> (param (t.idx.mod[static_cast<std::size_t> (k)], 100.0) / 100.0);
                 t.voices.setModulators (mods);
             }
-            t.voices.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, cents);
+            // molette de hauteur (hôte ou écran) : ajoutée à l'accordage de la piste, plage de l'instrument
+            const auto* inst = t.voices.instrumentPtr();
+            const double bendCents = inst != nullptr ? trackBend (ti) * 100.0 * static_cast<double> (inst->bendRange) : 0.0;
+            t.voices.render (raw_.l.data(), raw_.r.data(), n, t.lastGain, gain, cents + bendCents);
         }
         t.lastGain = gain;
 

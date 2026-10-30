@@ -318,6 +318,7 @@ std::string toJson (const InstrumentDescription& d)
     if (d.chokeSameZone) doc["choke_same_zone"] = true;
     if (d.cutFadeMs != 3) doc["cut_fade_ms"] = d.cutFadeMs;
     if (d.glideMs != 0) doc["glide_ms"] = d.glideMs;
+    if (d.bendRange != InstrumentDescription::defaultBendRange) doc["bend_range"] = d.bendRange;   // absent tant qu'il vaut 2 : les fichiers d'avant se réécrivent à l'identique
     if (d.velocityFadeWidth != 0) doc["velocity_fade_width"] = d.velocityFadeWidth;
     if (d.velocityFadeLinear) doc["velocity_fade_linear"] = true;
     if (! d.velocityCurve.isLinear())
@@ -574,6 +575,7 @@ InstrumentDescription instrumentFromJson (std::string_view text)
     if (const auto m = doc.find ("choke_same_zone"); m != doc.end() && m->is_boolean()) d.chokeSameZone = m->get<bool>();
     d.cutFadeMs = std::clamp (readInt (doc, "cut_fade_ms", 3), 1, InstrumentDescription::maxCutFadeMs);
     d.glideMs = std::clamp (readInt (doc, "glide_ms", 0), 0, InstrumentDescription::maxGlideMs);
+    d.bendRange = std::clamp (readInt (doc, "bend_range", InstrumentDescription::defaultBendRange), 0, InstrumentDescription::maxBendRange);
     d.velocityFadeWidth = std::clamp (readInt (doc, "velocity_fade_width", 0), 0, InstrumentDescription::maxVelocityFadeWidth);
     if (const auto m = doc.find ("velocity_fade_linear"); m != doc.end() && m->is_boolean()) d.velocityFadeLinear = m->get<bool>();
     if (const auto m = doc.find ("velocity_curve"); m != doc.end() && m->is_object())
@@ -985,6 +987,7 @@ std::shared_ptr<const Instrument> buildInstrument (const InstrumentDescription& 
     inst->humanizeVolumeDb = static_cast<float> (std::clamp (description.humanizeVolumeDb, 0.0, 6.0));
     inst->humanizeTimingMs = static_cast<float> (std::clamp (description.humanizeTimingMs, 0.0, 30.0));
     inst->glideMs = std::clamp (description.glideMs, 0, InstrumentDescription::maxGlideMs);
+    inst->bendRange = std::clamp (description.bendRange, 0, InstrumentDescription::maxBendRange);
     inst->chokeSameZone = description.chokeSameZone;
     std::map<std::string, int> groupIds;
     SampleCache localCache;

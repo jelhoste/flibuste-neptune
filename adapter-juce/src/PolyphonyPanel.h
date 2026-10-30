@@ -18,11 +18,12 @@ public:
         neptune::core::SameKeyMode sameKey = neptune::core::SameKeyMode::Stack;
         int cutFadeMs = 3;
         int glideMs = 0;
+        int bendRange = neptune::core::InstrumentDescription::defaultBendRange;   // plage du pitch bend, demi-tons
         bool chokeSameZone = false;
         bool operator== (const Settings& o) const noexcept
         {
             return mode == o.mode && maxVoices == o.maxVoices && steal == o.steal && sameKey == o.sameKey
-                && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && chokeSameZone == o.chokeSameZone;
+                && cutFadeMs == o.cutFadeMs && glideMs == o.glideMs && bendRange == o.bendRange && chokeSameZone == o.chokeSameZone;
         }
     };
 
@@ -47,13 +48,14 @@ private:
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     Settings s_;
-    juce::Label modeLabel_, limitLabel_, stealLabel_, sameKeyLabel_, fadeLabel_, glideLabel_, hint_;
+    juce::Label modeLabel_, limitLabel_, stealLabel_, sameKeyLabel_, fadeLabel_, glideLabel_, bendLabel_, hint_;
     juce::ComboBox mode_, steal_, sameKey_;
     juce::TextButton limitPreset_[3]; // 64, 128, 256
     juce::ToggleButton chokeSame_;
     juce::Slider limit_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider fade_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Slider glide_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Slider bend_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };   // plage du pitch bend
     bool updating_ = false;
     bool dragging_ = false;
 

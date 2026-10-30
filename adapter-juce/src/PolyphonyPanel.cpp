@@ -18,6 +18,7 @@ PolyphonyPanel::PolyphonyPanel (const theme::Palette& palette, const i18n::Trans
     label (sameKeyLabel_, "poly.same_key");
     label (fadeLabel_, "poly.cut_fade");
     label (glideLabel_, "poly.glide");
+    label (bendLabel_, "poly.bend_range");
 
     mode_.addItem (text ("poly.mode_poly"), 1);
     mode_.addItem (text ("poly.mode_mono"), 2);
@@ -63,7 +64,9 @@ PolyphonyPanel::PolyphonyPanel (const theme::Palette& palette, const i18n::Trans
     fade_.setTextValueSuffix (" ms");
     glide_.setRange (0, InstrumentDescription::maxGlideMs, 10);
     glide_.setTextValueSuffix (" ms");
-    for (auto* sl : { &limit_, &fade_, &glide_ })
+    bend_.setRange (0, InstrumentDescription::maxBendRange, 1);
+    bend_.setTextValueSuffix (" st");
+    for (auto* sl : { &limit_, &fade_, &glide_, &bend_ })
     {
         sl->onDragStart = [this] { dragging_ = true; if (onGestureBegin) onGestureBegin(); };
         sl->onDragEnd = [this] { dragging_ = false; if (onGestureEnd) onGestureEnd(); };
@@ -73,6 +76,7 @@ PolyphonyPanel::PolyphonyPanel (const theme::Palette& palette, const i18n::Trans
             s_.maxVoices = static_cast<int> (limit_.getValue());
             s_.cutFadeMs = static_cast<int> (fade_.getValue());
             s_.glideMs = static_cast<int> (glide_.getValue());
+            s_.bendRange = static_cast<int> (bend_.getValue());
             changed();
         };
         addAndMakeVisible (*sl);
@@ -117,6 +121,7 @@ void PolyphonyPanel::refreshControls()
     limit_.setValue (s_.maxVoices, juce::dontSendNotification);
     fade_.setValue (s_.cutFadeMs, juce::dontSendNotification);
     glide_.setValue (s_.glideMs, juce::dontSendNotification);
+    bend_.setValue (s_.bendRange, juce::dontSendNotification);
     chokeSame_.setToggleState (s_.chokeSameZone, juce::dontSendNotification);
     updating_ = false;
     const bool poly = s_.mode == PolyphonyMode::Poly;
@@ -166,8 +171,9 @@ void PolyphonyPanel::resized()
     row (sameKeyLabel_, sameKey_);
     row (fadeLabel_, fade_);
     row (glideLabel_, glide_);
+    row (bendLabel_, bend_);
     chokeSame_.setBounds (r.removeFromTop (30));
-    hint_.setBounds (r.removeFromTop (46));
+    hint_.setBounds (r);   // ce qui reste (la ligne de plage du bend a pris sa place)
 }
 
 void PolyphonyPanel::paint (juce::Graphics& g) { g.fillAll (colour (Token::BgCard)); }
