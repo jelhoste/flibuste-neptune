@@ -39,8 +39,8 @@ public:
             amount_.setRange (range, "%");
         }
         amount_.setTooltip (owner.text ("mod.tip_amount"));
-        amount_.onGestureBegin = [this] { owner_.processor_.uiBeginGesture(); };
-        amount_.onGestureEnd = [this] { owner_.processor_.uiEndGesture(); };
+        amount_.onGestureBegin = [this] { owner_.host_.modBeginGesture(); };
+        amount_.onGestureEnd = [this] { owner_.host_.modEndGesture(); };
         amount_.onValue = [this] (double v) { if (! updating_) { edit().amount = v / 100.0; owner_.commit(); } };
         addAndMakeVisible (amount_);
         centred_.setTooltip (owner.text ("mod.tip_centred"));
@@ -99,7 +99,7 @@ public:
         centred_.setToggleState (bipolar || r.centred, juce::dontSendNotification);
         centred_.setButtonText (owner_.text (bipolar || r.centred ? "mod.range_bipolar" : "mod.range_unipolar"));
         centred_.setEnabled (! bipolar);
-        const auto destName = r.dest != 0 ? owner_.processor_.modulationDestName (owner_.track_, r.dest) : std::string();
+        const auto destName = r.dest != 0 ? owner_.host_.modDestName (owner_.track_, r.dest) : std::string();
         dest_.setButtonText (! destName.empty() ? juce::String::fromUTF8 (destName.c_str()) : owner_.text ("mod.choose_dest"));
         updating_ = false;
     }
@@ -142,8 +142,8 @@ private:
 
 // ------------------------------------------------------------------------------------------------ la vue
 
-ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr)
-    : processor_ (p), palette_ (palette), tr_ (tr)
+ModView::ModView (ModulationHost& host, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr)
+    : host_ (host), palette_ (palette), tr_ (tr)
 {
     auto caption = [this] (juce::Label& l, const char* key)
     {
@@ -186,8 +186,8 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
         for (auto* pill : { &row.rate, &row.phase })
         {
             pill->setPalette (palette_);
-            pill->onGestureBegin = [this] { processor_.uiBeginGesture(); };
-            pill->onGestureEnd = [this] { processor_.uiEndGesture(); };
+            pill->onGestureBegin = [this] { host_.modBeginGesture(); };
+            pill->onGestureEnd = [this] { host_.modEndGesture(); };
             addAndMakeVisible (*pill);
         }
         {
@@ -203,8 +203,8 @@ ModView::ModView (NeptuneProcessor& p, const neptune::core::theme::Palette& pale
         row.phase.onValue = [this, i] (double v) { if (! updating_) { matrix_.lfos[static_cast<std::size_t> (i)].phase = v / 100.0; commit(); } };
     }
     envEditor_ = std::make_unique<EnvelopeEditor> (palette_, tr_);
-    envEditor_->onGestureBegin = [this] { processor_.uiBeginGesture(); };
-    envEditor_->onGestureEnd = [this] { processor_.uiEndGesture(); };
+    envEditor_->onGestureBegin = [this] { host_.modBeginGesture(); };
+    envEditor_->onGestureEnd = [this] { host_.modEndGesture(); };
     envEditor_->onChange = [this] (const neptune::core::EnvelopeDescription& e)
     {
         if (updating_) return;
@@ -317,8 +317,8 @@ void ModView::layoutRoutes()
 
 void ModView::reload()
 {
-    track_ = processor_.selectedTrack();
-    committed_ = processor_.trackSettings (track_).modulation;
+    track_ = host_.modTrack();
+    committed_ = host_.modMatrix (track_);
     matrix_ = committed_;
     updating_ = true;
     for (int i = 0; i < mod::kLfos; ++i)
@@ -358,16 +358,14 @@ void ModView::selectEnvelope (int index)
 void ModView::commit()
 {
     committed_ = mod::sanitised (matrix_);
-    auto strip = processor_.trackSettings (track_);
-    strip.modulation = committed_;
-    processor_.uiEditTrack (track_, std::move (strip), "Modulation", "modulation");
+    host_.modEdit (track_, committed_);
 }
 
 void ModView::timerCallback()
 {
     if (! isShowing()) return;
-    if (processor_.selectedTrack() != track_) { reload(); return; }
-    if (processor_.trackSettings (track_).modulation != committed_) reload();   // annulation, chargement... : la matrice a changé ailleurs
+    if (host_.modTrack() != track_) { reload(); return; }
+    if (host_.modMatrix (track_) != committed_) reload();   // annulation, chargement... : la matrice a changé ailleurs
 }
 
 void ModView::addRoute()
@@ -391,7 +389,7 @@ void ModView::removeRoute (std::size_t index)
 void ModView::chooseDestination (std::size_t index)
 {
     if (search_ != nullptr || index >= matrix_.routes.size()) return;
-    search_ = std::make_unique<ParamSearchPanel> (processor_.parameters(), palette_, tr_, track_, true,
+    search_ = std::make_unique<ParamSearchPanel> (host_.modParameters(), palette_, tr_, track_, true,
         [safe = juce::Component::SafePointer<ModView> (this), index] (neptune::core::ParamId id)
         {
             if (safe == nullptr || index >= safe->matrix_.routes.size()) return;
@@ -403,7 +401,7 @@ void ModView::chooseDestination (std::size_t index)
         {
             juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->search_.reset(); });
         },
-        processor_.insertModulationTargets (track_));
+        host_.modInsertTargets (track_));
     addAndMakeVisible (*search_);
     search_->setBounds (getLocalBounds());
     search_->toFront (true);

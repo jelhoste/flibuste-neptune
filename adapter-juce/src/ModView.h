@@ -6,7 +6,7 @@
 #include "DragValuePill.h"
 #include "EnvelopeEditor.h"
 #include "ParamSearchPanel.h"
-#include "PluginProcessor.h"
+#include "ModulationHost.h"
 #include "neptune/core/I18n.h"
 #include "neptune/core/Modulation.h"
 #include "neptune/core/Theme.h"
@@ -17,7 +17,7 @@
 class ModView : public juce::Component, private juce::Timer
 {
 public:
-    ModView (NeptuneProcessor&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
+    ModView (ModulationHost&, const neptune::core::theme::Palette&, const neptune::core::i18n::Translator&);
     ~ModView() override;
 
     void resized() override;
@@ -39,7 +39,7 @@ private:
     juce::String text (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Colour colour (neptune::core::theme::Token) const;
 
-    NeptuneProcessor& processor_;
+    ModulationHost& host_;
     neptune::core::theme::Palette palette_;
     const neptune::core::i18n::Translator& tr_;
     int track_ = -1;

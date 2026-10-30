@@ -13,6 +13,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <set>
 #include <string>
 #include "HostProbe.h"
+#include "ModulationHost.h"
 #include "ParamHost.h"
 #include "PresetHost.h"
 #include "neptune/core/OrganImport.h"
@@ -43,7 +44,8 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 class NeptuneProcessor : public juce::AudioProcessor,
                          public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                          public ParamHost,
-                         public PresetHost // presets du synthé de la piste sélectionnée (mêmes presets qu'AnalogSynth)
+                         public PresetHost, // presets du synthé de la piste sélectionnée (mêmes presets qu'AnalogSynth)
+                         public ModulationHost // matrice de modulation de la piste sélectionnée (onglet MOD)
 {
 public:
     NeptuneProcessor();
@@ -277,6 +279,20 @@ public:
     std::vector<std::pair<neptune::core::ParamId, std::string>> insertModulationTargets (int track) const;
     // Nom lisible d'une destination de modulation : un paramètre de Neptune ou d'un insert de la piste ; vide si elle n'existe plus.
     std::string modulationDestName (int track, neptune::core::ParamId dest) const;
+    // ModulationHost (onglet MOD) : la matrice de la piste sélectionnée du mixeur, enregistrée comme un réglage de bande annulable.
+    int modTrack() const noexcept override { return selectedTrack(); }
+    neptune::core::modulation::Matrix modMatrix (int track) const override { return trackSettings (track).modulation; }
+    void modEdit (int track, neptune::core::modulation::Matrix matrix) override
+    {
+        auto strip = trackSettings (track);
+        strip.modulation = std::move (matrix);
+        uiEditTrack (track, std::move (strip), "Modulation", "modulation");
+    }
+    void modBeginGesture() override { uiBeginGesture(); }
+    void modEndGesture() override { uiEndGesture(); }
+    neptune::core::ParameterSet& modParameters() override { return params_; }
+    std::string modDestName (int track, neptune::core::ParamId dest) const override { return modulationDestName (track, dest); }
+    std::vector<std::pair<neptune::core::ParamId, std::string>> modInsertTargets (int track) const override { return insertModulationTargets (track); }
     // Réduction de gain (dB, >= 0) des compresseurs insérés sur une bande (le plus fort de ceux qui ne sont pas en bypass), par canal.
     std::pair<float, float> compressorReduction (StripKind, int index) const;
 
