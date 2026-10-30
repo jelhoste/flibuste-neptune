@@ -1,4 +1,5 @@
 #include "NovaConvolutionEditor.h"
+#include "neptune/core/IrGenerator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -737,6 +738,21 @@ void NovaConvolutionEditor::chooseFile()
     });
 }
 
+void NovaConvolutionEditor::chooseBuiltin()
+{
+    juce::PopupMenu menu;
+    const auto current = irgen::keyOfPath (module_->irPath());
+    int id = 1;
+    for (const auto& e : irgen::entries())
+        menu.addItem (id++, tx (std::string (e.nameKey).c_str()), true, e.key == current);
+    juce::Component::SafePointer<NovaConvolutionEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (builtinPill_), [safe] (int chosen)
+    {
+        if (safe == nullptr || chosen <= 0) return;
+        safe->setIrFile (irgen::pathFor (irgen::entries()[static_cast<std::size_t> (chosen - 1)].key));
+    });
+}
+
 void NovaConvolutionEditor::setIrFile (const std::string& path)
 {
     ConvolutionModule* module = module_;
@@ -773,6 +789,10 @@ void NovaConvolutionEditor::buildIrPage()
     loadPill_->setText (tx ("cv.load"));
     loadPill_->setFontSize (kPillFont);
     loadPill_->onClick = [this] { chooseFile(); };
+    builtinPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
+    builtinPill_->setText (tx ("cv.builtin"));
+    builtinPill_->setFontSize (kPillFont);
+    builtinPill_->onClick = [this] { chooseBuiltin(); };
     clearPill_ = add<nova::Pill> (0, skin(), nova::Pill::Look::Small);
     clearPill_->setText (tx ("cv.clear"));
     clearPill_->setFontSize (kPillFont);
@@ -891,10 +911,11 @@ void NovaConvolutionEditor::layout()
 
     // ---- page IR
     irPanel_->setBounds (R (204, 72, 942, 332));
-    loadPill_->setBounds (R (220, 104, 140, 28));
-    clearPill_->setBounds (R (366, 104, 80, 28));
-    fileText_->setBounds (R (460, 104, 470, 18));
-    statusText_->setBounds (R (460, 122, 470, 14));
+    loadPill_->setBounds (R (220, 104, 120, 28));
+    builtinPill_->setBounds (R (346, 104, 130, 28));
+    clearPill_->setBounds (R (482, 104, 70, 28));
+    fileText_->setBounds (R (566, 104, 364, 18));
+    statusText_->setBounds (R (566, 122, 364, 14));
     wavePill_->setBounds (R (940, 104, 84, 28));
     spectrumPill_->setBounds (R (1030, 104, 100, 28));
     irView_->setBounds (R (220, 142, 910, 250));
@@ -952,7 +973,10 @@ void NovaConvolutionEditor::tick()
     {
         irView_->update();
         const auto path = module_->irPath();
-        const auto name = path.empty() ? tx ("cv.no_file") : juce::File (juce::String::fromUTF8 (path.c_str())).getFileName();
+        juce::String name = path.empty() ? tx ("cv.no_file") : juce::File (juce::String::fromUTF8 (path.c_str())).getFileName();
+        if (irgen::isBuiltinPath (path))
+            for (const auto& e : irgen::entries())
+                if (e.key == irgen::keyOfPath (path)) name = tx (std::string (e.nameKey).c_str()) + "  (" + tx ("cv.builtin_tag") + ")";
         if (name != shownFile_) { shownFile_ = name; fileText_->setText (name); }
         const auto status = statusText();
         if (status != shownStatus_) { shownStatus_ = status; statusText_->setText (status); }

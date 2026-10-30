@@ -1,4 +1,5 @@
 #include "neptune/core/ConvolutionModule.h"
+#include "neptune/core/IrGenerator.h"
 
 #include <algorithm>
 #include <cctype>
@@ -22,6 +23,7 @@ constexpr int kSlopes[3] = { 12, 24, 48 };
 // que ce lecteur refuse passe par le chargeur de samples de Neptune (mono ou stéréo).
 bool loadIrFile (const std::string& path, llc::IRBuffer& out)
 {
+    if (irgen::isBuiltinPath (path)) return irgen::generate (irgen::keyOfPath (path), out);   // IR d'usine calculée (IrGenerator.h) : aucun fichier
     std::string ext = std::filesystem::u8path (path).extension().string();
     for (auto& ch : ext) ch = static_cast<char> (std::tolower (static_cast<unsigned char> (ch)));
     if ((ext == ".wav" || ext == ".wave" || ext == ".w64") && llc::loadWavFile (path, out) == llc::WavStatus::Ok) return true;

@@ -29,6 +29,7 @@ private:
     void buildTonePage();
     void buildLevelsPage();
     void chooseFile();
+    void chooseBuiltin();   // menu des IR d'usine calculées (IrGenerator.h)
     void setIrFile (const std::string& path);   // annulable
     bool isInterestedInFileDrag (const juce::StringArray&) override;
     void filesDropped (const juce::StringArray&, int, int) override;
@@ -45,7 +46,7 @@ private:
 
     // page IR
     nova::Panel *irPanel_ = nullptr, *optionsPanel_ = nullptr;
-    nova::Pill *loadPill_ = nullptr, *clearPill_ = nullptr, *wavePill_ = nullptr, *spectrumPill_ = nullptr;
+    nova::Pill *loadPill_ = nullptr, *builtinPill_ = nullptr, *clearPill_ = nullptr, *wavePill_ = nullptr, *spectrumPill_ = nullptr;
     nova::Text *fileText_ = nullptr, *statusText_ = nullptr;
     IrView* irView_ = nullptr;
     std::vector<nova::KnobCard*> irKnobs_;                 // étirement, début, fin, attaque, décroissance
