@@ -11,7 +11,7 @@ namespace mod = neptune::core::modulation;
 namespace
 {
 // Largeurs des colonnes d'une route (la ligne de légende au-dessus de la liste reprend les mêmes).
-constexpr int kRemoveW = 34, kDestW = 300, kKindW = 150, kIndexW = 90, kChannelW = 90, kRangeW = 84, kGapS = 6, kGapL = 10;
+constexpr int kRemoveW = 34, kDestW = 300, kKindW = 176, kIndexW = 90, kChannelW = 90, kRangeW = 84, kGapS = 6, kGapL = 10;
 }
 
 // ------------------------------------------------------------------------------------------------ une route
@@ -22,8 +22,8 @@ public:
     RouteRow (ModView& owner, std::size_t index) : owner_ (owner), index_ (index)
     {
         const auto& r = owner.matrix_.routes[index];
-        const char* kinds[6] = { "mod.src_cc", "mod.src_bend", "mod.src_aftertouch", "mod.src_macro", "mod.src_lfo", "mod.src_env" };
-        for (int i = 0; i < 6; ++i) kind_.addItem (owner.text (kinds[i]), i + 1);
+        const char* kinds[7] = { "mod.src_cc", "mod.src_bend", "mod.src_aftertouch", "mod.src_macro", "mod.src_lfo", "mod.src_env", "mod.src_wheel" };
+        for (const int id : { 1, 7, 2, 3, 4, 5, 6 }) kind_.addItem (owner.text (kinds[id - 1]), id);   // « Molette de modulation » (id 7) juste après les CC
         kind_.onChange = [this] { kindChanged(); };
         addAndMakeVisible (kind_);
         indexBox_.onChange = [this] { if (! updating_) { edit().source.index = indexBox_.getSelectedId() - 1; owner_.commit(); } };
@@ -81,7 +81,7 @@ public:
         int kindId = 5;   // LFO par défaut
         switch (r.source.kind)
         {
-            case SK::ControlChange: kindId = 1; break;
+            case SK::ControlChange: kindId = r.source.index == 1 ? 7 : 1; break;   // CC 1 = la molette de modulation
             case SK::PitchBend: kindId = 2; break;
             case SK::Aftertouch: kindId = 3; break;
             case SK::Macro: kindId = 4; break;
@@ -153,7 +153,9 @@ private:
         using SK = mod::SourceKind;
         const SK kinds[6] = { SK::ControlChange, SK::PitchBend, SK::Aftertouch, SK::Macro, SK::Lfo, SK::Envelope };
         auto& r = edit();
-        r.source.kind = kinds[std::clamp (kind_.getSelectedId() - 1, 0, 5)];
+        const int chosen = kind_.getSelectedId();
+        if (chosen == 7) { r.source = { SK::ControlChange, 1, 0 }; refresh (r); owner_.commit(); return; }   // molette de modulation : CC 1, tous canaux
+        r.source.kind = kinds[std::clamp (chosen - 1, 0, 5)];
         r.source.index = 0;
         if (r.source.kind != SK::ControlChange && r.source.kind != SK::PitchBend && r.source.kind != SK::Aftertouch) r.source.channel = 0;
         refresh (r);

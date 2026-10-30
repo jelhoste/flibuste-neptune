@@ -521,6 +521,7 @@ const Entry kEntries[] = {
     { "mod.head_dest", { "Destination", "Destination" } },
     { "mod.any_channel", { "Any channel", "Tous canaux" } },
     { "mod.src_cc", { "MIDI CC", "CC MIDI" } },
+    { "mod.src_wheel", { "Mod wheel", "Molette de modulation" } },
     { "mod.src_bend", { "Pitch bend", "Pitch bend" } },
     { "mod.src_aftertouch", { "Aftertouch", "Aftertouch" } },
     { "mod.src_macro", { "Macro", "Macro" } },
