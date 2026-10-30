@@ -37,6 +37,7 @@ private:
     void buildEnvPage();
     void buildModPage();
     ModulationHost* modulation_ = nullptr;   // page MOD (plugin seul) : l'hôte de la matrice
+    bool hasBend_ = false;                   // l'hôte fournit une molette de hauteur : le patch montre sa plage
     ModView* modView_ = nullptr;
 
     // ---- fabriques typées sur la description du patch
@@ -97,7 +98,7 @@ private:
     nova::Panel *ampPanel_ = nullptr, *pitchPanel_ = nullptr, *voicesPanel_ = nullptr;
     EnvelopeEditor *ampEnv_ = nullptr, *pitchEnv_ = nullptr;
     nova::KnobCard* pitchDepth_ = nullptr;
-    nova::NumberPill* bendRange_ = nullptr;   // plage du pitch bend (plugin seul : Neptune n'envoie pas de pitch bend au synthé)
+    nova::NumberPill* bendRange_ = nullptr;   // plage du pitch bend (quand l'hôte fournit une molette de hauteur)
     nova::ChoicePill *polyMode_ = nullptr, *steal_ = nullptr;
     nova::ValueSlider *voices_ = nullptr, *glide_ = nullptr;
 };

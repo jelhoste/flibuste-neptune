@@ -33,6 +33,7 @@ public:
         double pulse[numOscillators] = { 50.0, 50.0, 50.0 };      // % (largeur d'impulsion)
         double unisonDetune[numOscillators] = { 20.0, 20.0, 20.0 }; // cents, voix extrêmes
         double pitchEnvDepth = 0.0;          // demi-tons à pleine enveloppe
+        double bend = 0.0;                   // molette de hauteur, -1..+1 : multipliée par la plage du patch (SynthDescription::bendRange demi-tons)
         // Temps et sustain d'une enveloppe (paramètres de la piste) ; -1 : ceux du patch. Pris au Note On (attaque, décroissance,
         // sustain) et au Note Off (relâchement).
         struct EnvParams { double attackMs = -1.0, decayMs = -1.0, sustain = -1.0 /* 0..1 */, releaseMs = -1.0; };

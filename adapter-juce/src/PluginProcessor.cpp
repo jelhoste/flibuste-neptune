@@ -2375,7 +2375,12 @@ void NeptuneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             mm.channel = (msg.getChannel() - 1) & 15;
             bool known = true;
             if (msg.isController()) { mm.kind = neptune::core::midi::MsgKind::ControlChange; mm.data1 = msg.getControllerNumber(); mm.data2 = msg.getControllerValue(); }
-            else if (msg.isPitchWheel()) { mm.kind = neptune::core::midi::MsgKind::PitchBend; mm.data2 = msg.getPitchWheelValue() >> 7; }
+            else if (msg.isPitchWheel())
+            {
+                mm.kind = neptune::core::midi::MsgKind::PitchBend;
+                mm.data2 = msg.getPitchWheelValue() >> 7;
+                engine_.pitchBendMidi (mm.channel, msg.getPitchWheelValue());   // les pistes Synthé et FM suivent la molette sur 14 bits
+            }
             else if (msg.isChannelPressure()) { mm.kind = neptune::core::midi::MsgKind::ChannelPressure; mm.data2 = msg.getChannelPressureValue(); }
             else if (msg.isAftertouch()) { mm.kind = neptune::core::midi::MsgKind::PolyPressure; mm.data1 = msg.getNoteNumber(); mm.data2 = msg.getAfterTouchValue(); }
             else if (msg.isProgramChange()) { mm.kind = neptune::core::midi::MsgKind::ProgramChange; mm.data1 = msg.getProgramChangeNumber(); }

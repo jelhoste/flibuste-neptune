@@ -186,6 +186,7 @@ NovaSynthEditor::NovaSynthEditor (ParamHost& host, PresetHost& presets, SynthLin
 {
     desc_ = describe_();
     modulation_ = link.modulation;
+    hasBend_ = static_cast<bool> (link.pitchBend);
     addPage (tx ("synth.page_osc"), iconPath (0));
     addPage (tx ("synth.page_filter"), iconPath (1));
     addPage (tx ("synth.page_env"), iconPath (2));
@@ -339,7 +340,7 @@ void NovaSynthEditor::buildEnvPage()
     ampEnv_ = envelope (2, [] (const Desc& d) { return d.ampEnv; }, [] (Desc& d, const EnvelopeDescription& e) { d.ampEnv = e; });
     pitchEnv_ = envelope (2, [] (const Desc& d) { return d.pitchEnv; }, [] (Desc& d, const EnvelopeDescription& e) { d.pitchEnv = e; });
     pitchDepth_ = knob (2, mx::synthParam (link_.track, mx::kPitchEnvDepth), tx ("synth.pitch_depth"), false);
-    if (modulation_ != nullptr)
+    if (hasBend_)
         bendRange_ = number (2, tx ("synth.bend_range").toUpperCase(), 0, SynthDescription::maxBendRange, [] (const Desc& d) { return d.bendRange; },
                              [] (Desc& d, int v) { d.bendRange = v; }, {});
     voicesPanel_ = add<nova::Panel> (2, skin());

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "neptune/core/AnalogSynth.h"
+#include "neptune/core/Engine.h"
 #include "neptune/core/Mixer.h"
 #include "neptune/core/ProbePool.h"
 #include "neptune/core/SamplerParams.h"
@@ -702,4 +703,59 @@ TEST_CASE ("synth description: the bend range is bounded and written only when i
     CHECK (sanitised (d).bendRange == SynthDescription::maxBendRange);
     d.bendRange = -4;
     CHECK (sanitised (d).bendRange == 0);
+}
+
+TEST_CASE ("neptune engine: synth and FM tracks follow the pitch wheel of the host and of the screen", "[engine][bend]")
+{
+    auto frequency = [] (const std::vector<float>& v, std::size_t from)
+    {
+        int crossings = 0;
+        double first = -1.0, last = -1.0;
+        for (std::size_t i = from + 1; i < v.size(); ++i)
+            if (v[i - 1] < 0.0f && v[i] >= 0.0f)
+            {
+                const double t = static_cast<double> (i - 1) + static_cast<double> (-v[i - 1]) / static_cast<double> (v[i] - v[i - 1]);
+                if (first < 0.0) first = t;
+                last = t;
+                ++crossings;
+            }
+        return crossings > 2 ? (crossings - 1) * kRate / (last - first) : 0.0;
+    };
+    auto run = [&] (TrackType type, int midiBend14, float uiBend)
+    {
+        Engine e;
+        e.prepare (kRate, 256);
+        e.setTrackActive (0, true);
+        e.setTrackType (0, type);
+        if (type == TrackType::Synth)
+        {
+            SynthDescription d;
+            d.osc[0].wave = kWaveSine;   // sinus : une seule traversée par période
+            d.filters.filter[0].on = false;
+            e.publishSynth (0, std::make_shared<SynthPatch> (d));
+        }
+        else
+            e.publishFm (0, std::make_shared<fm::FmDescription>());
+        e.pitchBendMidi (0, midiBend14);
+        e.setUiPitchBend (0, uiBend);
+        std::vector<float> all, l (256), r (256);
+        float* out[2] = { l.data(), r.data() };
+        e.process (out, 2, 256);
+        e.noteOnTrack (0, 0, 69, 0.8f);
+        for (int i = 0; i < 100; ++i)
+        {
+            e.process (out, 2, 256);
+            all.insert (all.end(), l.begin(), l.end());
+        }
+        return frequency (all, 6000);
+    };
+    for (const auto type : { TrackType::Synth, TrackType::Fm })
+    {
+        const double centre = run (type, 8192, 0.0f);
+        REQUIRE (centre > 100.0);
+        INFO ("type " << static_cast<int> (type) << " centre " << centre);
+        CHECK (run (type, 16383, 0.0f) / centre == Approx (std::pow (2.0, 2.0 / 12.0)).epsilon (0.01));    // molette de l'hôte en haut : +2 demi-tons
+        CHECK (run (type, 0, 0.0f) / centre == Approx (std::pow (2.0, -2.0 / 12.0)).epsilon (0.01));       // en bas : -2
+        CHECK (run (type, 16383, 0.5f) / centre == Approx (std::pow (2.0, 1.0 / 12.0)).epsilon (0.01));    // la molette de l'écran prime tant qu'elle n'est pas au repos
+    }
 }

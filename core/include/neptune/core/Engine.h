@@ -97,6 +97,12 @@ public:
     void setTrackMidiFilter (int track, std::shared_ptr<const midi::CompiledFilter>);
     // Un message de contrôleur (CC, pitch bend, pression, programme) : retenu pour les conditions MIDI des zones. Thread audio.
     void midiController (const midi::Message& m) noexcept { midiState_.update (m); }
+    // Molette de hauteur de l'hôte sur `channel` (0..15), 14 bits (0..16383, repos 8192) : la matrice et les conditions MIDI n'en voient que 7 (midiController) ;
+    // les pistes Synthé et FM suivent celle-ci. Thread audio.
+    void pitchBendMidi (int channel, int value14) noexcept { bend14_[static_cast<std::size_t> (channel & 15)].v.store (value14 < 0 ? 0 : value14 > 16383 ? 16383 : value14, std::memory_order_relaxed); }
+    // Molettes de l'écran, pour une piste Synthé ou FM (thread de message) : hauteur -1..+1 (au repos, la molette de l'hôte reprend la main), modulation 0..1.
+    void setUiPitchBend (int track, float position) noexcept;
+    void setUiModWheel (int track, float position) noexcept;
     // Écrit la valeur (0..100) d'un modulateur quand une touche de keyswitch le bascule ; appelé par le thread audio (fourni par le processeur, qui relaie vers l'hôte).
     void setModulatorWriter (std::function<void (ParamId, double)> w) { modulatorWriter_ = std::move (w); }
     // Notes en cours d'une piste Synthé figées par un changement de preset (capture par voix).
@@ -396,6 +402,12 @@ private:
     std::function<void (ParamId, double)> modulatorWriter_;
     void keyswitch (int track, int channel, int key, bool down) noexcept;
     midi::State midiState_;   // dernier état des contrôleurs de chaque canal (conditions MIDI des zones)
+    struct Wheel { std::atomic<int> v { 8192 }; };   // 14 bits, repos au milieu
+    std::array<Wheel, 16> bend14_;                   // molette de hauteur de l'hôte, par canal
+    std::array<Wheel, 16> uiBend_;                   // molette de hauteur de l'écran, par piste
+    std::array<std::atomic<int>, 16> uiMod_ {};      // molette de modulation de l'écran, par piste (0..127)
+    double trackBend (int track) const noexcept;     // -1..+1 : celle de l'écran si elle n'est pas au repos, sinon la plus écartée des canaux que la piste écoute
+    int trackModWheel (int track) const noexcept;    // 0..127 : le plus fort du CC 1 des canaux écoutés et de la molette de l'écran
     bool currentRootAudioIn_ = false;
     std::array<Parallel, kParallels> parallels_;
     // contexte du bloc en cours

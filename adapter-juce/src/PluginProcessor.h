@@ -352,6 +352,9 @@ public:
     // Voix qui sonnent (moniteur) : thread de message.
     int readVoices (neptune::core::Engine::VoiceInfo* out, int maxOut) const { return engine_.readVoices (out, maxOut); }
     void uiPanic() { engine_.postUiEvent ({ neptune::core::Engine::UiEvent::Type::Panic, 0, 0, 0.0f, 0 }); }
+    // molettes de l'écran d'une piste Synthé ou FM (thread de message) : hauteur -1..+1 (revient au repos au lâcher), modulation 0..1 (CC 1)
+    void uiPitchBendTrack (int track, float position) noexcept { engine_.setUiPitchBend (track, position); }
+    void uiModWheelTrack (int track, float position) noexcept { engine_.setUiModWheel (track, position); }
     void setVoiceMonitor (bool on) { engine_.setVoiceMonitor (on); }
     std::uint64_t heldKeyWord (int track, int word) const noexcept { return engine_.heldKeyWord (track, word); }
     std::uint64_t heldChannelWord (int track, int channel, int word) const noexcept { return engine_.heldChannelWord (track, channel, word); }

@@ -210,6 +210,44 @@ bool listensTo (const Strip& c, int channel) noexcept
 }
 } // namespace
 
+void Engine::setUiPitchBend (int track, float position) noexcept
+{
+    if (track < 0 || track >= kTracks) return;
+    const float p = position < -1.0f ? -1.0f : position > 1.0f ? 1.0f : position;
+    uiBend_[static_cast<std::size_t> (track)].v.store (static_cast<int> (std::lround (8192.0f + p * 8191.0f)), std::memory_order_relaxed);
+}
+
+void Engine::setUiModWheel (int track, float position) noexcept
+{
+    if (track < 0 || track >= kTracks) return;
+    const float p = position < 0.0f ? 0.0f : position > 1.0f ? 1.0f : position;
+    uiMod_[static_cast<std::size_t> (track)].store (static_cast<int> (std::lround (p * 127.0f)), std::memory_order_relaxed);
+}
+
+double Engine::trackBend (int track) const noexcept
+{
+    const int ui = uiBend_[static_cast<std::size_t> (track)].v.load (std::memory_order_relaxed);
+    if (ui != 8192) return (ui - 8192) / 8191.0;
+    const auto& cfg = tracks_[static_cast<std::size_t> (track)].config;
+    int best = 8192;
+    for (int ch = 0; ch < 16; ++ch)
+    {
+        if (! listensTo (cfg, ch)) continue;
+        const int v = bend14_[static_cast<std::size_t> (ch)].v.load (std::memory_order_relaxed);
+        if (std::abs (v - 8192) > std::abs (best - 8192)) best = v;
+    }
+    return (best - 8192) / (best >= 8192 ? 8191.0 : 8192.0);
+}
+
+int Engine::trackModWheel (int track) const noexcept
+{
+    int best = uiMod_[static_cast<std::size_t> (track)].load (std::memory_order_relaxed);
+    const auto& cfg = tracks_[static_cast<std::size_t> (track)].config;
+    for (int ch = 0; ch < 16; ++ch)
+        if (listensTo (cfg, ch)) best = std::max (best, static_cast<int> (midiState_.cc[static_cast<std::size_t> (ch)][1]));
+    return best;
+}
+
 void Engine::setTrackSettings (int track, const mixer::StripSettings& s)
 {
     if (track < 0 || track >= kTracks) return;
@@ -1234,6 +1272,8 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
         {
             fm::FmLive live;
             live.tuneCents = static_cast<float> (cents);
+            live.pitchBend = static_cast<int> (std::lround (8192.0 + trackBend (ti) * 8191.0));   // les molettes de l'hôte et de l'écran
+            live.modWheel = trackModWheel (ti);
             if (params_ != nullptr)
             {
                 const auto& fx = t.idx.fm;
@@ -1262,6 +1302,7 @@ void Engine::processChunk (float* const* out, int numChannels, int n) noexcept
             SynthVoices::Params sp;
             for (int f = 0; f < 2; ++f) { sp.cutoffHz[f] = fp.cutoffHz[f]; sp.resonance[f] = fp.resonance[f]; }
             sp.tuneCents = cents;
+            sp.bend = trackBend (ti);   // molette de hauteur de l'hôte ou de l'écran (plage du patch)
             if (params_ != nullptr)
             {
                 const auto& sy = t.idx.synth;

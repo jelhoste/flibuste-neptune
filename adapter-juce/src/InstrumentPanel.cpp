@@ -23,6 +23,8 @@ InstrumentPanel::InstrumentPanel (NeptuneProcessor& p, const theme::Palette& pal
     common.noteOff = [&proc, track] (int key) { proc.uiKeyOff (track, key); };
     common.heldKeys = [&proc, track] (int word) { return proc.heldKeyWord (track, word); };
     common.track = track;
+    common.pitchBend = [&proc, track] (float v) { proc.uiPitchBendTrack (track, v); };   // molettes de l'écran du clavier
+    common.modWheel = [&proc, track] (float v) { proc.uiModWheelTrack (track, v); };
     common.outputs = { mx::samplerParam (track, mx::kGain), mx::samplerParam (track, mx::kTuneSemitones), mx::samplerParam (track, mx::kTuneCents) };
 
     auto options = [&proc] (const char* moduleName)

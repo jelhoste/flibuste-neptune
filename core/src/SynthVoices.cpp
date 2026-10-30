@@ -556,7 +556,7 @@ void SynthVoices::renderVoice (Voice& v, float* left, float* right, int numFrame
             v.penv.advance (patch.pitchEnv, sampleRate_, static_cast<double> (m));
             pitchEnvValue = v.penv.value();
         }
-        const double semis = v.note - 69.0 + p.tuneCents / 100.0 + p.pitchEnvDepth * static_cast<double> (pitchEnvValue);
+        const double semis = v.note - 69.0 + p.tuneCents / 100.0 + p.bend * static_cast<double> (patch.desc.bendRange) + p.pitchEnvDepth * static_cast<double> (pitchEnvValue);
         const double f0 = 440.0 * std::exp2 (semis / 12.0) / sampleRate_; // incrément de phase de la note
 
         bool updateCoefs = ! coefsReady || gliding;
