@@ -673,6 +673,7 @@
     "first": 36,
     "hold": 0,
     "vel": 100,
+    "wheels": 1,
     "style": 6
    }
   ],

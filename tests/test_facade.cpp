@@ -776,3 +776,22 @@ TEST_CASE ("facade: a slider can mirror its position onto other parameters (save
     CHECK (back.widgets[0].mirror == clean.widgets[0].mirror);
     CHECK (back == clean);
 }
+
+TEST_CASE ("facade: the wheels option of a keyboard round-trips, is written only when on, and is a flag", "[facade][wheels]")
+{
+    facade::Facade f;
+    auto k = facade::defaultWidget (facade::WidgetType::Keyboard, 1, 10, 10);
+    f.widgets.push_back (k);
+    CHECK (facade::toJson (f).find ("wheels") == std::string::npos);   // absent tant qu'elle est éteinte : les façades d'avant se réécrivent à l'identique
+    f.widgets[0].wheels = 1;
+    const auto text = facade::toJson (f);
+    CHECK (text.find ("\"wheels\":1") != std::string::npos);
+    CHECK (facade::fromJson (text) == f);
+    CHECK (facade::fromJson (text).widgets[0].wheels == 1);
+    f.widgets[0].wheels = 7;
+    CHECK (facade::sanitised (f).widgets[0].wheels == 1);
+    f.widgets[0].wheels = -3;
+    CHECK (facade::sanitised (f).widgets[0].wheels == 1);   // tout ce qui n'est pas zéro allume l'option
+    f.widgets[0].wheels = 0;
+    CHECK (facade::sanitised (f).widgets[0].wheels == 0);
+}

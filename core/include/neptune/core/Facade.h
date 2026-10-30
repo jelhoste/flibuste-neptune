@@ -19,6 +19,7 @@ constexpr int canvasWidth = 1000;
 constexpr int canvasHeight = 600;
 constexpr int maxWidgets = 200;
 constexpr int minWidgetSize = 16;
+constexpr int keyboardWheelsWidth = 60;   // largeur (dans le canevas) de la bande des molettes d'un clavier qui en a
 constexpr std::size_t maxTextLength = 64;
 constexpr std::size_t maxImagePath = 1024;
 
@@ -124,6 +125,7 @@ struct Widget
     int firstNote = 36;             // Clavier : première touche affichée à gauche (do) ; le nombre de touches suit la largeur
     int hold = 0;                   // Clavier : 1, une touche cliquée reste enfoncée jusqu'au clic suivant
     int velocity = 100;             // Clavier : vélocité envoyée, 1..127
+    int wheels = 0;                 // Clavier : 1, deux molettes (hauteur et modulation) à gauche des touches ; elles envoient des messages MIDI sur le canal du clavier
     // Potard et curseur : fonction, indépendante du style d'images.
     //  stepMode 0 : automatique (le curseur saute de cran en cran sur un paramètre à pas, le potard est continu) ;
     //  1 : toujours continu ; 2 : crans personnalisés, aux valeurs réelles de `notches` (une position par cran, à égale distance).
@@ -148,7 +150,7 @@ struct Widget
     {
         return id == o.id && type == o.type && x == o.x && y == o.y && w == o.w && h == o.h && param == o.param && text == o.text && snapshot == o.snapshot
             && parent == o.parent && layout == o.layout && align == o.align && justify == o.justify && gap == o.gap && columns == o.columns
-            && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity
+            && channel == o.channel && firstNote == o.firstNote && hold == o.hold && velocity == o.velocity && wheels == o.wheels
             && midi == o.midi && midiTarget == o.midiTarget && midiFader == o.midiFader && actionMode == o.actionMode && source == o.source && style == o.style && vertical == o.vertical && mirror == o.mirror && stepMode == o.stepMode && invert == o.invert && scale == o.scale && response == o.response && notches == o.notches;
     }
 };

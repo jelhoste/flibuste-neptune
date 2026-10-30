@@ -138,8 +138,9 @@ Lié à un réglage **à choix** (par exemple `9024`, le vibrato de l'orgue : 0=
 | `first` | première touche affichée à gauche (un do) | 0 à 120, défaut 36 |
 | `hold` | 1 : une touche cliquée reste enfoncée jusqu'au clic suivant | 0 ou 1 |
 | `vel` | vélocité envoyée | 1 à 127, défaut 100 |
+| `wheels` | 1 : deux **molettes** à gauche des touches, hauteur (pitch bend, revient au milieu quand on la lâche) et modulation (CC 1, reste où on la laisse). Elles envoient du MIDI sur le canal `ch` du clavier, vers Neptune. Elles prennent 60 unités de la largeur du widget. Absent = pas de molettes. | 0 ou 1 |
 
-Le nombre de touches dépend de la largeur.
+Le nombre de touches dépend de la largeur (moins la bande des molettes, s'il y en a).
 
 ### 6.5 Voyant (9)
 

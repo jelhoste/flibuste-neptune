@@ -52,12 +52,18 @@ const std::array<int, 129>& whitesBelow()
     return table;
 }
 
+// Bord gauche des touches d'un clavier : à droite de la bande des molettes quand il en a.
+float keysLeft (const neptune::core::facade::Widget& w) noexcept
+{
+    return static_cast<float> (w.x) + (w.wheels != 0 ? static_cast<float> (neptune::core::facade::keyboardWheelsWidth) : 0.0f);
+}
+
 juce::Rectangle<float> keyRect (const neptune::core::facade::Widget& w, int key)
 {
     int first = w.firstNote;
     while (first > 0 && keyIsBlack (first)) --first;
     const auto& below = whitesBelow();
-    const float origin = static_cast<float> (w.x) - keyWhiteWidth * static_cast<float> (below[static_cast<std::size_t> (first)]);
+    const float origin = keysLeft (w) - keyWhiteWidth * static_cast<float> (below[static_cast<std::size_t> (first)]);
     const float x = origin + keyWhiteWidth * static_cast<float> (below[static_cast<std::size_t> (key)]);
     const float h = static_cast<float> (w.h);
     if (! keyIsBlack (key)) return { x, static_cast<float> (w.y), keyWhiteWidth, h };
@@ -67,7 +73,7 @@ juce::Rectangle<float> keyRect (const neptune::core::facade::Widget& w, int key)
 // Touche sous le point (coordonnées du canevas), -1 si aucune ; les noires sont au-dessus des blanches.
 int keyAtPoint (const neptune::core::facade::Widget& w, juce::Point<float> p)
 {
-    if (! juce::Rectangle<float> (static_cast<float> (w.x), static_cast<float> (w.y), static_cast<float> (w.w), static_cast<float> (w.h)).contains (p)) return -1;
+    if (! juce::Rectangle<float> (keysLeft (w), static_cast<float> (w.y), static_cast<float> (w.x + w.w) - keysLeft (w), static_cast<float> (w.h)).contains (p)) return -1;
     for (const bool black : { true, false })
         for (int k = 0; k < 128; ++k)
             if (keyIsBlack (k) == black && keyRect (w, k).contains (p)) return k;
@@ -475,6 +481,11 @@ public:
             }
             return;
         }
+        if (mode_ == Mode::Wheel)
+        {
+            if (const auto* w = o.facade_.find (wheelWidget_)) wheelSet (*w, wheelIndex_, toCanvas (e.position).y);
+            return;
+        }
         if (mode_ == Mode::Midi)
         {
             if (const auto* w = o.facade_.find (midiId_); w != nullptr && w->midiFader != 0) sendMidiFader (*w, toCanvas (e.position));
@@ -537,6 +548,14 @@ public:
             if (! longPress_)
                 if (const auto* w = o.facade_.find (id)) runAction (*w);
             longPress_ = false;
+            return;
+        }
+        if (mode_ == Mode::Wheel)
+        {
+            if (const auto* w = o.facade_.find (wheelWidget_); w != nullptr && wheelIndex_ == 0) sendWheel (*w, 0, 0.0f);   // la molette de hauteur revient au milieu
+            wheelWidget_ = 0;
+            mode_ = Mode::None;
+            repaint();
             return;
         }
         if (mode_ == Mode::Key)
@@ -654,7 +673,7 @@ public:
     }
 
 private:
-    enum class Mode { None, Move, Resize, Turn, Band, Key, Slide, Midi };
+    enum class Mode { None, Move, Resize, Turn, Band, Key, Slide, Midi, Wheel };
 
     // Message MIDI d'un widget « Message MIDI » vers Neptune et/ou l'hôte. `release` : le relâchement d'une note envoie la note coupée.
     void sendMidi (const fc::Widget& w, bool release)
@@ -737,8 +756,53 @@ private:
     void noteOff (const fc::Widget& w, int key) { owner_.processor_.uiKeyOff (owner_.track_, key, w.channel - 1); }
 
     // Touche cliquée : la note part sur le canal du clavier. Maintien (réglage ou Maj) : une touche reste enfoncée jusqu'au clic suivant.
+    // Molettes d'un clavier : hauteur (revient au milieu au lâcher) à gauche, modulation (reste où on la laisse) à droite ; messages MIDI sur le canal du clavier.
+    static juce::Rectangle<float> wheelRect (const fc::Widget& w, int index)
+    {
+        return { static_cast<float> (w.x) + 4.0f + 28.0f * static_cast<float> (index), static_cast<float> (w.y) + 4.0f, 24.0f, static_cast<float> (w.h) - 8.0f };
+    }
+    void wheelSet (const fc::Widget& w, int index, float canvasY)
+    {
+        const auto r = wheelRect (w, index);
+        const float capH = 14.0f, labelH = 12.0f;
+        const float t = 1.0f - juce::jlimit (0.0f, 1.0f, (canvasY - capH * 0.5f - r.getY()) / std::max (1.0f, r.getHeight() - labelH - capH));
+        sendWheel (w, index, index == 0 ? t * 2.0f - 1.0f : t);
+    }
+    void sendWheel (const fc::Widget& w, int index, float position)
+    {
+        wheelPos_[w.id][static_cast<std::size_t> (index)] = position;
+        const int ch = juce::jlimit (0, 15, w.channel - 1);
+        std::vector<std::uint8_t> bytes;
+        int sent;
+        if (index == 0)
+        {
+            sent = juce::jlimit (0, 16383, static_cast<int> (std::lround (8192.0f + position * 8191.0f)));
+            bytes = { static_cast<std::uint8_t> (0xE0 | ch), static_cast<std::uint8_t> (sent & 127), static_cast<std::uint8_t> (sent >> 7) };
+        }
+        else
+        {
+            sent = juce::jlimit (0, 127, static_cast<int> (std::lround (position * 127.0f)));
+            bytes = { static_cast<std::uint8_t> (0xB0 | ch), 1, static_cast<std::uint8_t> (sent) };
+        }
+        auto& last = wheelSent_[w.id];
+        if (last[static_cast<std::size_t> (index)] != sent || index == 0)
+        {
+            last[static_cast<std::size_t> (index)] = sent;
+            owner_.processor_.postMidi (bytes, 1);
+        }
+        repaint();
+    }
+
     void keyDown (const juce::MouseEvent& e, const fc::Widget& w)
     {
+        if (w.wheels != 0 && toCanvas (e.position).x < static_cast<float> (w.x + fc::keyboardWheelsWidth))
+        {
+            mode_ = Mode::Wheel;
+            wheelWidget_ = w.id;
+            wheelIndex_ = toCanvas (e.position).x < static_cast<float> (w.x) + 30.0f ? 0 : 1;
+            wheelSet (w, wheelIndex_, toCanvas (e.position).y);
+            return;
+        }
         const int key = keyAtPoint (w, toCanvas (e.position));
         if (key < 0) return;
         if (w.hold != 0 || e.mods.isShiftDown())
@@ -1297,6 +1361,8 @@ private:
                     held[0] = o.processor_.heldChannelWordAny (w.channel - 1, 0);   // les notes du canal, quelle que soit la piste qui les joue
                     held[1] = o.processor_.heldChannelWordAny (w.channel - 1, 1);
                 }
+                g.saveState();
+                g.reduceClipRegion ((w.wheels != 0 ? b.withTrimmedLeft (static_cast<float> (fc::keyboardWheelsWidth)) : b).toNearestInt());   // les touches ne passent pas sous les molettes
                 for (const bool black : { false, true })
                     for (int k = 0; k < 128; ++k)
                     {
@@ -1328,6 +1394,28 @@ private:
                             g.drawText ("C" + juce::String (k / 12 - 1), r.withTrimmedBottom (4.0f).toNearestInt(), juce::Justification::centredBottom);
                         }
                     }
+                g.restoreState();
+                if (w.wheels != 0)
+                {
+                    const auto posIt = wheelPos_.find (w.id);
+                    const std::array<float, 2> pos = posIt != wheelPos_.end() ? posIt->second : std::array<float, 2> { 0.0f, 0.0f };
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        const auto r = wheelRect (w, i);
+                        const auto area = r.withTrimmedBottom (12.0f);
+                        g.setColour (juce::Colour (0xff1a1a1a));
+                        g.fillRoundedRectangle (area, 4.0f);
+                        g.setColour (juce::Colour (0xff555555));
+                        g.drawRoundedRectangle (area, 4.0f, 1.0f);
+                        const float t = i == 0 ? (pos[0] + 1.0f) * 0.5f : pos[1];
+                        const auto cap = juce::Rectangle<float> (area.getX() + 2.0f, area.getBottom() - 14.0f - t * (area.getHeight() - 14.0f), area.getWidth() - 4.0f, 14.0f);
+                        g.setColour (o.colour (Token::Accent).withAlpha (mode_ == Mode::Wheel && wheelWidget_ == w.id && wheelIndex_ == i ? 1.0f : 0.75f));
+                        g.fillRoundedRectangle (cap, 3.0f);
+                        g.setColour (o.colour (Token::TextDim));
+                        g.setFont (juce::FontOptions (9.0f));
+                        g.drawText (i == 0 ? "PITCH" : "MOD", juce::Rectangle<float> (r).removeFromBottom (12.0f).toNearestInt(), juce::Justification::centred);
+                    }
+                }
                 g.setColour (o.colour (Token::Border));
                 g.drawRect (b, 1.0f);
                 break;
@@ -1385,6 +1473,9 @@ private:
     juce::Rectangle<float> band_;
     std::set<int> bandBase_;
     std::map<int, std::pair<int, int>> pressed_;   // doigt ou souris -> (clavier, touche) tenu
+    std::map<int, std::array<float, 2>> wheelPos_;   // clavier -> position des molettes (hauteur -1..+1, modulation 0..1)
+    std::map<int, std::array<int, 2>> wheelSent_;    // clavier -> dernière valeur MIDI envoyée par chaque molette
+    int wheelWidget_ = 0, wheelIndex_ = 0;           // molette tenue par la souris
     std::map<int, std::set<int>> latched_;         // clavier -> touches en maintien
     std::set<int> moving_;   // widgets entraînés par un déplacement : la sélection et le contenu des zones sélectionnées
     neptune::core::ParamId playId_ = 0;
@@ -2920,6 +3011,10 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     kbHoldButton_.setButtonText (text ("facade.kb_hold"));
     kbHoldButton_.setTooltip (text ("facade.tip_kb_hold"));
     kbHoldButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.hold = w.hold != 0 ? 0 : 1; }, "Facade: keyboard hold"); };
+    kbWheelsButton_.setButtonText (text ("facade.kb_wheels"));
+    kbWheelsButton_.setTooltip (text ("facade.tip_kb_wheels"));
+    kbWheelsButton_.setClickingTogglesState (false);
+    kbWheelsButton_.onClick = [this] { applySingle ([] (fc::Widget& w) { w.wheels = w.wheels != 0 ? 0 : 1; }, "Facade: keyboard wheels"); };
     helpButton_.setButtonText ("?");
     helpButton_.setTooltip (text ("facade.help_title"));
     helpButton_.onClick = [this] { openHelp(); };
@@ -2941,7 +3036,7 @@ FacadeView::FacadeView (NeptuneProcessor& p, const neptune::core::theme::Palette
     alignButton_.setTooltip (text ("facade.tip_align"));
 
     for (auto* b : { &editButton_, &knobButton_, &buttonButton_, &menuButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &lampSourceButton_, &setKeyButton_, &actionModeButton_, &midiButton_, &midiEditButton_, &meterButton_, &meterSourceButton_, &imageButton_, &fitButton_, &clearImageButton_,
-                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
+                     &sliderButton_, &stylesButton_, &styleButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &saveFacadeButton_, &loadFacadeButton_, &relocateButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &linkButton_, &textButton_, &captureButton_, &duplicateButton_, &deleteButton_, &alignButton_, &helpButton_ })
         addAndMakeVisible (*b);
     refresh();
     updateButtons();
@@ -2980,7 +3075,7 @@ void FacadeView::updateButtons()
     sameSizeButton_.setVisible (editMode_ && one != nullptr);
     const bool zone = editMode_ && one != nullptr && one->type == fc::WidgetType::Zone;
     const bool keyboard = editMode_ && one != nullptr && one->type == fc::WidgetType::Keyboard;
-    for (auto* b : { &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_ }) b->setVisible (keyboard);
+    for (auto* b : { &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_ }) b->setVisible (keyboard);
     kbChannelButton_.setVisible (keyboard || (editMode_ && one != nullptr && one->type == fc::WidgetType::Lamp && one->source == 1));   // un voyant de notes lit aussi un canal
     bool anyStylable = false;
     for (const auto& w : facade_.widgets)
@@ -2993,7 +3088,7 @@ void FacadeView::updateButtons()
     invertButton_.setVisible (dial);
     if (dial) invertButton_.setToggleState (one->invert != 0, juce::dontSendNotification);
     if (one != nullptr && (one->type == fc::WidgetType::Slider || one->type == fc::WidgetType::Meter)) orientButton_.setToggleState (one->vertical != 0, juce::dontSendNotification);
-    if (keyboard) kbHoldButton_.setToggleState (one->hold != 0, juce::dontSendNotification);
+    if (keyboard) { kbHoldButton_.setToggleState (one->hold != 0, juce::dontSendNotification); kbWheelsButton_.setToggleState (one->wheels != 0, juce::dontSendNotification); }
     layoutButton_.setVisible (zone);
     zoneAlignButton_.setVisible (zone);
     zoneGapButton_.setVisible (zone);
@@ -3067,7 +3162,7 @@ void FacadeView::resized()
     if (editMode_)
     {
         flow ({ &knobButton_, &buttonButton_, &menuButton_, &sliderButton_, &actionButton_, &curveButton_, &labelButton_, &zoneButton_, &keyboardButton_, &lampButton_, &setKeyButton_, &midiButton_, &meterButton_ });
-        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
+        flow ({ &linkButton_, &textButton_, &styleButton_, &meterSourceButton_, &midiEditButton_, &actionModeButton_, &lampSourceButton_, &orientButton_, &notchesButton_, &scaleButton_, &invertButton_, &captureButton_, &kbChannelButton_, &kbFirstButton_, &kbHoldButton_, &kbWheelsButton_, &kbVelocityButton_, &sameSizeButton_, &layoutButton_, &zoneAlignButton_, &zoneGapButton_, &duplicateButton_, &deleteButton_, &alignButton_ });
     }
     canvas_->setBounds (area);
     if (picker_ != nullptr) picker_->setBounds (getLocalBounds());

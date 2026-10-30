@@ -113,7 +113,7 @@ add(type=1, x=670, y=430, w=80, h=44, param=9029, text="Drive", style=2, parent=
 add(type=9, x=760, y=438, w=28, h=28, param=9029, source=0, style=5, parent=zd)
 add(type=0, x=800, y=424, w=70, h=80, param=9030, text="Entrée", style=3, parent=zd)
 add(type=0, x=890, y=424, w=70, h=80, param=9032, text="Sortie", style=3, parent=zd)
-add(type=7, x=20, y=520, w=960, h=72, ch=1, first=36, hold=0, vel=100, style=6)
+add(type=7, x=20, y=520, w=960, h=72, ch=1, first=36, hold=0, vel=100, wheels=1, style=6)
 page1 = {"name": "Orgue", "image": a("0_fond.png"), "fit": 2, "styles": styles, "widgets": widgets}
 
 # page 2 : table d'essai des autres types (étiquette, vumètres, courbe, Midi, Set)

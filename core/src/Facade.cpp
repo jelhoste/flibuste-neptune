@@ -286,6 +286,7 @@ Facade sanitisedPage (Facade f)
         w.firstNote = std::clamp (w.firstNote, 0, 120);
         w.hold = w.hold != 0 ? 1 : 0;
         w.velocity = std::clamp (w.velocity, 1, 127);
+        w.wheels = w.wheels != 0 ? 1 : 0;
         w.vertical = w.vertical != 0 ? 1 : 0;
         w.source = w.type == WidgetType::Meter ? sanitisedMeterSource (w.source) : std::clamp (w.source, 0, 2);
         w.actionMode = std::clamp (w.actionMode, 0, 1 + combi::kNumCommands);
@@ -727,6 +728,7 @@ json pageJson (const Facade& f)
             e["first"] = w.firstNote;
             e["hold"] = w.hold;
             e["vel"] = w.velocity;
+            if (w.wheels != 0) e["wheels"] = 1;
         }
         if (w.type == WidgetType::Zone)
         {
@@ -885,6 +887,7 @@ Facade pageFromJson (const json& o)
             w.firstNote = intOf (e, "first", 36);
             w.hold = intOf (e, "hold", 0);
             w.velocity = intOf (e, "vel", 100);
+            w.wheels = intOf (e, "wheels", 0);
             if (const auto p = e.find ("param"); p != e.end() && p->is_number_integer())
             {
                 const auto v = p->get<long long>();

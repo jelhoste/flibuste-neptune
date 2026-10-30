@@ -110,7 +110,7 @@ private:
     int missingTick_ = 0;
 
     juce::TextButton editButton_, knobButton_, buttonButton_, labelButton_, menuButton_, actionButton_, curveButton_, zoneButton_, keyboardButton_, lampButton_, lampSourceButton_, setKeyButton_, actionModeButton_, midiButton_, midiEditButton_, meterButton_, meterSourceButton_, sliderButton_, stylesButton_, styleButton_, orientButton_, notchesButton_, scaleButton_, invertButton_, saveFacadeButton_, loadFacadeButton_, relocateButton_, imageButton_, fitButton_, clearImageButton_;
-    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbVelocityButton_;
+    juce::TextButton linkButton_, textButton_, duplicateButton_, deleteButton_, captureButton_, alignButton_, helpButton_, sameSizeButton_, layoutButton_, zoneAlignButton_, zoneGapButton_, kbChannelButton_, kbFirstButton_, kbHoldButton_, kbWheelsButton_, kbVelocityButton_;
     std::unique_ptr<Canvas> canvas_;
     std::unique_ptr<Picker> picker_;
     std::unique_ptr<TextPrompt> prompt_;

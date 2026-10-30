@@ -267,6 +267,8 @@ const Entry kEntries[] = {
     { "facade.tip_kb_first", { "Leftmost key; the width of the widget sets how many keys are shown", "Touche de gauche ; la largeur du widget règle le nombre de touches affichées" } },
     { "facade.kb_hold", { "Hold", "Maintien" } },
     { "facade.tip_kb_hold", { "A clicked key stays down until you click it again (Shift-click does the same)", "Une touche cliquée reste enfoncée jusqu'au clic suivant (Maj-clic fait pareil)" } },
+    { "facade.kb_wheels", { "Wheels", "Molettes" } },
+    { "facade.tip_kb_wheels", { "Show a pitch wheel and a modulation wheel on the left of the keyboard; they send MIDI on this keyboard's channel", "Affiche une molette de hauteur et une molette de modulation à gauche du clavier ; elles envoient du MIDI sur le canal de ce clavier" } },
     { "facade.kb_velocity", { "Velocity...", "Vélocité..." } },
     { "facade.tip_kb_velocity", { "Velocity sent when a key is clicked", "Vélocité envoyée quand on clique une touche" } },
     { "facade.add_slider", { "+ Slider", "+ Curseur" } },
