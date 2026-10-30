@@ -18,7 +18,7 @@ class ParamSearchPanel : public juce::Component, private juce::ListBoxModel
 public:
     ParamSearchPanel (const neptune::core::ParameterSet& set, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
                       int track, bool continuousOnly, std::function<void (neptune::core::ParamId)> onChoose, std::function<void()> onClose,
-                      std::vector<std::pair<neptune::core::ParamId, std::string>> extras = {})
+                      std::vector<std::pair<neptune::core::ParamId, std::string>> extras = {}, bool showScope = true)
         : palette_ (palette), tr_ (tr), onChoose_ (std::move (onChoose)), onClose_ (std::move (onClose))
     {
         for (std::size_t i = 0; i < set.size(); ++i)
@@ -47,7 +47,7 @@ public:
         {
             std::vector<neptune::core::paramgroups::Group> groups;
             for (const auto& e : entries_) groups.push_back (e.group);
-            bar_ = std::make_unique<ParamFilterBar> (groups, palette_, tr_, track, [this] { refilter(); });
+            bar_ = std::make_unique<ParamFilterBar> (groups, palette_, tr_, track, [this] { refilter(); }, showScope);
             addAndMakeVisible (*bar_);
         }
         filter_.setFont (juce::FontOptions (18.0f));

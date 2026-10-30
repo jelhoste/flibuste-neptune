@@ -20,5 +20,6 @@ public:
     virtual void modEndGesture() = 0;
     virtual neptune::core::ParameterSet& modParameters() = 0;                                           // les réglages que les routes peuvent viser
     virtual std::string modDestName (int track, neptune::core::ParamId dest) const = 0;                 // nom affiché d'une destination
+    virtual bool modShowScope() const { return true; }                                                   // faux : un seul module, le menu de portée (piste, global...) de la liste des destinations est caché
     virtual std::vector<std::pair<neptune::core::ParamId, std::string>> modInsertTargets (int track) const { (void) track; return {}; }   // destinations propres aux inserts (aucune hors Neptune)
 };

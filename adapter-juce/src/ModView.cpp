@@ -401,7 +401,7 @@ void ModView::chooseDestination (std::size_t index)
         {
             juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->search_.reset(); });
         },
-        host_.modInsertTargets (track_));
+        host_.modInsertTargets (track_), host_.modShowScope());
     addAndMakeVisible (*search_);
     search_->setBounds (getLocalBounds());
     search_->toFront (true);

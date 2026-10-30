@@ -117,6 +117,7 @@ public:
     void modEndGesture() override { undo_.endGesture(); }
     neptune::core::ParameterSet& modParameters() override { return engine_.params(); }
     std::string modDestName (int, neptune::core::ParamId dest) const override;
+    bool modShowScope() const override { return false; }   // un seul module : pas de menu « Piste 1 / Globale »
 
     neptune::core::analogsynth::AnalogSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }

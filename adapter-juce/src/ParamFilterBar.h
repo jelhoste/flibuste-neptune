@@ -21,8 +21,8 @@ public:
 
     // `groups` : le classement de chaque entrée de la liste (sert à ne proposer que les pistes et familles qui existent).
     ParamFilterBar (const std::vector<Group>& groups, const neptune::core::theme::Palette& palette, const neptune::core::i18n::Translator& tr,
-                    int defaultTrack, std::function<void()> onChange)
-        : palette_ (palette), tr_ (tr), onChange_ (std::move (onChange))
+                    int defaultTrack, std::function<void()> onChange, bool showScope = true)
+        : palette_ (palette), tr_ (tr), onChange_ (std::move (onChange)), showScope_ (showScope)
     {
         std::set<int> tracks;
         std::array<bool, neptune::core::paramgroups::numFamilies> present {};
@@ -59,9 +59,10 @@ public:
         addKind (hasParallel, Scope::Parallel, "pfilter.parallels");
         addKind (hasBus, Scope::Bus, "pfilter.buses");
         addKind (hasGlobal, Scope::Global, "pfilter.global");
-        scope_.setSelectedId (defaultId, juce::dontSendNotification);
+        scope_.setSelectedId (showScope ? defaultId : 1, juce::dontSendNotification);   // sans menu de portée : tout est montré
         scope_.onChange = [this] { if (onChange_) onChange_(); };
-        addAndMakeVisible (scope_);
+        addChildComponent (scope_);
+        scope_.setVisible (showScope);
 
         addChip (text ("pfilter.all_families"), -1);
         for (int f = 0; f < neptune::core::paramgroups::numFamilies - 1; ++f)
@@ -85,14 +86,17 @@ public:
 
     int preferredHeight (int width) const
     {
-        return 30 + 6 + rowsFor (width) * 26;
+        return (showScope_ ? 30 + 6 : 0) + rowsFor (width) * 26;
     }
 
     void resized() override
     {
         auto r = getLocalBounds();
-        scope_.setBounds (r.removeFromTop (30));
-        r.removeFromTop (6);
+        if (showScope_)
+        {
+            scope_.setBounds (r.removeFromTop (30));
+            r.removeFromTop (6);
+        }
         int x = 0, y = r.getY();
         for (auto& c : chips_)
         {
@@ -146,6 +150,7 @@ private:
     const neptune::core::i18n::Translator& tr_;
     std::function<void()> onChange_;
     juce::ComboBox scope_;
+    bool showScope_ = true;
     std::vector<Choice> choices_;
     std::vector<std::unique_ptr<juce::TextButton>> chips_;
     int family_ = -1;
