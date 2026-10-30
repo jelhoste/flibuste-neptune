@@ -91,6 +91,7 @@ public:
 
     // --- thread de message
     void resetLoudness() noexcept { loudness_.reset(); }
+    void resetLevels() noexcept { resetRequested_.store (true, std::memory_order_release); }   // crêtes tenues, voyants d'écrêtage, moyennes (pas la sonie)
     void resetAll() noexcept { resetRequested_.store (true, std::memory_order_release); loudness_.reset(); }
     LoudnessMeter::Reading loudness() const noexcept { return loudness_.read(); }
 

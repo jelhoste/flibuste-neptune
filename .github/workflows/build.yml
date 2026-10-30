@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur, Microdécale et Convolution)
-        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP Mirador_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -128,6 +128,9 @@ jobs:
           DIA=$(find build/adapter-juce/Diapason_artefacts -name 'Diapason.clap' -print -quit)
           test -n "$DIA" || { echo "Diapason.clap introuvable"; exit 1; }
           "$CV" validate "$DIA"
+          MIR=$(find build/adapter-juce/Mirador_artefacts -name 'Mirador.clap' -print -quit)
+          test -n "$MIR" || { echo "Mirador.clap introuvable"; exit 1; }
+          "$CV" validate "$MIR"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -462,4 +465,28 @@ jobs:
         with:
           name: Diapason-${{ matrix.name }}
           path: dist-dia/*
+          if-no-files-found: error
+
+      # Mirador séparé, archivé à part.
+      - name: Archive Mirador.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Mirador_artefacts -name 'Mirador.clap' -print -quit)
+          test -n "$CLAP" || { echo "Mirador.clap introuvable"; exit 1; }
+          mkdir -p dist-mir/stage
+          cp -R "$CLAP" dist-mir/stage/
+          cd dist-mir/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Mirador-${{ matrix.name }}.zip" Mirador.clap
+          else
+            tar -czf "../Mirador-${{ matrix.name }}.tar.gz" Mirador.clap
+          fi
+          cd ../..
+          rm -rf dist-mir/stage
+          ls -la dist-mir
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Mirador-${{ matrix.name }}
+          path: dist-mir/*
           if-no-files-found: error

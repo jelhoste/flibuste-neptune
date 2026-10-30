@@ -9,6 +9,7 @@
 #include "../src/NovaDelayEditor.h"
 #include "../src/NovaMicrodecaleEditor.h"
 #include "../src/NovaDiapasonEditor.h"
+#include "../src/NovaMiradorEditor.h"
 #include "../src/NovaSynthEditor.h"
 #include "../src/NovaFmEditor.h"
 #include "../src/NovaSpectrum.h"
@@ -19,11 +20,15 @@
 #include "neptune/core/DelayModule.h"
 #include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/SignalGenerator.h"
+#include "neptune/core/Mirador.h"
 #include "neptune/core/StockModule.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmSynth.h"
 #include "neptune/core/SamplerParams.h"
+#include <chrono>
 #include <cmath>
+#include <thread>
+#include <vector>
 #include <memory>
 
 using namespace neptune::core;
@@ -56,6 +61,17 @@ struct EngineHost : ParamHost
 {
     generator::GeneratorEngine& engine;
     explicit EngineHost (generator::GeneratorEngine& e) : engine (e) {}
+    ParameterSet& parameters() override { return engine.params(); }
+    void uiBeginEdit (ParamId) override {}
+    void uiSetNormalised (ParamId id, double n) override { engine.params().setNormalized (id, n); }
+    void uiEndEdit (ParamId) override {}
+    void uiResetToDefault (ParamId id) override { engine.params().reset (id); }
+};
+
+struct MiradorHost : ParamHost
+{
+    mirador::MiradorEngine& engine;
+    explicit MiradorHost (mirador::MiradorEngine& e) : engine (e) {}
     ParameterSet& parameters() override { return engine.params(); }
     void uiBeginEdit (ParamId) override {}
     void uiSetNormalised (ParamId id, double n) override { engine.params().setNormalized (id, n); }
@@ -675,6 +691,68 @@ int main (int argc, char** argv)
             if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
             std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
         }
+    }
+
+    // ---- l'éditeur réel de Mirador
+    {
+        nova::SpectrumEngine::setThreading (false);
+        mirador::MiradorEngine mEngine;
+        mEngine.prepare (48000.0, 480);
+        MiradorHost mh (mEngine);
+        struct MCase { const char* name; th::ThemeId id; float scale; int page; };
+        const MCase mcs[] = { { "mirador-dark-loud", th::ThemeId::Dark, 1.0f, 0 }, { "mirador-dark-levels", th::ThemeId::Dark, 1.0f, 1 },
+                              { "mirador-dark-stereo", th::ThemeId::Dark, 1.0f, 2 }, { "mirador-dark-spectrum", th::ThemeId::Dark, 1.0f, 3 },
+                              { "mirador-light-loud", th::ThemeId::Light, 1.0f, 0 }, { "mirador-dark-set", th::ThemeId::Dark, 1.0f, 4 },
+                              { "mirador-dark-loud-070", th::ThemeId::Dark, 0.7f, 0 } };
+        for (const auto& c : mcs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaMiradorEditor::Options opt;
+            opt.brand = true;
+            opt.moduleName = "mirador";
+            opt.noPresets = true;
+            opt.noAB = true;
+            opt.noBypass = true;
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaMiradorEditor ed (mh, mEngine, th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            // un signal stéréo un peu large (sinus gauche + sinus droit décalé + bruit) pour que les mesures et le dessin aient de la matière
+            std::vector<float> l (480), r (480);
+            double ph = 0.0, ph2 = 0.0;
+            std::uint32_t seed = 2463534242u;
+            auto feed = [&] (int blocks)
+            {
+                for (int blk = 0; blk < blocks; ++blk)
+                {
+                    for (std::size_t i = 0; i < 480; ++i)
+                    {
+                        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+                        const float n = static_cast<float> (static_cast<std::int32_t> (seed)) * (1.0f / 2147483648.0f);
+                        l[i] = static_cast<float> (0.25 * std::sin (ph) + 0.08 * std::sin (ph * 5.0)) + 0.03f * n;
+                        r[i] = static_cast<float> (0.22 * std::sin (ph2) + 0.08 * std::sin (ph * 5.0)) - 0.03f * n;
+                        ph += 2.0 * 3.14159265358979 * 220.0 / 48000.0;
+                        ph2 += 2.0 * 3.14159265358979 * 223.0 / 48000.0;
+                    }
+                    mEngine.process (l.data(), r.data(), 480, true);
+                    if (blk % 10 == 9) std::this_thread::sleep_for (std::chrono::milliseconds (100));
+                }
+            };
+            feed (40);
+            ed.refreshNow();   // le spectre prépare son analyseur au premier passage : il lui faut du signal après
+            feed (60);
+            std::this_thread::sleep_for (std::chrono::milliseconds (300));
+            ed.refreshNow();
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+        mEngine.stop();
     }
 
     // ---- l'éditeur réel de l'égaliseur
