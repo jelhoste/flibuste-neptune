@@ -11,6 +11,7 @@
 #include "neptune/core/FmVoices.h"
 #include "neptune/core/HandoffSlot.h"
 #include "neptune/core/Mixer.h"
+#include "neptune/core/Modulation.h"
 #include "neptune/core/Parameter.h"
 
 namespace neptune::core::fm
@@ -22,8 +23,9 @@ constexpr ParamId synthPan = probe::trackParam (0, probe::kPan);       // -100..
 bool addSynthParams (ParameterSet& set, std::string* error = nullptr);
 
 // État du plugin (getStateInformation) : JSON versionné.
-std::string stateToJson (const ParameterSet&, const FmDescription&, const std::string& currentPresetId);
-bool stateFromJson (std::string_view text, ParameterSet&, FmDescription&, std::string& currentPresetId);
+// `modulation` (facultatif) : la matrice de modulation du plugin ; écrite seulement si elle n'est pas vide (un état sans matrice reste identique octet pour octet).
+std::string stateToJson (const ParameterSet&, const FmDescription&, const std::string& currentPresetId, const modulation::Matrix* modulation = nullptr);
+bool stateFromJson (std::string_view text, ParameterSet&, FmDescription&, std::string& currentPresetId, modulation::Matrix* modulation = nullptr);   // `modulation` : vide si l'état n'en porte pas
 
 class FmSynthEngine
 {

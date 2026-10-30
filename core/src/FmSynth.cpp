@@ -31,7 +31,7 @@ bool addSynthParams (ParameterSet& set, std::string* error)
         && mixer::addFmParams (set, 0, "", error);
 }
 
-std::string stateToJson (const ParameterSet& set, const FmDescription& d, const std::string& currentPresetId)
+std::string stateToJson (const ParameterSet& set, const FmDescription& d, const std::string& currentPresetId, const modulation::Matrix* modulation)
 {
     json doc;
     doc["format"] = kFormat;
@@ -42,10 +42,15 @@ std::string stateToJson (const ParameterSet& set, const FmDescription& d, const 
     const auto fmJson = json::parse (toJson (d), nullptr, false);
     if (! fmJson.is_discarded()) doc["fm"] = fmJson;
     if (! currentPresetId.empty()) doc["preset_id"] = currentPresetId;
+    if (modulation != nullptr && *modulation != modulation::Matrix {})
+    {
+        const auto m = json::parse (modulation::toJson (*modulation), nullptr, false);
+        if (! m.is_discarded()) doc["modulation"] = m;
+    }
     return doc.dump (2);
 }
 
-bool stateFromJson (std::string_view text, ParameterSet& set, FmDescription& d, std::string& currentPresetId)
+bool stateFromJson (std::string_view text, ParameterSet& set, FmDescription& d, std::string& currentPresetId, modulation::Matrix* modulation)
 {
     const auto doc = json::parse (text.begin(), text.end(), nullptr, false);
     if (doc.is_discarded() || ! doc.is_object()) return false;
@@ -65,6 +70,11 @@ bool stateFromJson (std::string_view text, ParameterSet& set, FmDescription& d, 
     currentPresetId.clear();
     if (const auto p = doc.find ("preset_id"); p != doc.end() && p->is_string() && p->get<std::string>().size() <= 64)
         currentPresetId = p->get<std::string>();
+    if (modulation != nullptr)
+    {
+        *modulation = modulation::Matrix {};
+        if (const auto m = doc.find ("modulation"); m != doc.end() && m->is_object()) *modulation = modulation::fromJson (m->dump());
+    }
     return true;
 }
 

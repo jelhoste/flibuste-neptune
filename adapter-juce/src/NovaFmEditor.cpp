@@ -1,4 +1,5 @@
 #include "NovaFmEditor.h"
+#include "ModView.h"
 
 #include <algorithm>
 #include <array>
@@ -22,6 +23,16 @@ juce::Path iconPath (int kind)
         p.addRectangle (3.0f, 3.0f, 8.0f, 7.0f);
         p.addRectangle (13.0f, 14.0f, 8.0f, 7.0f);
         p.startNewSubPath (7.0f, 10.0f); p.lineTo (7.0f, 17.0f); p.lineTo (13.0f, 17.0f);
+    }
+    else if (kind == 5)   // modulation : deux ondes lentes
+    {
+        p.startNewSubPath (2.0f, 8.0f);
+        p.cubicTo (5.0f, 1.0f, 9.0f, 1.0f, 12.0f, 8.0f);
+        p.cubicTo (15.0f, 15.0f, 19.0f, 15.0f, 22.0f, 8.0f);
+        p.startNewSubPath (2.0f, 18.0f);
+        p.lineTo (8.0f, 18.0f);
+        p.lineTo (11.0f, 13.0f);
+        p.lineTo (22.0f, 13.0f);
     }
     else   // global : LFO
     {
@@ -349,17 +360,26 @@ NovaFmEditor::NovaFmEditor (ParamHost& host, PresetHost& presets, FmLink link, c
     : NovaInstrumentBase (host, presets, link, palette, knobStyle, tr, std::move (options), juce::String::fromUTF8 ("FM6OP")), describe_ (link.description), apply_ (link.edit)
 {
     desc_ = fm::sanitised (describe_());
+    modulation_ = link.modulation;
     sysex_ = std::make_unique<FmSysexIO> (*this, presets, tr);
     addPage (tx ("fm.tab_operators").toUpperCase(), iconPath (0));
     addPage (tx ("fm.tab_global").toUpperCase(), iconPath (1));
+    if (modulation_ != nullptr) addPage (tx ("synth.page_mod"), iconPath (5));   // plugin seul
     buildCommon ("hlp.fm_out");   // MATRICE, SETTINGS, colonne de gauche, clavier
     buildOperatorPage();
     buildGlobalPage();
+    if (modulation_ != nullptr) buildModPage();
     setPage (0);
     setSize (designWidth, designHeight);
 }
 
 NovaFmEditor::~NovaFmEditor() = default;
+
+void NovaFmEditor::buildModPage()
+{
+    // l'onglet MOD de Neptune, tel quel, sur la matrice du plugin (page 2 : après OPÉRATEURS et GLOBAL)
+    modView_ = add<ModView> (2, *modulation_, skin().palette(), translator());
+}
 
 void NovaFmEditor::buildOperatorPage()
 {
@@ -560,6 +580,9 @@ void NovaFmEditor::layout()
 {
     const float H = contentH(), K = stretch();
     layoutCommon();
+
+    // ---- page MOD (plugin seul)
+    if (modView_ != nullptr) modView_->setBounds (R (X0, 72, 942, H));
 
     // ---- page OPÉRATEURS
     algoPanel_->setBounds (R (X0, 72, 330, H));

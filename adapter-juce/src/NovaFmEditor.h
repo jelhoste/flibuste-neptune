@@ -4,6 +4,7 @@
 // accordage, contrôleurs, macros automatisables), puis MATRICE (grille de presets) et SETTINGS ; clavier à l'écran masquable ; import / export sysex DX7.
 // L'éditeur ne connaît le module que par `FmLink` (description du patch, notes) : le même éditeur sert au plugin indépendant et à une piste de Neptune.
 #include "FmSysexIO.h"
+#include "ModulationHost.h"
 #include "NovaInstrumentBase.h"
 #include "neptune/core/FmVoices.h"
 
@@ -11,7 +12,10 @@ struct FmLink : InstrumentLink
 {
     std::function<neptune::core::fm::FmDescription()> description;
     std::function<void (neptune::core::fm::FmDescription, std::string name, std::string mergeKey)> edit;
+    ModulationHost* modulation = nullptr;   // plugin seul : la matrice de modulation (page MOD) ; nul dans Neptune, qui a son onglet MOD
 };
+
+class ModView;
 
 class NovaFmEditor : public NovaInstrumentBase
 {
@@ -31,6 +35,9 @@ private:
     void reloadDescription() override { desc_ = describe_(); }
     void buildOperatorPage();
     void buildGlobalPage();
+    void buildModPage();
+    ModulationHost* modulation_ = nullptr;   // page MOD (plugin seul) : l'hôte de la matrice
+    ModView* modView_ = nullptr;
 
     void edit (const std::function<void (Desc&)>&, const char* name = "FM", const char* mergeKey = "fm");
     nova::ValueSlider* slider (int page, juce::String title, double lo, double hi, std::function<int (const Desc&)> get, std::function<void (Desc&, int)> set, int def,

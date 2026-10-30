@@ -717,3 +717,35 @@ TEST_CASE ("fm synth engine follows the host modulation without changing the set
     CHECK (peakOf (modulated) < peakPlain * 0.6f);
     CHECK (modulated.params().get (synthVolume) == plain.params().get (synthVolume));   // le réglage ne bouge pas
 }
+
+TEST_CASE ("fm state: the modulation matrix is saved when it is not empty, and an empty one leaves the state unchanged", "[fm][modulation]")
+{
+    FmSynthEngine e;
+    REQUIRE (e.ok());
+    const auto without = stateToJson (e.params(), e.description(), "");
+    modulation::Matrix empty;
+    CHECK (stateToJson (e.params(), e.description(), "", &empty) == without);   // sans matrice : identique octet pour octet à l'état d'avant
+
+    modulation::Matrix m;
+    m.lfos[0].rateHz = 3.5;
+    modulation::Route r;
+    r.source = { modulation::SourceKind::ControlChange, 1, 0 };   // la molette de modulation
+    r.dest = synthVolume;
+    r.amount = -0.4;
+    m.routes.push_back (r);
+    const auto with = stateToJson (e.params(), e.description(), "", &m);
+    CHECK (with != without);
+
+    FmSynthEngine other;
+    REQUIRE (other.ok());
+    FmDescription back;
+    std::string id;
+    modulation::Matrix loaded;
+    REQUIRE (stateFromJson (with, other.params(), back, id, &loaded));
+    CHECK (loaded == m);
+    modulation::Matrix none;
+    none.lfos[1].rateHz = 3.0;   // une valeur de départ non vide doit être remise à vide par un état sans matrice
+    REQUIRE (stateFromJson (without, other.params(), back, id, &none));
+    CHECK (none == modulation::Matrix {});
+    CHECK (stateFromJson (without, other.params(), back, id));   // l'appel d'avant, sans matrice, marche toujours
+}

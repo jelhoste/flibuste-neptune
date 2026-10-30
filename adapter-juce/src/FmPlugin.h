@@ -8,6 +8,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include <string>
 #include <vector>
 #include "HostProbe.h"
+#include "ModulationHost.h"
 #include "NovaFmEditor.h"
 #include "ParamHost.h"
 #include "PresetHost.h"
@@ -15,6 +16,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 #include "neptune/core/FmPreset.h"
 #include "neptune/core/FmSynth.h"
 #include "neptune/core/I18n.h"
+#include "neptune/core/ModulationRig.h"
 #include "neptune/core/Settings.h"
 #include "neptune/core/Theme.h"
 #include "neptune/core/Undo.h"
@@ -25,6 +27,7 @@ class FmSynthProcessor : public juce::AudioProcessor,
                          public clap_juce_extensions::clap_juce_audio_processor_capabilities,
                          public ParamHost,
                          public PresetHost,
+                         public ModulationHost,   // matrice de modulation du plugin (onglet MOD)
                          private juce::AsyncUpdater
 {
 public:
@@ -72,6 +75,9 @@ public:
     void uiNoteOn (int key, float velocity) { engine_.postNoteOn (key, velocity); }
     void uiNoteOff (int key) { engine_.postNoteOff (key); }
     void uiPanic() { engine_.postPanic(); }
+    // molettes de l'écran (thread de message) : lues par le thread audio à chaque bloc, comme si elles venaient du MIDI
+    void uiPitchBend (float position) noexcept { uiBend_.store (position); }
+    void uiModWheel (float position) noexcept { uiMod_.store (position); }
 
     // ---- presets (PresetHost) ----
     neptune::core::preset::Library& library() override { return *library_; }
@@ -97,6 +103,16 @@ public:
         return keys;
     }
 
+    // ---- ModulationHost : la matrice du plugin (une seule « piste », la 0) ----
+    int modTrack() const noexcept override { return 0; }
+    neptune::core::modulation::Matrix modMatrix (int) const override { return rig_.matrix(); }
+    void modEdit (int, neptune::core::modulation::Matrix) override;
+    void modBeginGesture() override { undo_.beginGesture(); }
+    void modEndGesture() override { undo_.endGesture(); }
+    neptune::core::ParameterSet& modParameters() override { return engine_.params(); }
+    std::string modDestName (int, neptune::core::ParamId dest) const override;
+    bool modShowScope() const override { return false; }   // un seul module : pas de menu « Piste 1 / Globale »
+
     neptune::core::fm::FmSynthEngine& engine() { return engine_; }
     const neptune::core::settings::GlobalSettings& settings() const { return settings_; }
     void applySettings (const neptune::core::settings::GlobalSettings&);   // met à jour et enregistre les réglages globaux de la suite (thème, contraste, langue)
@@ -104,10 +120,12 @@ public:
 private:
     static BusesProperties makeBuses();
     void handleAsyncUpdate() override;
+    std::string modulationText() const;
     void notifyHostOfParameterChanges (const std::vector<float>& before);
     std::vector<float> snapshotNormalised() const;
 
     neptune::core::fm::FmSynthEngine engine_;
+    neptune::core::modulation::Rig rig_;   // matrice, LFO, enveloppes et sources MIDI du plugin
     HostProbe probe_;
     neptune::core::UndoManager undo_;
     neptune::core::settings::GlobalSettings settings_;
@@ -115,6 +133,8 @@ private:
     std::unique_ptr<neptune::core::preset::Library> library_;
     std::string currentPresetId_;
     std::uint32_t presetRevision_ = 1;
+    std::atomic<float> uiBend_ { 0.0f }, uiMod_ { 0.0f };   // molettes de l'écran
+    float lastUiBend_ = 0.0f, lastUiMod_ = 0.0f;              // thread audio : dernières positions transmises
     std::atomic<int> midiBank_ { 0 };
     std::atomic<int> pendingBank_ { -1 }, pendingProgram_ { -1 };
 
