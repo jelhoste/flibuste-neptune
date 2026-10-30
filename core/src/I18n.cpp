@@ -678,6 +678,7 @@ const Entry kEntries[] = {
     { "organ.import", { "Import a GrandOrgue organ...", "Importer un orgue GrandOrgue..." } },
     { "organ.no_odf", { "No .organ definition file found in the package.", "Aucun fichier de définition .organ dans le paquet." } },
     { "organ.stream_ask", { "This organ needs about {0} MB of memory if loaded entirely ({1} MB available).\n\nRead the samples from disk while playing (streaming)? Loading is faster and uses less memory, but the disk must keep up when many notes sound.", "Cet orgue demande environ {0} Mo de mémoire s'il est chargé en entier ({1} Mo disponibles).\n\nLire les échantillons sur le disque pendant le jeu (streaming) ? Le chargement est plus rapide et prend moins de mémoire, mais le disque doit suivre quand beaucoup de notes sonnent." } },
+    { "organ.missing_samples", { "{0} sample file(s) not found", "{0} fichier(s) d'échantillons introuvable(s)" } },
     { "organ.persp_title", { "Choose the perspectives to load", "Choisir les perspectives à charger" } },
     { "organ.persp_text", { "This organ has several microphone positions (perspectives). Each one adds its own set of pipes: loading fewer saves memory and voices. Uncheck the ones you do not want.", "Cet orgue a plusieurs positions de micro (perspectives). Chacune ajoute son propre jeu de tuyaux : en charger moins économise de la mémoire et des voix. Décochez celles dont vous ne voulez pas." } },
     { "organ.persp_item", { "{0}  ({1} ranks, {2} pipes)", "{0}  ({1} rangs, {2} tuyaux)" } },
