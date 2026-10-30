@@ -47,6 +47,25 @@ const WaveInfo kInfos[kNumWaves] = {
     W (kWaveOctaves, "octaves", Complex, false),
     W (kWaveFifths, "fifths", Complex, false),
     W (kWaveComb, "comb", Complex, false),
+    W (kWaveVoxI, "vox_i", Complex, false),
+    W (kWaveVoxU, "vox_u", Complex, false),
+    W (kWaveFlute, "flute", Complex, false),
+    W (kWaveClarinet, "clarinet", Complex, false),
+    W (kWaveBowed, "bowed", Complex, false),
+    W (kWaveEPiano, "e_piano", Complex, false),
+    W (kWaveBell, "bell", Complex, false),
+    W (kWaveSyncSaw15, "sync_saw_15", Analog, false),
+    W (kWaveSyncSaw25, "sync_saw_25", Analog, false),
+    W (kWaveSyncSaw35, "sync_saw_35", Analog, false),
+    W (kWaveSyncSine25, "sync_sine_25", Analog, false),
+    W (kWaveSkewTri, "skew_tri", Analog, false),
+    W (kWaveExpSaw, "exp_saw", Analog, false),
+    W (kWaveFold1, "fold_1", Digital, false),
+    W (kWaveFold2, "fold_2", Digital, false),
+    W (kWaveFold3, "fold_3", Digital, false),
+    W (kWaveSatSine, "sat_sine", Digital, false),
+    W (kWaveSine13, "sine_1_3", Digital, false),
+    W (kWaveSine15, "sine_1_5", Digital, false),
 };
 #undef W
 
@@ -170,6 +189,38 @@ Spectrum spectrumOf (int wave, double pulseWidth)
         case kWaveOctaves: return fromSines ([] (int h) { return (h == 1 || h == 2 || h == 4 || h == 8 || h == 16) ? 1.0 : 0.0; });
         case kWaveFifths: return fromSines ([] (int h) { return (h == 1 || h == 2 || h == 3 || h == 4 || h == 6 || h == 12) ? 1.0 / std::sqrt (static_cast<double> (h)) : 0.0; });
         case kWaveComb: return fromSines ([] (int h) { return h % 3 == 0 ? 1.0 / std::sqrt (static_cast<double> (h)) : 0.0; });
+
+        // voyelles I et U (mêmes formants approximatifs que A, E, O)
+        case kWaveVoxI: return fromSines ([] (int h) { const double f = h * 110.0; return (gaussian (f, 270, 70) + 0.6 * gaussian (f, 2300, 250) + 0.4 * gaussian (f, 3000, 300) + 0.04) / h * 4.0; });
+        case kWaveVoxU: return fromSines ([] (int h) { const double f = h * 110.0; return (gaussian (f, 300, 70) + 0.35 * gaussian (f, 870, 120) + 0.05 * gaussian (f, 2250, 300) + 0.03) / h * 4.0; });
+        // instruments : spectres d'inspiration, un cycle unique (pas de partiels inharmoniques)
+        case kWaveFlute: return fromSines ([] (int h) { switch (h) { case 1: return 1.0; case 2: return 0.35; case 3: return 0.12; case 4: return 0.05; case 5: return 0.03; default: return 0.0; } });
+        case kWaveClarinet: return fromSines ([] (int h) { return h % 2 == 1 ? (h == 3 ? 1.1 : 1.0) / std::pow (static_cast<double> (h), 0.8) : 0.04 / h; });
+        case kWaveBowed: return fromSines ([] (int h) { return 1.6 * std::abs (std::sin (kPi * h / 8.0)) / h; });   // archet à 1/8 de la corde : les harmoniques multiples de 8 manquent
+        case kWaveEPiano: return fromSines ([] (int h)
+        {
+            switch (h) { case 1: return 1.0; case 2: return 0.5; case 3: return 0.14; case 4: return 0.08; case 5: return 0.2; case 6: return 0.03; case 7: return 0.07; case 8: return 0.02; default: return 0.0; }
+        });
+        case kWaveBell: return fromSines ([] (int h)
+        {
+            switch (h) { case 1: return 1.0; case 2: return 0.15; case 3: return 0.55; case 4: return 0.1; case 5: return 0.4; case 6: return 0.08; case 7: return 0.3; case 9: return 0.2; case 11: return 0.12; case 13: return 0.08; default: return 0.0; }
+        });
+
+        // synchro dure : l'oscillateur esclave tourne `ratio` fois plus vite et repart de zéro au début de chaque cycle (rapports non entiers : un rapport entier redonne une scie plus aiguë)
+        case kWaveSyncSaw15: return fromTime ([] (double t) { return sawTime (std::fmod (t * 1.5, 1.0)); });
+        case kWaveSyncSaw25: return fromTime ([] (double t) { return sawTime (std::fmod (t * 2.5, 1.0)); });
+        case kWaveSyncSaw35: return fromTime ([] (double t) { return sawTime (std::fmod (t * 3.5, 1.0)); });
+        case kWaveSyncSine25: return fromTime ([] (double t) { return std::sin (2.0 * kPi * 2.5 * t); });
+        case kWaveSkewTri: return fromTime ([] (double t) { return t < 0.8 ? 2.0 * (t / 0.8) - 1.0 : 1.0 - 2.0 * ((t - 0.8) / 0.2); });
+        case kWaveExpSaw: return fromTime ([] (double t) { return 2.0 * (1.0 - std::exp (-4.0 * t)) / (1.0 - std::exp (-4.0)) - 1.0; });
+
+        // repli (wavefolder) et saturation d'un sinus, harmoniques ajoutées au sinus
+        case kWaveFold1: return fromTime ([] (double t) { return std::sin (1.8 * std::sin (2.0 * kPi * t)); });
+        case kWaveFold2: return fromTime ([] (double t) { return std::sin (3.5 * std::sin (2.0 * kPi * t)); });
+        case kWaveFold3: return fromTime ([] (double t) { return std::sin (6.0 * std::sin (2.0 * kPi * t)); });
+        case kWaveSatSine: return fromTime ([] (double t) { return std::tanh (3.0 * std::sin (2.0 * kPi * t)); });
+        case kWaveSine13: return fromSines ([] (int h) { return h == 1 ? 1.0 : h == 3 ? 0.5 : 0.0; });
+        case kWaveSine15: return fromSines ([] (int h) { return h == 1 ? 1.0 : h == 5 ? 0.4 : 0.0; });
         default: return fromSines ([] (int h) { return h == 1 ? 1.0 : 0.0; });
     }
 }

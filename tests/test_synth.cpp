@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <cmath>
 #include <memory>
 #include <set>
@@ -751,4 +752,42 @@ TEST_CASE ("global voice limit steals the weakest voice across tracks", "[synth]
     int total = 0;
     for (int i = 0; i < 3; ++i) total += e.activeVoices (i);
     CHECK (total == 8);
+}
+
+TEST_CASE ("wave catalog: the 2026-10-30 additions keep the old ids and have the intended spectra")
+{
+    // les anciens identifiants ne bougent pas, les nouveaux s'ajoutent à la suite
+    CHECK (waveIdFromKey ("sine") == 0);
+    CHECK (waveIdFromKey ("comb") == 31);
+    CHECK (waveIdFromKey ("vox_i") == 32);
+    CHECK (waveIdFromKey ("sine_1_5") == kNumWaves - 1);
+    CHECK (kNumWaves == 51);
+
+    // amplitude de l'harmonique h d'une table (la plus riche), par transformée de Fourier directe
+    const auto& tables = WaveTables::instance();
+    auto harmonic = [&] (const char* key, int h)
+    {
+        const float* t = tables.table (waveIdFromKey (key), 0);
+        double re = 0.0, im = 0.0;
+        for (int i = 0; i < WaveTables::kSize; ++i)
+        {
+            const double ph = 2.0 * 3.14159265358979 * h * i / WaveTables::kSize;
+            re += t[i] * std::cos (ph);
+            im += t[i] * std::sin (ph);
+        }
+        return 2.0 * std::sqrt (re * re + im * im) / WaveTables::kSize;
+    };
+    CHECK (harmonic ("sine_1_3", 3) / harmonic ("sine_1_3", 1) == Catch::Approx (0.5).margin (0.01));
+    CHECK (harmonic ("sine_1_5", 5) / harmonic ("sine_1_5", 1) == Catch::Approx (0.4).margin (0.01));
+    CHECK (harmonic ("sine_1_3", 2) < 0.001);
+    CHECK (harmonic ("bowed", 8) < 0.002);                         // l'archet à 1/8 de la corde supprime la 8e harmonique
+    CHECK (harmonic ("bowed", 7) > 0.03);
+    CHECK (harmonic ("clarinet", 3) > 10.0 * harmonic ("clarinet", 2));   // harmoniques impaires dominantes
+    CHECK (harmonic ("flute", 1) > 2.0 * harmonic ("flute", 2));
+    // le repli ajoute des harmoniques impaires seulement (fonction impaire du sinus) : plus il est fort, plus le contenu aigu est riche
+    CHECK (harmonic ("fold_1", 2) < 0.001);
+    CHECK (harmonic ("fold_3", 9) + harmonic ("fold_3", 11) > harmonic ("fold_1", 9) + harmonic ("fold_1", 11));
+    // le sinus saturé est une quasi-carré : impairs seulement
+    CHECK (harmonic ("sat_sine", 3) > 0.1);
+    CHECK (harmonic ("sat_sine", 4) < 0.001);
 }

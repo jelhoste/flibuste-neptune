@@ -22,6 +22,10 @@ enum WaveId : int
     // complexe
     kWaveOrgan8, kWaveOrganFull, kWaveVoxA, kWaveVoxE, kWaveVoxO, kWaveReed, kWaveBrass, kWaveStrings, kWaveGlass, kWaveHollow,
     kWaveDigitalNoise, kWaveOctaves, kWaveFifths, kWaveComb,
+    // ajouts du 2026-10-30 : voyelles et instruments (complexe), synchro dure et formes asymétriques (analogique), repli et saturation (numérique)
+    kWaveVoxI, kWaveVoxU, kWaveFlute, kWaveClarinet, kWaveBowed, kWaveEPiano, kWaveBell,
+    kWaveSyncSaw15, kWaveSyncSaw25, kWaveSyncSaw35, kWaveSyncSine25, kWaveSkewTri, kWaveExpSaw,
+    kWaveFold1, kWaveFold2, kWaveFold3, kWaveSatSine, kWaveSine13, kWaveSine15,
     kNumWaves
 };
 
