@@ -1,0 +1,931 @@
+{
+ "format": 1,
+ "track": 0,
+ "facade": {
+  "name": "Orgue",
+  "image": "asset:assets/0_fond.png",
+  "fit": 2,
+  "styles": [
+   {
+    "id": 1,
+    "name": "Tirant",
+    "track": "asset:assets/1_rail.svg",
+    "handle": "asset:assets/2_poignee.svg",
+    "text_colour": "#f1ead6",
+    "text_size": 12,
+    "text_position": 2
+   },
+   {
+    "id": 2,
+    "name": "Bouton",
+    "off": "asset:assets/3_bouton_off.svg",
+    "on": "asset:assets/4_bouton_on.svg",
+    "text_colour": "#f1ead6",
+    "text_size": 40
+   },
+   {
+    "id": 3,
+    "name": "Potard",
+    "body": "asset:assets/5_potard_corps.svg",
+    "pointer": "asset:assets/6_potard_aiguille.svg",
+    "angles": [
+     -135,
+     135
+    ],
+    "pivot": [
+     50,
+     50
+    ],
+    "text_colour": "#f1ead6",
+    "text_size": 14,
+    "text_position": 2
+   },
+   {
+    "id": 4,
+    "name": "Cadre",
+    "frame": "asset:assets/7_cadre.svg",
+    "slice": [
+     20,
+     20,
+     20,
+     20
+    ],
+    "text_colour": "#ffe0a0",
+    "text_size": 70,
+    "text_position": 1
+   },
+   {
+    "id": 5,
+    "name": "Voyant",
+    "off": "asset:assets/8_voyant_off.svg",
+    "on": "asset:assets/9_voyant_on.svg"
+   },
+   {
+    "id": 6,
+    "name": "Clavier",
+    "key_white": "asset:assets/10_touche_blanche.svg",
+    "key_white_on": "asset:assets/11_touche_blanche_on.svg",
+    "key_black": "asset:assets/12_touche_noire.svg",
+    "key_black_on": "asset:assets/13_touche_noire_on.svg"
+   }
+  ],
+  "widgets": [
+   {
+    "id": 1,
+    "type": 6,
+    "x": 20,
+    "y": 20,
+    "w": 620,
+    "h": 240,
+    "text": "Clavier supérieur",
+    "layout": 0,
+    "style": 4
+   },
+   {
+    "id": 2,
+    "type": 8,
+    "x": 40,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9000,
+    "text": "16'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 3,
+    "type": 8,
+    "x": 106,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9001,
+    "text": "5 1/3'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 4,
+    "type": 8,
+    "x": 172,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9002,
+    "text": "8'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 5,
+    "type": 8,
+    "x": 238,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9003,
+    "text": "4'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 6,
+    "type": 8,
+    "x": 304,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9004,
+    "text": "2 2/3'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 7,
+    "type": 8,
+    "x": 370,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9005,
+    "text": "2'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 8,
+    "type": 8,
+    "x": 436,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9006,
+    "text": "1 3/5'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 9,
+    "type": 8,
+    "x": 502,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9007,
+    "text": "1 1/3'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 10,
+    "type": 8,
+    "x": 568,
+    "y": 54,
+    "w": 48,
+    "h": 176,
+    "param": 9008,
+    "text": "1'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 1
+   },
+   {
+    "id": 11,
+    "type": 6,
+    "x": 20,
+    "y": 270,
+    "w": 620,
+    "h": 240,
+    "text": "Clavier inférieur et pédale",
+    "layout": 0,
+    "style": 4
+   },
+   {
+    "id": 12,
+    "type": 8,
+    "x": 40,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9009,
+    "text": "16'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 13,
+    "type": 8,
+    "x": 94,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9010,
+    "text": "5 1/3'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 14,
+    "type": 8,
+    "x": 148,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9011,
+    "text": "8'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 15,
+    "type": 8,
+    "x": 202,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9012,
+    "text": "4'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 16,
+    "type": 8,
+    "x": 256,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9013,
+    "text": "2 2/3'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 17,
+    "type": 8,
+    "x": 310,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9014,
+    "text": "2'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 18,
+    "type": 8,
+    "x": 364,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9015,
+    "text": "1 3/5'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 19,
+    "type": 8,
+    "x": 418,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9016,
+    "text": "1 1/3'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 20,
+    "type": 8,
+    "x": 472,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9017,
+    "text": "1'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 21,
+    "type": 8,
+    "x": 532,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9018,
+    "text": "Péd 16'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 22,
+    "type": 8,
+    "x": 586,
+    "y": 304,
+    "w": 44,
+    "h": 176,
+    "param": 9019,
+    "text": "Péd 8'",
+    "vertical": 1,
+    "style": 1,
+    "parent": 11
+   },
+   {
+    "id": 23,
+    "type": 6,
+    "x": 660,
+    "y": 20,
+    "w": 320,
+    "h": 100,
+    "text": "Vibrato",
+    "layout": 0,
+    "style": 4
+   },
+   {
+    "id": 24,
+    "type": 3,
+    "x": 670,
+    "y": 52,
+    "w": 150,
+    "h": 56,
+    "param": 9024,
+    "text": "Vibrato",
+    "parent": 23
+   },
+   {
+    "id": 25,
+    "type": 1,
+    "x": 830,
+    "y": 60,
+    "w": 65,
+    "h": 40,
+    "param": 9025,
+    "text": "Haut",
+    "style": 2,
+    "parent": 23
+   },
+   {
+    "id": 26,
+    "type": 1,
+    "x": 905,
+    "y": 60,
+    "w": 65,
+    "h": 40,
+    "param": 9026,
+    "text": "Bas",
+    "style": 2,
+    "parent": 23
+   },
+   {
+    "id": 27,
+    "type": 6,
+    "x": 660,
+    "y": 130,
+    "w": 320,
+    "h": 130,
+    "text": "Leslie et réverbération",
+    "layout": 0,
+    "style": 4
+   },
+   {
+    "id": 28,
+    "type": 3,
+    "x": 670,
+    "y": 164,
+    "w": 150,
+    "h": 56,
+    "param": 9027,
+    "text": "Leslie",
+    "parent": 27
+   },
+   {
+    "id": 29,
+    "type": 0,
+    "x": 830,
+    "y": 164,
+    "w": 70,
+    "h": 90,
+    "param": 9028,
+    "text": "Mélange",
+    "style": 3,
+    "parent": 27
+   },
+   {
+    "id": 30,
+    "type": 0,
+    "x": 900,
+    "y": 164,
+    "w": 70,
+    "h": 90,
+    "param": 9033,
+    "text": "Réverb",
+    "style": 3,
+    "parent": 27
+   },
+   {
+    "id": 31,
+    "type": 6,
+    "x": 660,
+    "y": 270,
+    "w": 320,
+    "h": 110,
+    "text": "Pistons",
+    "layout": 0,
+    "style": 4
+   },
+   {
+    "id": 32,
+    "type": 4,
+    "x": 670,
+    "y": 310,
+    "w": 90,
+    "h": 44,
+    "text": "Plein jeu",
+    "style": 2,
+    "parent": 31,
+    "snap": [
+     [
+      9000,
+      8.0
+     ],
+     [
+      9001,
+      8.0
+     ],
+     [
+      9002,
+      8.0
+     ],
+     [
+      9003,
+      8.0
+     ],
+     [
+      9004,
+      8.0
+     ],
+     [
+      9005,
+      8.0
+     ],
+     [
+      9006,
+      8.0
+     ],
+     [
+      9007,
+      8.0
+     ],
+     [
+      9008,
+      8.0
+     ]
+    ]
+   },
+   {
+    "id": 33,
+    "type": 4,
+    "x": 770,
+    "y": 310,
+    "w": 90,
+    "h": 44,
+    "text": "Flûtes",
+    "style": 2,
+    "parent": 31,
+    "snap": [
+     [
+      9000,
+      0.0
+     ],
+     [
+      9001,
+      0.0
+     ],
+     [
+      9002,
+      8.0
+     ],
+     [
+      9003,
+      0.0
+     ],
+     [
+      9004,
+      0.0
+     ],
+     [
+      9005,
+      0.0
+     ],
+     [
+      9006,
+      0.0
+     ],
+     [
+      9007,
+      0.0
+     ],
+     [
+      9008,
+      0.0
+     ]
+    ]
+   },
+   {
+    "id": 34,
+    "type": 4,
+    "x": 870,
+    "y": 310,
+    "w": 90,
+    "h": 44,
+    "text": "Zéro",
+    "style": 2,
+    "parent": 31,
+    "mode": 1,
+    "snap": [
+     [
+      9000,
+      0.0
+     ],
+     [
+      9001,
+      0.0
+     ],
+     [
+      9002,
+      0.0
+     ],
+     [
+      9003,
+      0.0
+     ],
+     [
+      9004,
+      0.0
+     ],
+     [
+      9005,
+      0.0
+     ],
+     [
+      9006,
+      0.0
+     ],
+     [
+      9007,
+      0.0
+     ],
+     [
+      9008,
+      0.0
+     ]
+    ]
+   },
+   {
+    "id": 35,
+    "type": 6,
+    "x": 660,
+    "y": 390,
+    "w": 320,
+    "h": 120,
+    "text": "Saturation",
+    "layout": 0,
+    "style": 4
+   },
+   {
+    "id": 36,
+    "type": 1,
+    "x": 670,
+    "y": 430,
+    "w": 80,
+    "h": 44,
+    "param": 9029,
+    "text": "Drive",
+    "style": 2,
+    "parent": 35
+   },
+   {
+    "id": 37,
+    "type": 9,
+    "x": 760,
+    "y": 438,
+    "w": 28,
+    "h": 28,
+    "param": 9029,
+    "source": 0,
+    "style": 5,
+    "parent": 35
+   },
+   {
+    "id": 38,
+    "type": 0,
+    "x": 800,
+    "y": 424,
+    "w": 70,
+    "h": 80,
+    "param": 9030,
+    "text": "Entrée",
+    "style": 3,
+    "parent": 35
+   },
+   {
+    "id": 39,
+    "type": 0,
+    "x": 890,
+    "y": 424,
+    "w": 70,
+    "h": 80,
+    "param": 9032,
+    "text": "Sortie",
+    "style": 3,
+    "parent": 35
+   },
+   {
+    "id": 40,
+    "type": 7,
+    "x": 20,
+    "y": 520,
+    "w": 960,
+    "h": 72,
+    "ch": 1,
+    "first": 36,
+    "hold": 0,
+    "vel": 100,
+    "style": 6
+   }
+  ],
+  "pages": [
+   {
+    "name": "Console",
+    "image": "asset:assets/0_fond.png",
+    "fit": 2,
+    "styles": [
+     {
+      "id": 2,
+      "name": "Bouton",
+      "off": "asset:assets/3_bouton_off.svg",
+      "on": "asset:assets/4_bouton_on.svg",
+      "text_colour": "#f1ead6",
+      "text_size": 40
+     },
+     {
+      "id": 4,
+      "name": "Cadre",
+      "frame": "asset:assets/7_cadre.svg",
+      "slice": [
+       20,
+       20,
+       20,
+       20
+      ],
+      "text_colour": "#ffe0a0",
+      "text_size": 70,
+      "text_position": 1
+     }
+    ],
+    "widgets": [
+     {
+      "id": 1,
+      "type": 2,
+      "x": 20,
+      "y": 16,
+      "w": 500,
+      "h": 40,
+      "text": "Console : contrôles et mesures"
+     },
+     {
+      "id": 2,
+      "type": 6,
+      "x": 20,
+      "y": 70,
+      "w": 300,
+      "h": 250,
+      "text": "Niveaux",
+      "layout": 0,
+      "style": 4
+     },
+     {
+      "id": 3,
+      "type": 12,
+      "x": 60,
+      "y": 110,
+      "w": 44,
+      "h": 190,
+      "vertical": 1,
+      "source": 0,
+      "parent": 2
+     },
+     {
+      "id": 4,
+      "type": 12,
+      "x": 140,
+      "y": 110,
+      "w": 44,
+      "h": 190,
+      "vertical": 1,
+      "source": 1,
+      "parent": 2
+     },
+     {
+      "id": 5,
+      "type": 12,
+      "x": 220,
+      "y": 110,
+      "w": 44,
+      "h": 190,
+      "vertical": 1,
+      "source": 2,
+      "parent": 2
+     },
+     {
+      "id": 6,
+      "type": 6,
+      "x": 340,
+      "y": 70,
+      "w": 400,
+      "h": 250,
+      "text": "Courbe de vélocité",
+      "layout": 0,
+      "style": 4
+     },
+     {
+      "id": 7,
+      "type": 5,
+      "x": 360,
+      "y": 104,
+      "w": 360,
+      "h": 200,
+      "parent": 6
+     },
+     {
+      "id": 8,
+      "type": 6,
+      "x": 760,
+      "y": 70,
+      "w": 220,
+      "h": 250,
+      "text": "Messages MIDI",
+      "layout": 0,
+      "style": 4
+     },
+     {
+      "id": 9,
+      "type": 11,
+      "x": 780,
+      "y": 110,
+      "w": 180,
+      "h": 44,
+      "text": "Panique (CC 123)",
+      "style": 2,
+      "parent": 8,
+      "midi": {
+       "kind": 2,
+       "channel": 1,
+       "d1": 123,
+       "d2": 0
+      },
+      "target": 1,
+      "fader": 0
+     },
+     {
+      "id": 10,
+      "type": 11,
+      "x": 780,
+      "y": 170,
+      "w": 180,
+      "h": 44,
+      "text": "Programme 1",
+      "style": 2,
+      "parent": 8,
+      "midi": {
+       "kind": 3,
+       "channel": 1,
+       "d1": 0,
+       "d2": 0
+      },
+      "target": 3,
+      "fader": 0
+     },
+     {
+      "id": 11,
+      "type": 11,
+      "x": 780,
+      "y": 230,
+      "w": 180,
+      "h": 44,
+      "text": "Expression (CC 11)",
+      "style": 2,
+      "parent": 8,
+      "midi": {
+       "kind": 2,
+       "channel": 1,
+       "d1": 11,
+       "d2": 100
+      },
+      "target": 1,
+      "fader": 1
+     },
+     {
+      "id": 12,
+      "type": 6,
+      "x": 20,
+      "y": 340,
+      "w": 960,
+      "h": 150,
+      "text": "Pistons programmables",
+      "layout": 0,
+      "style": 4
+     },
+     {
+      "id": 13,
+      "type": 10,
+      "x": 40,
+      "y": 390,
+      "w": 90,
+      "h": 44,
+      "text": "Set",
+      "style": 2,
+      "parent": 12
+     },
+     {
+      "id": 14,
+      "type": 4,
+      "x": 150,
+      "y": 390,
+      "w": 100,
+      "h": 44,
+      "text": "Piston 1",
+      "style": 2,
+      "parent": 12
+     },
+     {
+      "id": 15,
+      "type": 4,
+      "x": 260,
+      "y": 390,
+      "w": 100,
+      "h": 44,
+      "text": "Piston 2",
+      "style": 2,
+      "parent": 12
+     },
+     {
+      "id": 16,
+      "type": 4,
+      "x": 370,
+      "y": 390,
+      "w": 100,
+      "h": 44,
+      "text": "Piston 3",
+      "style": 2,
+      "parent": 12
+     },
+     {
+      "id": 17,
+      "type": 4,
+      "x": 480,
+      "y": 390,
+      "w": 100,
+      "h": 44,
+      "text": "Piston 4",
+      "style": 2,
+      "parent": 12
+     },
+     {
+      "id": 18,
+      "type": 4,
+      "x": 590,
+      "y": 390,
+      "w": 100,
+      "h": 44,
+      "text": "Piston 5",
+      "style": 2,
+      "parent": 12
+     }
+    ]
+   }
+  ]
+ }
+}
