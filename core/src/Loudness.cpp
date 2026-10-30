@@ -32,6 +32,7 @@ void LoudnessMeter::prepare (double sampleRate)
     shortTerm_.store (-200.0f);
     integrated_.store (-200.0f);
     truePeak_.store (-200.0f);
+    range_.store (0.0f);
    #ifdef NEPTUNE_HAS_EBUR128
     thread_ = std::thread ([this] { run(); });
    #endif
@@ -60,13 +61,14 @@ LoudnessMeter::Reading LoudnessMeter::read() const noexcept
     r.shortTerm = shortTerm_.load (std::memory_order_relaxed);
     r.integrated = integrated_.load (std::memory_order_relaxed);
     r.truePeakDb = truePeak_.load (std::memory_order_relaxed);
+    r.range = range_.load (std::memory_order_relaxed);
     return r;
 }
 
 #ifdef NEPTUNE_HAS_EBUR128
 namespace
 {
-constexpr int kModes = EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I | EBUR128_MODE_TRUE_PEAK | EBUR128_MODE_HISTOGRAM;
+constexpr int kModes = EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I | EBUR128_MODE_TRUE_PEAK | EBUR128_MODE_LRA | EBUR128_MODE_HISTOGRAM;
 
 float clampLufs (double v) noexcept
 {
@@ -90,6 +92,7 @@ void LoudnessMeter::run()
             state = ebur128_init (2, static_cast<unsigned long> (sampleRate_), kModes);
             if (state == nullptr) return;
             peak = 0.0;
+            range_.store (0.0f, std::memory_order_relaxed);
         }
         const auto tail = tail_.load (std::memory_order_relaxed);
         const auto head = head_.load (std::memory_order_acquire);
@@ -114,6 +117,7 @@ void LoudnessMeter::run()
             if (ebur128_loudness_momentary (state, &v) == EBUR128_SUCCESS) momentary_.store (clampLufs (v), std::memory_order_relaxed);
             if (ebur128_loudness_shortterm (state, &v) == EBUR128_SUCCESS) shortTerm_.store (clampLufs (v), std::memory_order_relaxed);
             if (ebur128_loudness_global (state, &v) == EBUR128_SUCCESS) integrated_.store (clampLufs (v), std::memory_order_relaxed);
+            if (ebur128_loudness_range (state, &v) == EBUR128_SUCCESS && std::isfinite (v)) range_.store (static_cast<float> (std::max (v, 0.0)), std::memory_order_relaxed);
             for (unsigned c = 0; c < 2; ++c)
             {
                 double tp = 0.0;
