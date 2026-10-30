@@ -80,8 +80,9 @@ struct SynthDescription
     int maxVoices = defaultMaxVoices;
     VoiceStealMode stealMode = VoiceStealMode::Oldest;
     int glideMs = 0;
+    int bendRange = 2;         // plage de la molette de hauteur (pitch bend), en demi-tons de chaque côté ; 0 : la molette ne change rien (plugin seul : Neptune n'envoie pas de pitch bend au synthé)
 
-    static constexpr int defaultMaxVoices = 16, maxVoicesLimit = 64, minOctave = -3, maxOctave = 3, maxGlideMs = 2000;
+    static constexpr int defaultMaxVoices = 16, maxVoicesLimit = 64, minOctave = -3, maxOctave = 3, maxGlideMs = 2000, defaultBendRange = 2, maxBendRange = 24;
 
     // Valeurs de départ : un oscillateur en dent de scie, attaque 5 ms (pas de clic), relâchement 150 ms, filtre 1 passe-bas 24 dB
     // ouvert, filtre 2 éteint ; enveloppe de pitch neutre (profondeur 0).
@@ -98,7 +99,7 @@ struct SynthDescription
     {
         return osc == o.osc && subWave == o.subWave && subOctave == o.subOctave && noise == o.noise && mix == o.mix
             && ampEnv == o.ampEnv && pitchEnv == o.pitchEnv && filters == o.filters && polyphony == o.polyphony
-            && maxVoices == o.maxVoices && stealMode == o.stealMode && glideMs == o.glideMs;
+            && maxVoices == o.maxVoices && stealMode == o.stealMode && glideMs == o.glideMs && bendRange == o.bendRange;
     }
     bool operator!= (const SynthDescription& o) const noexcept { return ! (*this == o); }
 };

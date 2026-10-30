@@ -98,6 +98,8 @@ public:
     // Construit le patch et le remet au thread audio. `newPreset` : changement de preset -> les notes en cours gardent l'ancien
     // patch et leurs anciennes valeurs (capture par voix) ; faux : retouche du patch, les notes en cours suivent.
     void setDescription (const SynthDescription&, bool newPreset = false);
+    // Molette de hauteur (thread audio) : -1..+1, multipliée par la plage du patch (`bendRange` demi-tons) et ajoutée à l'accordage de toutes les voix.
+    void setPitchBend (float position) noexcept { bend_ = position < -1.0f ? -1.0f : position > 1.0f ? 1.0f : position; }
     int frozenVoices() const noexcept { return voices_.frozenVoices(); }
     // La description avec les valeurs courantes des paramètres d'enveloppe, de glissando et d'équilibre (voir withLiveParams).
     SynthDescription description() const { return withLiveParams (description_, params_); }
@@ -139,6 +141,7 @@ public:
 private:
     struct Event { enum Type : int { NoteOn, NoteOff, Panic, ReleaseAll } type = NoteOn; int key = 0; float velocity = 0.0f; };
     void clearHeld() noexcept { held_[0].store (0, std::memory_order_relaxed); held_[1].store (0, std::memory_order_relaxed); }
+    float bend_ = 0.0f;   // position de la molette de hauteur (thread audio)
     void adoptPatch() noexcept { if (patchSlot_.adoptPending()) voices_.setPatch (patchSlot_.current()); } // avant toute note
     void post (Event::Type t, int key, float velocity) noexcept;
     void drain() noexcept;

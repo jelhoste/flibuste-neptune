@@ -81,6 +81,7 @@ SynthDescription sanitised (SynthDescription d)
     d.filters = sanitised (std::move (d.filters));
     d.maxVoices = std::clamp (d.maxVoices, 1, SynthDescription::maxVoicesLimit);
     d.glideMs = std::clamp (d.glideMs, 0, SynthDescription::maxGlideMs);
+    d.bendRange = std::clamp (d.bendRange, 0, SynthDescription::maxBendRange);
     return d;
 }
 
@@ -116,6 +117,7 @@ std::string toJson (const SynthDescription& d)
     o["max_voices"] = d.maxVoices;
     o["voice_steal"] = toString (d.stealMode);
     o["glide_ms"] = d.glideMs;
+    if (d.bendRange != SynthDescription::defaultBendRange) o["bend_range"] = d.bendRange;   // absent tant qu'il vaut 2 : les fichiers d'avant se relisent et se réécrivent à l'identique
     return o.dump();
 }
 
@@ -165,6 +167,7 @@ SynthDescription synthFromJson (std::string_view text)
     else if (v == "keep_low") d.stealMode = VoiceStealMode::KeepLow;
     else if (v == "keep_high") d.stealMode = VoiceStealMode::KeepHigh;
     d.glideMs = detail::jsonInt (doc, "glide_ms", d.glideMs);
+    d.bendRange = detail::jsonInt (doc, "bend_range", d.bendRange);
     return sanitised (std::move (d));
 }
 

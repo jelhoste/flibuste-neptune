@@ -455,6 +455,11 @@ void AnalogSynthEngine::process (float* left, float* right, int n) noexcept
         sp.resonance[f] = params_.effectiveAt (idxReso_[static_cast<std::size_t> (f)]) / 100.0;
     }
     sp.tuneCents = params_.effectiveAt (idxSemi_) * 100.0 + params_.effectiveAt (idxCents_);
+    if (bend_ != 0.0f)
+    {
+        const auto* patch = patchSlot_.current();
+        sp.tuneCents += static_cast<double> (bend_) * 100.0 * static_cast<double> (patch != nullptr ? patch->desc.bendRange : SynthDescription::defaultBendRange);
+    }
     auto get = [this] (mixer::SynthKind k) { return params_.effectiveAt (synthIdx_[static_cast<std::size_t> (k)]); };
     for (int o = 0; o < numSources; ++o) sp.level[o] = get (static_cast<mixer::SynthKind> (mixer::kLevelOsc1 + o));
     for (int o = 0; o < numOscillators; ++o)

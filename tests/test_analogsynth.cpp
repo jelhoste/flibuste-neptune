@@ -651,3 +651,55 @@ TEST_CASE ("preset: the modulation field round trips, is bounded and defaults to
     REQUIRE (ok);
     CHECK (backPlain.modulation.empty());
 }
+
+TEST_CASE ("analogsynth pitch bend: the wheel moves every voice by up to the range of the patch, and nothing when it is centred", "[analogsynth][bend]")
+{
+    // fréquence par passages à zéro montants sur la partie stable du rendu
+    auto frequency = [] (const Render& r)
+    {
+        int crossings = 0;
+        double first = -1.0, last = -1.0;
+        for (std::size_t i = 4800 + 1; i < r.l.size(); ++i)
+            if (r.l[i - 1] < 0.0f && r.l[i] >= 0.0f)
+            {
+                const double t = static_cast<double> (i - 1) + static_cast<double> (-r.l[i - 1]) / static_cast<double> (r.l[i] - r.l[i - 1]);
+                if (first < 0.0) first = t;
+                last = t;
+                ++crossings;
+            }
+        return crossings > 2 ? (crossings - 1) * kRate / (last - first) : 0.0;
+    };
+    auto render = [&] (float bend, int range)
+    {
+        AnalogSynthEngine e;
+        REQUIRE (e.ok());
+        auto d = e.description();
+        d.osc[0].wave = kWaveSine;   // sinus : une seule traversée par période
+        d.filters.filter[0].on = false;
+        d.bendRange = range;
+        e.setDescription (d);
+        e.prepare (kRate, 128);
+        e.setPitchBend (bend);
+        return play (e, 69, 24000);
+    };
+    const double centre = frequency (render (0.0f, 2));
+    REQUIRE (centre > 400.0);
+    CHECK (centre == Approx (440.0).epsilon (0.01));
+    CHECK (frequency (render (1.0f, 2)) / centre == Approx (std::pow (2.0, 2.0 / 12.0)).epsilon (0.003));    // +2 demi-tons
+    CHECK (frequency (render (-1.0f, 2)) / centre == Approx (std::pow (2.0, -2.0 / 12.0)).epsilon (0.003));  // -2 demi-tons
+    CHECK (frequency (render (0.5f, 12)) / centre == Approx (std::pow (2.0, 6.0 / 12.0)).epsilon (0.003));   // la moitié d'une plage de 12
+    CHECK (frequency (render (1.0f, 0)) / centre == Approx (1.0).epsilon (0.003));                          // plage 0 : la molette ne change rien
+}
+
+TEST_CASE ("synth description: the bend range is bounded and written only when it is not the default", "[synth][bend]")
+{
+    SynthDescription d;
+    CHECK (d.bendRange == 2);
+    CHECK (toJson (d).find ("bend_range") == std::string::npos);   // les fichiers d'avant se réécrivent à l'identique
+    d.bendRange = 7;
+    CHECK (synthFromJson (toJson (d)).bendRange == 7);
+    d.bendRange = 99;
+    CHECK (sanitised (d).bendRange == SynthDescription::maxBendRange);
+    d.bendRange = -4;
+    CHECK (sanitised (d).bendRange == 0);
+}
