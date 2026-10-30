@@ -242,10 +242,11 @@ public:
     int uiImportTrack (neptune::core::trackexport::Bundle);
     // Importe un orgue GrandOrgue (fichier .organ déjà sur disque) : un clavier = une piste Sampler sur des pistes libres consécutives, routeur et combinaisons fusionnés.
     // `streamFromDisk` : les échantillons sont lus sur le disque après leur début (orgues trop gros pour la mémoire).
-    neptune::core::organimport::Result uiImportOrgan (const std::filesystem::path& organFile, bool streamFromDisk = false);
+    // `excludedPerspectives` : perspectives (positions de micro, voir organimport::listPerspectives) dont les rangs ne sont pas chargés.
+    neptune::core::organimport::Result uiImportOrgan (const std::filesystem::path& organFile, bool streamFromDisk = false, const std::vector<std::string>& excludedPerspectives = {});
     // Mémoire que l'orgue occuperait chargé en entier (octets, en-têtes des fichiers seulement) et mémoire dont on dispose pour lui ; 0 = inconnu.
     struct OrganMemory { std::uint64_t needed = 0, headroom = 0; };
-    OrganMemory uiEstimateOrganMemory (const std::filesystem::path& organFile);
+    OrganMemory uiEstimateOrganMemory (const std::filesystem::path& organFile, const std::vector<std::string>& excludedPerspectives = {});
     // Import d'un instrument SFZ dans une nouvelle piste Sampler : AddTrack la met dans la première piste libre (ou la piste de départ restée vide), ClearMixer supprime
     // d'abord toutes les autres pistes. L'historique d'annulation est vidé. Erreur « no_free_track » si les 16 pistes sont prises.
     enum class SfzPlacement { AddTrack, ClearMixer };

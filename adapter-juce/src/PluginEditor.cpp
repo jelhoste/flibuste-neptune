@@ -18,6 +18,44 @@ neptune::core::theme::Palette makePalette (const neptune::core::settings::Global
     const auto id = neptune::core::theme::themeFromString (st.theme).value_or (neptune::core::theme::ThemeId::Dark);
     return neptune::core::theme::withContrast (neptune::core::theme::definition (id), st.contrast);
 }
+
+// Cases à cocher des perspectives d'un orgue (fenêtre d'import) : une ligne par perspective, toutes cochées au départ.
+class PerspectiveList : public juce::Component
+{
+public:
+    PerspectiveList (const std::vector<std::string>& labels, const std::vector<std::string>& names) : names_ (names)
+    {
+        for (const auto& label : labels)
+        {
+            auto& b = *boxes_.add (new juce::ToggleButton (juce::String::fromUTF8 (label.c_str())));
+            b.setToggleState (true, juce::dontSendNotification);
+            addAndMakeVisible (b);
+        }
+        setSize (440, 28 * static_cast<int> (labels.size()) + 4);
+    }
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (0, 2);
+        for (auto* b : boxes_) b->setBounds (area.removeFromTop (28));
+    }
+    std::vector<std::string> excluded() const
+    {
+        std::vector<std::string> out;
+        for (int i = 0; i < boxes_.size(); ++i)
+            if (! boxes_[i]->getToggleState()) out.push_back (names_[static_cast<std::size_t> (i)]);
+        return out;
+    }
+    bool anyChosen() const
+    {
+        for (auto* b : boxes_)
+            if (b->getToggleState()) return true;
+        return false;
+    }
+
+private:
+    std::vector<std::string> names_;
+    juce::OwnedArray<juce::ToggleButton> boxes_;
+};
 } // namespace
 
 juce::Colour NeptuneEditor::colour (Token t) const
@@ -760,11 +798,52 @@ void NeptuneEditor::importOrgan()
                 }
         }
         const std::filesystem::path organPath (organFile.getFullPathName().toStdString());
+        safe->chooseOrganPerspectives (organPath);
+    });
+}
+
+void NeptuneEditor::chooseOrganPerspectives (const std::filesystem::path& organPath)
+{
+    const auto perspectives = neptune::core::organimport::listPerspectivesFile (organPath);
+    if (perspectives.size() < 2)
+    {
+        finishOrganImport (organPath, {});
+        return;
+    }
+    // un orgue qui garde plusieurs positions de micro : on choisit celles à charger (chacune double à peu près la mémoire et les voix)
+    std::vector<std::string> labels, names;
+    for (const auto& p : perspectives)
+    {
+        names.push_back (p.name);
+        labels.push_back (tr_.format ("organ.persp_item", { p.name, std::to_string (p.ranks), std::to_string (p.pipes) }));
+    }
+    auto* w = new juce::AlertWindow (text ("organ.persp_title"), text ("organ.persp_text"), juce::MessageBoxIconType::QuestionIcon);
+    auto* list = new PerspectiveList (labels, names);
+    w->addCustomComponent (list);
+    w->addButton (text ("organ.persp_ok"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (text ("mix.cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, list, organPath] (int answer)
+    {
+        if (safe == nullptr || answer == 0) return;
+        if (! list->anyChosen())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), safe->text ("organ.persp_none"));
+            return;
+        }
+        safe->finishOrganImport (organPath, list->excluded());
+    }), true);
+}
+
+void NeptuneEditor::finishOrganImport (const std::filesystem::path& organPath, const std::vector<std::string>& excluded)
+{
+    juce::Component::SafePointer<NeptuneEditor> safe (this);
+    {
         // Lecture sur le disque : automatique quand l'orgue entier dépasse la moitié de la mémoire disponible, proposée au-delà du quart.
-        auto runImport = [safe, organPath] (bool stream, juce::String note)
+        auto runImport = [safe, organPath, excluded] (bool stream, juce::String note)
         {
             if (safe == nullptr) return;
-            const auto result = safe->processor_.uiImportOrgan (organPath, stream);
+            const auto result = safe->processor_.uiImportOrgan (organPath, stream, excluded);
             juce::String message;
             if (! result.ok) message = juce::String::fromUTF8 (result.error.c_str());
             else
@@ -787,7 +866,7 @@ void NeptuneEditor::importOrgan()
             if (note.isNotEmpty()) message += "\n\n" + note;
             juce::AlertWindow::showMessageBoxAsync (result.ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon, safe->text ("organ.import"), message);
         };
-        const auto mem = safe->processor_.uiEstimateOrganMemory (organPath);
+        const auto mem = safe->processor_.uiEstimateOrganMemory (organPath, excluded);
         const auto mb = [] (std::uint64_t bytes) { return std::to_string (bytes / (1024ull * 1024ull)); };
         const bool known = mem.needed > 0 && mem.headroom > 0;
         if (known && static_cast<double> (mem.needed) > neptune::core::memory::refuseFraction * static_cast<double> (mem.headroom))
@@ -799,7 +878,7 @@ void NeptuneEditor::importOrgan()
                                           [runImport] (int result) { runImport (result == 1, {}); });
         else
             runImport (false, {});
-    });
+    }
 }
 
 void NeptuneEditor::saveGlobalPreset (const juce::String& rawName)

@@ -838,12 +838,13 @@ neptune::core::soundfont::Result NeptuneProcessor::uiImportSoundFont (const std:
     return result;
 }
 
-NeptuneProcessor::OrganMemory NeptuneProcessor::uiEstimateOrganMemory (const std::filesystem::path& organFile)
+NeptuneProcessor::OrganMemory NeptuneProcessor::uiEstimateOrganMemory (const std::filesystem::path& organFile, const std::vector<std::string>& excludedPerspectives)
 {
     using namespace neptune::core;
     organimport::Options probe;
     probe.baseDir = organFile.parent_path();
     probe.readSampleMarks = false;
+    probe.excludedPerspectives = excludedPerspectives;
     auto counted = organimport::importOrganFile (organFile, probe);
     OrganMemory m;
     if (! counted.ok) return m;
@@ -857,7 +858,7 @@ NeptuneProcessor::OrganMemory NeptuneProcessor::uiEstimateOrganMemory (const std
     return m;
 }
 
-neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::filesystem::path& organFile, bool streamFromDisk)
+neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::filesystem::path& organFile, bool streamFromDisk, const std::vector<std::string>& excludedPerspectives)
 {
     using namespace neptune::core;
     namespace mx = neptune::core::mixer;
@@ -896,6 +897,7 @@ neptune::core::organimport::Result NeptuneProcessor::uiImportOrgan (const std::f
     opt.firstChannel = 1;
     opt.stylePack = "organ-wood-brass";   // style par défaut des pages générées (bois et laiton)
     opt.streamFromDisk = streamFromDisk;
+    opt.excludedPerspectives = excludedPerspectives;
     auto result = organimport::importOrganFile (organFile, opt);
     if (! result.ok) return result;
 

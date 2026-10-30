@@ -64,6 +64,7 @@ struct Options
     std::string stylePack;           // pack de styles d'images des pages de Façade générées (identifiant, ex. "organ-wood-brass") ; vide : dessin d'origine
     bool readSampleMarks = true;     // lire boucle et repère de relâchement dans les fichiers (faux : tests sans fichiers)
     bool streamFromDisk = false;     // vrai : les instruments gardent le début des échantillons en mémoire et lisent le reste sur le disque (gros orgues)
+    std::vector<std::string> excludedPerspectives;   // perspectives (voir listPerspectives) dont les rangs ne sont pas chargés ; vide : toutes
 };
 
 struct Result
@@ -78,6 +79,19 @@ struct Result
     std::vector<std::pair<ParamId, double>> initialValues;   // état initial des interrupteurs (valeurs réelles)
     std::vector<std::string> warnings;
 };
+
+// Perspectives d'un orgue (positions de micro : « Front (Diffuse) », « Rear »...). Dans un fichier converti d'un format Hauptwerk, chaque perspective est un jeu de rangs
+// séparé dont le nom commence par le nom de la perspective suivi de deux-points (« Rear: Ped Subbass 16 »), et un même jeu liste un rang par perspective. Un préfixe
+// n'est une perspective que si au moins un jeu réunit des rangs de préfixes différents ; les autres rangs (bruits, jeux à un seul rang) sont toujours chargés.
+// Rend la liste vide pour un orgue sans perspectives.
+struct Perspective
+{
+    std::string name;
+    int ranks = 0;                 // rangs qui portent ce préfixe
+    std::int64_t pipes = 0;        // tuyaux logiques de ces rangs (NumberOfLogicalPipes)
+};
+std::vector<Perspective> listPerspectives (std::string_view odfText);
+std::vector<Perspective> listPerspectivesFile (const std::filesystem::path& odfFile);
 
 Result importOrgan (std::string_view odfText, const Options&);
 Result importOrganFile (const std::filesystem::path& odfFile, Options options = {});   // baseDir = dossier du fichier si non précisé

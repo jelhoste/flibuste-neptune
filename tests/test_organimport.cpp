@@ -1297,3 +1297,184 @@ TEST_CASE ("sampler voices: the running count of active voices always matches th
     v.allSoundOff();
     CHECK (v.activeVoices() == 0);
 }
+
+namespace
+{
+// Un orgue converti d'un format Hauptwerk : chaque jeu lie un rang par perspective (« Front: », « Rear: »), plus un rang de bruit qu'aucune perspective ne concerne.
+const char* const kPerspectiveOrgan = R"(; orgue a perspectives
+[Organ]
+ChurchName=Perspective Organ
+NumberOfManuals=1
+HasPedals=N
+AmplitudeLevel=100
+
+[Manual001]
+Name=Great
+NumberOfLogicalKeys=3
+NumberOfAccessibleKeys=3
+FirstAccessibleKeyLogicalKeyNumber=1
+FirstAccessibleKeyMIDINoteNumber=48
+NumberOfStops=3
+Stop001=1
+Stop002=2
+Stop003=3
+
+[Stop001]
+Name=Principal 8'
+SwitchCount=1
+Switch001=1
+NumberOfAccessiblePipes=3
+FirstAccessiblePipeLogicalKeyNumber=1
+NumberOfRanks=2
+Rank001=1
+Rank001FirstPipeNumber=1
+Rank001PipeCount=3
+Rank002=2
+Rank002FirstPipeNumber=1
+Rank002PipeCount=3
+
+[Stop002]
+Name=Flute 4'
+SwitchCount=1
+Switch001=2
+NumberOfAccessiblePipes=3
+FirstAccessiblePipeLogicalKeyNumber=1
+NumberOfRanks=2
+Rank001=3
+Rank001FirstPipeNumber=1
+Rank001PipeCount=3
+Rank002=4
+Rank002FirstPipeNumber=1
+Rank002PipeCount=3
+
+[Stop003]
+Name=Noise
+SwitchCount=1
+Switch001=3
+NumberOfAccessiblePipes=3
+FirstAccessiblePipeLogicalKeyNumber=1
+NumberOfRanks=1
+Rank001=5
+Rank001FirstPipeNumber=1
+Rank001PipeCount=3
+
+[Rank001]
+Name=Front: Principal 8'
+NumberOfLogicalPipes=3
+Pipe001=front/p1.wav
+Pipe002=front/p2.wav
+Pipe003=front/p3.wav
+
+[Rank002]
+Name=Rear: Principal 8'
+NumberOfLogicalPipes=3
+Pipe001=rear/p1.wav
+Pipe002=rear/p2.wav
+Pipe003=rear/p3.wav
+
+[Rank003]
+Name=Front: Flute 4'
+NumberOfLogicalPipes=3
+Pipe001=front/f1.wav
+Pipe002=front/f2.wav
+Pipe003=front/f3.wav
+
+[Rank004]
+Name=Rear: Flute 4'
+NumberOfLogicalPipes=3
+Pipe001=rear/f1.wav
+Pipe002=rear/f2.wav
+Pipe003=rear/f3.wav
+
+[Rank005]
+Name=Special: Noise
+NumberOfLogicalPipes=3
+Pipe001=noise/n1.wav
+Pipe002=noise/n2.wav
+Pipe003=noise/n3.wav
+)";
+
+int zonesFrom (const Result& r, const std::string& part)
+{
+    int n = 0;
+    for (const auto& k : r.keyboards)
+        for (const auto& z : k.instrument.zones)
+            if (z.samplePath.find (part) != std::string::npos) ++n;
+    return n;
+}
+} // namespace
+
+TEST_CASE ("organ import: perspectives are the rank-name prefixes that a same stop combines")
+{
+    const auto list = listPerspectives (crlf (kPerspectiveOrgan));
+    REQUIRE (list.size() == 2);
+    CHECK (list[0].name == "Front");
+    CHECK (list[0].ranks == 2);
+    CHECK (list[0].pipes == 6);
+    CHECK (list[1].name == "Rear");
+    CHECK (list[1].ranks == 2);
+    // le rang de bruit (jamais combiné à un autre dans un jeu) n'est pas une perspective ; un orgue sans perspectives en rend la liste vide
+    for (const auto& p : list) CHECK (p.name != "Special");
+    CHECK (listPerspectives (crlf (kOrgan)).empty());
+}
+
+TEST_CASE ("organ import: leaving a perspective out loads only the ranks of the others")
+{
+    Options opt;
+    opt.readSampleMarks = false;
+    const auto all = importOrgan (crlf (kPerspectiveOrgan), opt);
+    REQUIRE (all.ok);
+    CHECK (zonesFrom (all, "front") == 6);
+    CHECK (zonesFrom (all, "rear") == 6);
+    CHECK (zonesFrom (all, "noise") == 3);
+
+    opt.excludedPerspectives = { "Rear" };
+    const auto front = importOrgan (crlf (kPerspectiveOrgan), opt);
+    REQUIRE (front.ok);
+    CHECK (zonesFrom (front, "front") == 6);
+    CHECK (zonesFrom (front, "rear") == 0);
+    CHECK (zonesFrom (front, "noise") == 3);   // le bruit reste
+    CHECK_FALSE (hasWarning (front, "no playable pipe"));
+    int stopsAll = 0, stopsFront = 0;
+    for (const auto& k : all.keyboards) stopsAll += k.stops;
+    for (const auto& k : front.keyboards) stopsFront += k.stops;
+    CHECK (stopsAll == 3);
+    CHECK (stopsFront == 3);
+
+    opt.excludedPerspectives = { "Front", "Rear" };
+    const auto none = importOrgan (crlf (kPerspectiveOrgan), opt);
+    REQUIRE (none.ok);
+    CHECK (zonesFrom (none, "front") == 0);
+    CHECK (zonesFrom (none, "rear") == 0);
+    CHECK (zonesFrom (none, "noise") == 3);
+    CHECK_FALSE (hasWarning (none, "no playable pipe"));   // une perspective écartée n'est pas une erreur
+    CHECK (hasWarning (none, "2 stop(s) have no rank in the chosen perspectives"));   // mais les jeux laissés de côté sont comptés
+    CHECK_FALSE (hasWarning (front, "left out"));
+}
+
+TEST_CASE ("organ import: the Buckeburg surround demo definition lists three perspectives (optional, NEPTUNE_BUCKEBURG_ODF)")
+{
+    const char* path = std::getenv ("NEPTUNE_BUCKEBURG_ODF");
+    if (path == nullptr || ! std::filesystem::exists (path)) { SUCCEED ("no file"); return; }
+    const auto list = listPerspectivesFile (path);
+    REQUIRE (list.size() == 3);
+    std::map<std::string, int> ranks;
+    for (const auto& p : list) ranks[p.name] = p.ranks;
+    CHECK (ranks["Front (Diffuse)"] == 82);
+    CHECK (ranks["Front (Direct)"] == 52);
+    CHECK (ranks["Rear"] == 82);
+
+    Options opt;
+    opt.readSampleMarks = false;
+    const auto everything = importOrganFile (path, opt);
+    REQUIRE (everything.ok);
+    opt.excludedPerspectives = { "Rear", "Front (Direct)" };
+    const auto oneSet = importOrganFile (path, opt);
+    REQUIRE (oneSet.ok);
+    std::size_t zonesAll = 0, zonesOne = 0;
+    for (const auto& k : everything.keyboards) zonesAll += k.instrument.zones.size();
+    for (const auto& k : oneSet.keyboards) zonesOne += k.instrument.zones.size();
+    INFO ("zones " << zonesAll << " -> " << zonesOne);
+    CHECK (zonesOne < zonesAll);
+    CHECK (zonesOne > 0);
+}

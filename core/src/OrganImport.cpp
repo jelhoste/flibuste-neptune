@@ -222,10 +222,38 @@ int combineOf (const std::string& fn, bool& known)
     return static_cast<int> (router::Combine::All);
 }
 
+// Préfixe de perspective d'un nom de rang (« Rear » dans « Rear: Ped Subbass 16 ») ; vide s'il n'y en a pas.
+std::string rankPrefix (const std::string& rankName)
+{
+    const auto colon = rankName.find (':');
+    return colon == std::string::npos || colon == 0 ? std::string() : trimmed (std::string_view (rankName).substr (0, colon));
+}
+
+// Préfixes qui sont des perspectives : ceux des rangs qu'un même jeu réunit quand ils diffèrent.
+std::set<std::string> perspectivePrefixes (const IniFile& ini)
+{
+    std::set<std::string> out;
+    for (const auto& section : ini.sections())
+    {
+        const std::string low = lowered (section);
+        if (low.size() < 5 || low.rfind ("stop", 0) != 0 || low.find_first_not_of ("0123456789", 4) != std::string::npos) continue;
+        const int n = ini.getInt (section, "NumberOfRanks", 0);
+        std::set<std::string> here;
+        for (int r = 1; r <= n; ++r)
+        {
+            const std::string prefix = rankPrefix (ini.get (numbered ("Rank", ini.getInt (section, numbered ("Rank", r), 0)), "Name"));
+            if (! prefix.empty()) here.insert (prefix);
+        }
+        if (here.size() >= 2) out.insert (here.begin(), here.end());
+    }
+    return out;
+}
+
 class Builder
 {
 public:
-    Builder (const IniFile& ini, const Options& options) : ini_ (ini), opt_ (options) {}
+    Builder (const IniFile& ini, const Options& options)
+        : ini_ (ini), opt_ (options), perspectives_ (perspectivePrefixes (ini)), excluded_ (options.excludedPerspectives.begin(), options.excludedPerspectives.end()) {}
 
     Result run()
     {
@@ -250,6 +278,7 @@ public:
         const std::size_t room = static_cast<std::size_t> (std::max (0, mixer::numTracks - opt_.firstTrack));
         for (std::size_t i = 0; i < indices.size() && i < room; ++i) buildKeyboard (indices[i], i);
         if (indices.size() > room) warn ("the organ has more keyboards than Neptune has tracks: the extra ones are not imported");
+        if (stopsLeftOut_ > 0) warn (std::to_string (stopsLeftOut_) + " stop(s) have no rank in the chosen perspectives and are left out");
         buildCouplers();
         buildCombinations();
         otherThings();
@@ -1026,6 +1055,7 @@ private:
         const int nRanks = ini_.getInt (section, "NumberOfRanks", 0);
         const int accessible = ini_.getInt (section, "NumberOfAccessiblePipes", ini_.getInt (section, "NumberOfLogicalPipes", 0));
         const int firstKey = ini_.getInt (section, "FirstAccessiblePipeLogicalKeyNumber", 1);
+        bool leftOutByPerspective = false;
         if (nRanks > 0)
         {
             for (int r = 1; r <= nRanks; ++r)
@@ -1033,6 +1063,11 @@ private:
                 const int rankNumber = ini_.getInt (section, numbered ("Rank", r), 0);
                 const std::string rankSection = numbered ("Rank", rankNumber);
                 if (! ini_.hasSection (rankSection)) { warn ("stop \"" + name + "\": rank " + std::to_string (rankNumber) + " is missing"); continue; }
+                if (const auto prefix = rankPrefix (ini_.get (rankSection, "Name")); ! prefix.empty() && perspectives_.count (prefix) != 0 && excluded_.count (prefix) != 0)
+                {
+                    leftOutByPerspective = true;   // perspective non choisie : ce rang n'est pas chargé
+                    continue;
+                }
                 const std::string prefix = numbered ("Rank", r);
                 const int firstPipe = ini_.getInt (section, prefix + "FirstPipeNumber", 1);
                 const int rankPipes = ini_.getInt (rankSection, "NumberOfLogicalPipes", 0);
@@ -1065,7 +1100,12 @@ private:
                 addPipe (kb, info, section, firstPipe + j, firstKey + j, group, base, organTuning_ + stopTuning, organGain_ + stopGain);
             }
         }
-        if (kb.instrument.zones.size() == zonesBefore) { warn ("stop \"" + name + "\" has no playable pipe"); return; }
+        if (kb.instrument.zones.size() == zonesBefore)
+        {
+            if (leftOutByPerspective) ++stopsLeftOut_;
+            else warn ("stop \"" + name + "\" has no playable pipe");
+            return;
+        }
         kb.instrument.groups[group].modulators = mask;
         ++kb.stops;
     }
@@ -1234,6 +1274,9 @@ private:
 
     const IniFile& ini_;
     Options opt_;
+    std::set<std::string> perspectives_;   // préfixes de rangs qui sont des perspectives (voir perspectivePrefixes)
+    std::set<std::string> excluded_;       // perspectives dont les rangs ne sont pas chargés
+    int stopsLeftOut_ = 0;                 // jeux sans aucun rang dans les perspectives choisies
     Result result_;
     struct BoxControl { std::size_t keyboard; std::string name; int index; std::string key; };
     std::vector<BoxControl> boxControls_;
@@ -1256,6 +1299,35 @@ private:
     int routerSwitches_ = 0;
 };
 } // namespace
+
+std::vector<Perspective> listPerspectives (std::string_view odfText)
+{
+    const IniFile ini = IniFile::parse (odfText);
+    const auto prefixes = perspectivePrefixes (ini);
+    std::vector<Perspective> out;
+    if (prefixes.size() < 2) return out;
+    std::map<std::string, std::size_t> where;
+    for (const auto& section : ini.sections())
+    {
+        const std::string low = lowered (section);
+        if (low.size() < 5 || low.rfind ("rank", 0) != 0 || low.find_first_not_of ("0123456789", 4) != std::string::npos) continue;
+        const std::string prefix = rankPrefix (ini.get (section, "Name"));
+        if (prefixes.count (prefix) == 0) continue;
+        auto it = where.find (prefix);
+        if (it == where.end()) { it = where.emplace (prefix, out.size()).first; out.push_back ({ prefix, 0, 0 }); }
+        ++out[it->second].ranks;
+        out[it->second].pipes += ini.getInt (section, "NumberOfLogicalPipes", 0);
+    }
+    return out;
+}
+
+std::vector<Perspective> listPerspectivesFile (const fs::path& odfFile)
+{
+    std::ifstream in (odfFile, std::ios::binary);
+    if (! in) return {};
+    const std::string text ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    return listPerspectives (text);
+}
 
 Result importOrgan (std::string_view odfText, const Options& options)
 {

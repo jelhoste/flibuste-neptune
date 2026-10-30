@@ -45,6 +45,8 @@ private:
     void openMidiSend();
     void showControlMenu();
     void importOrgan();                                // importer un orgue GrandOrgue (.organ ou paquet .orgue)
+    void chooseOrganPerspectives (const std::filesystem::path& organPath);   // orgue à plusieurs perspectives : fenêtre de choix, puis finishOrganImport
+    void finishOrganImport (const std::filesystem::path& organPath, const std::vector<std::string>& excludedPerspectives);   // mémoire, lecture sur le disque, import
     void importSfz();                                  // importer un instrument SFZ : choisit le fichier, demande où le mettre, puis finishSfzImport
     void finishSfzImport (const juce::File& picked, NeptuneProcessor::SfzPlacement placement);
     void importSoundFont();
