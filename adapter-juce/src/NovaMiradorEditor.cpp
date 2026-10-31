@@ -99,19 +99,11 @@ public:
             changed = true;
         }
         peak_ = std::max (lv.peakL, lv.peakR);
-        // barre de crête du mètre : suit les pics, tient 4 s puis retombe lentement (3 dB par seconde)
-        const double nowMs = juce::Time::getMillisecondCounterHiRes();
-        const double dt = lastMs_ > 0.0 ? std::min (0.5, (nowMs - lastMs_) / 1000.0) : 0.0;
-        lastMs_ = nowMs;
+        // barre blanche du mètre, comme celle du mètre d'entrée : le plus haut niveau atteint par la mesure choisie, jusqu'à la remise à zéro ou au changement de mesure
         const int mode = meterMode();
-        if (mode != lastMode_) { lastMode_ = mode; holdLevel_ = mir::kNoValue; holdAge_ = 0.0; }
+        if (mode != lastMode_) { lastMode_ = mode; holdLevel_ = mir::kNoValue; }
         const float level = meterValue();
-        if (level > holdLevel_ || holdLevel_ <= -150.0f) { if (level > -150.0f) { holdLevel_ = level; holdAge_ = 0.0; } }
-        else
-        {
-            holdAge_ += dt;
-            if (holdAge_ > 4.0) holdLevel_ = std::max (level, holdLevel_ - static_cast<float> (3.0 * dt));
-        }
+        if (level > holdLevel_) holdLevel_ = level;
         const auto key = std::make_tuple (r.momentary, r.shortTerm, r.integrated, r.truePeakDb, r.range, peak_ + holdLevel_,
                                           ps.version (mir::target), ps.version (mir::customTarget), ps.version (mir::tolerance), ps.version (mir::meterMode));
         if (key != lastKey_) { lastKey_ = key; changed = true; }
@@ -176,9 +168,9 @@ public:
         {
             g.setColour (skin_.colour (Token::Grid, 0.6f));
             g.drawLine (plot.getX(), yOf (static_cast<float> (db)), plot.getRight(), yOf (static_cast<float> (db)), std::max (1.0f, skin_.px (1.0f)));
-            g.setColour (skin_.colour (Token::TextDim2));
-            g.setFont (skin_.font (10.0f));
-            g.drawText (juce::String (db), juce::Rectangle<float> (plot.getX() - skin_.px (36.0f), yOf (static_cast<float> (db)) - skin_.px (7.0f), skin_.px (32.0f), skin_.px (14.0f)), juce::Justification::centredRight);
+            g.setColour (skin_.colour (Token::Text, 0.8f));
+            g.setFont (skin_.font (11.0f, true));
+            g.drawText (juce::String (db), juce::Rectangle<float> (plot.getX() - skin_.px (38.0f), yOf (static_cast<float> (db)) - skin_.px (8.0f), skin_.px (34.0f), skin_.px (16.0f)), juce::Justification::centredRight);
         }
         g.setColour (kGreen.withAlpha (0.9f));
         g.drawLine (plot.getX(), yOf (static_cast<float> (tgt)), plot.getRight(), yOf (static_cast<float> (tgt)), std::max (1.5f, skin_.px (1.5f)));
@@ -203,7 +195,7 @@ public:
         const float level = meterValue();
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (10.0f, true));
-        g.drawText (tx (("mx.mm" + std::to_string (meterMode())).c_str()).toUpperCase(), juce::Rectangle<float> (bar.getX() - skin_.px (40.0f), plot.getY() - skin_.px (24.0f), bar.getWidth() + skin_.px (80.0f), skin_.px (16.0f)), juce::Justification::centred);
+        g.drawText (tx (("mx.mm" + std::to_string (meterMode())).c_str()).toUpperCase() + (meterMode() == mir::kMeterPeak ? "  (dBFS)" : "  (LUFS)"), juce::Rectangle<float> (bar.getX() - skin_.px (40.0f), plot.getY() - skin_.px (24.0f), bar.getWidth() + skin_.px (80.0f), skin_.px (16.0f)), juce::Justification::centred);
         g.setColour (skin_.colour (Token::Grid));
         g.fillRoundedRectangle (bar, skin_.px (3.0f));
         {
@@ -232,12 +224,12 @@ public:
         {
             const float y = yOf (static_cast<float> (db));
             const bool major = db % 10 == 0;
-            g.setColour (skin_.colour (Token::TextDim2, major ? 0.9f : 0.5f));
-            g.drawLine (bar.getX() - skin_.px (major ? 7.0f : 4.0f), y, bar.getX() - skin_.px (1.0f), y, std::max (1.0f, skin_.px (1.0f)));
+            g.setColour (skin_.colour (Token::Text, major ? 0.85f : 0.5f));
+            g.drawLine (bar.getX() - skin_.px (major ? 8.0f : 5.0f), y, bar.getX() - skin_.px (1.0f), y, std::max (1.2f, skin_.px (1.3f)));
             if (major)
             {
-                g.setFont (skin_.font (9.0f));
-                g.drawText (juce::String (db), juce::Rectangle<float> (bar.getX() - skin_.px (40.0f), y - skin_.px (6.0f), skin_.px (30.0f), skin_.px (12.0f)), juce::Justification::centredRight);
+                g.setFont (skin_.font (11.5f, true));
+                g.drawText (juce::String (db), juce::Rectangle<float> (bar.getX() - skin_.px (46.0f), y - skin_.px (8.0f), skin_.px (36.0f), skin_.px (16.0f)), juce::Justification::centredRight);
             }
         }
         if (meterMode() != mir::kMeterPeak)   // repère de la cible sur le mètre
@@ -246,11 +238,6 @@ public:
             const float y = yOf (static_cast<float> (tgt));
             g.drawLine (bar.getX(), y, bar.getRight(), y, std::max (1.5f, skin_.px (1.5f)));
         }
-        // valeur lue, à droite du mètre, à la hauteur du niveau
-        g.setColour (skin_.colour (Token::Text));
-        g.setFont (skin_.font (13.0f, true));
-        if (level > -150.0f)
-            g.drawText (number (level, 1), juce::Rectangle<float> (bar.getRight() + skin_.px (8.0f), yOf (level) - skin_.px (8.0f), skin_.px (44.0f), skin_.px (16.0f)), juce::Justification::centredLeft);
     }
 
 private:
@@ -350,7 +337,6 @@ private:
     const i18n::Translator& tr_;
     LoudnessMeter::Reading reading_;
     float peak_ = mir::kNoValue, holdLevel_ = mir::kNoValue;
-    double holdAge_ = 0.0, lastMs_ = 0.0;
     int lastMode_ = -1;
     mir::LoudnessHistory history_ { 6000 };
     juce::Path momentaryPath_, shortPath_, shortArea_;
@@ -415,7 +401,7 @@ public:
             // valeurs, sous l'échelle
             g.setColour (skin_.colour (Token::Text));
             g.setFont (skin_.font (13.0f, true));
-            g.drawText (tx ("mx.peak") + "  " + number (hold[ch], 1) + "      " + tx ("mx.rms") + "  " + number (rms[ch], 1),
+            g.drawText (tx ("mx.peak") + "  " + number (hold[ch], 1) + " dBFS      " + tx ("mx.rms") + "  " + number (rms[ch], 1) + " dBFS",
                         juce::Rectangle<float> (bar.getX(), row.getY() + skin_.px (92.0f), bar.getWidth(), skin_.px (24.0f)), juce::Justification::centredLeft);
             // voyant d'écrêtage
             const auto led = juce::Rectangle<float> (row.getRight() - skin_.px (40.0f), bar.getCentreY() - skin_.px (9.0f), skin_.px (18.0f), skin_.px (18.0f));
@@ -701,7 +687,7 @@ void NovaMiradorEditor::buildCommon()
     metersPanel_ = add<nova::Panel> (-1, skin());
     navPanel_ = add<nova::Panel> (-1, skin());
     navPanel_->toBack();   // sous les entrées du menu, créées avant lui
-    peakMeter_ = add<nova::VMeter> (-1, skin(), tx ("mx.peak"), nova::VMeter::Kind::Level, false);
+    peakMeter_ = add<nova::VMeter> (-1, skin(), tx ("mx.peak_unit"), nova::VMeter::Kind::Level, false);
     peakMeter_->setModeVisible (false);
     peakMeter_->setZones (true);
     resetPill_ = add<nova::Pill> (-1, skin(), nova::Pill::Look::Small);
@@ -744,7 +730,7 @@ void NovaMiradorEditor::buildLoudPage()
 void NovaMiradorEditor::buildLevelsPage()
 {
     levelsPanel_ = add<nova::Panel> (1, skin());
-    levelsPanel_->setTitle (tx ("mx.page_levels"));
+    levelsPanel_->setTitle (tx ("mx.page_levels") + " (dBFS)");
     levels_ = add<LevelsView> (1, skin(), engine_, translator());
     holdPill_ = add<nova::Pill> (1, skin());
     holdPill_->bindValue (host(), mir::peakHold, tx ("mx.hold"));
@@ -772,7 +758,7 @@ void NovaMiradorEditor::buildStereoPage()
 void NovaMiradorEditor::buildSpectrumPage()
 {
     spectrumPanel_ = add<nova::Panel> (3, skin());
-    spectrumPanel_->setTitle (tx ("mx.page_spectrum"));
+    spectrumPanel_->setTitle (tx ("mx.page_spectrum") + " (dBFS / Hz)");
     spectrum_ = add<SpectrumView> (3, skin(), engine_);
 }
 
