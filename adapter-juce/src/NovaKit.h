@@ -66,6 +66,8 @@ juce::Rectangle<int> fitRect (int w, int h, int dw, int dh, float scale);
 
 // Aspect de la fenêtre qui reste constant (proportions du gabarit) : à appeler depuis un ComponentBoundsConstrainer.
 void configureConstrainer (juce::ComponentBoundsConstrainer&, int dw, int dh, float minScale, float maxScale);
+// Fenêtre étirable en largeur : la hauteur fixe l'échelle (proportions du gabarit conservées en hauteur), la largeur en plus n'agrandit que la zone de droite.
+void configureStretchConstrainer (juce::ComponentBoundsConstrainer&, int dw, int dh, float minScale, float maxScale, int maxWidth);
 
 // ------------------------------------------------------------------------------------------------ éléments sans état
 struct Refreshable

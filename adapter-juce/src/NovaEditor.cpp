@@ -138,6 +138,13 @@ void EditorBase::resized()
     const float s = fitScale (getWidth(), getHeight(), designWidth, designHeight, minScale, maxScale);
     skin_.setScale (s);
     frame_ = fitRect (getWidth(), getHeight(), designWidth, designHeight, s);
+    extraW_ = 0.0f;
+    if (options_.stretchWidth)
+    {
+        // la hauteur fixe l'échelle ; toute la largeur de la fenêtre est utilisée, le surplus (en pixels de maquette) va à la zone de droite
+        frame_ = { 0, frame_.getY(), getWidth(), frame_.getHeight() };
+        extraW_ = std::max (0.0f, static_cast<float> (getWidth()) / s - static_cast<float> (designWidth));
+    }
     layout();
     layoutSettings();
     layoutHeaderControls();
@@ -469,16 +476,17 @@ void EditorBase::layoutHeaderControls()
 {
     if (hdrTheme_ == nullptr) return;
     // de droite à gauche : bypass (36 px à 14 px du bord), thème, puis le sélecteur de contraste « - valeur + »
-    hdrTheme_->setBounds (R (1160 - 14 - 36 - 10 - 64, 15, 64, 28));
-    hdrPlus_->setBounds (R (1160 - 14 - 36 - 10 - 64 - 10 - 28, 15, 28, 28));
-    hdrContrast_->setBounds (R (1160 - 14 - 36 - 10 - 64 - 10 - 28 - 36, 15, 36, 28));
-    hdrMinus_->setBounds (R (1160 - 14 - 36 - 10 - 64 - 10 - 28 - 36 - 28, 15, 28, 28));
+    const float w = 1160.0f + extraW_;
+    hdrTheme_->setBounds (R (w - 14 - 36 - 10 - 64, 15, 64, 28));
+    hdrPlus_->setBounds (R (w - 14 - 36 - 10 - 64 - 10 - 28, 15, 28, 28));
+    hdrContrast_->setBounds (R (w - 14 - 36 - 10 - 64 - 10 - 28 - 36, 15, 36, 28));
+    hdrMinus_->setBounds (R (w - 14 - 36 - 10 - 64 - 10 - 28 - 36 - 28, 15, 28, 28));
 }
 
 void EditorBase::layoutSettings()
 {
     if (settingsPage_ < 0) return;
-    setPanel_->setBounds (R (204, 72, 942, 638));
+    setPanel_->setBounds (Rs (204, 72, 942, 638));
     setGeneral_->setBounds (R (220, 116, 400, 16));
     langPill_->setBounds (R (220, 140, 250, 34));
     setNote_->setBounds (R (220, 184, 900, 34));

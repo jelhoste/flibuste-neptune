@@ -80,6 +80,13 @@ void configureConstrainer (juce::ComponentBoundsConstrainer& c, int dw, int dh, 
                      juce::roundToInt (static_cast<float> (dw) * maxScale), juce::roundToInt (static_cast<float> (dh) * maxScale));
 }
 
+void configureStretchConstrainer (juce::ComponentBoundsConstrainer& c, int dw, int dh, float minScale, float maxScale, int maxWidth)
+{
+    c.setFixedAspectRatio (0.0);   // largeur et hauteur libres
+    c.setSizeLimits (juce::roundToInt (static_cast<float> (dw) * minScale), juce::roundToInt (static_cast<float> (dh) * minScale),
+                     maxWidth, juce::roundToInt (static_cast<float> (dh) * maxScale));
+}
+
 // ------------------------------------------------------------------------------------------------ gestes
 void setParam (ParamHost& host, neptune::core::ParamId id, double plain)
 {

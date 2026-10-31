@@ -26,6 +26,7 @@ public:
         bool noAB = false;          // pas de bouton A/B
         bool noBypass = false;      // pas de pastille de bypass (instrument : aucun paramètre `stock::bypass`)
         std::function<void (juce::Component* anchor)> presetMenu;   // remplace le menu de presets NOVA (presets d'usine + fichiers utilisateur), par exemple par une bibliothèque
+        bool stretchWidth = false;  // fenêtre étirable en largeur : la zone de droite s'agrandit, la colonne de gauche et la hauteur ne changent pas
         bool hostTempo = false;     // le tempo de l'hôte est disponible (plugin séparé) : SYNC du delay utilisable
         bool midiSource = false;   // plugin séparé avec entrée MIDI : la source du sidechain peut être « MIDI » (compresseur)
         juce::String moduleName;   // « compressor », « equalizer » : dossier des presets utilisateur
@@ -74,6 +75,12 @@ protected:
         return { frame_.getX() + skin_.ipx (x), frame_.getY() + skin_.ipx (y), skin_.ipx (w), skin_.ipx (h) };
     }
     juce::Rectangle<int> frame() const { return frame_; }
+    // Largeur ajoutée à la maquette (en pixels de maquette) quand la fenêtre est étirée ; 0 sinon
+    float extraW() const noexcept { return extraW_; }
+    // Rectangle décalé vers la droite de la largeur ajoutée (éléments ancrés au bord droit)
+    juce::Rectangle<int> Rr (float x, float y, float w, float h) const { return R (x + extraW_, y, w, h); }
+    // Rectangle élargi de la largeur ajoutée (zones qui s'étirent)
+    juce::Rectangle<int> Rs (float x, float y, float w, float h) const { return R (x, y, w + extraW_, h); }
 
     // Crée un composant, l'ajoute à la fenêtre et à une page (-1 : toutes les pages, -2 : toutes sauf la page SETTINGS), l'enregistre pour le rafraîchissement s'il est Refreshable.
     template <class T, class... Args>
@@ -137,6 +144,7 @@ private:
     Options options_;
     juce::String word_;
     juce::Rectangle<int> frame_;
+    float extraW_ = 0.0f;
     std::vector<std::unique_ptr<juce::Component>> owned_;
     std::vector<PageItem> items_;
     std::vector<Refreshable*> refreshables_;

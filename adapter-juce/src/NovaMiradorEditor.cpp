@@ -110,6 +110,11 @@ public:
         reading_ = r;
         if (changed) { buildPaths(); repaint(); }
     }
+    void openLegend() { legendOpen_ = true; repaint(); }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (legendButton().contains (e.position)) { legendOpen_ = ! legendOpen_; repaint(); }
+    }
     void clearHistory() { history_.clear(); holdLevel_ = mir::kNoValue; buildPaths(); repaint(); }
     void resized() override { buildPaths(); }
 
@@ -190,6 +195,51 @@ public:
             g.drawLine (plot.getX(), yOf (reading_.integrated), plot.getRight(), yOf (reading_.integrated), std::max (1.0f, skin_.px (1.0f)));
         }
 
+        // ---- légende : un petit bouton en bas à droite du graphe déplie vers la gauche une ligne qui donne la correspondance des couleurs
+        {
+            const auto btn = legendButton();
+            skin_.fill (g, Token::BgCard, btn, skin_.px (5.0f));
+            g.setColour (skin_.colour (Token::CtlBd));
+            g.drawRoundedRectangle (btn.reduced (0.5f), skin_.px (5.0f), skin_.borderWidth());
+            g.setColour (skin_.colour (legendOpen_ ? Token::Accent : Token::Text, 0.9f));
+            g.setFont (skin_.font (9.5f, true));
+            g.drawText (juce::String (legendOpen_ ? "< " : "") + tx ("mx.legend"), btn, juce::Justification::centred);
+            if (legendOpen_)
+            {
+                struct Item { juce::String text; juce::Colour colour; bool band; };
+                const Item items[5] = { { tx ("mx.momentary"), skin_.colour (Token::TextDim2, 0.8f), false }, { tx ("mx.short"), skin_.colour (Token::Accent), false },
+                                        { tx ("mx.integrated"), skin_.colour (Token::Text, 0.85f), false }, { tx ("mx.target"), kGreen, false },
+                                        { tx ("mx.tolerance"), kGreen, true } };
+                const float swatch = skin_.px (20.0f), gapText = skin_.px (6.0f), gapItem = skin_.px (16.0f), charW = skin_.px (6.6f);
+                float total = 0.0f;
+                for (const auto& it : items) total += swatch + gapText + static_cast<float> (it.text.length()) * charW + gapItem;
+                const float x0 = btn.getX() - skin_.px (8.0f) - total;
+                skin_.fill (g, Token::StageBg, juce::Rectangle<float> (x0 - skin_.px (6.0f), btn.getY() - skin_.px (2.0f), total + skin_.px (4.0f), btn.getHeight() + skin_.px (4.0f)), skin_.px (5.0f));
+                float x = x0;
+                for (const auto& it : items)
+                {
+                    const float cy = btn.getCentreY();
+                    if (it.band)   // bande de tolérance : vert au centre, jaune de part et d'autre
+                    {
+                        g.setColour (kYellow.withAlpha (0.55f));
+                        g.fillRect (x, cy - skin_.px (6.0f), swatch, skin_.px (12.0f));
+                        g.setColour (kGreen.withAlpha (0.85f));
+                        g.fillRect (x, cy - skin_.px (3.0f), swatch, skin_.px (6.0f));
+                    }
+                    else
+                    {
+                        g.setColour (it.colour);
+                        g.fillRoundedRectangle (x, cy - skin_.px (1.5f), swatch, skin_.px (3.0f), skin_.px (1.5f));
+                    }
+                    g.setColour (skin_.colour (Token::Text, 0.85f));
+                    g.setFont (skin_.font (9.5f, true));
+                    const float tw = static_cast<float> (it.text.length()) * charW;
+                    g.drawText (it.text, juce::Rectangle<float> (x + swatch + gapText, btn.getY(), tw + skin_.px (4.0f), btn.getHeight()), juce::Justification::centredLeft);
+                    x += swatch + gapText + tw + gapItem;
+                }
+            }
+        }
+
         // ---- mètre, à la même hauteur que le graphe (même échelle verticale)
         const auto bar = meterBar();
         const float level = meterValue();
@@ -266,6 +316,11 @@ private:
     {
         return getLocalBounds().toFloat().withTrimmedTop (skin_.px (122.0f)).withTrimmedLeft (skin_.px (44.0f)).withTrimmedRight (skin_.px (150.0f)).withTrimmedBottom (skin_.px (46.0f));
     }
+    juce::Rectangle<float> legendButton() const
+    {
+        const auto plot = plotArea();
+        return { plot.getRight() - skin_.px (74.0f), plot.getBottom() - skin_.px (26.0f), skin_.px (68.0f), skin_.px (20.0f) };
+    }
     juce::Rectangle<float> meterBar() const
     {
         const auto plot = plotArea();
@@ -338,6 +393,7 @@ private:
     LoudnessMeter::Reading reading_;
     float peak_ = mir::kNoValue, holdLevel_ = mir::kNoValue;
     int lastMode_ = -1;
+    bool legendOpen_ = false;
     mir::LoudnessHistory history_ { 6000 };
     juce::Path momentaryPath_, shortPath_, shortArea_;
     std::uint64_t lastTotal_ = 0;
@@ -682,6 +738,8 @@ NovaMiradorEditor::NovaMiradorEditor (ParamHost& host, mir::MiradorEngine& engin
 
 NovaMiradorEditor::~NovaMiradorEditor() { engine_.ring().setActive (false); }
 
+void NovaMiradorEditor::openLegendForTest() { loud_->openLegend(); }
+
 void NovaMiradorEditor::buildCommon()
 {
     metersPanel_ = add<nova::Panel> (-1, skin());
@@ -775,31 +833,31 @@ void NovaMiradorEditor::layout()
     layoutNav (542, 168);
 
     // ---- cadres de page
-    for (auto* panel : { loudPanel_, levelsPanel_, stereoPanel_, spectrumPanel_ }) panel->setBounds (R (204, 72, 942, 638));
+    for (auto* panel : { loudPanel_, levelsPanel_, stereoPanel_, spectrumPanel_ }) panel->setBounds (Rs (204, 72, 942, 638));
 
     // SONIE
-    loud_->setBounds (R (220, 108, 910, 480));
+    loud_->setBounds (Rs (220, 108, 910, 480));
     targetPill_->setBounds (R (220, 604, 210, 32));
     customPill_->setBounds (R (438, 604, 130, 32));
     tolerancePill_->setBounds (R (576, 604, 150, 32));
     historyPill_->setBounds (R (734, 604, 150, 32));
-    resetPlayPill_->setBounds (R (892, 604, 238, 32));
+    resetPlayPill_->setBounds (Rr (892, 604, 238, 32));
     resetLoudPill_->setBounds (R (220, 650, 150, 32));
-    meterPill_->setBounds (R (989, 548, 130, 28));   // sous le mètre de la page SONIE (centre du mètre : 220 + 760 + 54 + 20 = 1054)
+    meterPill_->setBounds (Rr (989, 548, 130, 28));   // sous le mètre de la page SONIE (centre du mètre : 220 + 760 + 54 + 20 = 1054)
 
     // NIVEAUX
-    levels_->setBounds (R (220, 108, 910, 380));
+    levels_->setBounds (Rs (220, 108, 910, 380));
     holdPill_->setBounds (R (220, 604, 170, 32));
     fallPill_->setBounds (R (398, 604, 170, 32));
     rmsPill_->setBounds (R (576, 604, 210, 32));
     resetPeaksPill_->setBounds (R (794, 604, 150, 32));
 
     // STÉRÉO et SPECTRE
-    stereo_->setBounds (R (220, 108, 910, 500));
-    spectrum_->setBounds (R (220, 108, 910, 580));
+    stereo_->setBounds (Rs (220, 108, 910, 500));
+    spectrum_->setBounds (Rs (220, 108, 910, 580));
 
     // ---- en-tête
-    if (bypassPill() != nullptr) bypassPill()->setBounds (R (1160 - 14 - 36, 11, 36, 36));
+    if (bypassPill() != nullptr) bypassPill()->setBounds (Rr (1160 - 14 - 36, 11, 36, 36));
 }
 
 void NovaMiradorEditor::pageChanged() {}

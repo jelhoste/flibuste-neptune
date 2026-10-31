@@ -699,11 +699,13 @@ int main (int argc, char** argv)
         mirador::MiradorEngine mEngine;
         mEngine.prepare (48000.0, 480);
         MiradorHost mh (mEngine);
-        struct MCase { const char* name; th::ThemeId id; float scale; int page; };
-        const MCase mcs[] = { { "mirador-dark-loud", th::ThemeId::Dark, 1.0f, 0 }, { "mirador-dark-levels", th::ThemeId::Dark, 1.0f, 1 },
-                              { "mirador-dark-stereo", th::ThemeId::Dark, 1.0f, 2 }, { "mirador-dark-spectrum", th::ThemeId::Dark, 1.0f, 3 },
-                              { "mirador-light-loud", th::ThemeId::Light, 1.0f, 0 }, { "mirador-dark-set", th::ThemeId::Dark, 1.0f, 4 },
-                              { "mirador-dark-loud-070", th::ThemeId::Dark, 0.7f, 0 } };
+        struct MCase { const char* name; th::ThemeId id; float scale; int page; float widthMul; };
+        const MCase mcs[] = { { "mirador-dark-loud", th::ThemeId::Dark, 1.0f, 0, 1.0f }, { "mirador-dark-levels", th::ThemeId::Dark, 1.0f, 1, 1.0f },
+                              { "mirador-dark-stereo", th::ThemeId::Dark, 1.0f, 2, 1.0f }, { "mirador-dark-spectrum", th::ThemeId::Dark, 1.0f, 3, 1.0f },
+                              { "mirador-light-loud", th::ThemeId::Light, 1.0f, 0, 1.0f }, { "mirador-dark-set", th::ThemeId::Dark, 1.0f, 4, 1.0f },
+                              { "mirador-dark-loud-070", th::ThemeId::Dark, 0.7f, 0, 1.0f }, { "mirador-dark-loud-wide", th::ThemeId::Dark, 1.0f, 0, 1.5f },
+                              { "mirador-dark-levels-wide", th::ThemeId::Dark, 1.0f, 1, 1.5f }, { "mirador-dark-stereo-wide", th::ThemeId::Dark, 1.0f, 2, 1.5f },
+                              { "mirador-dark-set-wide", th::ThemeId::Dark, 1.0f, 4, 1.5f } };
         for (const auto& c : mcs)
         {
             std::fprintf (stderr, "editor %s\n", c.name);
@@ -711,13 +713,15 @@ int main (int argc, char** argv)
             NovaMiradorEditor::Options opt;
             opt.brand = true;
             opt.moduleName = "mirador";
+            opt.stretchWidth = true;
             opt.noPresets = true;
             opt.noAB = true;
             opt.noBypass = true;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaMiradorEditor ed (mh, mEngine, th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * c.widthMul), juce::roundToInt (780 * c.scale));
+            if (c.widthMul > 1.0f && c.page == 0) ed.openLegendForTest();
             ed.setPageForTest (c.page);
             // un signal stéréo un peu large (sinus gauche + sinus droit décalé + bruit) pour que les mesures et le dessin aient de la matière
             std::vector<float> l (480), r (480);

@@ -1011,6 +1011,7 @@ const Entry kEntries[] = {
     { "mx.mm1", { "Momentary", "Momentanée" } },
     { "mx.mm2", { "Short-term", "Court terme" } },
     { "mx.mm3", { "Integrated", "Intégrée" } },
+    { "mx.legend", { "LEGEND", "LÉGENDE" } },
     { "mx.history", { "LOUDNESS HISTORY (LUFS)", "HISTORIQUE DE SONIE (LUFS)" } },
     { "mx.target", { "TARGET", "CIBLE" } },
     { "mx.tgt0", { "-23 EBU", "-23 EBU" } },

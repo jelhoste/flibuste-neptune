@@ -12,6 +12,7 @@ public:
                        const neptune::core::i18n::Translator&, Options);
     ~NovaMiradorEditor() override;
     void setPageForTest (int p) { setPage (p); }
+    void openLegendForTest();
 
 private:
     class LoudView;
