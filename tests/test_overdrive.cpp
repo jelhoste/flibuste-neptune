@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "neptune/core/OverdriveModule.h"
+#include "neptune/core/OverdrivePresets.h"
 
 using namespace neptune::core;
 using namespace neptune::core::overdrive;
@@ -292,5 +293,98 @@ TEST_CASE ("overdrive tames the highs compared with a bare waveshaper (less hars
         const double moduleRatio = bandRatio (moduleSignal, kRate), bareRatio = bandRatio (bare, hiRate);
         INFO ("module " << moduleRatio << " dB, courbe nue " << bareRatio << " dB");
         CHECK (moduleRatio < bareRatio - 6.0);
+    }
+}
+
+TEST_CASE ("overdrive Tight keeps a low note from modulating the mids", "[overdrive]")
+{
+    // deux notes : 60 Hz fort et 1 kHz faible ; les bandes latérales à 1000 +- 60 Hz mesurent l'intermodulation
+    std::vector<float> in (static_cast<std::size_t> (2.0 * kRate));
+    for (std::size_t i = 0; i < in.size(); ++i)
+    {
+        const double t = static_cast<double> (i) / kRate;
+        in[i] = static_cast<float> (0.25 * std::sin (2.0 * kPi * 60.0 * t) + 0.04 * std::sin (2.0 * kPi * 1000.0 * t));
+    }
+    auto sidebands = [&] (double tightPct)
+    {
+        auto inst = make();
+        setP (*inst, model, kTube);
+        setP (*inst, drive, 28.0);
+        setP (*inst, autoGain, 0.0);
+        setP (*inst, imperfection, 0.0);
+        setP (*inst, tight, tightPct);
+        setP (*inst, oversampling, 2);
+        const auto out = run (*inst, in);
+        const std::size_t n = static_cast<std::size_t> (kRate);
+        const double carrier = component (out, 1000.0, n), low = component (out, 940.0, n), high = component (out, 1060.0, n);
+        return db (std::sqrt (low * low + high * high) / carrier);
+    };
+    const double without = sidebands (0.0), with = sidebands (100.0);
+    INFO ("intermodulation sans Tight " << without << " dB, avec " << with << " dB");
+    CHECK (with < without - 6.0);
+}
+
+TEST_CASE ("overdrive tube sag lowers the gain under a sustained loud signal", "[overdrive]")
+{
+    auto level = [&] (double feelPct)
+    {
+        auto inst = make();
+        setP (*inst, model, kTube);
+        setP (*inst, drive, 14.0);
+        setP (*inst, feel, feelPct);
+        setP (*inst, autoGain, 0.0);
+        setP (*inst, imperfection, 0.0);
+        const auto out = run (*inst, sine (440.0, 0.3, 2.0));
+        double s = 0.0;
+        for (std::size_t i = out.size() - static_cast<std::size_t> (kRate); i < out.size(); ++i) s += static_cast<double> (out[i]) * static_cast<double> (out[i]);
+        return 10.0 * std::log10 (s / kRate);
+    };
+    CHECK (level (100.0) < level (0.0) - 0.5);
+}
+
+TEST_CASE ("overdrive imperfection makes the two channels slightly different", "[overdrive]")
+{
+    auto spread = [&] (double imperfectionPct)
+    {
+        auto inst = make();
+        setP (*inst, model, kTube);
+        setP (*inst, drive, 14.0);
+        setP (*inst, imperfection, imperfectionPct);
+        const auto in = sine (440.0, 0.3, 1.5);
+        std::vector<float> l (512), r (512);
+        double maxDiff = 0.0;
+        for (std::size_t pos = 0; pos + 512 <= in.size(); pos += 512)
+        {
+            std::copy (in.begin() + static_cast<long> (pos), in.begin() + static_cast<long> (pos + 512), l.begin());
+            r = l;
+            inst->runner.process (l.data(), r.data(), 512, false);
+            if (pos >= 24000) for (std::size_t i = 0; i < 512; ++i) maxDiff = std::max (maxDiff, static_cast<double> (std::fabs (l[i] - r[i])));
+        }
+        return maxDiff;
+    };
+    CHECK (spread (0.0) < 1.0e-6);
+    CHECK (spread (100.0) > 0.005);
+}
+
+TEST_CASE ("overdrive factory presets apply cleanly and stay finite", "[overdrive]")
+{
+    const auto& presets = factoryPresets();
+    REQUIRE (presets.size() >= 10);
+    for (const auto& preset : presets)
+    {
+        INFO ("preset " << preset.name);
+        auto inst = make();
+        for (const auto& [id, value] : preset.values)
+        {
+            const auto* spec = inst->runner.params().find (id);
+            REQUIRE (spec != nullptr);
+            CHECK (spec->clamp (value) == Approx (value));   // valeur dans la plage du paramètre
+        }
+        applyPreset (inst->runner.params(), preset);
+        std::vector<float> in (8192);
+        unsigned seed = 777u;
+        for (auto& x : in) { seed = seed * 1664525u + 1013904223u; x = 0.3f * static_cast<float> (static_cast<int> (seed >> 8) % 2001 - 1000) / 1000.0f; }
+        const auto out = run (*inst, in);
+        for (const float y : out) { REQUIRE (std::isfinite (y)); REQUIRE (std::fabs (y) < 8.0f); }
     }
 }

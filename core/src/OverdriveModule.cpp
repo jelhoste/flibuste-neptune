@@ -169,7 +169,11 @@ void OverdriveModule::Chain::reset() noexcept
     hi.reset();
     gbw = 0.0;
     pre.reset(); post1.reset(); post2.reset(); dc.reset();
-    toneLp = sagEnv = 0.0;
+    toneLp = sagFast = sagSlow = biasDyn = lowLp = lowLp2 = 0.0;
+    driftPhase1 = index == 0 ? 0.3 : 2.2;   // départs fixes : le rendu est déterministe
+    driftPhase2 = index == 0 ? 1.7 : 4.1;
+    lowRing.fill (0.0f);
+    lowPos = 0;
     delay.fill (0.0f);
     delayPos = 0;
 }
@@ -239,6 +243,8 @@ bool OverdriveModule::declareParams (ParameterSet& set, std::string* error) cons
     add (P::continuous (keyRelease, "Key Release", Unit::Milliseconds, 10.0, 1000.0, 120.0, Curve::Exponential));
     add (P::continuous (keyHp, "Key HP", Unit::Hertz, 20.0, 2000.0, 20.0, Curve::Exponential));
     add (pct (smooth, "Smooth", 0.0, 100.0, 60.0));
+    add (pct (tight, "Tight", 0.0, 100.0, 0.0));
+    add (pct (imperfection, "Imperfection", 0.0, 100.0, 25.0));
     return ok;
 }
 
@@ -251,11 +257,21 @@ void OverdriveModule::prepare (double sampleRate, int maxBlockSize)
 {
     fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
     maxBlock_ = std::max (1, maxBlockSize);
-    for (auto& c : chain_) c.os.prepare (maxBlock_);
+    for (std::size_t i = 0; i < chain_.size(); ++i)
+    {
+        chain_[i].index = static_cast<int> (i);
+        chain_[i].os.prepare (maxBlock_);
+        chain_[i].low.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+    }
     for (auto* v : { &a_, &b_, &keepA_, &keepB_, &modDb_ }) v->assign (static_cast<std::size_t> (maxBlock_), 0.0f);
     eq_.prepare (fs_);
-    sagAttack_ = smoothCoef (0.005, fs_);
-    sagRelease_ = smoothCoef (0.150, fs_);
+    sagAttackF_ = smoothCoef (0.003, fs_);   // affaissement : une composante rapide (condensateur de filtrage de l'étage) ...
+    sagReleaseF_ = smoothCoef (0.060, fs_);
+    sagAttackS_ = smoothCoef (0.025, fs_);   // ... et une lente (alimentation)
+    sagReleaseS_ = smoothCoef (0.450, fs_);
+    lowCoef_ = 1.0 - std::exp (-2.0 * kPi * 180.0 / fs_);   // Tight : séparation des graves à 180 Hz
+    driftInc1_ = 2.0 * kPi * 0.13 / fs_;                     // Imperfection : dérives lentes (0,13 Hz et 0,31 Hz)
+    driftInc2_ = 2.0 * kPi * 0.31 / fs_;
     gainSmooth_ = smoothCoef (0.005, fs_);
     levelSmooth_ = smoothCoef (0.010, fs_);
     toneCoef_ = 1.0 - std::exp (-2.0 * kPi * 800.0 / fs_);
@@ -346,6 +362,9 @@ void OverdriveModule::updateDesigns() noexcept
     shapeTarget_ = { modelIndex_, param (bias) / 100.0, param (character) / 100.0, param (feel) / 100.0, param (smooth) / 100.0 };
     compTarget_ = param (autoGain) >= 0.5 ? autoGainFor (dbToLin (driveDb_), shapeTarget_) : 1.0;
     levelLin_ = dbToLin (param (level));
+    tight_ = param (tight) / 100.0;
+    imperfection_ = param (imperfection) / 100.0;
+    lowBack_ = param (autoGain) >= 0.5 ? 1.0 / std::max (compTarget_, 0.05) : 1.0;   // le niveau de sortie (avec compensation) s'applique aussi aux graves rajoutés : on le leur annule
     const double t = param (tone) / 100.0;
     toneGainLow_ = dbToLin (-6.0 * t);
     toneGainHigh_ = dbToLin (6.0 * t);
@@ -393,32 +412,54 @@ void OverdriveModule::delayThrough (Chain& c, float* buf, int len, int samples) 
 void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
 {
     const bool inHpOnNow = param (inHpOn) >= 0.5, inLpOnNow = param (inLpOn) >= 0.5, outHpOnNow = param (outHpOn) >= 0.5, outLpOnNow = param (outLpOn) >= 0.5;
-    const double sagAmount = modelIndex_ == kTube ? 1.5 * param (feel) / 100.0 : 0.0;
+    const bool isTube = modelIndex_ == kTube;
+    const double sagAmount = isTube ? 1.5 * param (feel) / 100.0 : 0.0;
     const bool emphasis = modelIndex_ == kTape || modelIndex_ == kTransistor;
+    const bool useTight = tight_ > 0.0005;
+    const std::size_t lowDelay = static_cast<std::size_t> (std::clamp (latency_, 0, 127));
+
+    // imperfection : décalage fixe de signe opposé entre les deux voies, plus une dérive lente (gain en dB, polarisation)
+    c.driftPhase1 += driftInc1_ * len;
+    c.driftPhase2 += driftInc2_ * len;
+    const double sign = c.index == 0 ? 1.0 : -1.0;
+    const double driftA = 0.6 * std::sin (c.driftPhase1) + 0.4 * std::sin (c.driftPhase2);
+    const double driftB = std::sin (c.driftPhase2 * 1.7 + 0.9);
+    const double impDriveDb = imperfection_ * (0.45 * sign + 0.30 * driftA);
+    const double impBias = imperfection_ * (0.06 * sign + 0.04 * driftB);
 
     // bande passante du gain : produit gain x bande passante constant par modèle, borné entre 2,5 kHz et 20 kHz (au-delà, le filtre est neutre)
     static const double gbwHz[kNumModels] = { 700000.0, 1500000.0, 400000.0, 300000.0 };
     const double fcGain = std::clamp (gbwHz[std::clamp (modelIndex_, 0, kNumModels - 1)] / std::max (c.gain, 1.0), 2500.0, 20000.0);
     const double gbwCoef = fcGain >= 19999.0 ? 1.0 : 1.0 - std::exp (-2.0 * kPi * fcGain / fs_);
 
-    // ---- cadence de base : filtres d'entrée, préaccentuation, drive
+    // ---- cadence de base : filtres d'entrée, séparation des graves (Tight), préaccentuation, drive
     for (int i = 0; i < len; ++i)
     {
         double x = buf[i];
         if (! std::isfinite (x)) x = 0.0;
         if (inHpOnNow) x = c.inHp.process (static_cast<float> (x));
         if (inLpOnNow) x = c.inLp.process (static_cast<float> (x));
+        if (useTight)
+        {
+            // x = passe-haut du second ordre (x - 2 LP1 + LP2) + graves (2 LP1 - LP2) : la distorsion ne reçoit que le passe-haut, plus ou moins selon Tight
+            c.lowLp += lowCoef_ * (x - c.lowLp);
+            c.lowLp2 += lowCoef_ * (c.lowLp - c.lowLp2);
+            const double lowPart = tight_ * (2.0 * c.lowLp - c.lowLp2);   // la part des graves retirée de la distorsion
+            c.low[static_cast<std::size_t> (i)] = static_cast<float> (lowPart);
+            x -= lowPart;
+        }
         if (emphasis) x = c.pre.processD (x);
-        const double target = dbToLin (driveDb_ + static_cast<double> (modDb_[static_cast<std::size_t> (i)]));
+        const double target = dbToLin (driveDb_ + impDriveDb + static_cast<double> (modDb_[static_cast<std::size_t> (i)]));
         if (! smoothInit_) c.gain = target;
         c.gain += (target - c.gain) * gainSmooth_;
         double g = c.gain;
         if (sagAmount > 0.0)
         {
-            // affaissement : un signal fort tire l'alimentation vers le bas, le gain baisse un peu (enveloppe lente)
+            // affaissement : un signal fort tire l'alimentation vers le bas, le gain baisse (deux constantes de temps, rapide et lente)
             const double level01 = std::min (std::fabs (x * g), 4.0) * 0.25;
-            c.sagEnv += (level01 > c.sagEnv ? sagAttack_ : sagRelease_) * (level01 - c.sagEnv);
-            g /= 1.0 + sagAmount * c.sagEnv;
+            c.sagFast += (level01 > c.sagFast ? sagAttackF_ : sagReleaseF_) * (level01 - c.sagFast);
+            c.sagSlow += (level01 > c.sagSlow ? sagAttackS_ : sagReleaseS_) * (level01 - c.sagSlow);
+            g /= 1.0 + sagAmount * (0.6 * c.sagFast + 0.4 * c.sagSlow);
         }
         const double driven = x * g;
         // gain-bande passante limitée (comme un amplificateur opérationnel) : plus le gain est fort, plus les aigus sont coupés AVANT l'écrêteur
@@ -426,29 +467,42 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
         else { c.gbw = driven; buf[i] = static_cast<float> (driven); }
     }
 
-    // ---- cadence haute : courbe de transfert (réglages interpolés sur le bloc)
+    // ---- cadence haute : courbe de transfert (réglages interpolés sur le bloc ; la polarisation de la lampe suit l'enveloppe lente du signal)
     float* hi = c.os.up (buf, len);
     const int total = len * factor_;
     ShapeParams sp = shape_;
     c.hi.configure (fs_ * static_cast<double> (factor_), modelIndex_, driveDb_, shapeTarget_.smooth);
     const double inv = 1.0 / static_cast<double> (std::max (1, total));
     const double stepBias = (shapeTarget_.bias - sp.bias) * inv, stepChar = (shapeTarget_.character - sp.character) * inv, stepFeel = (shapeTarget_.feel - sp.feel) * inv;
+    const double dynEnd = isTube ? 0.35 * param (feel) / 100.0 * c.sagSlow : 0.0;
+    const double stepDyn = (dynEnd - c.biasDyn) * inv;
+    double dyn = c.biasDyn;
     for (int k = 0; k < total; ++k)
     {
         sp.bias += stepBias;
         sp.character += stepChar;
         sp.feel += stepFeel;
-        hi[k] = static_cast<float> (c.hi.process (static_cast<double> (hi[k]), sp));
+        dyn += stepDyn;
+        ShapeParams now = sp;
+        now.bias += dyn + impBias;
+        hi[k] = static_cast<float> (c.hi.process (static_cast<double> (hi[k]), now));
     }
+    c.biasDyn = dynEnd;
     c.os.down (buf, len);
 
-    // ---- cadence de base : continu, tonalité, désaccentuation, filtres de sortie
+    // ---- cadence de base : continu, tonalité, désaccentuation, graves propres (retardés comme la voie traitée), filtres de sortie
     for (int i = 0; i < len; ++i)
     {
         double y = c.dc.processD (static_cast<double>(buf[i]));
         c.toneLp += toneCoef_ * (y - c.toneLp);
         y = c.toneLp * toneGainLow_ + (y - c.toneLp) * toneGainHigh_;
         if (modelIndex_ == kTape) y = c.post2.processD (c.post1.processD (y));
+        if (useTight)
+        {
+            c.lowRing[c.lowPos] = c.low[static_cast<std::size_t> (i)];
+            y += lowBack_ * static_cast<double> (c.lowRing[(c.lowPos + 128 - lowDelay) & 127]);
+            c.lowPos = (c.lowPos + 1) & 127;
+        }
         float f = static_cast<float> (y);
         if (outHpOnNow) f = c.outHp.process (f);
         if (outLpOnNow) f = c.outLp.process (f);

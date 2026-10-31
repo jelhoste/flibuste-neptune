@@ -1019,6 +1019,8 @@ const Entry kEntries[] = {
     { "fo.mix", { "MIX", "MÉLANGE" } },
     { "fo.output", { "OUTPUT", "SORTIE" } },
     { "fo.smooth", { "SMOOTH", "DOUCEUR" } },
+    { "fo.tight", { "TIGHT", "GRAVES NETS" } },
+    { "fo.imperfection", { "IMPERFECTION", "IMPERFECTION" } },
     { "fo.autogain", { "AUTO GAIN", "GAIN AUTO" } },
     { "fo.os", { "OVERSAMPLING", "SURÉCHANTILLONNAGE" } },
     { "fo.channels", { "CHANNELS", "VOIES" } },

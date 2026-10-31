@@ -32,6 +32,9 @@ private:
     void buildEqPage();
     void buildKeyPage();
     void retitleKnobs();   // les titres de « Bias » et « Feel » suivent le modèle
+    std::vector<juce::String> presetNames() const override;
+    std::vector<std::pair<neptune::core::ParamId, double>> presetValues (int index) const override;
+    std::vector<neptune::core::ParamId> presetParamIds() const override;
 
     const neptune::core::OverdriveModule* module_;
 
@@ -45,9 +48,8 @@ private:
     ChipRow* modelChips_ = nullptr;
     TransferView* transfer_ = nullptr;
     nova::KnobCard *driveKnob_ = nullptr, *biasKnob_ = nullptr, *charKnob_ = nullptr, *feelKnob_ = nullptr, *toneKnob_ = nullptr, *levelKnob_ = nullptr;
-    nova::KnobCard *trimInKnob_ = nullptr, *mixKnob_ = nullptr, *trimOutKnob_ = nullptr, *smoothKnob_ = nullptr;
+    nova::KnobCard *trimInKnob_ = nullptr, *mixKnob_ = nullptr, *trimOutKnob_ = nullptr, *smoothKnob_ = nullptr, *tightKnob_ = nullptr, *imperfectionKnob_ = nullptr;
     nova::Pill *autoPill_ = nullptr, *osPill_ = nullptr, *chPill_ = nullptr;
-    nova::Text* satHint_ = nullptr;
     int shownModel_ = -1;
 
     // page FILTRES : passe-haut et passe-bas d'entrée, puis de sortie

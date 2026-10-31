@@ -39,7 +39,9 @@ constexpr ParamId eqHpOn = 138, eqHp = 139, eqHpSlope = 140, eqLpOn = 141, eqLp 
 // entrée latérale : source, quantité (pourcentage de 30 dB de drive), attaque, retombée, passe-haut de la clé
 constexpr ParamId keySource = 144, keyAmount = 145, keyAttack = 146, keyRelease = 147, keyHp = 148;
 constexpr ParamId smooth = 149;   // douceur : 0 clair, 100 très adouci (fréquences des passe-bas de l'étage non linéaire)
-constexpr std::size_t numParams = 50;   // identifiants 100..149
+constexpr ParamId tight = 150;          // graves nets : part des graves (sous ~180 Hz) retirée de la distorsion et ajoutée propre à la sortie
+constexpr ParamId imperfection = 151;   // petites différences et dérive lente entre les deux voies (gain, polarisation), comme deux voies d'un vrai appareil
+constexpr std::size_t numParams = 52;   // identifiants 100..151
 
 enum Meter : int { kInPeakL = 0, kInPeakR, kOutPeakL, kOutPeakR, kKeyLevel, kNumMeters };   // pics linéaires depuis la dernière lecture ; kKeyLevel : 0..1
 
@@ -108,7 +110,14 @@ private:
         ButterworthCascade inHp, inLp, outHp, outLp;
         Biquad pre, post1, post2, dc;   // préaccentuation, désaccentuation, bosse grave, blocage du continu
         overdrive::HiStage hi;
-        double toneLp = 0.0, sagEnv = 0.0, gain = 1.0, gbw = 0.0;   // gbw : état du passe-bas de bande passante du gain
+        double toneLp = 0.0, gain = 1.0, gbw = 0.0;   // gbw : état du passe-bas de bande passante du gain
+        double sagFast = 0.0, sagSlow = 0.0, biasDyn = 0.0;   // affaissement de l'alimentation (deux constantes de temps) et décalage dynamique de la polarisation
+        double lowLp = 0.0, lowLp2 = 0.0;                     // Tight : deux passe-bas en série qui isolent les graves
+        double driftPhase1 = 0.0, driftPhase2 = 0.0;          // Imperfection : dérive lente
+        int index = 0;                                        // 0 : première voie, 1 : seconde (signe de l'imperfection)
+        std::vector<float> low;                               // graves du bloc, pour les rajouter propres après la distorsion
+        std::array<float, 128> lowRing {};
+        std::size_t lowPos = 0;
         std::array<float, 128> delay {};
         std::size_t delayPos = 0;
         void reset() noexcept;
@@ -137,7 +146,7 @@ private:
     std::vector<float> modDb_;      // modulation du drive par la clé, en dB, un échantillon par entrée
     overdrive::ShapeParams shape_ {}, shapeTarget_ {};
     double driveDb_ = 18.0, levelLin_ = 1.0, levelCur_ = 1.0, compTarget_ = 1.0, toneGainLow_ = 1.0, toneGainHigh_ = 1.0;
-    double sagAttack_ = 0.0, sagRelease_ = 0.0, keyEnv_ = 0.0, keyAttack_ = 0.0, keyRelease_ = 0.0, gainSmooth_ = 0.0, toneCoef_ = 0.0, levelSmooth_ = 0.0;
+    double sagAttackF_ = 0.0, sagReleaseF_ = 0.0, sagAttackS_ = 0.0, sagReleaseS_ = 0.0, lowCoef_ = 0.0, lowBack_ = 1.0, tight_ = 0.0, imperfection_ = 0.0, driftInc1_ = 0.0, driftInc2_ = 0.0, keyEnv_ = 0.0, keyAttack_ = 0.0, keyRelease_ = 0.0, gainSmooth_ = 0.0, toneCoef_ = 0.0, levelSmooth_ = 0.0;
     int factor_ = 2, modelIndex_ = 0, channelMode_ = 0, keyMode_ = 0, latency_ = 0;
     bool smoothInit_ = false;
 

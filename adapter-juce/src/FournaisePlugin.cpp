@@ -210,7 +210,6 @@ void FournaisePluginEditor::buildContent()
     opt.brand = true;
     opt.externalKey = true;
     opt.moduleName = "fournaise";
-    opt.noPresets = true;   // pas encore de presets d'usine
     opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
     opt.getSettings = [&p] { return p.settings(); };

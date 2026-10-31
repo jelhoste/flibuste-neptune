@@ -773,7 +773,7 @@ int main (int argc, char** argv)
             opt.brand = true;
             opt.externalKey = true;
             opt.moduleName = "fournaise";
-            opt.noPresets = true;
+            opt.noPresets = false;
             opt.stretchAuto = gWide > 1.0f;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};

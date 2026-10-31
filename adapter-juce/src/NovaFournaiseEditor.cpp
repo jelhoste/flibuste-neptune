@@ -1,4 +1,5 @@
 #include "NovaFournaiseEditor.h"
+#include "neptune/core/OverdrivePresets.h"
 
 #include <algorithm>
 #include <cmath>
@@ -487,11 +488,23 @@ NovaFournaiseEditor::NovaFournaiseEditor (ParamHost& host, const OverdriveModule
     buildEqPage();
     buildKeyPage();
     buildSettingsPage (4);
+    if (const auto names = presetNames(); ! names.empty()) presetPill()->setText (names[0]);
     setPage (0);
     setSize (designWidth, designHeight);
 }
 
 NovaFournaiseEditor::~NovaFournaiseEditor() = default;
+
+std::vector<juce::String> NovaFournaiseEditor::presetNames() const
+{
+    std::vector<juce::String> out;
+    for (const auto& p : ovd::factoryPresets()) out.push_back (juce::String::fromUTF8 (p.name));
+    return out;
+}
+
+std::vector<std::pair<ParamId, double>> NovaFournaiseEditor::presetValues (int i) const { return ovd::factoryPresets()[static_cast<std::size_t> (i)].values; }
+
+std::vector<ParamId> NovaFournaiseEditor::presetParamIds() const { return ovd::presetParams(); }
 
 void NovaFournaiseEditor::buildCommon()
 {
@@ -528,14 +541,14 @@ void NovaFournaiseEditor::buildSaturationPage()
     mixKnob_ = knob (stock::mix, "fo.mix", true);
     trimOutKnob_ = knob (stock::outputTrim, "fo.output", true);
     smoothKnob_ = knob (ovd::smooth, "fo.smooth");
+    tightKnob_ = knob (ovd::tight, "fo.tight");
+    imperfectionKnob_ = knob (ovd::imperfection, "fo.imperfection");
     autoPill_ = add<nova::Pill> (0, skin());
     autoPill_->bindToggle (host(), ovd::autoGain, tx ("fo.autogain"));
     osPill_ = add<nova::Pill> (0, skin());
     osPill_->bindChoice (host(), ovd::oversampling, tx ("fo.os"), { "Off", "2x", "4x" });
     chPill_ = add<nova::Pill> (0, skin());
     chPill_->bindChoice (host(), ovd::channels, tx ("fo.channels"), { tx ("fo.ch0"), tx ("fo.ch1"), tx ("fo.ch2"), tx ("fo.ch3") });
-    satHint_ = add<nova::Text> (0, skin(), Token::TextDim2, 11.0f);
-    satHint_->setText (tx ("fo.hint_sat"));
 }
 
 void NovaFournaiseEditor::retitleKnobs()
@@ -639,13 +652,13 @@ void NovaFournaiseEditor::layout()
             top[i]->setBounds (R (x0 + static_cast<float> (i) * (cw + gap), 160, cw, 150));
             mid[i]->setBounds (R (x0 + static_cast<float> (i) * (cw + gap), 322, cw, 150));
         }
-        nova::KnobCard* low[4] = { trimInKnob_, mixKnob_, trimOutKnob_, smoothKnob_ };
-        for (int i = 0; i < 4; ++i) low[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + gap), 536, cw, 150));
+        // rangée du bas : six potards de 140 sur la largeur de la page
+        nova::KnobCard* low[6] = { trimInKnob_, mixKnob_, trimOutKnob_, smoothKnob_, tightKnob_, imperfectionKnob_ };
+        for (int i = 0; i < 6; ++i) low[i]->setBounds (R (220.0f + static_cast<float> (i) * 154.0f, 536, 140, 150));
     }
     autoPill_->setBounds (R (220, 486, 200, 36));
     osPill_->setBounds (R (428, 486, 230, 36));
     chPill_->setBounds (R (666, 486, 300, 36));
-    satHint_->setBounds (R (890, 540, 240, 120));
 
     // ---- page FILTRES : entrée (haut), sortie (bas) ; passe-haut puis passe-bas
     inFiltersPanel_->setBounds (R (204, 72, 942, 300));
@@ -687,6 +700,7 @@ void NovaFournaiseEditor::layout()
 
     // ---- en-tête et barre du bas
     if (abPill() != nullptr) abPill()->setBounds (R (14, 736, 40, 32));
+    if (presetPill() != nullptr) presetPill()->setBounds (R (470, 11, 220, 36));
     if (bypassPill() != nullptr) bypassPill()->setBounds (R (1160 - 14 - 36, 11, 36, 36));
 }
 
