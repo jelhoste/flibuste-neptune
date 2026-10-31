@@ -746,6 +746,12 @@ int main (int argc, char** argv)
             std::this_thread::sleep_for (std::chrono::milliseconds (300));
             ed.refreshNow();
             ed.refreshNow();
+            if (c.page == 0)
+            {
+                // page SONIE : de quoi remplir une partie de l'historique (une minute d'historique, 10 blocs = 0,1 s d'audio par passage)
+                mh.uiSetNormalised (mirador::historyMinutes, mEngine.params().spec (mEngine.params().indexOf (mirador::historyMinutes)).toNormalized (1.0));
+                for (int k = 0; k < 150; ++k) { feed (10); ed.refreshNow(); }
+            }
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;
             juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));

@@ -66,6 +66,19 @@ TEST_CASE ("mirador declares valid parameters", "[mirador]")
     REQUIRE (e.ok());
     CHECK (e.params().indexOf (target) != ParameterSet::npos);
     CHECK (e.params().indexOf (autoReset) != ParameterSet::npos);
+    CHECK (e.params().indexOf (meterMode) != ParameterSet::npos);
+}
+
+TEST_CASE ("mirador counts the audio samples it has seen", "[mirador]")
+{
+    MiradorEngine e;
+    e.prepare (kRate, 480);
+    CHECK (e.processedSamples() == 0u);
+    runSilence (e, 0.1);
+    CHECK (e.processedSamples() == 4800u);
+    std::vector<float> z (100, 0.0f);
+    e.process (z.data(), z.data(), 0, true);   // un bloc vide ne compte pas
+    CHECK (e.processedSamples() == 4800u);
 }
 
 TEST_CASE ("mirador targets, PLR / PSR and target state", "[mirador]")

@@ -24,9 +24,10 @@ constexpr const char* moduleId = "mirador";
 
 enum Target : int { kTargetEbu = 0, kTargetAtsc, kTargetPodcast, kTargetStreaming, kTargetCustom, kNumTargets };
 enum RmsWindow : int { kRms300ms = 0, kRms1s, kRms3s, kNumRmsWindows };
+enum MeterMode : int { kMeterPeak = 0, kMeterMomentary, kMeterShortTerm, kMeterIntegrated, kNumMeterModes };
 
 // ---- identifiants (stables : ne changent jamais une fois publiés)
-constexpr ParamId target = 100, customTarget = 101, tolerance = 102, historyMinutes = 103, peakHold = 104, peakFall = 105, rmsWindow = 106, autoReset = 107;
+constexpr ParamId target = 100, customTarget = 101, tolerance = 102, historyMinutes = 103, peakHold = 104, peakFall = 105, rmsWindow = 106, autoReset = 107, meterMode = 108;
 
 // Hors temps réel.
 bool addParams (ParameterSet& set, std::string* error = nullptr);
@@ -103,6 +104,7 @@ public:
     AnalyzerRing& ring() noexcept { return ring_; }
     const AnalyzerRing& ring() const noexcept { return ring_; }
     double sampleRate() const noexcept { return sr_; }
+    std::uint64_t processedSamples() const noexcept { return processed_.load (std::memory_order_relaxed); }   // échantillons vus par process() : le temps de l'audio, pour l'historique
 
 private:
     double p (std::size_t idx) const noexcept { return params_.effectiveAt (idx); }
@@ -125,6 +127,7 @@ private:
     double winLeft_ = 0.0;                                                    // échantillons restants dans la fenêtre en cours
     bool wasPlaying_ = false;
     std::atomic<bool> resetRequested_ { false };
+    std::atomic<std::uint64_t> processed_ { 0 };
 
     // publication
     std::atomic<float> peakL_ { kNoValue }, peakR_ { kNoValue }, holdLPub_ { kNoValue }, holdRPub_ { kNoValue };

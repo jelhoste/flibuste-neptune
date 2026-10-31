@@ -639,8 +639,25 @@ void VMeter::paint (juce::Graphics& g)
         const auto c1 = pink_ ? skin_.colour (Token::Pink2) : skin_.colour (Token::Accent2);
         const auto c2 = pink_ ? skin_.colour (Token::Pink) : skin_.colour (Token::Accent);
         const auto fillRect = kind_ == Kind::Level ? t.withTrimmedTop (t.getHeight() * (1.0f - f)) : t.withHeight (t.getHeight() * f);
-        g.setGradientFill (juce::ColourGradient (c1, 0.0f, t.getY(), c2, 0.0f, t.getBottom(), false));
-        g.fillRoundedRectangle (fillRect, skin_.px (3.0f));
+        if (zones_ && kind_ == Kind::Level)
+        {
+            // zones traditionnelles : vert, jaune (à partir de -18 dB), rouge (à partir de -6 dB)
+            struct Zone { float lo, hi; juce::uint32 argb; };
+            const Zone zs[3] = { { floor_, -18.0f, 0xFF3DBE5Eu }, { -18.0f, -6.0f, 0xFFE8C13Au }, { -6.0f, ceil_, 0xFFE5484Du } };
+            for (const auto& z : zs)
+            {
+                const float lo = juce::jlimit (0.0f, 1.0f, (z.lo - floor_) / span), hi = juce::jlimit (0.0f, 1.0f, (z.hi - floor_) / span);
+                const float top = std::min (f, hi);
+                if (top <= lo) continue;
+                g.setColour (juce::Colour (z.argb));
+                g.fillRect (t.getX(), t.getBottom() - t.getHeight() * top, t.getWidth(), t.getHeight() * (top - lo));
+            }
+        }
+        else
+        {
+            g.setGradientFill (juce::ColourGradient (c1, 0.0f, t.getY(), c2, 0.0f, t.getBottom(), false));
+            g.fillRoundedRectangle (fillRect, skin_.px (3.0f));
+        }
         // crête
         const float pf = kind_ == Kind::Level ? juce::jlimit (0.0f, 1.0f, (peak_[c] - floor_) / span) : juce::jlimit (0.0f, 1.0f, peak_[c] / span);
         if (pf > 0.0f)

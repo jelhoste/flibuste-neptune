@@ -42,6 +42,7 @@ bool addParams (ParameterSet& set, std::string* error)
     add (P::continuous (peakFall, "Peak Fall", Unit::None, 5.0, 60.0, 20.0));
     add (P::choice (rmsWindow, "RMS Window", { "300 ms", "1 s", "3 s" }, kRms300ms));
     add (P::toggle (autoReset, "Reset On Play", true));
+    add (P::choice (meterMode, "Meter", { "Peak", "Momentary", "Short-term", "Integrated" }, kMeterShortTerm));
     return ok;
 }
 
@@ -144,6 +145,7 @@ void MiradorEngine::process (const float* left, const float* right, int n, bool 
 {
     if (left == nullptr || n <= 0) return;
     if (right == nullptr) right = left;
+    processed_.fetch_add (static_cast<std::uint64_t> (n), std::memory_order_relaxed);
 
     if (resetRequested_.exchange (false, std::memory_order_acq_rel)) reset();
     if (playing && ! wasPlaying_ && p (iAutoReset_) > 0.5) loudness_.reset();

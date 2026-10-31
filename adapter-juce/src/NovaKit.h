@@ -275,6 +275,7 @@ public:
     void setModeVisible (bool v) { showMode_ = v; repaint(); }
     std::function<void()> onModeClick;   // clic sur le bouton de mode (PEAK / RMS ...)
     void resetPeak() { peak_[0] = peak_[1] = -120.0f; repaint(); }
+    void setZones (bool z) { zones_ = z; repaint(); }   // Level : vert jusqu'à -18 dB, jaune jusqu'à -6 dB, rouge au-delà (au lieu du dégradé du thème)
 
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -285,7 +286,7 @@ private:
     const Skin& skin_;
     juce::String title_, mode_ = "PEAK";
     Kind kind_;
-    bool pink_, showMode_ = true;
+    bool pink_, showMode_ = true, zones_ = false;
     float floor_ = -60.0f, ceil_ = 0.0f;
     float decay_ = 24.0f;
     double lastTime_ = 0.0;
