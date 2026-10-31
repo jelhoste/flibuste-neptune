@@ -32,10 +32,16 @@ public:
     // Takes ownership. A previously queued, not-yet-installed engine is simply replaced.
     void load(std::unique_ptr<StereoEngine> next) {
         if (!next || !next->ready()) return;
+        // A new engine supersedes any earlier unload request. Without this, an unload asked for while nothing was loaded (empty IR path, before any audio ran
+        // to consume the request) would remove the engine right after it was installed.
+        unloadRequested_.store(false, std::memory_order_release);
         delete pending_.exchange(next.release(), std::memory_order_acq_rel);
     }
-    // Removes the IR (fades back to dry).
-    void unload() { unloadRequested_.store(true, std::memory_order_release); }
+    // Removes the IR (fades back to dry). An engine still waiting to be installed is dropped as well (this request is the later one).
+    void unload() {
+        delete pending_.exchange(nullptr, std::memory_order_acq_rel);
+        unloadRequested_.store(true, std::memory_order_release);
+    }
     // Call periodically (e.g. from a timer / after load) to free engines the audio thread is done with.
     void collectRetired() { delete retired_.exchange(nullptr, std::memory_order_acq_rel); }
 

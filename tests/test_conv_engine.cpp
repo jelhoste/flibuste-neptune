@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "neptune/core/ConvolutionModule.h"
+#include "neptune/core/conv/live_convolver.hpp"
 #include "neptune/core/StockModule.h"
 
 using namespace neptune::core;
@@ -315,6 +316,7 @@ TEST_CASE ("convolution module: lab-like sequence, one switch at a time", "[conv
     REQUIRE (inst != nullptr);
     auto& module = static_cast<ConvolutionModule&> (inst->runner.module());
     const auto file = writeImpulseIr (taps, 24000, "bisect");
+    std::this_thread::sleep_for (std::chrono::milliseconds (300));   // le plugin vit un moment sans IR (chemin vide) avant que l'état n'arrive, comme dans le banc
     inst->runner.params().resetAll();
     module.setIrPath (file.string());
     if (doReset) inst->runner.reset();
@@ -352,4 +354,31 @@ TEST_CASE ("convolution module: lab-like sequence, one switch at a time", "[conv
             if (pos == 4000) { if (doSets) CHECK (normOff); else CHECK (normOn); }   // les options changées sans audio doivent être prises en compte
         }
     std::filesystem::remove (file);
+}
+
+TEST_CASE ("live convolver: an unload requested before the first IR does not remove that IR later", "[conv][live]")
+{
+    llc::LiveConvolver lc (1024, true);
+    lc.unload();   // le thread de chargement décharge « rien » quand le chemin d'IR est vide, avant tout audio
+    std::vector<float> h (1, 0.5f);
+    llc::IRBuffer ir;
+    ir.ch = { h };
+    lc.load (llc::StereoEngine::build (ir, llc::InputMode::Stereo));
+    std::vector<float> in (512, 1.0f), outL (512), outR (512);
+    float last = 0.0f;
+    for (int i = 0; i < 20; ++i)
+    {
+        lc.process (in.data(), in.data(), outL.data(), outR.data(), 512);
+        last = outL.back();
+    }
+    CHECK (std::fabs (last - 0.5f) < 1.0e-5f);   // l'IR est restée (0,5), pas de retour au signal sec (1,0)
+
+    // un déchargement demandé après le chargement, lui, doit s'appliquer
+    lc.unload();
+    for (int i = 0; i < 20; ++i)
+    {
+        lc.process (in.data(), in.data(), outL.data(), outR.data(), 512);
+        last = outL.back();
+    }
+    CHECK (std::fabs (last) < 1.0e-5f);   // silencieux sans IR (silentWhenEmpty)
 }
