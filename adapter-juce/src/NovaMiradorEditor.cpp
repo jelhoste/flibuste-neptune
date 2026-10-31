@@ -105,7 +105,7 @@ public:
         const float level = meterValue();
         if (level > holdLevel_) holdLevel_ = level;
         const auto key = std::make_tuple (r.momentary, r.shortTerm, r.integrated, r.truePeakDb, r.range, peak_ + holdLevel_,
-                                          ps.version (mir::target), ps.version (mir::customTarget), ps.version (mir::tolerance), ps.version (mir::meterMode));
+                                          ps.version (mir::target), ps.version (mir::customTarget), ps.version (mir::tolerance), ps.version (mir::meterMode), ps.version (mir::scaleLow), ps.version (mir::scaleHigh));
         if (key != lastKey_) { lastKey_ = key; changed = true; }
         reading_ = r;
         if (changed) { buildPaths(); repaint(); }
@@ -169,13 +169,14 @@ public:
         band (tgt + tol, tgt + tol + 3.0, kYellow, 0.14f);
         band (tgt - tol, tgt + tol, kGreen, 0.20f);
         band (tgt - tol - 3.0, tgt - tol, kYellow, 0.08f);
-        for (int db = -60; db <= 0; db += 10)
+        const float gridLo = scaleLo(), gridHi = scaleHi(), step = scaleStep();
+        for (float db = std::ceil (gridLo / step) * step; db <= gridHi + 0.01f; db += step)
         {
             g.setColour (skin_.colour (Token::Grid, 0.6f));
             g.drawLine (plot.getX(), yOf (static_cast<float> (db)), plot.getRight(), yOf (static_cast<float> (db)), std::max (1.0f, skin_.px (1.0f)));
             g.setColour (skin_.colour (Token::Text, 0.8f));
             g.setFont (skin_.font (11.0f, true));
-            g.drawText (juce::String (db), juce::Rectangle<float> (plot.getX() - skin_.px (38.0f), yOf (static_cast<float> (db)) - skin_.px (8.0f), skin_.px (34.0f), skin_.px (16.0f)), juce::Justification::centredRight);
+            g.drawText (juce::String (juce::roundToInt (db)), juce::Rectangle<float> (plot.getX() - skin_.px (38.0f), yOf (static_cast<float> (db)) - skin_.px (8.0f), skin_.px (34.0f), skin_.px (16.0f)), juce::Justification::centredRight);
         }
         g.setColour (kGreen.withAlpha (0.9f));
         g.drawLine (plot.getX(), yOf (static_cast<float> (tgt)), plot.getRight(), yOf (static_cast<float> (tgt)), std::max (1.5f, skin_.px (1.5f)));
@@ -258,8 +259,8 @@ public:
             {
                 const bool peakMode = meterMode() == mir::kMeterPeak;
                 const float hi = static_cast<float> (target() + tolerance());
-                g.setGradientFill (peakMode ? zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, -18.0f, -6.0f, 4.0f)
-                                            : zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, hi, hi + 3.0f, 1.2f));
+                g.setGradientFill (peakMode ? zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, scaleLo(), scaleHi(), -18.0f, -6.0f, 4.0f)
+                                            : zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, scaleLo(), scaleHi(), hi, hi + 3.0f, 1.2f));
                 const float top = yOf (level);
                 g.fillRect (bar.getX(), top, bar.getWidth(), bar.getBottom() - top);
             }
@@ -270,16 +271,17 @@ public:
             }
         }
         // graduation : un repère tous les 5 dB, un chiffre tous les 10 dB, à gauche du mètre
-        for (int db = -60; db <= 0; db += 5)
+        const float minorStep = scaleStep() >= 10.0f ? 5.0f : 1.0f;
+        for (float db = std::ceil (scaleLo() / minorStep) * minorStep; db <= scaleHi() + 0.01f; db += minorStep)
         {
-            const float y = yOf (static_cast<float> (db));
-            const bool major = db % 10 == 0;
+            const float y = yOf (db);
+            const bool major = std::fmod (std::fabs (db), scaleStep()) < 0.01f || std::fabs (std::fmod (std::fabs (db), scaleStep()) - scaleStep()) < 0.01f;
             g.setColour (skin_.colour (Token::Text, major ? 0.85f : 0.5f));
             g.drawLine (bar.getX() - skin_.px (major ? 8.0f : 5.0f), y, bar.getX() - skin_.px (1.0f), y, std::max (1.2f, skin_.px (1.3f)));
             if (major)
             {
                 g.setFont (skin_.font (11.5f, true));
-                g.drawText (juce::String (db), juce::Rectangle<float> (bar.getX() - skin_.px (46.0f), y - skin_.px (8.0f), skin_.px (36.0f), skin_.px (16.0f)), juce::Justification::centredRight);
+                g.drawText (juce::String (juce::roundToInt (db)), juce::Rectangle<float> (bar.getX() - skin_.px (46.0f), y - skin_.px (8.0f), skin_.px (36.0f), skin_.px (16.0f)), juce::Justification::centredRight);
             }
         }
         if (meterMode() != mir::kMeterPeak)   // repère de la cible sur le mètre
@@ -294,6 +296,13 @@ private:
     juce::String tx (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     double target() const { const auto& ps = host_.parameters(); return mir::targetLufs (static_cast<int> (std::lround (ps.get (mir::target))), ps.get (mir::customTarget)); }
     double tolerance() const { return host_.parameters().get (mir::tolerance); }
+    float scaleHi() const { return static_cast<float> (mir::scaleHighDb (static_cast<int> (std::lround (host_.parameters().get (mir::scaleHigh))))); }
+    float scaleLo() const
+    {
+        const auto& ps = host_.parameters();
+        return static_cast<float> (mir::scaleLowDb (static_cast<int> (std::lround (ps.get (mir::scaleLow))), static_cast<int> (std::lround (ps.get (mir::scaleHigh)))));
+    }
+    float scaleStep() const { return scaleHi() - scaleLo() <= 30.0f ? 5.0f : 10.0f; }   // pas de la grille
     int meterMode() const { return juce::jlimit (0, mir::kNumMeterModes - 1, static_cast<int> (std::lround (host_.parameters().get (mir::meterMode)))); }
     float meterValue() const
     {
@@ -329,7 +338,7 @@ private:
     float yOf (float lufs) const
     {
         const auto plot = plotArea();   // la même échelle verticale sert au graphe et au mètre
-        return plot.getBottom() - std::clamp ((lufs + 60.0f) / 60.0f, 0.0f, 1.0f) * plot.getHeight();
+        return plot.getBottom() - std::clamp ((lufs - scaleLo()) / (scaleHi() - scaleLo()), 0.0f, 1.0f) * plot.getHeight();
     }
     void buildPaths()
     {
@@ -398,7 +407,7 @@ private:
     juce::Path momentaryPath_, shortPath_, shortArea_;
     std::uint64_t lastTotal_ = 0;
     bool started_ = false;
-    std::tuple<float, float, float, float, float, float, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t> lastKey_ {};
+    std::tuple<float, float, float, float, float, float, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t> lastKey_ {};
 };
 
 // ------------------------------------------------------------------------------------------------ page NIVEAUX : barres, crête tenue, RMS, écrêtage
@@ -775,6 +784,10 @@ void NovaMiradorEditor::buildLoudPage()
     resetPlayPill_->bindToggle (host(), mir::autoReset, tx ("mx.reset_play"));
     meterPill_ = add<nova::Pill> (0, skin());
     meterPill_->bindChoice (host(), mir::meterMode, tx ("mx.meter"), { tx ("mx.mm0"), tx ("mx.mm1"), tx ("mx.mm2"), tx ("mx.mm3") });
+    scaleLowPill_ = add<nova::Pill> (0, skin());
+    scaleLowPill_->bindChoice (host(), mir::scaleLow, tx ("mx.scale_low"), { "-90", "-80", "-70", "-60", "-50", "-40", "-30" });
+    scaleHighPill_ = add<nova::Pill> (0, skin());
+    scaleHighPill_->bindChoice (host(), mir::scaleHigh, tx ("mx.scale_high"), { "0", "-5", "-10", "-15", "-20" });
     resetLoudPill_ = add<nova::Pill> (0, skin());
     resetLoudPill_->setText (tx ("mx.reset_int"));
     resetLoudPill_->onClick = [this] { engine_.resetLoudness(); loud_->clearHistory(); };
@@ -843,6 +856,8 @@ void NovaMiradorEditor::layout()
     historyPill_->setBounds (R (734, 604, 150, 32));
     resetPlayPill_->setBounds (Rr (892, 604, 238, 32));
     resetLoudPill_->setBounds (R (220, 650, 150, 32));
+    scaleLowPill_->setBounds (R (378, 650, 190, 32));
+    scaleHighPill_->setBounds (R (576, 650, 190, 32));
     meterPill_->setBounds (Rr (989, 548, 130, 28));   // sous le mètre de la page SONIE (centre du mètre : 220 + 760 + 54 + 20 = 1054)
 
     // NIVEAUX

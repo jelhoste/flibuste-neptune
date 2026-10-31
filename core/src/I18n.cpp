@@ -1006,6 +1006,8 @@ const Entry kEntries[] = {
     { "mx.truepeak", { "TRUE PEAK", "CRÊTE VRAIE" } },
     { "mx.plr", { "PLR / PSR", "PLR / PSR" } },
     { "mx.lu", { "TO TARGET", "ÉCART À LA CIBLE" } },
+    { "mx.scale_low", { "SCALE LOW", "ÉCHELLE BAS" } },
+    { "mx.scale_high", { "SCALE HIGH", "ÉCHELLE HAUT" } },
     { "mx.meter", { "METER", "MÈTRE" } },
     { "mx.mm0", { "Peak", "Crête" } },
     { "mx.mm1", { "Momentary", "Momentanée" } },

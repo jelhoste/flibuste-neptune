@@ -10,6 +10,7 @@
 #include "../src/NovaMicrodecaleEditor.h"
 #include "../src/NovaDiapasonEditor.h"
 #include "../src/NovaMiradorEditor.h"
+#include "../src/NovaConvolutionEditor.h"
 #include "../src/NovaSynthEditor.h"
 #include "../src/NovaFmEditor.h"
 #include "../src/NovaSpectrum.h"
@@ -21,11 +22,13 @@
 #include "neptune/core/MicrodecaleModule.h"
 #include "neptune/core/SignalGenerator.h"
 #include "neptune/core/Mirador.h"
+#include "neptune/core/ConvolutionModule.h"
 #include "neptune/core/StockModule.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmSynth.h"
 #include "neptune/core/SamplerParams.h"
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <thread>
 #include <vector>
@@ -220,8 +223,11 @@ private:
 };
 } // namespace
 
+static float gWide = 1.0f;   // NOVA_GALLERY_WIDE=1.5 : fenêtres élargies de moitié (étirement horizontal), sorties à mettre dans un autre dossier
+
 int main (int argc, char** argv)
 {
+    if (const char* w = std::getenv ("NOVA_GALLERY_WIDE")) gWide = std::max (1.0f, static_cast<float> (std::atof (w)));
     juce::ScopedJuceInitialiser_GUI init;
     const juce::File out = juce::File::getCurrentWorkingDirectory().getChildFile (argc > 1 ? argv[1] : "nova-gallery");
     out.createDirectory();
@@ -281,10 +287,11 @@ int main (int argc, char** argv)
         NovaCompressorEditor::Options opt;
         opt.brand = true;
         opt.moduleName = "compressor";
+        opt.stretchAuto = gWide > 1.0f;
         opt.getSettings = [] { return settings::GlobalSettings{}; };
         opt.applySettings = [] (const settings::GlobalSettings&) {};
         NovaCompressorEditor ed (rhost, static_cast<const CompressorModule*> (&runner.module()), th::withContrast (def, 0), def.knob, tr, opt);
-        ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+        ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
         ed.setPageForTest (c.page);
         // signal simulé : percussions toutes les 0,6 s, jouées à 30 images par seconde pendant 10 s ; l'historique défile sur l'horloge simulée
         {
@@ -344,10 +351,11 @@ int main (int argc, char** argv)
             opt.brand = true;
             opt.externalKey = true;
             opt.moduleName = "shaper";
+            opt.stretchAuto = gWide > 1.0f;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaShaperEditor ed (sh, static_cast<const ShaperModule*> (&shRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.showResponseForTest (c.response);
             ed.refreshNow();   // active l'anneau d'analyse
@@ -422,10 +430,11 @@ int main (int argc, char** argv)
             opt.brand = true;
             opt.hostTempo = true;
             opt.moduleName = "delay";
+            opt.stretchAuto = gWide > 1.0f;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaDelayEditor ed (dh, static_cast<const DelayModule*> (&dRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.selectLineForTest (c.sel);
             ed.showFiltersForTest (c.filters);
@@ -467,10 +476,11 @@ int main (int argc, char** argv)
             opt.brand = true;
             opt.hostTempo = true;
             opt.moduleName = "chorus";
+            opt.stretchAuto = gWide > 1.0f;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaChorusEditor ed (chh, static_cast<const ChorusModule*> (&cRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.showResponseForTest (c.response);
             {
@@ -536,7 +546,7 @@ int main (int argc, char** argv)
             link.heldKeys = [] (int) { return std::uint64_t (0); };
             link.outputs = { analogsynth::volume, analogsynth::pan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
             NovaSynthEditor ed (sh, presets, link, th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.setKeyboardShownForTest (c.keyboard);
             ed.refreshNow();
@@ -606,7 +616,7 @@ int main (int argc, char** argv)
             link.heldKeys = [] (int) { return std::uint64_t (0); };
             link.outputs = { fm::synthVolume, fm::synthPan, static_cast<ParamId> (sampler::gain), static_cast<ParamId> (sampler::tuneSemitones), static_cast<ParamId> (sampler::tuneCents) };
             NovaFmEditor ed (fh, fpresets, link, th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.setKeyboardShownForTest (c.keyboard);
             ed.refreshNow();
@@ -636,10 +646,11 @@ int main (int argc, char** argv)
             NovaMicrodecaleEditor::Options opt;
             opt.brand = true;
             opt.moduleName = "microdecale";
+            opt.stretchAuto = gWide > 1.0f;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaMicrodecaleEditor ed (mh, static_cast<const MicrodecaleModule*> (&mRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
@@ -675,15 +686,48 @@ int main (int argc, char** argv)
             NovaDiapasonEditor::Options opt;
             opt.brand = true;
             opt.moduleName = "diapason";
+            opt.stretchAuto = gWide > 1.0f;
             opt.noPresets = true;
             opt.noAB = true;
             opt.noBypass = true;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaDiapasonEditor ed (dh, dEngine, th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
             ed.selectDrumForTest (2);
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel de Convolution (IR intégrée « hall »)
+    {
+        ModuleRunner cRunner (std::make_unique<ConvolutionModule>());
+        cRunner.prepare (48000.0, 512);
+        RunnerHost ch (cRunner);
+        static_cast<ConvolutionModule&> (cRunner.module()).setIrPath ("builtin:hall");
+        std::this_thread::sleep_for (std::chrono::milliseconds (600));   // le fil de chargement calcule l'IR
+        struct CCase { const char* name; th::ThemeId id; float scale; int page; };
+        const CCase ccs[] = { { "conv-dark-p0", th::ThemeId::Dark, 1.0f, 0 }, { "conv-dark-p1", th::ThemeId::Dark, 1.0f, 1 }, { "conv-dark-p2", th::ThemeId::Dark, 1.0f, 2 },
+                              { "conv-light-p0", th::ThemeId::Light, 1.0f, 0 } };
+        for (const auto& c : ccs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            NovaConvolutionEditor::Options opt;
+            opt.brand = true;
+            opt.moduleName = "convolution";
+            opt.stretchAuto = gWide > 1.0f;
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaConvolutionEditor ed (ch, static_cast<ConvolutionModule*> (&cRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;
@@ -810,10 +854,11 @@ int main (int argc, char** argv)
             NovaEqualizerEditor::Options opt;
             opt.brand = true;
             opt.moduleName = "equalizer";
+            opt.stretchAuto = gWide > 1.0f;
             opt.getSettings = [] { return settings::GlobalSettings{}; };
             opt.applySettings = [] (const settings::GlobalSettings&) {};
             NovaEqualizerEditor ed (eh, static_cast<const EqualizerModule*> (&eqRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
-            ed.setSize (juce::roundToInt (1160 * c.scale), juce::roundToInt (780 * c.scale));
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.selectBandForTest (c.sel);
             ed.setPageForTest (c.page);
             ed.refreshNow();   // active l'anneau d'analyse

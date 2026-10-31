@@ -169,7 +169,7 @@ ChorusPluginEditor::ChorusPluginEditor (ChorusProcessor& p)
     buildContent();
     setWantsKeyboardFocus (true);
     // proportions de la maquette conservées ; l'interface se redessine à la vraie taille (aucune transformation)
-    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    nova::configureStretchConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale, 4096);
     setConstrainer (&constrainer_);
     setResizable (true, true);
     setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
@@ -185,6 +185,7 @@ void ChorusPluginEditor::buildContent()
     opt.brand = true;
     opt.hostTempo = true;
     opt.moduleName = "chorus";
+    opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
     opt.getSettings = [&p] { return p.settings(); };
     // appliqué hors de l'éditeur qui l'appelle : l'interface est détruite puis recréée avec la nouvelle palette

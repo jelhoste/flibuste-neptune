@@ -161,7 +161,7 @@ MicrodecalePluginEditor::MicrodecalePluginEditor (MicrodecaleProcessor& p)
     buildContent();
     setWantsKeyboardFocus (true);
     // proportions de la maquette conservées ; l'interface se redessine à la vraie taille (aucune transformation)
-    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    nova::configureStretchConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale, 4096);
     setConstrainer (&constrainer_);
     setResizable (true, true);
     setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
@@ -176,6 +176,7 @@ void MicrodecalePluginEditor::buildContent()
     NovaMicrodecaleEditor::Options opt;
     opt.brand = true;
     opt.moduleName = "microdecale";
+    opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.sampleRate = [&p] { return p.getSampleRate() > 0.0 ? p.getSampleRate() : 48000.0; };
     opt.getSettings = [&p] { return p.settings(); };
     // appliqué hors de l'éditeur qui l'appelle : l'interface est détruite puis recréée avec la nouvelle palette

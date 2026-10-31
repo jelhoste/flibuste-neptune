@@ -42,6 +42,6 @@ private:
     LevelsView* levels_ = nullptr;
     StereoView* stereo_ = nullptr;
     SpectrumView* spectrum_ = nullptr;
-    nova::Pill *targetPill_ = nullptr, *customPill_ = nullptr, *tolerancePill_ = nullptr, *historyPill_ = nullptr, *resetPlayPill_ = nullptr, *resetLoudPill_ = nullptr, *meterPill_ = nullptr;
+    nova::Pill *targetPill_ = nullptr, *customPill_ = nullptr, *tolerancePill_ = nullptr, *historyPill_ = nullptr, *resetPlayPill_ = nullptr, *resetLoudPill_ = nullptr, *meterPill_ = nullptr, *scaleLowPill_ = nullptr, *scaleHighPill_ = nullptr;
     nova::Pill *holdPill_ = nullptr, *fallPill_ = nullptr, *rmsPill_ = nullptr, *resetPeaksPill_ = nullptr;
 };

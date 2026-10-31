@@ -139,7 +139,7 @@ void EditorBase::resized()
     skin_.setScale (s);
     frame_ = fitRect (getWidth(), getHeight(), designWidth, designHeight, s);
     extraW_ = 0.0f;
-    if (options_.stretchWidth)
+    if (options_.stretchWidth || options_.stretchAuto)
     {
         // la hauteur fixe l'échelle ; toute la largeur de la fenêtre est utilisée, le surplus (en pixels de maquette) va à la zone de droite
         frame_ = { 0, frame_.getY(), getWidth(), frame_.getHeight() };
@@ -476,7 +476,7 @@ void EditorBase::layoutHeaderControls()
 {
     if (hdrTheme_ == nullptr) return;
     // de droite à gauche : bypass (36 px à 14 px du bord), thème, puis le sélecteur de contraste « - valeur + »
-    const float w = 1160.0f + extraW_;
+    const float w = options_.stretchAuto ? 1160.0f : 1160.0f + extraW_;   // en stretchAuto, R() décale déjà l'en-tête
     hdrTheme_->setBounds (R (w - 14 - 36 - 10 - 64, 15, 64, 28));
     hdrPlus_->setBounds (R (w - 14 - 36 - 10 - 64 - 10 - 28, 15, 28, 28));
     hdrContrast_->setBounds (R (w - 14 - 36 - 10 - 64 - 10 - 28 - 36, 15, 36, 28));

@@ -11,6 +11,8 @@ namespace
 constexpr const char* kTargetNames[kNumTargets] = { "-23 LUFS (EBU R128)", "-24 LUFS (ATSC A/85)", "-16 LUFS (Podcast)", "-14 LUFS (Streaming)", "Custom" };
 constexpr double kTargetValues[kNumTargets] = { -23.0, -24.0, -16.0, -14.0, -23.0 };
 constexpr double kRmsSeconds[kNumRmsWindows] = { 0.3, 1.0, 3.0 };
+constexpr double kScaleLow[kNumScaleLow] = { -90.0, -80.0, -70.0, -60.0, -50.0, -40.0, -30.0 };
+constexpr double kScaleHigh[kNumScaleHigh] = { 0.0, -5.0, -10.0, -15.0, -20.0 };
 
 float toDb (double linear) noexcept
 {
@@ -43,7 +45,20 @@ bool addParams (ParameterSet& set, std::string* error)
     add (P::choice (rmsWindow, "RMS Window", { "300 ms", "1 s", "3 s" }, kRms300ms));
     add (P::toggle (autoReset, "Reset On Play", true));
     add (P::choice (meterMode, "Meter", { "Peak", "Momentary", "Short-term", "Integrated" }, kMeterShortTerm));
+    add (P::choice (scaleLow, "Scale Low", { "-90", "-80", "-70", "-60", "-50", "-40", "-30" }, 3));
+    add (P::choice (scaleHigh, "Scale High", { "0", "-5", "-10", "-15", "-20" }, 0));
     return ok;
+}
+
+double scaleHighDb (int index) noexcept
+{
+    return kScaleHigh[std::clamp (index, 0, kNumScaleHigh - 1)];
+}
+
+double scaleLowDb (int index, int highIndex) noexcept
+{
+    const double lo = kScaleLow[std::clamp (index, 0, kNumScaleLow - 1)];
+    return std::min (lo, scaleHighDb (highIndex) - 10.0);   // au moins 10 dB d'étendue
 }
 
 const char* targetName (int t) noexcept

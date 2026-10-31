@@ -192,7 +192,7 @@ DiapasonPluginEditor::DiapasonPluginEditor (DiapasonProcessor& p)
     buildContent();
     setWantsKeyboardFocus (true);
     // proportions de la maquette conservées ; l'interface se redessine à la vraie taille (aucune transformation)
-    nova::configureConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale);
+    nova::configureStretchConstrainer (constrainer_, nova::EditorBase::designWidth, nova::EditorBase::designHeight, nova::EditorBase::minScale, nova::EditorBase::maxScale, 4096);
     setConstrainer (&constrainer_);
     setResizable (true, true);
     setSize (nova::EditorBase::designWidth, nova::EditorBase::designHeight);
@@ -207,6 +207,7 @@ void DiapasonPluginEditor::buildContent()
     NovaDiapasonEditor::Options opt;
     opt.brand = true;
     opt.moduleName = "diapason";
+    opt.stretchAuto = true;   // fenêtre étirable en largeur
     opt.noPresets = true;
     opt.noAB = true;
     opt.noBypass = true;

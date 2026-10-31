@@ -69,6 +69,19 @@ TEST_CASE ("mirador declares valid parameters", "[mirador]")
     CHECK (e.params().indexOf (meterMode) != ParameterSet::npos);
 }
 
+TEST_CASE ("mirador display range keeps at least 10 dB", "[mirador]")
+{
+    CHECK (scaleLowDb (3, 0) == Approx (-60.0));   // défaut : -60 .. 0
+    CHECK (scaleHighDb (0) == Approx (0.0));
+    CHECK (scaleLowDb (0, 0) == Approx (-90.0));
+    CHECK (scaleHighDb (4) == Approx (-20.0));
+    CHECK (scaleLowDb (6, 4) == Approx (-30.0));   // -30 .. -20 : 10 dB, accepté
+    CHECK (scaleLowDb (6, 2) == Approx (-30.0));
+    MiradorEngine e;
+    CHECK (e.params().indexOf (scaleLow) != ParameterSet::npos);
+    CHECK (e.params().indexOf (scaleHigh) != ParameterSet::npos);
+}
+
 TEST_CASE ("mirador counts the audio samples it has seen", "[mirador]")
 {
     MiradorEngine e;

@@ -26,7 +26,8 @@ public:
         bool noAB = false;          // pas de bouton A/B
         bool noBypass = false;      // pas de pastille de bypass (instrument : aucun paramètre `stock::bypass`)
         std::function<void (juce::Component* anchor)> presetMenu;   // remplace le menu de presets NOVA (presets d'usine + fichiers utilisateur), par exemple par une bibliothèque
-        bool stretchWidth = false;  // fenêtre étirable en largeur : la zone de droite s'agrandit, la colonne de gauche et la hauteur ne changent pas
+        bool stretchWidth = false;  // fenêtre étirable en largeur : la zone de droite s'agrandit, la colonne de gauche et la hauteur ne changent pas ; l'éditeur place lui-même ses zones (Rs, Rr)
+        bool stretchAuto = false;   // idem, mais R() étire tout seul : tout ce qui est à droite de la colonne de gauche s'élargit dans la même proportion (en-tête : décalé)
         bool hostTempo = false;     // le tempo de l'hôte est disponible (plugin séparé) : SYNC du delay utilisable
         bool midiSource = false;   // plugin séparé avec entrée MIDI : la source du sidechain peut être « MIDI » (compresseur)
         juce::String moduleName;   // « compressor », « equalizer » : dossier des presets utilisateur
@@ -72,15 +73,16 @@ protected:
     // Rectangle de la maquette (x, y, largeur, hauteur) converti dans la fenêtre actuelle (échelle et centrage compris)
     juce::Rectangle<int> R (float x, float y, float w, float h) const
     {
+        if (options_.stretchAuto && extraW_ > 0.0f) stretchX (x, y, w);
         return { frame_.getX() + skin_.ipx (x), frame_.getY() + skin_.ipx (y), skin_.ipx (w), skin_.ipx (h) };
     }
     juce::Rectangle<int> frame() const { return frame_; }
     // Largeur ajoutée à la maquette (en pixels de maquette) quand la fenêtre est étirée ; 0 sinon
     float extraW() const noexcept { return extraW_; }
     // Rectangle décalé vers la droite de la largeur ajoutée (éléments ancrés au bord droit)
-    juce::Rectangle<int> Rr (float x, float y, float w, float h) const { return R (x + extraW_, y, w, h); }
+    juce::Rectangle<int> Rr (float x, float y, float w, float h) const { return R (options_.stretchAuto ? x : x + extraW_, y, w, h); }
     // Rectangle élargi de la largeur ajoutée (zones qui s'étirent)
-    juce::Rectangle<int> Rs (float x, float y, float w, float h) const { return R (x, y, w + extraW_, h); }
+    juce::Rectangle<int> Rs (float x, float y, float w, float h) const { return R (x, y, options_.stretchAuto ? w : w + extraW_, h); }
 
     // Crée un composant, l'ajoute à la fenêtre et à une page (-1 : toutes les pages, -2 : toutes sauf la page SETTINGS), l'enregistre pour le rafraîchissement s'il est Refreshable.
     template <class T, class... Args>
@@ -118,6 +120,14 @@ protected:
     static constexpr float headerH = 58.0f, bottomH = 56.0f;
 
 private:
+    // étirement automatique (stretchAuto) : la zone à droite de la colonne de gauche (x >= 204) est étirée d'un facteur k ; l'en-tête est décalé
+    void stretchX (float& x, float y, float& w) const
+    {
+        if (y < headerH) { if (x + w * 0.5f > 580.0f) x += extraW_; return; }
+        const float k = (942.0f + extraW_) / 942.0f;
+        if (x >= 204.0f) { x = 204.0f + (x - 204.0f) * k; w *= k; }
+        else if (x + w > 205.0f) w = (204.0f - x) + (x + w - 204.0f) * k;
+    }
     struct PageItem { juce::Component* c; int page; };
     struct InfoPlace { InfoButton* button; juce::Component* target; int pos; };
     void placeInfos();

@@ -27,10 +27,15 @@ enum RmsWindow : int { kRms300ms = 0, kRms1s, kRms3s, kNumRmsWindows };
 enum MeterMode : int { kMeterPeak = 0, kMeterMomentary, kMeterShortTerm, kMeterIntegrated, kNumMeterModes };
 
 // ---- identifiants (stables : ne changent jamais une fois publiés)
-constexpr ParamId target = 100, customTarget = 101, tolerance = 102, historyMinutes = 103, peakHold = 104, peakFall = 105, rmsWindow = 106, autoReset = 107, meterMode = 108;
+constexpr ParamId target = 100, customTarget = 101, tolerance = 102, historyMinutes = 103, peakHold = 104, peakFall = 105, rmsWindow = 106, autoReset = 107, meterMode = 108, scaleLow = 109, scaleHigh = 110;
 
 // Hors temps réel.
 bool addParams (ParameterSet& set, std::string* error = nullptr);
+
+// Étendue affichée de l'échelle de la page SONIE (graphe et mètre) : bas et haut, en dB. Le haut est toujours au moins 10 dB au-dessus du bas.
+constexpr int kNumScaleLow = 7, kNumScaleHigh = 5;
+double scaleLowDb (int index, int highIndex) noexcept;
+double scaleHighDb (int index) noexcept;
 
 const char* targetName (int t) noexcept;                  // « -23 LUFS (EBU R128) »...
 double targetLufs (int t, double custom) noexcept;        // valeur en LUFS du choix de cible
