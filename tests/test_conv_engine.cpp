@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "neptune/core/ConvolutionModule.h"
+#include "neptune/core/IrGenerator.h"
 #include "neptune/core/conv/live_convolver.hpp"
 #include "neptune/core/StockModule.h"
 
@@ -381,4 +382,33 @@ TEST_CASE ("live convolver: an unload requested before the first IR does not rem
         last = outL.back();
     }
     CHECK (std::fabs (last) < 1.0e-5f);   // silencieux sans IR (silentWhenEmpty)
+}
+
+TEST_CASE ("convolution module: every built-in IR loads and answers a long impulse response", "[conv][module][builtin]")
+{
+    for (const auto& entry : neptune::core::irgen::entries())
+    {
+        INFO ("IR intégrée : " << entry.key);
+        auto inst = createInsert ("convolution", 48000.0, 512);
+        REQUIRE (inst != nullptr);
+        auto& module = static_cast<ConvolutionModule&> (inst->runner.module());
+        const auto t0 = std::chrono::steady_clock::now();
+        module.setIrPath (neptune::core::irgen::pathFor (entry.key));
+        runSilence (*inst, 4096, 512);
+        const bool loaded = waitFor (module, convolution::kLoaded, 15000);
+        const auto loadMs = std::chrono::duration_cast<std::chrono::milliseconds> (std::chrono::steady_clock::now() - t0).count();
+        CHECK (loadMs < 3000);   // le calcul d'une IR intégrée ne doit pas se compter en secondes (le ressort prenait 11 s : dénormalisés)
+        INFO ("état de chargement " << module.irStatus() << " (2 = chargée, 3 = erreur), durée " << module.irLengthMs() << " ms");
+        REQUIRE (loaded);
+        runSilence (*inst, 8192, 512);
+        const auto out = impulseResponse (*inst, 48000, 512);
+        double early = 0.0, late = 0.0;
+        for (std::size_t i = 0; i < out.size(); ++i)
+        {
+            const double e = static_cast<double> (out[i]) * static_cast<double> (out[i]);
+            (i < 2000 ? early : late) += e;
+        }
+        INFO ("énergie avant 2000 échantillons " << early << ", après " << late);
+        CHECK (late > 1.0e-4);   // une réponse longue : de l'énergie bien après les premiers 2000 échantillons
+    }
 }

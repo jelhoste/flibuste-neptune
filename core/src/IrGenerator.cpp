@@ -134,7 +134,8 @@ void makeSpring (llc::IRBuffer& out)
                 double x1 = 0.0, y1 = 0.0;
                 for (std::size_t i = 0; i < kSpan; ++i)
                 {
-                    const double y = -a * echo[i] + x1 + a * y1;
+                    double y = -a * echo[i] + x1 + a * y1;
+                    if (std::fabs (y) < 1.0e-25) y = 0.0;   // sans cela, la queue de la dispersion tombe dans les dénormalisés (≈ 100 fois plus lents) : 11 s de calcul au lieu de 0,3 s
                     x1 = echo[i];
                     y1 = y;
                     ap[i] = y;
@@ -142,7 +143,7 @@ void makeSpring (llc::IRBuffer& out)
                 echo.swap (ap);
             }
             lp = 0.0;
-            for (std::size_t i = 0; i < kSpan; ++i) { lp = (1.0 - lpA) * echo[i] + lpA * lp; echo[i] = lp; }
+            for (std::size_t i = 0; i < kSpan; ++i) { lp = (1.0 - lpA) * echo[i] + lpA * lp; if (std::fabs (lp) < 1.0e-25) lp = 0.0; echo[i] = lp; }
             const double gain = std::pow (perEcho, static_cast<double> (k));
             const std::size_t base = k * period;
             for (std::size_t i = 0; i < kSpan && base + i < len; ++i) out.ch[c][base + i] += static_cast<float> (echo[i] * gain);
