@@ -11,6 +11,7 @@
 #include "../src/NovaDiapasonEditor.h"
 #include "../src/NovaMiradorEditor.h"
 #include "../src/NovaConvolutionEditor.h"
+#include "../src/NovaFournaiseEditor.h"
 #include "../src/NovaSynthEditor.h"
 #include "../src/NovaFmEditor.h"
 #include "../src/NovaSpectrum.h"
@@ -23,6 +24,7 @@
 #include "neptune/core/SignalGenerator.h"
 #include "neptune/core/Mirador.h"
 #include "neptune/core/ConvolutionModule.h"
+#include "neptune/core/OverdriveModule.h"
 #include "neptune/core/StockModule.h"
 #include "neptune/core/AnalogSynth.h"
 #include "neptune/core/FmSynth.h"
@@ -728,6 +730,64 @@ int main (int argc, char** argv)
             NovaConvolutionEditor ed (ch, static_cast<ConvolutionModule*> (&cRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
             ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
             ed.setPageForTest (c.page);
+            ed.refreshNow();
+            const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            juce::FileOutputStream os (out.getChildFile (juce::String (c.name) + ".png"));
+            if (os.openedOk()) { os.setPosition (0); os.truncate(); png.writeImageToStream (img, os); }
+            std::printf ("%s %dx%d\n", c.name, img.getWidth(), img.getHeight());
+        }
+    }
+
+    // ---- l'éditeur réel de Fournaise
+    {
+        ModuleRunner fRunner (std::make_unique<OverdriveModule>());
+        fRunner.prepare (48000.0, 512);
+        RunnerHost fh (fRunner);
+        auto& fp = fRunner.params();
+        fp.set (overdrive::drive, 24.0);
+        fp.set (overdrive::bias, 25.0);
+        fp.set (overdrive::eqOn, 1.0);
+        fp.set (overdrive::bandParam (0, overdrive::kOn), 1.0);
+        fp.set (overdrive::bandParam (0, overdrive::kGain), 4.0);
+        fp.set (overdrive::bandParam (1, overdrive::kOn), 1.0);
+        fp.set (overdrive::bandParam (1, overdrive::kGain), -5.0);
+        fp.set (overdrive::bandParam (1, overdrive::kFreq), 900.0);
+        fp.set (overdrive::bandParam (2, overdrive::kOn), 1.0);
+        fp.set (overdrive::bandParam (2, overdrive::kGain), 3.0);
+        fp.set (overdrive::inHpOn, 1.0);
+        fp.set (overdrive::outLpOn, 1.0);
+        fp.set (overdrive::keySource, 1.0);
+        fp.set (overdrive::keyAmount, 40.0);
+        struct FCase { const char* name; th::ThemeId id; float scale; int page; int model; };
+        const FCase fcs[] = { { "fournaise-dark-tube", th::ThemeId::Dark, 1.0f, 0, 0 }, { "fournaise-dark-fuzz", th::ThemeId::Dark, 1.0f, 0, 3 },
+                              { "fournaise-light-tape", th::ThemeId::Light, 1.0f, 0, 1 }, { "fournaise-dark-filters", th::ThemeId::Dark, 1.0f, 1, 0 },
+                              { "fournaise-dark-eq", th::ThemeId::Dark, 1.0f, 2, 0 }, { "fournaise-dark-key", th::ThemeId::Dark, 1.0f, 3, 0 },
+                              { "fournaise-dark-set", th::ThemeId::Dark, 1.0f, 4, 0 }, { "fournaise-dark-tube-070", th::ThemeId::Dark, 0.7f, 0, 0 } };
+        for (const auto& c : fcs)
+        {
+            std::fprintf (stderr, "editor %s\n", c.name);
+            const auto& def = th::definition (c.id);
+            fp.set (overdrive::model, c.model);
+            NovaFournaiseEditor::Options opt;
+            opt.brand = true;
+            opt.externalKey = true;
+            opt.moduleName = "fournaise";
+            opt.noPresets = true;
+            opt.stretchAuto = gWide > 1.0f;
+            opt.getSettings = [] { return settings::GlobalSettings{}; };
+            opt.applySettings = [] (const settings::GlobalSettings&) {};
+            NovaFournaiseEditor ed (fh, static_cast<const OverdriveModule*> (&fRunner.module()), th::withContrast (def, 0), def.knob, tr, opt);
+            ed.setSize (juce::roundToInt (1160 * c.scale * gWide), juce::roundToInt (780 * c.scale));
+            ed.setPageForTest (c.page);
+            // un peu de signal pour les mètres, le point de la courbe de transfert et la clé
+            std::vector<float> l (512), r (512);
+            double ph = 0.0;
+            for (int blk = 0; blk < 12; ++blk)
+            {
+                for (std::size_t i = 0; i < 512; ++i) { l[i] = r[i] = static_cast<float> (0.3 * std::sin (ph)); ph += 2.0 * 3.14159265358979 * 220.0 / 48000.0; }
+                fRunner.process (l.data(), r.data(), 512, false);
+            }
             ed.refreshNow();
             const auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
             juce::PNGImageFormat png;

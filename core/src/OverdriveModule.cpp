@@ -220,21 +220,47 @@ void OverdriveModule::readParams (const ParameterSet& params) noexcept
     for (std::size_t i = 0; i < v_.size(); ++i) v_[i] = idx_[i] != ParameterSet::npos ? params.getAt (idx_[i]) : 0.0;
 }
 
-llc::EQParams OverdriveModule::makeEq() const noexcept
+namespace
+{
+// Réglages de l'égaliseur à partir des paramètres (`at` : identifiant -> valeur)
+template <class At>
+llc::EQParams eqParamsFrom (At at)
 {
     llc::EQParams eq;
     for (int b = 0; b < 3; ++b)
     {
         auto& band = eq.band[b];
-        band.enabled = param (bandParam (b, kOn)) >= 0.5;
-        band.type = static_cast<llc::BandType> (choiceIndex (param (bandParam (b, kType)), 3));
-        band.freq = param (bandParam (b, kFreq));
-        band.gainDb = param (bandParam (b, kGain));
-        band.q = param (bandParam (b, kQ));
+        band.enabled = at (bandParam (b, kOn)) >= 0.5;
+        band.type = static_cast<llc::BandType> (choiceIndex (at (bandParam (b, kType)), 3));
+        band.freq = at (bandParam (b, kFreq));
+        band.gainDb = at (bandParam (b, kGain));
+        band.q = at (bandParam (b, kQ));
     }
-    eq.hp = { param (eqHpOn) >= 0.5, param (eqHp), kSlopes[choiceIndex (param (eqHpSlope), 3)] };
-    eq.lp = { param (eqLpOn) >= 0.5, param (eqLp), kSlopes[choiceIndex (param (eqLpSlope), 3)] };
+    eq.hp = { at (eqHpOn) >= 0.5, at (eqHp), kSlopes[choiceIndex (at (eqHpSlope), 3)] };
+    eq.lp = { at (eqLpOn) >= 0.5, at (eqLp), kSlopes[choiceIndex (at (eqLpSlope), 3)] };
     return eq;
+}
+} // namespace
+
+llc::EQParams OverdriveModule::makeEq() const noexcept
+{
+    return eqParamsFrom ([this] (ParamId id) { return param (id); });
+}
+
+double OverdriveModule::eqResponseDb (const ParameterSet& set, double freq, double sampleRate)
+{
+    if (set.get (eqOn) < 0.5) return 0.0;
+    return llc::ParametricEQ::responseDb (eqParamsFrom ([&set] (ParamId id) { return set.get (id); }), freq, sampleRate);
+}
+
+double OverdriveModule::eqBandResponseDb (const ParameterSet& set, int band, double freq, double sampleRate)
+{
+    if (set.get (eqOn) < 0.5) return 0.0;
+    const auto eq = eqParamsFrom ([&set] (ParamId id) { return set.get (id); });
+    if (band >= 0 && band < 3) return llc::ParametricEQ::bandResponseDb (eq.band[band], freq, sampleRate);
+    if (band == 3) return llc::ParametricEQ::passResponseDb (eq.hp, true, freq, sampleRate);
+    if (band == 4) return llc::ParametricEQ::passResponseDb (eq.lp, false, freq, sampleRate);
+    return 0.0;
 }
 
 void OverdriveModule::updateDesigns() noexcept

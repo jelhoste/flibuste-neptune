@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build (plugins CLAP, Neptune, Moussaillon, AnalogSynth, FM6Op, Orgamon, La Flèche, Compresseur, Egaliseur, Délai, Chœur, Microdécale et Convolution)
-        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP Mirador_CLAP
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'Linux' && '2' || '4' }} --target Neptune_CLAP Moussaillon_CLAP AnalogSynth_CLAP FM6Op_CLAP Orgamon_CLAP LaFleche_CLAP Compresseur_CLAP Egaliseur_CLAP Delai_CLAP Choeur_CLAP Microdecale_CLAP Convolution_CLAP Diapason_CLAP Mirador_CLAP Fournaise_CLAP
 
       # Galerie des composants communs NOVA rendue en PNG (Linux, sous xvfb) : sert à comparer avec les maquettes HTML.
       - name: NovaGallery (Linux)
@@ -131,6 +131,9 @@ jobs:
           MIR=$(find build/adapter-juce/Mirador_artefacts -name 'Mirador.clap' -print -quit)
           test -n "$MIR" || { echo "Mirador.clap introuvable"; exit 1; }
           "$CV" validate "$MIR"
+          FOU=$(find build/adapter-juce/Fournaise_artefacts -name 'Fournaise.clap' -print -quit)
+          test -n "$FOU" || { echo "Fournaise.clap introuvable"; exit 1; }
+          "$CV" validate "$FOU"
 
       # Ne garder que le .clap (sur macOS c'est un bundle : on l'archive pour conserver les droits d'exécution).
       - name: Archive le .clap
@@ -489,4 +492,28 @@ jobs:
         with:
           name: Mirador-${{ matrix.name }}
           path: dist-mir/*
+          if-no-files-found: error
+
+      # Fournaise séparé, archivé à part.
+      - name: Archive Fournaise.clap
+        shell: bash
+        run: |
+          CLAP=$(find build/adapter-juce/Fournaise_artefacts -name 'Fournaise.clap' -print -quit)
+          test -n "$CLAP" || { echo "Fournaise.clap introuvable"; exit 1; }
+          mkdir -p dist-fou/stage
+          cp -R "$CLAP" dist-fou/stage/
+          cd dist-fou/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../Fournaise-${{ matrix.name }}.zip" Fournaise.clap
+          else
+            tar -czf "../Fournaise-${{ matrix.name }}.tar.gz" Fournaise.clap
+          fi
+          cd ../..
+          rm -rf dist-fou/stage
+          ls -la dist-fou
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Fournaise-${{ matrix.name }}
+          path: dist-fou/*
           if-no-files-found: error

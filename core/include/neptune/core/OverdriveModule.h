@@ -73,6 +73,10 @@ public:
     bool wantsKey() const noexcept override { return true; }
     void setKey (const float* left, const float* right) noexcept override { keyL_ = left; keyR_ = right; }
 
+    // Réponse en fréquence (dB) de l'égaliseur pour les réglages donnés (0 si l'égaliseur est coupé) : pour la courbe de l'interface, hors temps réel.
+    static double eqResponseDb (const ParameterSet&, double freq, double sampleRate);
+    static double eqBandResponseDb (const ParameterSet&, int band, double freq, double sampleRate);   // 0..2 : bandes, 3 : passe-haut, 4 : passe-bas
+
     int numMeters() const noexcept override { return overdrive::kNumMeters; }
     float meter (int i) const noexcept override
     {
