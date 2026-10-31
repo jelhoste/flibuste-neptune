@@ -122,6 +122,7 @@ private:
     std::atomic<int> status_ { convolution::kNoIr };
     std::atomic<double> lengthMs_ { 0.0 };
     std::atomic<bool> resetPeak_ { false }, quit_ { false };
+    std::atomic<bool> builtOnce_ { false };   // le thread de chargement a traité au moins une demande : une réactivation à la même cadence n'a pas à refaire l'IR
     std::thread worker_;
 };
 } // namespace neptune::core

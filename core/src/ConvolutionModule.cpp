@@ -127,10 +127,14 @@ void ConvolutionModule::bind (const ParameterSet& set)
 
 void ConvolutionModule::prepare (double sampleRate, int)
 {
-    sr_.store (sampleRate > 0.0 ? sampleRate : 48000.0);
-    proc_.prepare (sr_.load());
+    const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
+    const bool rateChanged = std::fabs (rate - sr_.load()) > 0.5;
+    sr_.store (rate);
+    proc_.prepare (rate);
     haveLast_ = false;
-    irStamp_.fetch_add (1, std::memory_order_relaxed);   // l'IR doit être refaite à la nouvelle cadence
+    // L'IR n'est refaite que si la cadence change (ou si rien n'a encore été construit) : une réactivation par l'hôte à la même cadence garde le moteur en place,
+    // sans permutation de moteur (le nouveau n'a pas l'historique d'entrée de l'ancien).
+    if (rateChanged || ! builtOnce_.load (std::memory_order_acquire)) irStamp_.fetch_add (1, std::memory_order_relaxed);
 }
 
 void ConvolutionModule::reset() noexcept
@@ -262,16 +266,27 @@ void ConvolutionModule::workerLoop()
     std::uint32_t built = 0xFFFFFFFFu;
     llc::IRBuffer raw;
     std::string rawPath;
+    std::array<double, convolution::norm - convolution::inputMode + 1> builtOptions {};   // réglages d'IR avec lesquels la dernière IR a été construite
+    bool haveOptions = false;
     auto stale = [this] (std::uint32_t stamp) { return irStamp_.load() != stamp; };
     while (! quit_.load (std::memory_order_acquire))
     {
         std::this_thread::sleep_for (20ms);
         proc_.collectRetired();
+        // Les réglages qui refont l'IR peuvent changer sans qu'aucun audio ne tourne (état chargé, script, hôte à l'arrêt) : on les surveille ici, pas dans le fil audio.
+        if (haveOptions && params_ != nullptr)
+        {
+            bool different = false;
+            for (std::size_t i = 0; i < builtOptions.size(); ++i)
+                different = different || std::fabs (value (static_cast<ParamId> (convolution::inputMode + i)) - builtOptions[i]) > 1.0e-9;
+            if (different) irStamp_.fetch_add (1, std::memory_order_relaxed);
+        }
         const std::uint32_t stamp = irStamp_.load();
         if (stamp == built || params_ == nullptr) continue;
         std::this_thread::sleep_for (60ms);   // débounce des réglages
         if (stale (stamp)) continue;
         built = stamp;
+        builtOnce_.store (true, std::memory_order_release);
 
         const auto path = irPath();
         if (path.empty())
@@ -302,6 +317,8 @@ void ConvolutionModule::workerLoop()
         }
         std::array<double, numParams> v;
         for (std::size_t i = 0; i < v.size(); ++i) v[i] = value (static_cast<ParamId> (100 + i));
+        for (std::size_t i = 0; i < builtOptions.size(); ++i) builtOptions[i] = v[static_cast<std::size_t> (convolution::inputMode - 100) + i];
+        haveOptions = true;
         const auto options = irOptionsFrom (v);
         llc::IRBuffer ir;
         if (! llc::processIR (raw, options, ir))
