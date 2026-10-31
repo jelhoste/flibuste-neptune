@@ -995,6 +995,7 @@ const Entry kEntries[] = {
     { "dp.axis_hz", { "Hz", "Hz" } },
     { "dp.axis_db", { "dB", "dB" } },
     { "module.mirador", { "Mirador", "Mirador" } },
+    { "module.overdrive", { "Fournaise", "Fournaise" } },
     { "mx.page_loud", { "LOUDNESS", "SONIE" } },
     { "mx.page_levels", { "LEVELS", "NIVEAUX" } },
     { "mx.page_stereo", { "STEREO", "STÉRÉO" } },
