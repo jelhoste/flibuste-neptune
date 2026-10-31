@@ -641,17 +641,16 @@ void VMeter::paint (juce::Graphics& g)
         const auto fillRect = kind_ == Kind::Level ? t.withTrimmedTop (t.getHeight() * (1.0f - f)) : t.withHeight (t.getHeight() * f);
         if (zones_ && kind_ == Kind::Level)
         {
-            // zones traditionnelles : vert, jaune (à partir de -18 dB), rouge (à partir de -6 dB)
-            struct Zone { float lo, hi; juce::uint32 argb; };
-            const Zone zs[3] = { { floor_, -18.0f, 0xFF3DBE5Eu }, { -18.0f, -6.0f, 0xFFE8C13Au }, { -6.0f, ceil_, 0xFFE5484Du } };
-            for (const auto& z : zs)
-            {
-                const float lo = juce::jlimit (0.0f, 1.0f, (z.lo - floor_) / span), hi = juce::jlimit (0.0f, 1.0f, (z.hi - floor_) / span);
-                const float top = std::min (f, hi);
-                if (top <= lo) continue;
-                g.setColour (juce::Colour (z.argb));
-                g.fillRect (t.getX(), t.getBottom() - t.getHeight() * top, t.getWidth(), t.getHeight() * (top - lo));
-            }
+            // dégradé diffus vert -> jaune (autour de -18 dB) -> rouge (autour de -6 dB), sur toute la hauteur du mètre
+            const juce::Colour green (0xFF3DBE5Eu), yellow (0xFFE8C13Au), red (0xFFE5484Du);
+            juce::ColourGradient grad (green, 0.0f, t.getBottom(), red, 0.0f, t.getY(), false);
+            auto pos = [this, span] (float db) { return static_cast<double> (juce::jlimit (0.0f, 1.0f, (db - floor_) / span)); };
+            grad.addColour (pos (-22.0f), green);
+            grad.addColour (pos (-14.0f), yellow);
+            grad.addColour (pos (-9.0f), yellow);
+            grad.addColour (pos (-3.0f), red);
+            g.setGradientFill (grad);
+            g.fillRect (t.getX(), fillRect.getY(), t.getWidth(), fillRect.getHeight());
         }
         else
         {

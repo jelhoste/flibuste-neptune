@@ -58,6 +58,19 @@ juce::String number (float v, int decimals, bool plus = false)
 const juce::Colour kGreen (0xFF3DBE5E), kYellow (0xFFE8C13A), kRed (0xFFE5484D);
 
 struct Zone { float lo, hi; juce::Colour colour; };
+
+// Dégradé vert -> jaune -> rouge, diffus : le jaune s'installe autour de `yellowAt`, le rouge autour de `redAt` (même unité que lo..hi), `soft` = demi-largeur
+// des transitions. Le dégradé couvre tout le mètre : seule la partie sous le niveau est dessinée.
+juce::ColourGradient zoneGradient (juce::Point<float> from, juce::Point<float> to, float lo, float hi, float yellowAt, float redAt, float soft)
+{
+    juce::ColourGradient grad (kGreen, from, kRed, to, false);
+    auto pos = [lo, hi] (float v) { return static_cast<double> (std::clamp ((v - lo) / (hi - lo), 0.0f, 1.0f)); };
+    grad.addColour (pos (yellowAt - soft), kGreen);
+    grad.addColour (pos (yellowAt + soft), kYellow);
+    grad.addColour (pos (redAt - soft), kYellow);
+    grad.addColour (pos (redAt + soft), kRed);
+    return grad;
+}
 } // namespace
 
 // ------------------------------------------------------------------------------------------------ page SONIE : valeurs, historique et mètre à la même hauteur
@@ -86,13 +99,26 @@ public:
             changed = true;
         }
         peak_ = std::max (lv.peakL, lv.peakR);
-        const auto key = std::make_tuple (r.momentary, r.shortTerm, r.integrated, r.truePeakDb, r.range, peak_,
+        // barre de crête du mètre : suit les pics, tient 4 s puis retombe lentement (3 dB par seconde)
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = lastMs_ > 0.0 ? std::min (0.5, (nowMs - lastMs_) / 1000.0) : 0.0;
+        lastMs_ = nowMs;
+        const int mode = meterMode();
+        if (mode != lastMode_) { lastMode_ = mode; holdLevel_ = mir::kNoValue; holdAge_ = 0.0; }
+        const float level = meterValue();
+        if (level > holdLevel_ || holdLevel_ <= -150.0f) { if (level > -150.0f) { holdLevel_ = level; holdAge_ = 0.0; } }
+        else
+        {
+            holdAge_ += dt;
+            if (holdAge_ > 4.0) holdLevel_ = std::max (level, holdLevel_ - static_cast<float> (3.0 * dt));
+        }
+        const auto key = std::make_tuple (r.momentary, r.shortTerm, r.integrated, r.truePeakDb, r.range, peak_ + holdLevel_,
                                           ps.version (mir::target), ps.version (mir::customTarget), ps.version (mir::tolerance), ps.version (mir::meterMode));
         if (key != lastKey_) { lastKey_ = key; changed = true; }
         reading_ = r;
         if (changed) { buildPaths(); repaint(); }
     }
-    void clearHistory() { history_.clear(); buildPaths(); repaint(); }
+    void clearHistory() { history_.clear(); holdLevel_ = mir::kNoValue; buildPaths(); repaint(); }
     void resized() override { buildPaths(); }
 
     void paint (juce::Graphics& g) override
@@ -134,18 +160,19 @@ public:
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (10.0f, true));
         g.drawText (tx ("mx.history"), juce::Rectangle<float> (plot.getX(), plot.getY() - skin_.px (24.0f), plot.getWidth(), skin_.px (16.0f)), juce::Justification::centredLeft);
-        // bandes autour de la cible : vert dans la tolérance, jaune sur 3 LU de plus (et de moins), rouge au-delà vers le haut
-        auto band = [&] (double lo, double hi, juce::Colour c, float alpha)
+        // trois zones très légères, avec un trait plus marqué sur leur bord haut : vert jusqu'à la tolérance, jaune sur 3 LU de plus, rouge au-delà
+        auto zone = [&] (double lo, double hi, juce::Colour c, float fillAlpha)
         {
             const float y0 = yOf (static_cast<float> (hi)), y1 = yOf (static_cast<float> (lo));
             if (y1 <= y0) return;
-            g.setColour (c.withAlpha (alpha));
+            g.setColour (c.withAlpha (fillAlpha));
             g.fillRect (juce::Rectangle<float> (plot.getX(), y0, plot.getWidth(), y1 - y0));
+            g.setColour (c.withAlpha (0.7f));
+            g.drawLine (plot.getX(), y0, plot.getRight(), y0, std::max (1.2f, skin_.px (1.4f)));
         };
-        band (tgt + tol + 3.0, 0.0, kRed, 0.10f);
-        band (tgt + tol, tgt + tol + 3.0, kYellow, 0.14f);
-        band (tgt - tol, tgt + tol, kGreen, 0.20f);
-        band (tgt - tol - 3.0, tgt - tol, kYellow, 0.08f);
+        zone (-60.0, tgt + tol, kGreen, 0.06f);
+        zone (tgt + tol, tgt + tol + 3.0, kYellow, 0.09f);
+        zone (tgt + tol + 3.0, 0.0, kRed, 0.08f);
         for (int db = -60; db <= 0; db += 10)
         {
             g.setColour (skin_.colour (Token::Grid, 0.6f));
@@ -156,9 +183,14 @@ public:
         }
         g.setColour (kGreen.withAlpha (0.9f));
         g.drawLine (plot.getX(), yOf (static_cast<float> (tgt)), plot.getRight(), yOf (static_cast<float> (tgt)), std::max (1.5f, skin_.px (1.5f)));
+        // sous la courbe à court terme : un voile qui s'estompe vers le bas ; puis un halo large et le trait fin
+        g.setGradientFill (juce::ColourGradient (skin_.colour (Token::Accent, 0.28f), 0.0f, plot.getY(), skin_.colour (Token::Accent, 0.0f), 0.0f, plot.getBottom(), false));
+        g.fillPath (shortArea_);
         const auto stroke = juce::PathStrokeType (std::max (1.2f, skin_.px (1.5f)), juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
         g.setColour (skin_.colour (Token::TextDim2, 0.7f));
         g.strokePath (momentaryPath_, stroke);
+        g.setColour (skin_.colour (Token::Accent, 0.25f));
+        g.strokePath (shortPath_, juce::PathStrokeType (std::max (4.0f, skin_.px (5.0f)), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         g.setColour (skin_.colour (Token::Accent));
         g.strokePath (shortPath_, stroke);
         if (reading_.integrated > -150.0f)   // sonie intégrée : trait fin sur toute la largeur
@@ -176,13 +208,19 @@ public:
         g.setColour (skin_.colour (Token::Grid));
         g.fillRoundedRectangle (bar, skin_.px (3.0f));
         if (level > -150.0f)
-            for (const auto& z : zones())
-            {
-                const float top = yOf (std::min (level, z.hi)), bottom = yOf (z.lo);
-                if (level <= z.lo || bottom <= top) continue;
-                g.setColour (z.colour);
-                g.fillRect (bar.getX(), top, bar.getWidth(), bottom - top);
-            }
+        {
+            const bool peakMode = meterMode() == mir::kMeterPeak;
+            const float hi = static_cast<float> (target() + tolerance());
+            g.setGradientFill (peakMode ? zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, -18.0f, -6.0f, 4.0f)
+                                        : zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, hi, hi + 3.0f, 1.2f));
+            const float top = yOf (level);
+            g.fillRect (bar.getX(), top, bar.getWidth(), bar.getBottom() - top);
+        }
+        if (holdLevel_ > -150.0f)   // barre de crête : suit les pics, tient puis retombe lentement
+        {
+            g.setColour (skin_.colour (Token::Text));
+            g.fillRect (bar.getX() - skin_.px (3.0f), yOf (holdLevel_) - skin_.px (1.5f), bar.getWidth() + skin_.px (6.0f), skin_.px (3.0f));
+        }
         if (meterMode() != mir::kMeterPeak)   // repère de la cible sur le mètre
         {
             g.setColour (skin_.colour (Token::Text));
@@ -211,13 +249,6 @@ private:
             default: return reading_.integrated;
         }
     }
-    // zones du mètre : le crête suit les niveaux numériques usuels, la sonie suit la cible
-    std::array<Zone, 3> zones() const
-    {
-        if (meterMode() == mir::kMeterPeak) return { { { -60.0f, -18.0f, kGreen }, { -18.0f, -6.0f, kYellow }, { -6.0f, 0.0f, kRed } } };
-        const float hi = static_cast<float> (target() + tolerance());
-        return { { { -60.0f, hi, kGreen }, { hi, hi + 3.0f, kYellow }, { hi + 3.0f, 0.0f, kRed } } };
-    }
     std::array<juce::Rectangle<float>, 7> cellRects() const
     {
         std::array<juce::Rectangle<float>, 7> out;
@@ -227,7 +258,7 @@ private:
     }
     juce::Rectangle<float> plotArea() const
     {
-        return getLocalBounds().toFloat().withTrimmedTop (skin_.px (122.0f)).withTrimmedLeft (skin_.px (44.0f)).withTrimmedRight (skin_.px (150.0f)).withTrimmedBottom (skin_.px (14.0f));
+        return getLocalBounds().toFloat().withTrimmedTop (skin_.px (122.0f)).withTrimmedLeft (skin_.px (44.0f)).withTrimmedRight (skin_.px (150.0f)).withTrimmedBottom (skin_.px (46.0f));
     }
     juce::Rectangle<float> meterBar() const
     {
@@ -243,6 +274,7 @@ private:
     {
         momentaryPath_.clear();
         shortPath_.clear();
+        shortArea_.clear();
         const auto plot = plotArea();
         const std::size_t cap = std::max<std::size_t> (history_.capacity(), 2);
         const float pointStep = plot.getWidth() / static_cast<float> (cap - 1);
@@ -250,6 +282,18 @@ private:
         // plus de points que de pixels : moyenne par paquets pour que la courbe reste fine et fluide
         const std::size_t stride = std::max<std::size_t> (1, static_cast<std::size_t> (static_cast<float> (n) / std::max (1.0f, plot.getWidth() * 1.5f)));
         bool openM = false, openS = false;
+        std::vector<juce::Point<float>> seg;
+        auto closeSegment = [&]
+        {
+            if (seg.size() >= 2)
+            {
+                shortArea_.startNewSubPath (seg.front().x, plot.getBottom());
+                for (const auto& pt : seg) shortArea_.lineTo (pt);
+                shortArea_.lineTo (seg.back().x, plot.getBottom());
+                shortArea_.closeSubPath();
+            }
+            seg.clear();
+        };
         for (std::size_t i = 0; i < n; i += stride)
         {
             const std::size_t last = std::min (n, i + stride) - 1;
@@ -262,16 +306,23 @@ private:
                 if (pt.shortTerm > -150.0f) { sumS += pt.shortTerm; ++cs; }
             }
             const float x = plot.getRight() - static_cast<float> (n - 1 - last) * pointStep;
-            auto add = [&] (juce::Path& path, bool& open, float sum, int count)
+            if (cm == 0) openM = false;
+            else
             {
-                if (count == 0) { open = false; return; }
-                const float y = yOf (sum / static_cast<float> (count));
-                if (! open) { path.startNewSubPath (x, y); open = true; }
-                else path.lineTo (x, y);
-            };
-            add (momentaryPath_, openM, sumM, cm);
-            add (shortPath_, openS, sumS, cs);
+                const float y = yOf (sumM / static_cast<float> (cm));
+                if (! openM) { momentaryPath_.startNewSubPath (x, y); openM = true; }
+                else momentaryPath_.lineTo (x, y);
+            }
+            if (cs == 0) { if (openS) closeSegment(); openS = false; }
+            else
+            {
+                const float y = yOf (sumS / static_cast<float> (cs));
+                if (! openS) { shortPath_.startNewSubPath (x, y); openS = true; }
+                else shortPath_.lineTo (x, y);
+                seg.emplace_back (x, y);
+            }
         }
+        closeSegment();
     }
 
     const nova::Skin& skin_;
@@ -279,9 +330,11 @@ private:
     mir::MiradorEngine& engine_;
     const i18n::Translator& tr_;
     LoudnessMeter::Reading reading_;
-    float peak_ = mir::kNoValue;
+    float peak_ = mir::kNoValue, holdLevel_ = mir::kNoValue;
+    double holdAge_ = 0.0, lastMs_ = 0.0;
+    int lastMode_ = -1;
     mir::LoudnessHistory history_ { 6000 };
-    juce::Path momentaryPath_, shortPath_;
+    juce::Path momentaryPath_, shortPath_, shortArea_;
     std::uint64_t lastTotal_ = 0;
     bool started_ = false;
     std::tuple<float, float, float, float, float, float, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t> lastKey_ {};
@@ -310,29 +363,28 @@ public:
             skin_.fill (g, Token::StageBg, row, skin_.px (8.0f));
             g.setColour (skin_.colour (Token::Text));
             g.setFont (skin_.font (18.0f, true));
-            g.drawText (names[ch], row.withWidth (skin_.px (50.0f)), juce::Justification::centred);
+            g.drawText (names[ch], juce::Rectangle<float> (row.getX(), row.getY() + skin_.px (20.0f), skin_.px (50.0f), skin_.px (34.0f)), juce::Justification::centred);
             const auto bar = barRect (row);
-            g.setColour (skin_.colour (Token::Grid, 0.5f));
+            g.setColour (skin_.colour (Token::Grid, 0.4f));
+            g.fillRoundedRectangle (bar, skin_.px (3.0f));
             for (int db = -60; db <= 0; db += 10)
             {
                 const float x = xOf (bar, static_cast<float> (db));
+                g.setColour (skin_.colour (Token::Grid, 0.7f));
                 g.drawLine (x, bar.getY() - skin_.px (4.0f), x, bar.getBottom() + skin_.px (4.0f), std::max (1.0f, skin_.px (1.0f)));
                 g.setColour (skin_.colour (Token::TextDim2));
                 g.setFont (skin_.font (9.0f));
-                g.drawText (juce::String (db), juce::Rectangle<float> (x - skin_.px (16.0f), bar.getBottom() + skin_.px (4.0f), skin_.px (32.0f), skin_.px (12.0f)), juce::Justification::centred);
-                g.setColour (skin_.colour (Token::Grid, 0.5f));
+                g.drawText (juce::String (db), juce::Rectangle<float> (x - skin_.px (16.0f), bar.getBottom() + skin_.px (5.0f), skin_.px (32.0f), skin_.px (12.0f)), juce::Justification::centred);
             }
-            // zones traditionnelles : vert jusqu'à -18 dB, jaune jusqu'à -6 dB, rouge au-delà ; RMS en haut (atténué), crête en bas
+            // dégradé diffus vert -> jaune -> rouge ; RMS en haut (atténué), crête en bas
+            const auto grad = zoneGradient ({ xOf (bar, -60.0f), 0.0f }, { xOf (bar, 0.0f), 0.0f }, -60.0f, 0.0f, -18.0f, -6.0f, 4.0f);
             auto zoned = [&] (float level, float y, float h, float alpha)
             {
                 if (level <= -150.0f) return;
-                const Zone zs[3] = { { -60.0f, -18.0f, kGreen }, { -18.0f, -6.0f, kYellow }, { -6.0f, 0.0f, kRed } };
-                for (const auto& z : zs)
-                {
-                    if (level <= z.lo) continue;
-                    g.setColour (z.colour.withAlpha (alpha));
-                    g.fillRect (juce::Rectangle<float> (xOf (bar, z.lo), y, xOf (bar, std::min (level, z.hi)) - xOf (bar, z.lo), h));
-                }
+                auto gr = grad;
+                gr.multiplyOpacity (alpha);
+                g.setGradientFill (gr);
+                g.fillRect (juce::Rectangle<float> (bar.getX(), y, xOf (bar, level) - bar.getX(), h));
             };
             zoned (rms[ch], bar.getY(), bar.getHeight() * 0.62f, 0.55f);
             zoned (peak[ch], bar.getY() + bar.getHeight() * 0.62f, bar.getHeight() * 0.38f, 1.0f);
@@ -341,18 +393,18 @@ public:
                 g.setColour (skin_.colour (Token::Text));
                 g.fillRect (juce::Rectangle<float> (xOf (bar, hold[ch]) - skin_.px (1.5f), bar.getY() - skin_.px (3.0f), skin_.px (3.0f), bar.getHeight() + skin_.px (6.0f)));
             }
-            // valeurs
-            const auto vals = juce::Rectangle<float> (bar.getRight() + skin_.px (14.0f), row.getY(), row.getRight() - bar.getRight() - skin_.px (60.0f), row.getHeight());
+            // valeurs, sous l'échelle
             g.setColour (skin_.colour (Token::Text));
             g.setFont (skin_.font (13.0f, true));
-            g.drawText (tx ("mx.peak") + "  " + number (hold[ch], 1) + "    " + tx ("mx.rms") + "  " + number (rms[ch], 1), vals, juce::Justification::centredLeft);
+            g.drawText (tx ("mx.peak") + "  " + number (hold[ch], 1) + "      " + tx ("mx.rms") + "  " + number (rms[ch], 1),
+                        juce::Rectangle<float> (bar.getX(), row.getY() + skin_.px (92.0f), bar.getWidth(), skin_.px (24.0f)), juce::Justification::centredLeft);
             // voyant d'écrêtage
-            const auto led = juce::Rectangle<float> (row.getRight() - skin_.px (36.0f), row.getCentreY() - skin_.px (9.0f), skin_.px (18.0f), skin_.px (18.0f));
-            g.setColour (clip[ch] ? skin_.colour (Token::Pink) : skin_.colour (Token::Grid));
+            const auto led = juce::Rectangle<float> (row.getRight() - skin_.px (40.0f), bar.getCentreY() - skin_.px (9.0f), skin_.px (18.0f), skin_.px (18.0f));
+            g.setColour (clip[ch] ? kRed : skin_.colour (Token::Grid));
             g.fillEllipse (led);
         }
         // facteur de crête
-        const auto cr = getLocalBounds().toFloat().withTop (rowRect (1).getBottom() + skin_.px (20.0f)).withHeight (skin_.px (60.0f));
+        const auto cr = juce::Rectangle<float> (0.0f, rowRect (1).getBottom() + skin_.px (20.0f), static_cast<float> (getWidth()), skin_.px (60.0f));
         skin_.fill (g, Token::StageBg, cr, skin_.px (8.0f));
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (10.0f, true));
@@ -366,12 +418,12 @@ private:
     juce::String tx (const char* key) const { return juce::String::fromUTF8 (std::string (tr_.tr (key)).c_str()); }
     juce::Rectangle<float> rowRect (int ch) const
     {
-        const float h = skin_.px (96.0f), gap = skin_.px (16.0f);
+        const float h = skin_.px (124.0f), gap = skin_.px (14.0f);
         return { 0.0f, static_cast<float> (ch) * (h + gap), static_cast<float> (getWidth()), h };
     }
     juce::Rectangle<float> barRect (juce::Rectangle<float> row) const
     {
-        return { row.getX() + skin_.px (66.0f), row.getY() + skin_.px (26.0f), row.getWidth() * 0.55f, skin_.px (30.0f) };
+        return { row.getX() + skin_.px (66.0f), row.getY() + skin_.px (22.0f), row.getWidth() - skin_.px (66.0f) - skin_.px (70.0f), skin_.px (34.0f) };
     }
     static float xOf (juce::Rectangle<float> bar, float db) { return bar.getX() + std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f) * bar.getWidth(); }
 
@@ -728,7 +780,7 @@ void NovaMiradorEditor::layout()
     historyPill_->setBounds (R (734, 604, 150, 32));
     resetPlayPill_->setBounds (R (892, 604, 238, 32));
     resetLoudPill_->setBounds (R (220, 650, 150, 32));
-    meterPill_->setBounds (R (378, 650, 250, 32));
+    meterPill_->setBounds (R (989, 548, 130, 28));   // sous le mètre de la page SONIE (centre du mètre : 220 + 760 + 54 + 20 = 1054)
 
     // NIVEAUX
     levels_->setBounds (R (220, 108, 910, 380));
