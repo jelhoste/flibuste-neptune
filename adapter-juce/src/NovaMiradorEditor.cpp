@@ -160,19 +160,18 @@ public:
         g.setColour (skin_.colour (Token::TextDim2));
         g.setFont (skin_.font (10.0f, true));
         g.drawText (tx ("mx.history"), juce::Rectangle<float> (plot.getX(), plot.getY() - skin_.px (24.0f), plot.getWidth(), skin_.px (16.0f)), juce::Justification::centredLeft);
-        // trois zones très légères, avec un trait plus marqué sur leur bord haut : vert jusqu'à la tolérance, jaune sur 3 LU de plus, rouge au-delà
-        auto zone = [&] (double lo, double hi, juce::Colour c, float fillAlpha)
+        // la tolérance : bande verte autour de la cible, jaune sur 3 LU de part et d'autre, rouge au-delà vers le haut. Aucun trait : seule la cible a sa ligne
+        auto band = [&] (double lo, double hi, juce::Colour c, float alpha)
         {
             const float y0 = yOf (static_cast<float> (hi)), y1 = yOf (static_cast<float> (lo));
             if (y1 <= y0) return;
-            g.setColour (c.withAlpha (fillAlpha));
+            g.setColour (c.withAlpha (alpha));
             g.fillRect (juce::Rectangle<float> (plot.getX(), y0, plot.getWidth(), y1 - y0));
-            g.setColour (c.withAlpha (0.7f));
-            g.drawLine (plot.getX(), y0, plot.getRight(), y0, std::max (1.2f, skin_.px (1.4f)));
         };
-        zone (-60.0, tgt + tol, kGreen, 0.06f);
-        zone (tgt + tol, tgt + tol + 3.0, kYellow, 0.09f);
-        zone (tgt + tol + 3.0, 0.0, kRed, 0.08f);
+        band (tgt + tol + 3.0, 0.0, kRed, 0.10f);
+        band (tgt + tol, tgt + tol + 3.0, kYellow, 0.14f);
+        band (tgt - tol, tgt + tol, kGreen, 0.20f);
+        band (tgt - tol - 3.0, tgt - tol, kYellow, 0.08f);
         for (int db = -60; db <= 0; db += 10)
         {
             g.setColour (skin_.colour (Token::Grid, 0.6f));
@@ -207,25 +206,45 @@ public:
         g.drawText (tx (("mx.mm" + std::to_string (meterMode())).c_str()).toUpperCase(), juce::Rectangle<float> (bar.getX() - skin_.px (40.0f), plot.getY() - skin_.px (24.0f), bar.getWidth() + skin_.px (80.0f), skin_.px (16.0f)), juce::Justification::centred);
         g.setColour (skin_.colour (Token::Grid));
         g.fillRoundedRectangle (bar, skin_.px (3.0f));
-        if (level > -150.0f)
         {
-            const bool peakMode = meterMode() == mir::kMeterPeak;
-            const float hi = static_cast<float> (target() + tolerance());
-            g.setGradientFill (peakMode ? zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, -18.0f, -6.0f, 4.0f)
-                                        : zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, hi, hi + 3.0f, 1.2f));
-            const float top = yOf (level);
-            g.fillRect (bar.getX(), top, bar.getWidth(), bar.getBottom() - top);
+            // même style que le mètre d'entrée de la colonne de gauche : coins arrondis, barre de crête à l'intérieur
+            juce::Graphics::ScopedSaveState clipState (g);
+            juce::Path clip;
+            clip.addRoundedRectangle (bar, skin_.px (3.0f));
+            g.reduceClipRegion (clip);
+            if (level > -150.0f)
+            {
+                const bool peakMode = meterMode() == mir::kMeterPeak;
+                const float hi = static_cast<float> (target() + tolerance());
+                g.setGradientFill (peakMode ? zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, -18.0f, -6.0f, 4.0f)
+                                            : zoneGradient ({ 0.0f, bar.getBottom() }, { 0.0f, bar.getY() }, -60.0f, 0.0f, hi, hi + 3.0f, 1.2f));
+                const float top = yOf (level);
+                g.fillRect (bar.getX(), top, bar.getWidth(), bar.getBottom() - top);
+            }
+            if (holdLevel_ > -150.0f)   // barre de crête : suit les pics, tient puis retombe lentement
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.85f));
+                g.fillRect (bar.getX(), yOf (holdLevel_) - skin_.px (1.0f), bar.getWidth(), skin_.px (2.0f));
+            }
         }
-        if (holdLevel_ > -150.0f)   // barre de crête : suit les pics, tient puis retombe lentement
+        // graduation : un repère tous les 5 dB, un chiffre tous les 10 dB, à gauche du mètre
+        for (int db = -60; db <= 0; db += 5)
         {
-            g.setColour (skin_.colour (Token::Text));
-            g.fillRect (bar.getX() - skin_.px (3.0f), yOf (holdLevel_) - skin_.px (1.5f), bar.getWidth() + skin_.px (6.0f), skin_.px (3.0f));
+            const float y = yOf (static_cast<float> (db));
+            const bool major = db % 10 == 0;
+            g.setColour (skin_.colour (Token::TextDim2, major ? 0.9f : 0.5f));
+            g.drawLine (bar.getX() - skin_.px (major ? 7.0f : 4.0f), y, bar.getX() - skin_.px (1.0f), y, std::max (1.0f, skin_.px (1.0f)));
+            if (major)
+            {
+                g.setFont (skin_.font (9.0f));
+                g.drawText (juce::String (db), juce::Rectangle<float> (bar.getX() - skin_.px (40.0f), y - skin_.px (6.0f), skin_.px (30.0f), skin_.px (12.0f)), juce::Justification::centredRight);
+            }
         }
         if (meterMode() != mir::kMeterPeak)   // repère de la cible sur le mètre
         {
             g.setColour (skin_.colour (Token::Text));
             const float y = yOf (static_cast<float> (tgt));
-            g.drawLine (bar.getX() - skin_.px (6.0f), y, bar.getRight() + skin_.px (6.0f), y, std::max (1.5f, skin_.px (1.5f)));
+            g.drawLine (bar.getX(), y, bar.getRight(), y, std::max (1.5f, skin_.px (1.5f)));
         }
         // valeur lue, à droite du mètre, à la hauteur du niveau
         g.setColour (skin_.colour (Token::Text));

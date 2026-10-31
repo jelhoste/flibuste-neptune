@@ -37,7 +37,7 @@ bool addParams (ParameterSet& set, std::string* error)
         t.decimals = 1;
         add (std::move (t));
     }
-    add (P::stepped (historyMinutes, "History Length", Unit::None, 1, 60, 10));
+    add (P::stepped (historyMinutes, "History Length", Unit::None, 1, 60, 1));
     add (P::continuous (peakHold, "Peak Hold", Unit::Seconds, 0.0, 10.0, 2.0));
     add (P::continuous (peakFall, "Peak Fall", Unit::None, 5.0, 60.0, 20.0));
     add (P::choice (rmsWindow, "RMS Window", { "300 ms", "1 s", "3 s" }, kRms300ms));
