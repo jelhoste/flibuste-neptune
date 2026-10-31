@@ -527,6 +527,7 @@ void NovaFournaiseEditor::buildSaturationPage()
     trimInKnob_ = knob (stock::inputTrim, "fo.input");
     mixKnob_ = knob (stock::mix, "fo.mix", true);
     trimOutKnob_ = knob (stock::outputTrim, "fo.output", true);
+    smoothKnob_ = knob (ovd::smooth, "fo.smooth");
     autoPill_ = add<nova::Pill> (0, skin());
     autoPill_->bindToggle (host(), ovd::autoGain, tx ("fo.autogain"));
     osPill_ = add<nova::Pill> (0, skin());
@@ -638,13 +639,13 @@ void NovaFournaiseEditor::layout()
             top[i]->setBounds (R (x0 + static_cast<float> (i) * (cw + gap), 160, cw, 150));
             mid[i]->setBounds (R (x0 + static_cast<float> (i) * (cw + gap), 322, cw, 150));
         }
-        nova::KnobCard* low[3] = { trimInKnob_, mixKnob_, trimOutKnob_ };
-        for (int i = 0; i < 3; ++i) low[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + gap), 536, cw, 150));
+        nova::KnobCard* low[4] = { trimInKnob_, mixKnob_, trimOutKnob_, smoothKnob_ };
+        for (int i = 0; i < 4; ++i) low[i]->setBounds (R (220.0f + static_cast<float> (i) * (cw + gap), 536, cw, 150));
     }
     autoPill_->setBounds (R (220, 486, 200, 36));
     osPill_->setBounds (R (428, 486, 230, 36));
     chPill_->setBounds (R (666, 486, 300, 36));
-    satHint_->setBounds (R (700, 540, 430, 60));
+    satHint_->setBounds (R (890, 540, 240, 120));
 
     // ---- page FILTRES : entrée (haut), sortie (bas) ; passe-haut puis passe-bas
     inFiltersPanel_->setBounds (R (204, 72, 942, 300));

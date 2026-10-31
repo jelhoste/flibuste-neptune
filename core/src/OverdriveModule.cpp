@@ -1,6 +1,7 @@
 #include "neptune/core/OverdriveModule.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace neptune::core
@@ -48,6 +49,28 @@ const char* modelName (int m) noexcept
     }
 }
 
+namespace
+{
+// Étages élémentaires (utilisés par la courbe statique et par HiStage). Le caractère d'une lampe est plafonné à 0,7 : une lampe n'écrête jamais « dur ».
+inline double tubeCharacter (double c) noexcept { return 0.7 * c; }
+inline double diodeStage (double x, const ShapeParams& p) noexcept
+{
+    // diodes : exponentielle de chaque côté, limites différentes selon l'asymétrie ; un peu d'écrêtage dur seulement quand le caractère est poussé
+    const double kp = std::exp (0.7 * p.bias), kn = std::exp (-0.7 * p.bias);
+    const double y = x >= 0.0 ? (1.0 - std::exp (-x * kp)) / kp : -(1.0 - std::exp (x * kn)) / kn;
+    return (1.0 - 0.35 * p.character) * y + 0.35 * p.character * hardClip (x);
+}
+inline double fuzzStage (double x, const ShapeParams& p) noexcept
+{
+    // polarisation décalée, porte qui étouffe les petits signaux, écrêtage de plus en plus carré
+    const double g = 0.12 * p.feel, ax = std::fabs (x);
+    const double gate = (g > 1.0e-6 && ax < g) ? (ax / g) * (ax / g) : 1.0;
+    const double u = 2.0 * (x + 0.5 * p.bias);
+    return gate * ((1.0 - p.character) * std::tanh (u) + p.character * hardClip (u));
+}
+inline double onePoleCoef (double fc, double fs) noexcept { return 1.0 - std::exp (-2.0 * kPi * std::min (fc, 0.45 * fs) / fs); }
+} // namespace
+
 double shape (double x, const ShapeParams& p) noexcept
 {
     switch (p.model)
@@ -55,45 +78,84 @@ double shape (double x, const ShapeParams& p) noexcept
         case kTape:
             return knee (x, p.character * 0.6);   // symétrique, jamais très dur
         case kTransistor:
-        {
-            // diodes : exponentielle de chaque côté, limites différentes selon l'asymétrie
-            const double kp = std::exp (0.7 * p.bias), kn = std::exp (-0.7 * p.bias);
-            const double y = x >= 0.0 ? (1.0 - std::exp (-x * kp)) / kp : -(1.0 - std::exp (x * kn)) / kn;
-            return (1.0 - 0.7 * p.character) * y + 0.7 * p.character * hardClip (x);
-        }
+            return diodeStage (0.8 * diodeStage (x, p), p);   // deux étages à diodes (le second un peu moins poussé)
         case kFuzz:
-        {
-            // polarisation décalée, porte qui étouffe les petits signaux, écrêtage de plus en plus carré
-            const double g = 0.12 * p.feel, ax = std::fabs (x);
-            const double gate = (g > 1.0e-6 && ax < g) ? (ax / g) * (ax / g) : 1.0;
-            const double u = 2.0 * (x + 0.5 * p.bias);
-            return gate * ((1.0 - p.character) * std::tanh (u) + p.character * hardClip (u));
-        }
+            return fuzzStage (x, p);
         default:
         {
             // lampe : deux étages de triode en cascade, point de repos opposé et plus faible pour le second
-            const double b = 0.6 * p.bias;
-            const double y1 = tubeStage (x, b, p.character);
-            return tubeStage (1.2 * y1, -0.4 * b, p.character);
+            const double b = 0.6 * p.bias, c = tubeCharacter (p.character);
+            const double y1 = tubeStage (x, b, c);
+            return tubeStage (1.2 * y1, -0.4 * b, c);
         }
     }
 }
 
+void HiStage::configure (double fsHi, int model, double driveDb, double smooth01) noexcept
+{
+    model_ = model;
+    const double drive01 = std::clamp (driveDb / 60.0, 0.0, 1.0);
+    static const double postBase[kNumModels] = { 7000.0, 9000.0, 5500.0, 4500.0 };   // passe-bas après l'écrêteur : lampe, bande, transistor, fuzz
+    const int m = std::clamp (model, 0, kNumModels - 1);
+    const double scale = 1.5 - 1.1 * std::clamp (smooth01, 0.0, 1.0);   // douceur : de x1,5 (clair) à x0,4 (très adouci)
+    aPost_ = onePoleCoef (postBase[m] * scale * (1.0 - 0.4 * drive01), fsHi);   // plus on pousse, plus on adoucit
+    aCouple_ = onePoleCoef (model == kTransistor ? 40.0 : 30.0, fsHi);   // condensateur de liaison
+    aMid_ = onePoleCoef (model == kTransistor ? 8000.0 : 9000.0, fsHi);   // passe-bas entre les deux étages
+}
+
+double HiStage::process (double x, const ShapeParams& p) noexcept
+{
+    double y;
+    switch (model_)
+    {
+        case kTape:
+            y = knee (x, p.character * 0.6);
+            break;
+        case kFuzz:
+            y = fuzzStage (x, p);
+            break;
+        case kTransistor:
+        {
+            double y1 = diodeStage (x, p);
+            couple_ += aCouple_ * (y1 - couple_);   // la polarisation se recentre : le continu créé par l'asymétrie est retiré lentement
+            y1 -= couple_;
+            mid_ += aMid_ * (y1 - mid_);
+            y = diodeStage (0.8 * mid_, p);
+            break;
+        }
+        default:
+        {
+            const double b = 0.6 * p.bias, c = tubeCharacter (p.character);
+            double y1 = tubeStage (x, b, c);
+            couple_ += aCouple_ * (y1 - couple_);
+            y1 -= couple_;
+            mid_ += aMid_ * (y1 - mid_);
+            y = tubeStage (1.2 * mid_, -0.4 * b, c);
+            break;
+        }
+    }
+    post1_ += aPost_ * (y - post1_);       // passe-bas à deux pôles
+    post2_ += aPost_ * (post1_ - post2_);
+    return post2_;
+}
+
 double autoGainFor (double driveLin, const ShapeParams& p) noexcept
 {
-    constexpr int N = 512;
-    constexpr double amp = 0.25;   // -12 dBFS
-    double ys[N];
-    double mean = 0.0;
-    for (int i = 0; i < N; ++i)
+    // On fait passer un sinus de -12 dBFS (480 Hz, 200 échantillons par période à 96 kHz) par l'étage complet, filtres compris.
+    constexpr double fsHi = 96000.0, amp = 0.25;
+    constexpr int settle = 8192, measure = 4000;
+    HiStage st;
+    st.configure (fsHi, p.model, 20.0 * std::log10 (std::max (driveLin, 1.0)), p.smooth);
+    double sum = 0.0, mean = 0.0;
+    std::array<double, measure> ys {};
+    for (int i = 0; i < settle + measure; ++i)
     {
-        ys[i] = shape (driveLin * amp * std::sin (2.0 * kPi * static_cast<double> (i) / N), p);
-        mean += ys[i];
+        const double y = st.process (driveLin * amp * std::sin (2.0 * kPi * 480.0 * static_cast<double> (i) / fsHi), p);
+        if (i >= settle) { ys[static_cast<std::size_t> (i - settle)] = y; mean += y; }
     }
-    mean /= N;
-    double sum = 0.0;
-    for (int i = 0; i < N; ++i) sum += (ys[i] - mean) * (ys[i] - mean);
-    const double rmsOut = std::sqrt (sum / N), rmsIn = amp / std::sqrt (2.0);
+    mean /= measure;
+    for (const double y : ys) sum += (y - mean) * (y - mean);
+    const double rmsOut = std::sqrt (sum / measure), rmsIn = amp / std::sqrt (2.0);
     if (rmsOut < 1.0e-9) return 1.0;
     return std::clamp (rmsIn / rmsOut, 0.05, 20.0);
 }
@@ -104,6 +166,8 @@ void OverdriveModule::Chain::reset() noexcept
 {
     os.reset();
     inHp.reset(); inLp.reset(); outHp.reset(); outLp.reset();
+    hi.reset();
+    gbw = 0.0;
     pre.reset(); post1.reset(); post2.reset(); dc.reset();
     toneLp = sagEnv = 0.0;
     delay.fill (0.0f);
@@ -134,7 +198,7 @@ bool OverdriveModule::declareParams (ParameterSet& set, std::string* error) cons
     add (pct (tone, "Tone", -100.0, 100.0, 0.0));
     add (P::continuous (level, "Output Level", Unit::Decibel, -24.0, 12.0, 0.0));
     add (P::toggle (autoGain, "Auto Gain", true));
-    add (fixed (P::choice (oversampling, "Oversampling", { "Off", "2x", "4x" }, 1)));
+    add (fixed (P::choice (oversampling, "Oversampling", { "Off", "2x", "4x" }, 2)));
     add (fixed (P::choice (channels, "Channels", { "Stereo", "Mid/Side", "Mid only", "Side only" }, kStereo)));
 
     add (P::toggle (inHpOn, "Input HP On"));
@@ -174,6 +238,7 @@ bool OverdriveModule::declareParams (ParameterSet& set, std::string* error) cons
     add (P::continuous (keyAttack, "Key Attack", Unit::Milliseconds, 1.0, 200.0, 5.0, Curve::Exponential));
     add (P::continuous (keyRelease, "Key Release", Unit::Milliseconds, 10.0, 1000.0, 120.0, Curve::Exponential));
     add (P::continuous (keyHp, "Key HP", Unit::Hertz, 20.0, 2000.0, 20.0, Curve::Exponential));
+    add (pct (smooth, "Smooth", 0.0, 100.0, 60.0));
     return ok;
 }
 
@@ -278,7 +343,7 @@ void OverdriveModule::updateDesigns() noexcept
         if (c.os.factor() != factor_) c.os.setFactor (factor_);
 
     driveDb_ = param (drive);
-    shapeTarget_ = { modelIndex_, param (bias) / 100.0, param (character) / 100.0, param (feel) / 100.0 };
+    shapeTarget_ = { modelIndex_, param (bias) / 100.0, param (character) / 100.0, param (feel) / 100.0, param (smooth) / 100.0 };
     compTarget_ = param (autoGain) >= 0.5 ? autoGainFor (dbToLin (driveDb_), shapeTarget_) : 1.0;
     levelLin_ = dbToLin (param (level));
     const double t = param (tone) / 100.0;
@@ -331,6 +396,11 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
     const double sagAmount = modelIndex_ == kTube ? 1.5 * param (feel) / 100.0 : 0.0;
     const bool emphasis = modelIndex_ == kTape || modelIndex_ == kTransistor;
 
+    // bande passante du gain : produit gain x bande passante constant par modèle, borné entre 2,5 kHz et 20 kHz (au-delà, le filtre est neutre)
+    static const double gbwHz[kNumModels] = { 700000.0, 1500000.0, 400000.0, 300000.0 };
+    const double fcGain = std::clamp (gbwHz[std::clamp (modelIndex_, 0, kNumModels - 1)] / std::max (c.gain, 1.0), 2500.0, 20000.0);
+    const double gbwCoef = fcGain >= 19999.0 ? 1.0 : 1.0 - std::exp (-2.0 * kPi * fcGain / fs_);
+
     // ---- cadence de base : filtres d'entrée, préaccentuation, drive
     for (int i = 0; i < len; ++i)
     {
@@ -350,13 +420,17 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
             c.sagEnv += (level01 > c.sagEnv ? sagAttack_ : sagRelease_) * (level01 - c.sagEnv);
             g /= 1.0 + sagAmount * c.sagEnv;
         }
-        buf[i] = static_cast<float> (x * g);
+        const double driven = x * g;
+        // gain-bande passante limitée (comme un amplificateur opérationnel) : plus le gain est fort, plus les aigus sont coupés AVANT l'écrêteur
+        if (gbwCoef < 0.999) { c.gbw += gbwCoef * (driven - c.gbw); buf[i] = static_cast<float> (c.gbw); }
+        else { c.gbw = driven; buf[i] = static_cast<float> (driven); }
     }
 
     // ---- cadence haute : courbe de transfert (réglages interpolés sur le bloc)
     float* hi = c.os.up (buf, len);
     const int total = len * factor_;
     ShapeParams sp = shape_;
+    c.hi.configure (fs_ * static_cast<double> (factor_), modelIndex_, driveDb_, shapeTarget_.smooth);
     const double inv = 1.0 / static_cast<double> (std::max (1, total));
     const double stepBias = (shapeTarget_.bias - sp.bias) * inv, stepChar = (shapeTarget_.character - sp.character) * inv, stepFeel = (shapeTarget_.feel - sp.feel) * inv;
     for (int k = 0; k < total; ++k)
@@ -364,7 +438,7 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
         sp.bias += stepBias;
         sp.character += stepChar;
         sp.feel += stepFeel;
-        hi[k] = static_cast<float> (shape (static_cast<double> (hi[k]), sp));
+        hi[k] = static_cast<float> (c.hi.process (static_cast<double> (hi[k]), sp));
     }
     c.os.down (buf, len);
 

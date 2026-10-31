@@ -50,13 +50,13 @@ std::vector<float> sine (double hz, double amp, double seconds)
 }
 
 // Amplitude (crête) de la composante à `hz` sur les `n` derniers échantillons (transformée de Fourier en un point).
-double component (const std::vector<float>& x, double hz, std::size_t n)
+double component (const std::vector<float>& x, double hz, std::size_t n, double rate = kRate)
 {
     double re = 0.0, im = 0.0;
     const std::size_t start = x.size() - n;
     for (std::size_t i = 0; i < n; ++i)
     {
-        const double ph = 2.0 * kPi * hz * static_cast<double> (i) / kRate;
+        const double ph = 2.0 * kPi * hz * static_cast<double> (i) / rate;
         re += static_cast<double> (x[start + i]) * std::cos (ph);
         im -= static_cast<double> (x[start + i]) * std::sin (ph);
     }
@@ -219,6 +219,7 @@ TEST_CASE ("overdrive mid/side modes leave the other channel untouched (delayed 
     for (std::size_t i = 0; i < total; ++i) { const float s = static_cast<float> (0.3 * std::sin (2.0 * kPi * 440.0 * static_cast<double> (i) / kRate)); l[i] = s; r[i] = -s; }   // côtés purs
     auto inst = make();
     setP (*inst, channels, kMidOnly);
+    setP (*inst, oversampling, 1);   // 2x : latence 31
     setP (*inst, drive, 30.0);
     std::vector<float> ol = l, orr = r;
     for (std::size_t pos = 0; pos < total; pos += 512)
@@ -256,4 +257,40 @@ TEST_CASE ("overdrive key input raises the drive", "[overdrive]")
         return std::sqrt (sum / static_cast<double> (count));
     };
     CHECK (rmsWith (100.0) > 3.0 * rmsWith (0.0));
+}
+
+TEST_CASE ("overdrive tames the highs compared with a bare waveshaper (less harsh)", "[overdrive]")
+{
+    // sinus de 220 Hz fortement poussé : énergie des harmoniques entre 3 et 12 kHz, rapportée au fondamental, pour le module et pour la seule courbe statique
+    constexpr double f0 = 220.0, amp = 0.5;
+    auto bandRatio = [] (const std::vector<float>& x, double rate)
+    {
+        const std::size_t n = static_cast<std::size_t> (rate);   // 1 s : nombre entier de périodes
+        const double fundamental = component (x, f0, n, rate);
+        double energy = 0.0;
+        for (int k = 14; k <= 54; ++k) { const double c = component (x, f0 * k, n, rate); energy += c * c; }
+        return 10.0 * std::log10 (std::max (energy, 1.0e-30) / (fundamental * fundamental));
+    };
+    for (const int m : { kTube, kTransistor, kFuzz })
+    {
+        INFO ("modèle " << modelName (m));
+        const double driveDb = 36.0;
+        auto inst = make();
+        setP (*inst, model, m);
+        setP (*inst, drive, driveDb);
+        setP (*inst, autoGain, 0.0);
+        setP (*inst, oversampling, 2);
+        const auto out = run (*inst, sine (f0, amp, 1.5));
+        const std::vector<float> moduleSignal (out.end() - static_cast<long> (kRate), out.end());
+        // courbe statique seule, à 192 kHz (aucun filtre) : ce que donnait la première version
+        constexpr double hiRate = 192000.0;
+        ShapeParams sp;
+        sp.model = m;
+        const double g = std::pow (10.0, driveDb / 20.0);
+        std::vector<float> bare (static_cast<std::size_t> (hiRate));
+        for (std::size_t i = 0; i < bare.size(); ++i) bare[i] = static_cast<float> (shape (g * amp * std::sin (2.0 * kPi * f0 * static_cast<double> (i) / hiRate), sp));
+        const double moduleRatio = bandRatio (moduleSignal, kRate), bareRatio = bandRatio (bare, hiRate);
+        INFO ("module " << moduleRatio << " dB, courbe nue " << bareRatio << " dB");
+        CHECK (moduleRatio < bareRatio - 6.0);
+    }
 }

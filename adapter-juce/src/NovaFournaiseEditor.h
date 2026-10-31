@@ -45,7 +45,7 @@ private:
     ChipRow* modelChips_ = nullptr;
     TransferView* transfer_ = nullptr;
     nova::KnobCard *driveKnob_ = nullptr, *biasKnob_ = nullptr, *charKnob_ = nullptr, *feelKnob_ = nullptr, *toneKnob_ = nullptr, *levelKnob_ = nullptr;
-    nova::KnobCard *trimInKnob_ = nullptr, *mixKnob_ = nullptr, *trimOutKnob_ = nullptr;
+    nova::KnobCard *trimInKnob_ = nullptr, *mixKnob_ = nullptr, *trimOutKnob_ = nullptr, *smoothKnob_ = nullptr;
     nova::Pill *autoPill_ = nullptr, *osPill_ = nullptr, *chPill_ = nullptr;
     nova::Text* satHint_ = nullptr;
     int shownModel_ = -1;

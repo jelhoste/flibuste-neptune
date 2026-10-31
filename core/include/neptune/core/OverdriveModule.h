@@ -38,7 +38,8 @@ enum BandField : int { kOn = 0, kType = 1, kFreq = 2, kGain = 3, kQ = 4 };
 constexpr ParamId eqHpOn = 138, eqHp = 139, eqHpSlope = 140, eqLpOn = 141, eqLp = 142, eqLpSlope = 143;
 // entrée latérale : source, quantité (pourcentage de 30 dB de drive), attaque, retombée, passe-haut de la clé
 constexpr ParamId keySource = 144, keyAmount = 145, keyAttack = 146, keyRelease = 147, keyHp = 148;
-constexpr std::size_t numParams = 49;   // identifiants 100..148
+constexpr ParamId smooth = 149;   // douceur : 0 clair, 100 très adouci (fréquences des passe-bas de l'étage non linéaire)
+constexpr std::size_t numParams = 50;   // identifiants 100..149
 
 enum Meter : int { kInPeakL = 0, kInPeakR, kOutPeakL, kOutPeakR, kKeyLevel, kNumMeters };   // pics linéaires depuis la dernière lecture ; kKeyLevel : 0..1
 
@@ -49,8 +50,25 @@ struct ShapeParams
     double bias = 0.0;        // -1..+1
     double character = 0.5;   // 0..1 : dureté du coude
     double feel = 0.4;        // 0..1 : seuil de coupure du fuzz
+    double smooth = 0.6;      // 0..1 : douceur (n'agit que dans HiStage, pas dans la courbe statique)
 };
 double shape (double x, const ShapeParams&) noexcept;
+
+// Étage non linéaire à la cadence haute, avec la mémoire d'un vrai circuit (prototype « plus doux », 2026-10-31) : la courbe du modèle, un condensateur de liaison entre
+// deux étages (il recentre la polarisation quand la courbe est asymétrique), un passe-bas entre les étages, puis un passe-bas à deux pôles après l'écrêteur
+// (les aigus produits par l'écrêtage sont adoucis, comme par la tonalité d'une pédale). La courbe statique `shape()` en est la version sans filtres.
+class HiStage
+{
+public:
+    void configure (double fsHi, int model, double driveDb, double smooth01) noexcept;
+    void reset() noexcept { couple_ = mid_ = post1_ = post2_ = 0.0; }
+    double process (double x, const ShapeParams&) noexcept;
+
+private:
+    int model_ = kTube;
+    double aCouple_ = 0.0, aMid_ = 0.0, aPost_ = 0.0;
+    double couple_ = 0.0, mid_ = 0.0, post1_ = 0.0, post2_ = 0.0;
+};
 // Gain qui ramène le niveau efficace (alternatif) d'un sinus de -12 dBFS saturé vers celui d'entrée, pour un drive donné.
 double autoGainFor (double driveLin, const ShapeParams&) noexcept;
 const char* modelName (int m) noexcept;
@@ -89,7 +107,8 @@ private:
         Oversampler os;
         ButterworthCascade inHp, inLp, outHp, outLp;
         Biquad pre, post1, post2, dc;   // préaccentuation, désaccentuation, bosse grave, blocage du continu
-        double toneLp = 0.0, sagEnv = 0.0, gain = 1.0;
+        overdrive::HiStage hi;
+        double toneLp = 0.0, sagEnv = 0.0, gain = 1.0, gbw = 0.0;   // gbw : état du passe-bas de bande passante du gain
         std::array<float, 128> delay {};
         std::size_t delayPos = 0;
         void reset() noexcept;
