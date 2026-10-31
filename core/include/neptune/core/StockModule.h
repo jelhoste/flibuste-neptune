@@ -106,6 +106,8 @@ private:
     std::vector<float> ringL_, ringR_;     // retard du signal sec : le module a une latence, le sec doit lui être aligné (mix, bypass)
     std::size_t ringPos_ = 0;
     int ringLatency_ = 0;
+    static constexpr int kDryFade = 1024;   // fondu enchaîné du sec quand la latence du module change (échantillons)
+    int fadeFrom_ = 0, fadeLeft_ = 0;
     const float *keyL_ = nullptr, *keyR_ = nullptr;
     float lastIn_ = 1.0f, lastOut_ = 1.0f, lastMix_ = 1.0f;
     bool idle_ = false; // contourné depuis un moment : le module n'est plus traité

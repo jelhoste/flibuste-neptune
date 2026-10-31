@@ -11,6 +11,7 @@
 // Entrée latérale : un suiveur d'enveloppe module le drive (source Off, entrée principale ou clé externe).
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <vector>
 
 #include "neptune/core/Biquad.h"
@@ -114,6 +115,10 @@ private:
         double sagFast = 0.0, sagSlow = 0.0, biasDyn = 0.0;   // affaissement de l'alimentation (deux constantes de temps) et décalage dynamique de la polarisation
         double lowLp = 0.0, lowLp2 = 0.0;                     // Tight : deux passe-bas en série qui isolent les graves
         double driftPhase1 = 0.0, driftPhase2 = 0.0;          // Imperfection : dérive lente
+        double impDriveDb = 0.0, impBias = 0.0;               // Imperfection : valeurs courantes (recalculées tous les 16 échantillons)
+        std::uint32_t driftTick = 0;
+        double lastGainArg = 1.0e9, lastGainTarget = 1.0, gbwCoef = 1.0;     // dernier gain de drive calculé (évite une exponentielle par échantillon)
+        std::vector<float> dynBuf;                            // polarisation dynamique, un échantillon par entrée
         int index = 0;                                        // 0 : première voie, 1 : seconde (signe de l'imperfection)
         std::vector<float> low;                               // graves du bloc, pour les rajouter propres après la distorsion
         std::array<float, 128> lowRing {};
@@ -137,7 +142,10 @@ private:
 
     double fs_ = 48000.0;
     int maxBlock_ = 512;
-    std::array<Chain, 2> chain_;
+    std::array<Chain, 2> chain_, old_;   // old_ : copie de chain_ avant un changement de suréchantillonnage, pendant le fondu enchaîné
+    static constexpr int kFadeLen = 1024;
+    int fadeLeft_ = 0;
+    std::vector<float> oa_, ob_;
     llc::ParametricEQ eq_;
     Biquad keyHpFilter_;
 

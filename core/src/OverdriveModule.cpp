@@ -15,6 +15,13 @@ constexpr int kSlopes[3] = { 12, 24, 48 };
 constexpr int kFactors[3] = { 1, 2, 4 };
 
 inline double dbToLin (double db) noexcept { return std::exp (db * 0.11512925464970229); }
+// tanh par fraction continue (7e ordre) : erreur inférieure à 1e-4 sur +-5, bornée à +-1, monotone ; bien moins chère que std::tanh aux cadences hautes
+inline double fastTanh (double x) noexcept
+{
+    const double u = std::clamp (x, -5.0, 5.0), u2 = u * u;
+    const double y = u * (135135.0 + u2 * (17325.0 + u2 * (378.0 + u2))) / (135135.0 + u2 * (62370.0 + u2 * (3150.0 + 28.0 * u2)));
+    return std::clamp (y, -1.0, 1.0);
+}
 inline double smoothCoef (double seconds, double fs) noexcept { return 1.0 - std::exp (-1.0 / (std::max (seconds, 1.0e-4) * fs)); }
 inline int choiceIndex (double v, int count) noexcept { return std::clamp (static_cast<int> (v + 0.5), 0, count - 1); }
 
@@ -27,10 +34,10 @@ inline double knee (double u, double c) noexcept
     if (c < 0.5)
     {
         const double t = c * 2.0;
-        return (1.0 - t) * softRat (u) + t * std::tanh (u);
+        return (1.0 - t) * softRat (u) + t * fastTanh (u);
     }
     const double t = (c - 0.5) * 2.0;
-    return (1.0 - t) * std::tanh (u) + t * hardClip (u);
+    return (1.0 - t) * fastTanh (u) + t * hardClip (u);
 }
 // Étage de triode : le point de repos (bias) décale l'entrée ; on retire la valeur au repos pour que zéro reste zéro.
 inline double tubeStage (double x, double b, double c) noexcept { return knee (x + b, c) - knee (b, c); }
@@ -66,7 +73,7 @@ inline double fuzzStage (double x, const ShapeParams& p) noexcept
     const double g = 0.12 * p.feel, ax = std::fabs (x);
     const double gate = (g > 1.0e-6 && ax < g) ? (ax / g) * (ax / g) : 1.0;
     const double u = 2.0 * (x + 0.5 * p.bias);
-    return gate * ((1.0 - p.character) * std::tanh (u) + p.character * hardClip (u));
+    return gate * ((1.0 - p.character) * fastTanh (u) + p.character * hardClip (u));
 }
 inline double onePoleCoef (double fc, double fs) noexcept { return 1.0 - std::exp (-2.0 * kPi * std::min (fc, 0.45 * fs) / fs); }
 } // namespace
@@ -170,6 +177,8 @@ void OverdriveModule::Chain::reset() noexcept
     gbw = 0.0;
     pre.reset(); post1.reset(); post2.reset(); dc.reset();
     toneLp = sagFast = sagSlow = biasDyn = lowLp = lowLp2 = 0.0;
+    lastGainArg = 1.0e9;
+    driftTick = 0;
     driftPhase1 = index == 0 ? 0.3 : 2.2;   // départs fixes : le rendu est déterministe
     driftPhase2 = index == 0 ? 1.7 : 4.1;
     lowRing.fill (0.0f);
@@ -202,7 +211,7 @@ bool OverdriveModule::declareParams (ParameterSet& set, std::string* error) cons
     add (pct (tone, "Tone", -100.0, 100.0, 0.0));
     add (P::continuous (level, "Output Level", Unit::Decibel, -24.0, 12.0, 0.0));
     add (P::toggle (autoGain, "Auto Gain", true));
-    add (fixed (P::choice (oversampling, "Oversampling", { "Off", "2x", "4x" }, 2)));
+    add (fixed (P::choice (oversampling, "Oversampling", { "Off", "2x", "4x" }, 1)));
     add (fixed (P::choice (channels, "Channels", { "Stereo", "Mid/Side", "Mid only", "Side only" }, kStereo)));
 
     add (P::toggle (inHpOn, "Input HP On"));
@@ -263,7 +272,14 @@ void OverdriveModule::prepare (double sampleRate, int maxBlockSize)
         chain_[i].os.prepare (maxBlock_);
         chain_[i].low.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
     }
-    for (auto* v : { &a_, &b_, &keepA_, &keepB_, &modDb_ }) v->assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+    for (std::size_t i = 0; i < old_.size(); ++i)
+    {
+        old_[i].os.prepare (maxBlock_);
+        old_[i].low.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+        old_[i].dynBuf.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+        chain_[i].dynBuf.assign (static_cast<std::size_t> (maxBlock_), 0.0f);
+    }
+    for (auto* v : { &a_, &b_, &keepA_, &keepB_, &modDb_, &oa_, &ob_ }) v->assign (static_cast<std::size_t> (maxBlock_), 0.0f);
     eq_.prepare (fs_);
     sagAttackF_ = smoothCoef (0.003, fs_);   // affaissement : une composante rapide (condensateur de filtrage de l'étage) ...
     sagReleaseF_ = smoothCoef (0.060, fs_);
@@ -285,6 +301,7 @@ void OverdriveModule::reset() noexcept
     eq_.reset();
     keyHpFilter_.reset();
     keyEnv_ = 0.0;
+    fadeLeft_ = 0;
     smoothInit_ = false;
     hold_.fill (0.0f);
 }
@@ -355,6 +372,12 @@ void OverdriveModule::updateDesigns() noexcept
     channelMode_ = choiceIndex (param (channels), kNumChannelModes);
     keyMode_ = choiceIndex (param (keySource), kNumKeySources);
     latency_ = Oversampler::latencyFor (factor_);
+    if (! snap && chain_[0].os.factor() != factor_)
+    {
+        // le retard du signal change d'un coup (0, 31 ou 39 échantillons) : on garde l'ancienne chaîne et on fait un fondu enchaîné vers la nouvelle
+        for (std::size_t i = 0; i < chain_.size(); ++i) old_[i] = chain_[i];
+        fadeLeft_ = kFadeLen;
+    }
     for (auto& c : chain_)
         if (c.os.factor() != factor_) c.os.setFactor (factor_);
 
@@ -416,21 +439,13 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
     const double sagAmount = isTube ? 1.5 * param (feel) / 100.0 : 0.0;
     const bool emphasis = modelIndex_ == kTape || modelIndex_ == kTransistor;
     const bool useTight = tight_ > 0.0005;
-    const std::size_t lowDelay = static_cast<std::size_t> (std::clamp (latency_, 0, 127));
-
-    // imperfection : décalage fixe de signe opposé entre les deux voies, plus une dérive lente (gain en dB, polarisation)
-    c.driftPhase1 += driftInc1_ * len;
-    c.driftPhase2 += driftInc2_ * len;
+    const int factor = c.os.factor();   // la chaîne garde son propre facteur : l'ancienne chaîne d'un fondu enchaîné tourne encore à l'ancien
+    const std::size_t lowDelay = static_cast<std::size_t> (std::clamp (Oversampler::latencyFor (factor), 0, 127));
     const double sign = c.index == 0 ? 1.0 : -1.0;
-    const double driftA = 0.6 * std::sin (c.driftPhase1) + 0.4 * std::sin (c.driftPhase2);
-    const double driftB = std::sin (c.driftPhase2 * 1.7 + 0.9);
-    const double impDriveDb = imperfection_ * (0.45 * sign + 0.30 * driftA);
-    const double impBias = imperfection_ * (0.06 * sign + 0.04 * driftB);
+    const double feel01 = param (feel) / 100.0;
 
     // bande passante du gain : produit gain x bande passante constant par modèle, borné entre 2,5 kHz et 20 kHz (au-delà, le filtre est neutre)
     static const double gbwHz[kNumModels] = { 700000.0, 1500000.0, 400000.0, 300000.0 };
-    const double fcGain = std::clamp (gbwHz[std::clamp (modelIndex_, 0, kNumModels - 1)] / std::max (c.gain, 1.0), 2500.0, 20000.0);
-    const double gbwCoef = fcGain >= 19999.0 ? 1.0 : 1.0 - std::exp (-2.0 * kPi * fcGain / fs_);
 
     // ---- cadence de base : filtres d'entrée, séparation des graves (Tight), préaccentuation, drive
     for (int i = 0; i < len; ++i)
@@ -449,7 +464,22 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
             x -= lowPart;
         }
         if (emphasis) x = c.pre.processD (x);
-        const double target = dbToLin (driveDb_ + impDriveDb + static_cast<double> (modDb_[static_cast<std::size_t> (i)]));
+        // imperfection : décalage fixe de signe opposé entre les deux voies, plus une dérive lente (gain en dB, polarisation) ; les phases avancent
+        // à chaque échantillon et la dérive est recalculée tous les 16 échantillons : le résultat ne dépend pas de la taille des blocs
+        c.driftPhase1 += driftInc1_;
+        c.driftPhase2 += driftInc2_;
+        if ((c.driftTick++ & 15) == 0)
+        {
+            const double driftA = 0.6 * std::sin (c.driftPhase1) + 0.4 * std::sin (c.driftPhase2);
+            const double driftB = std::sin (c.driftPhase2 * 1.7 + 0.9);
+            c.impDriveDb = imperfection_ * (0.45 * sign + 0.30 * driftA);
+            c.impBias = imperfection_ * (0.06 * sign + 0.04 * driftB);
+            const double fcGain = std::clamp (gbwHz[std::clamp (modelIndex_, 0, kNumModels - 1)] / std::max (c.gain, 1.0), 2500.0, 20000.0);
+            c.gbwCoef = fcGain >= 19999.0 ? 1.0 : 1.0 - std::exp (-2.0 * kPi * fcGain / fs_);
+        }
+        const double gainArg = driveDb_ + c.impDriveDb + static_cast<double> (modDb_[static_cast<std::size_t> (i)]);
+        if (std::fabs (gainArg - c.lastGainArg) > 1.0e-7) { c.lastGainArg = gainArg; c.lastGainTarget = dbToLin (gainArg); }
+        const double target = c.lastGainTarget;
         if (! smoothInit_) c.gain = target;
         c.gain += (target - c.gain) * gainSmooth_;
         double g = c.gain;
@@ -461,33 +491,33 @@ void OverdriveModule::processChain (Chain& c, float* buf, int len) noexcept
             c.sagSlow += (level01 > c.sagSlow ? sagAttackS_ : sagReleaseS_) * (level01 - c.sagSlow);
             g /= 1.0 + sagAmount * (0.6 * c.sagFast + 0.4 * c.sagSlow);
         }
+        c.dynBuf[static_cast<std::size_t> (i)] = static_cast<float> ((isTube ? 0.35 * feel01 * c.sagSlow : 0.0) + c.impBias);   // polarisation : dynamique (enveloppe lente) et imperfection
         const double driven = x * g;
         // gain-bande passante limitée (comme un amplificateur opérationnel) : plus le gain est fort, plus les aigus sont coupés AVANT l'écrêteur
-        if (gbwCoef < 0.999) { c.gbw += gbwCoef * (driven - c.gbw); buf[i] = static_cast<float> (c.gbw); }
+        if (c.gbwCoef < 0.999) { c.gbw += c.gbwCoef * (driven - c.gbw); buf[i] = static_cast<float> (c.gbw); }
         else { c.gbw = driven; buf[i] = static_cast<float> (driven); }
     }
 
     // ---- cadence haute : courbe de transfert (réglages interpolés sur le bloc ; la polarisation de la lampe suit l'enveloppe lente du signal)
     float* hi = c.os.up (buf, len);
-    const int total = len * factor_;
+    const int total = len * factor;
     ShapeParams sp = shape_;
-    c.hi.configure (fs_ * static_cast<double> (factor_), modelIndex_, driveDb_, shapeTarget_.smooth);
+    c.hi.configure (fs_ * static_cast<double> (factor), modelIndex_, driveDb_, shapeTarget_.smooth);
     const double inv = 1.0 / static_cast<double> (std::max (1, total));
     const double stepBias = (shapeTarget_.bias - sp.bias) * inv, stepChar = (shapeTarget_.character - sp.character) * inv, stepFeel = (shapeTarget_.feel - sp.feel) * inv;
-    const double dynEnd = isTube ? 0.35 * param (feel) / 100.0 * c.sagSlow : 0.0;
-    const double stepDyn = (dynEnd - c.biasDyn) * inv;
-    double dyn = c.biasDyn;
-    for (int k = 0; k < total; ++k)
+    for (int i = 0, k = 0; i < len; ++i)
     {
-        sp.bias += stepBias;
-        sp.character += stepChar;
-        sp.feel += stepFeel;
-        dyn += stepDyn;
-        ShapeParams now = sp;
-        now.bias += dyn + impBias;
-        hi[k] = static_cast<float> (c.hi.process (static_cast<double> (hi[k]), now));
+        const double dyn = static_cast<double> (c.dynBuf[static_cast<std::size_t> (i)]);
+        for (int f = 0; f < factor; ++f, ++k)
+        {
+            sp.bias += stepBias;
+            sp.character += stepChar;
+            sp.feel += stepFeel;
+            ShapeParams now = sp;
+            now.bias += dyn;
+            hi[k] = static_cast<float> (c.hi.process (static_cast<double> (hi[k]), now));
+        }
     }
-    c.biasDyn = dynEnd;
     c.os.down (buf, len);
 
     // ---- cadence de base : continu, tonalité, désaccentuation, graves propres (retardés comme la voie traitée), filtres de sortie
@@ -551,9 +581,28 @@ void OverdriveModule::processChunk (float* l, float* r, int len, const float* kl
     const bool doA = channelMode_ != kSideOnly, doB = channelMode_ != kMidOnly;
 
     shape_.model = shapeTarget_.model;
+    const bool fading = fadeLeft_ > 0;
+    if (fading)
+    {
+        // changement de suréchantillonnage : l'ancienne chaîne traite le même signal, puis fondu enchaîné vers la nouvelle
+        std::copy (a, a + len, oa_.begin());
+        std::copy (b, b + len, ob_.begin());
+        if (doA) processChain (old_[0], oa_.data(), len); else delayThrough (old_[0], oa_.data(), len, Oversampler::latencyFor (old_[0].os.factor()));
+        if (doB) processChain (old_[1], ob_.data(), len); else delayThrough (old_[1], ob_.data(), len, Oversampler::latencyFor (old_[1].os.factor()));
+    }
     if (doA) processChain (chain_[0], a, len); else delayThrough (chain_[0], a, len, latency_);
     if (doB) processChain (chain_[1], b, len); else delayThrough (chain_[1], b, len, latency_);
     shape_ = shapeTarget_;
+    if (fading)
+    {
+        for (int i = 0; i < len; ++i)
+        {
+            const float t = i >= fadeLeft_ ? 1.0f : 1.0f - static_cast<float> (fadeLeft_ - i) / static_cast<float> (kFadeLen);
+            a[i] = oa_[static_cast<std::size_t> (i)] * (1.0f - t) + a[i] * t;
+            b[i] = ob_[static_cast<std::size_t> (i)] * (1.0f - t) + b[i] * t;
+        }
+        fadeLeft_ = std::max (0, fadeLeft_ - len);
+    }
 
     // ---- égaliseur (la voie qui n'est pas traitée est rendue telle quelle)
     if (param (eqOn) >= 0.5)

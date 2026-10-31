@@ -51,7 +51,8 @@ void ModuleRunner::prepare (double sampleRate, int maxBlockSize)
     ringL_.assign (ringSize, 0.0f);
     ringR_.assign (ringSize, 0.0f);
     ringPos_ = 0;
-    ringLatency_ = 0;
+    ringLatency_ = -1;
+    fadeLeft_ = 0;
     module_->prepare (sampleRate_, maxBlock_);
     reset();
 }
@@ -85,32 +86,45 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
     const int latency = ringL_.empty() ? 0 : std::min (module_->latencySamples (params_), static_cast<int> (ringL_.size()) - 2);
     if (latency != ringLatency_)
     {
-        std::fill (ringL_.begin(), ringL_.end(), 0.0f);
-        std::fill (ringR_.begin(), ringR_.end(), 0.0f);
+        // la latence change : le sec glisse de l'ancien retard au nouveau en fondu enchaîné (l'anneau garde l'historique, il n'est plus vidé)
+        if (ringLatency_ >= 0) { fadeFrom_ = ringLatency_; fadeLeft_ = kDryFade; }
         ringLatency_ = latency;
     }
     auto delayed = [this, n, latency] (const float* in, float* out, std::vector<float>& ring)
     {
-        if (latency <= 0) { std::copy (in, in + n, out); return; }
+        if (ring.empty()) { std::copy (in, in + n, out); return; }
         const std::size_t size = ring.size();
         for (int i = 0; i < n; ++i)
         {
             const std::size_t w = (ringPos_ + static_cast<std::size_t> (i)) % size;
             ring[w] = in[i];
-            out[i] = ring[(w + size - static_cast<std::size_t> (latency)) % size];
+            float cur = ring[(w + size - static_cast<std::size_t> (latency)) % size];
+            if (i < fadeLeft_)
+            {
+                const float t = 1.0f - static_cast<float> (fadeLeft_ - i) / static_cast<float> (kDryFade);
+                cur = ring[(w + size - static_cast<std::size_t> (fadeFrom_)) % size] * (1.0f - t) + cur * t;
+            }
+            out[i] = cur;
         }
+    };
+    auto advance = [this, n]
+    {
+        if (ringL_.empty()) return;
+        ringPos_ = (ringPos_ + static_cast<std::size_t> (n)) % ringL_.size();
+        fadeLeft_ = std::max (0, fadeLeft_ - n);
     };
     if (mixTarget == 0.0f && lastMix_ == 0.0f)
     {
         if (! idle_) { module_->reset(); idle_ = true; } // contourné et fondu terminé : plus de calcul, le signal passe tel quel (retardé de la latence)
-        if (latency > 0)
+        if (latency > 0 || fadeLeft_ > 0)
         {
             delayed (left, dryL_.data(), ringL_);
             delayed (right, dryR_.data(), ringR_);
-            ringPos_ = (ringPos_ + static_cast<std::size_t> (n)) % ringL_.size();
+            advance();
             std::copy (dryL_.begin(), dryL_.begin() + n, left);
             std::copy (dryR_.begin(), dryR_.begin() + n, right);
         }
+        else advance();
         return;
     }
     idle_ = false;
@@ -118,7 +132,7 @@ void ModuleRunner::process (float* left, float* right, int n, bool bypassed) noe
     const auto un = static_cast<std::size_t> (n);
     delayed (left, dryL_.data(), ringL_);       // dryL_ / dryR_ : le signal d'entrée retardé de la latence du module
     delayed (right, dryR_.data(), ringR_);
-    if (latency > 0) ringPos_ = (ringPos_ + un) % ringL_.size();
+    advance();
 
     const float inGain = mixer::dbToGain (std::clamp (values.getAt (idxIn_), -24.0, 24.0), -1000.0);
     const float outGain = mixer::dbToGain (std::clamp (values.getAt (idxOut_), -24.0, 24.0), -1000.0);

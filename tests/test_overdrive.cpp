@@ -3,7 +3,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 #include "neptune/core/OverdriveModule.h"
@@ -388,3 +390,95 @@ TEST_CASE ("overdrive factory presets apply cleanly and stay finite", "[overdriv
         for (const float y : out) { REQUIRE (std::isfinite (y)); REQUIRE (std::fabs (y) < 8.0f); }
     }
 }
+
+// Mesure de charge (cachée : `[.bench]`) : temps de calcul de 10 s de signal, blocs de 64, en pourcentage du temps réel pour un cœur.
+TEST_CASE ("overdrive CPU cost", "[.bench]")
+{
+    const char* modelNames[4] = { "tube", "tape", "transistor", "fuzz" };
+    const char* osNames[3] = { "off", "2x", "4x" };
+    const auto in = sine (440.0, 0.25, 10.0);
+    for (int os = 2; os >= 0; --os)
+        for (int m = 0; m < 4; ++m)
+        {
+            if (os != 2 && m != 0) continue;
+            auto inst = make (64);
+            setP (*inst, model, m);
+            setP (*inst, oversampling, os);
+            std::vector<float> l (64), r (64);
+            const auto t0 = std::chrono::steady_clock::now();
+            for (std::size_t pos = 0; pos + 64 <= in.size(); pos += 64)
+            {
+                std::copy (in.begin() + static_cast<long> (pos), in.begin() + static_cast<long> (pos + 64), l.begin());
+                r = l;
+                inst->runner.process (l.data(), r.data(), 64, false);
+            }
+            const double sec = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+            printf ("BENCH %-10s %-3s : %.2f %% d'un coeur\n", modelNames[m], osNames[os], sec / 10.0 * 100.0);
+        }
+}
+
+TEST_CASE ("overdrive oversampling default is 2x", "[overdrive]")
+{
+    auto inst = make();
+    CHECK (inst->runner.params().get (oversampling) == Approx (1.0));
+}
+
+TEST_CASE ("overdrive changing the oversampling during the sound does not click", "[overdrive]")
+{
+    for (const double mix : { 100.0, 50.0 })
+    {
+        auto inst = make (64);
+        setP (*inst, oversampling, 2);   // 4x
+        setP (*inst, stock::mix, mix);
+        setP (*inst, drive, 6.0);
+        const auto in = sine (1000.0, 0.25, 1.0);
+        std::vector<float> out (in.size());
+        std::vector<float> l (64), r (64);
+        for (std::size_t pos = 0; pos + 64 <= in.size(); pos += 64)
+        {
+            if (pos == 12800) setP (*inst, oversampling, 0);    // 4x -> Off
+            if (pos == 28800) setP (*inst, oversampling, 1);    // Off -> 2x
+            std::copy (in.begin() + static_cast<long> (pos), in.begin() + static_cast<long> (pos + 64), l.begin());
+            r = l;
+            inst->runner.process (l.data(), r.data(), 64, false);
+            std::copy (l.begin(), l.end(), out.begin() + static_cast<long> (pos));
+        }
+        double base = 0.0, worst = 0.0;
+        for (std::size_t i = 2000; i < 12000; ++i) base = std::max (base, static_cast<double> (std::fabs (out[i] - out[i - 1])));
+        for (std::size_t i = 12800; i < 36000; ++i) worst = std::max (worst, static_cast<double> (std::fabs (out[i] - out[i - 1])));
+        INFO ("mix " << mix << " base step " << base << " worst step " << worst);
+        CHECK (worst < base * 1.5);
+    }
+}
+
+TEST_CASE ("overdrive output does not depend on the block size", "[overdrive]")
+{
+    const auto in = sine (330.0, 0.3, 2.0);
+    auto renderWith = [&] (int block)
+    {
+        auto inst = make (block);
+        setP (*inst, imperfection, 100.0);
+        setP (*inst, oversampling, 2);
+        std::vector<float> out (in.size());
+        std::vector<float> l (static_cast<std::size_t> (block)), r (static_cast<std::size_t> (block));
+        for (std::size_t pos = 0; pos < in.size(); pos += static_cast<std::size_t> (block))
+        {
+            const std::size_t n = std::min<std::size_t> (static_cast<std::size_t> (block), in.size() - pos);
+            std::copy (in.begin() + static_cast<long> (pos), in.begin() + static_cast<long> (pos + n), l.begin());
+            r = l;
+            inst->runner.process (l.data(), r.data(), static_cast<int> (n), false);
+            std::copy (l.begin(), l.begin() + static_cast<long> (n), out.begin() + static_cast<long> (pos));
+        }
+        return out;
+    };
+    const auto ref = renderWith (512);
+    for (const int block : { 37, 64, 256 })
+    {
+        const auto y = renderWith (block);
+        double err = 0.0, sig = 0.0;
+        for (std::size_t i = 4800; i < ref.size(); ++i) { err += std::pow (static_cast<double> (y[i] - ref[i]), 2.0); sig += std::pow (static_cast<double> (ref[i]), 2.0); }
+        INFO ("block " << block << " error " << db (std::sqrt (err / sig)) << " dB");
+        CHECK (db (std::sqrt (err / sig)) < -100.0);
+    }
+}
+

@@ -29,7 +29,8 @@ HalfbandStage::HalfbandStage (int taps) : taps_ (taps % 2 == 0 ? taps + 1 : taps
     for (int j = 0; j < taps_; ++j)
     {
         const double t = static_cast<double> (j - m);
-        const double sinc = t == 0.0 ? 0.5 : std::sin (0.5 * kPi * t) / (kPi * t);
+        const bool evenOffset = j != m && (j - m) % 2 == 0;   // demi-bande : les coefficients de décalage pair (hors centre) sont nuls
+        const double sinc = t == 0.0 ? 0.5 : evenOffset ? 0.0 : std::sin (0.5 * kPi * t) / (kPi * t);
         const double r = t / static_cast<double> (std::max (1, m));
         const double win = bessel0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r))) / norm;
         h_[static_cast<std::size_t> (j)] = static_cast<float> (sinc * win);
@@ -63,8 +64,12 @@ void HalfbandStage::up (const float* in, int n, float* out) noexcept
         {
             // sortie d'indice haut k = 2i + phase : somme sur j de h[j] * xz[k - j], où xz est l'entrée avec un zéro intercalé ;
             // seuls les j de même parité que `phase` tombent sur une entrée réelle, d'indice i - (j - phase) / 2
+            // demi-bande : si le décalage du centre est pair pour cette phase, seul le centre compte ; sinon tous les coefficients de la phase comptent
+            const int m = (taps_ - 1) / 2;
             float acc = 0.0f;
-            for (int j = phase; j < taps_; j += 2) acc += h_[static_cast<std::size_t> (j)] * w[hist + i - (j - phase) / 2];
+            if (((phase + m) & 1) == 0) acc = h_[static_cast<std::size_t> (m)] * w[hist + i - (m - phase) / 2];
+            else
+                for (int j = phase; j < taps_; j += 2) acc += h_[static_cast<std::size_t> (j)] * w[hist + i - (j - phase) / 2];
             out[2 * i + phase] = 2.0f * acc;
         }
     std::copy (w + n, w + n + hist, histUp_.begin());
@@ -80,8 +85,9 @@ void HalfbandStage::down (const float* in, int n, float* out) noexcept
     for (int i = 0; i < n; ++i)
     {
         const int k = 2 * i;   // un échantillon sur deux ; interpolateur + décimateur : retard total de (taps - 1) échantillons haute cadence, pair
-        float acc = 0.0f;
-        for (int j = 0; j < taps_; ++j) acc += h_[static_cast<std::size_t> (j)] * w[hist + k - j];
+        const int m = (taps_ - 1) / 2;
+        float acc = h_[static_cast<std::size_t> (m)] * w[hist + k - m];   // centre, puis les coefficients de décalage impair (les autres sont nuls)
+        for (int j = (m + 1) & 1; j < taps_; j += 2) acc += h_[static_cast<std::size_t> (j)] * w[hist + k - j];
         out[i] = acc;
     }
     std::copy (w + 2 * n, w + 2 * n + hist, histDown_.begin());
